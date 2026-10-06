@@ -1,0 +1,58 @@
+{
+  "name": "f1-live-kr",
+  "version": "0.7.0",
+  "description": "한국어 라이브 타이밍 데스크톱 앱 (비공식, 개인용)",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --mac dir",
+    "share": "electron-builder --mac zip --arm64 --x64 && electron-builder --win zip --x64",
+    "vendor": "cp node_modules/three/build/three.module.js node_modules/three/build/three.core.js src/renderer/vendor/ && sed \"s#from 'three';#from './three.module.js';#\" node_modules/three/examples/jsm/controls/OrbitControls.js > src/renderer/vendor/OrbitControls.js"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "three": "^0.186.1"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "build": {
+    "appId": "kr.local.livetiming",
+    "productName": "LiveTimingKR",
+    "directories": {
+      "output": "dist.noindex",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!src/main/dev-snapshot.js"
+    ],
+    "mac": {
+      "category": "public.app-category.sports",
+      "icon": "build/icon.png",
+      "target": [
+        "dir"
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "CFBundleDisplayName": "라이브 타이밍 KR",
+        "LSHasLocalizedDisplayName": true
+      }
+    },
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "signAndEditExecutable": false
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  },
+  "author": "namkiheon"
+}

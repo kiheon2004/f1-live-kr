@@ -1,0 +1,4 @@
+node_modules/
+dist.noindex/
+.DS_Store
+.devshots/

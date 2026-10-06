@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src https://livetiming.formula1.com">
+<title>라이브 타이밍 KR</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">라이브 타이밍 <b>KR</b> <span class="tag">비공식</span></div>
+  <div class="modes" role="tablist" aria-label="모드">
+    <button id="modeReplay" role="tab" aria-selected="true">다시보기</button>
+    <button id="modeLive" role="tab" aria-selected="false">실시간 <span id="liveDot" class="dot"></span></button>
+  </div>
+
+  <div id="replayBar" class="picker">
+    <select id="year" aria-label="연도"></select>
+    <select id="session" aria-label="세션"></select>
+    <button id="load" class="primary">불러오기</button>
+    <span id="loadBar" class="loadbar" role="progressbar" aria-label="불러오기 진행률" aria-valuemin="0" aria-valuemax="100" hidden><i></i></span>
+    <span id="progress" class="muted mono-num"></span>
+  </div>
+
+  <div id="liveBar" class="picker" hidden>
+    <button id="liveToggle" class="primary">연결</button>
+    <span id="liveState" class="chip">연결 안 됨</span>
+    <label class="delay" title="TV 중계가 늦게 나오면 그만큼 화면을 늦춰 맞춥니다 · 단축키 , . (1초) [ ] (5초)">
+      <span class="delay-text">중계 지연</span> <input id="delay" type="range" min="0" max="600" step="1" value="0"> <output id="delayOut" class="mono">0초</output>
+    </label>
+    <span class="nudge"><button id="delayMinus5" class="ghost small" title="5초 줄이기 ( [ )">−5</button><button id="delayMinus" class="ghost small" title="1초 줄이기 ( , )">−1</button><button id="delayPlus" class="ghost small" title="1초 늘리기 ( . )">+1</button><button id="delayPlus5" class="ghost small" title="5초 늘리기 ( ] )">+5</button></span>
+    <button id="livePause" class="small" aria-pressed="false" title="TV 중계를 멈췄을 때 같이 멈춰요. 다시 누르면 멈춘 시간만큼 지연이 늘어나 TV와 계속 맞아요 (스페이스바)">❚❚ 멈춤</button>
+    <button id="syncBtn" class="small" aria-expanded="false" aria-controls="syncPop">TV와 맞추기</button>
+    <div id="syncPop" class="sync-pop" hidden>
+      <h3>TV 중계와 시점 맞추기</h3>
+      <p class="muted">중계가 늦게 나오는 만큼 화면을 늦춰서, 순위가 TV보다 먼저 바뀌지 않게 해요.</p>
+      <div class="sync-way">
+        <b>① TV 화면의 남은 시간으로</b> <span class="muted">연습·예선처럼 시계가 보일 때</span>
+        <div class="sync-row"><input id="syncClock" class="mono" placeholder="예: 23:45" inputmode="numeric" aria-label="TV에 보이는 남은 시간"><button id="syncClockBtn" class="primary small">맞추기</button></div>
+      </div>
+      <div class="sync-way">
+        <b>② 새 랩이 시작되는 순간에</b> <span class="muted">결승처럼 랩 수가 보일 때</span>
+        <div class="sync-row"><span class="muted">TV에서 선두가 결승선을 지나는 순간 누르세요</span><button id="syncLapBtn" class="primary small">지금!</button></div>
+      </div>
+      <p id="syncMsg" class="sync-msg" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <div class="right">
+    <button id="compactBtn" class="ghost" aria-pressed="false" aria-label="컴팩트 보기" title="컴팩트 보기 · 중계 화면 옆에 둘 좁은 순위표로 바꿔요 (다시 누르면 원래대로)">▤<span class="compact-text"> 컴팩트</span></button>
+    <button id="pinBtn" class="ghost" aria-pressed="false" aria-label="위에 고정" title="위에 고정 · 쿠팡플레이·F1 TV를 전체 화면으로 볼 때도 이 창을 위에 띄워 둬요">📌<span class="pin-text"> 위에 고정</span></button>
+    <label class="toggle" title="세이프티카·적색기·페널티를 macOS 알림으로도 받아요 (실시간)"><input type="checkbox" id="notify"> 알림</label>
+    <button id="glossaryBtn" class="ghost">용어</button>
+    <button id="scheduleBtn" class="ghost">KST 일정</button>
+    <button id="authBtn" class="ghost">F1 TV 로그인</button>
+  </div>
+</header>
+
+<section class="status-bar">
+  <div id="title" class="title">세션을 골라 불러오세요</div>
+  <div id="part" class="pill" hidden></div>
+  <div id="trackStatus" class="pill">—</div>
+  <div id="sessStatus" class="chip" hidden></div>
+  <div id="nextChip" class="chip next-chip" hidden></div>
+  <div class="facts"><span id="lap"></span><span id="clock"></span><span id="weather"></span></div>
+</section>
+
+<main class="layout">
+  <section class="board">
+    <table id="board">
+      <thead><tr>
+        <th class="c" title="현재 순위">순위</th>
+        <th class="c" title="출발 그리드 대비 순위 변화 (결승·스프린트) · ↑ 올라감 · ↓ 내려감">변동</th>
+        <th>드라이버</th>
+        <th class="c"><button id="gapToggle" class="th-btn" aria-pressed="false"><span id="hGap">리더와 차이</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></th>
+        <th class="c" id="hInt" title="바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요">앞 차와 간격</th>
+        <th class="c"><button id="lapToggle" class="th-btn" aria-pressed="false" title="누르면 랩타임 ↔ 개인 최고 랩을 바꿔 봐요 · 보라: 전체 최고 · 초록: 개인 최고 · 흐린 회색: 아웃랩·인랩처럼 피트를 오간 느린 랩"><span id="lapLabel">랩타임</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></th>
+        <th class="c" title="섹터 1 기록과 아래 미니 섹터 막대 · 보라: 전체 최고 · 초록: 개인 최고 · 노랑: 그 외 · 파랑: 피트 레인">S1</th>
+        <th class="c" title="섹터 2 기록">S2</th>
+        <th class="c" title="섹터 3 기록">S3</th>
+        <th class="c" title="지금 끼운 타이어와 그 타이어로 달린 랩 수 · S 소프트 · M 미디엄 · H 하드 · I 인터미디어트 · W 웻">타이어</th>
+        <th class="c" title="피트스톱 횟수">피트</th>
+        <th>상태</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="boardEmpty" class="empty">불러온 세션이 없어요. <b>다시보기</b>에서 세션을 고르거나, 경기 중이라면 <b>실시간</b>에서 연결하세요.</p>
+  </section>
+
+  <div id="splitV" class="splitter v" role="separator" aria-orientation="vertical" tabindex="0" title="끌어서 순위표와 맵 너비 조절 · 더블클릭: 기본 크기"></div>
+
+  <section class="side">
+    <div class="card map-card" id="mapCard">
+      <div class="view-switch seg" role="group" aria-label="맵 보기">
+        <button data-view="2d" title="위에서 내려다본 평면 맵">2D</button><button data-view="3d" title="실제 높낮이를 살린 3D 서킷">3D</button>
+      </div>
+      <button id="expandMap" class="expand-btn" title="크게 보기 · Esc로 닫기" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+      <canvas id="map"></canvas>
+      <div id="map3d" class="map3d" hidden>
+        <div class="cam3d" role="group" aria-label="카메라">
+          <button data-cam="heli" title="헬리콥터 시점 · 끌어서 돌리기 · 스크롤·핀치로 확대 · 오른쪽 끌기로 이동">헬기</button>
+          <button data-cam="chase" title="중계 카메라처럼 선택한 차 뒤에서 따라가요">추적</button>
+          <button data-cam="onboard" title="선택한 드라이버의 운전석 시점">온보드</button>
+        </div>
+        <div class="hud3d-wrap">
+          <button id="cam3dPrev" class="ghost small" title="앞 순위 드라이버">◀</button>
+          <div id="hud3d" class="hud3d" hidden></div>
+          <button id="cam3dNext" class="ghost small" title="뒤 순위 드라이버">▶</button>
+        </div>
+        <p id="note3d" class="note3d" hidden>서킷 모양을 만들 주행 기록이 아직 없어요.</p>
+        <p id="geo3dStatus" class="geo3d-status" aria-live="polite" hidden></p>
+        <p id="geo3dAttr" class="geo3d-attr" hidden></p>
+        <button id="geo3dBtn" class="geo3d-btn" aria-expanded="false" aria-controls="geo3dPop" title="실제 지도 설정 (위성 사진·건물·나무·밤 경기)">🛰 지도</button>
+        <div id="geo3dPop" class="geo3d-pop" hidden>
+          <h3>실제 지도</h3>
+          <p class="muted">OpenStreetMap 지도로 트랙 위치를 맞추고, 위성 사진·실제 지형 높이·건물·나무를 그려요. 처음 여는 서킷은 데이터를 받느라 10~60초 걸려요.</p>
+          <fieldset>
+            <legend>위성 사진</legend>
+            <label><input type="radio" name="geoProvider" value="eox"> 무료 위성 사진 <span class="muted">Sentinel-2 · 10m 해상도</span></label>
+            <label><input type="radio" name="geoProvider" value="google"> Google 위성 사진 <span class="muted">고해상도 · 내 API 키 필요</span></label>
+            <label><input type="radio" name="geoProvider" value="off"> 끄기 <span class="muted">기본 그래픽</span></label>
+          </fieldset>
+          <div class="geo-key">
+            <input id="geoKey" type="password" placeholder="Google Maps Platform API 키" autocomplete="off" aria-label="Google Maps API 키">
+            <button id="geoKeySave" class="small">저장</button>
+          </div>
+          <p class="muted tiny">Google Cloud에서 <b>Map Tiles API</b>를 켠 키가 필요해요(매달 무료 사용량 안에서 충분해요). 키는 이 컴퓨터에 암호화해서 저장해요.</p>
+          <p id="geoKeyMsg" class="sync-msg"></p>
+          <fieldset class="row">
+            <label><input type="checkbox" id="geoBuildings"> 건물</label>
+            <label><input type="checkbox" id="geoTrees"> 나무</label>
+            <label title="해의 실제 위치(세션 시각·서킷 좌표)로 그림자를 그려요"><input type="checkbox" id="geoShadows"> 그림자</label>
+            <label>밤 경기 <select id="geoNight"><option value="auto">자동</option><option value="on">밤</option><option value="off">낮</option></select></label>
+          </fieldset>
+        </div>
+      </div>
+      <ol id="miniBoard" class="mini-board" hidden></ol>
+      <p class="expand-hint" hidden>스페이스바 재생 · ←/→ 이동 · 차를 누르면 선택 · Esc 닫기</p>
+      <div class="map-tools" role="toolbar" aria-label="맵 조작">
+        <button id="mapZoomIn" title="확대 · 트랙패드 핀치로도 돼요"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21M10.5 7.5v6M7.5 10.5h6"/></svg></button>
+        <button id="mapZoomOut" title="축소"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21M7.5 10.5h6"/></svg></button>
+        <button id="mapRotate" title="시계 방향으로 90° 회전 · 서킷마다 기억해요"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="9" height="9" rx="1.5"/><path d="M8 7.5A8 8 0 0 1 20 11"/><path d="M20 6v5h-5"/></svg></button>
+        <button id="mapSat" aria-pressed="false" title="실제 위성 사진을 맵 아래에 깔아요 · 처음 여는 서킷은 지도 데이터를 받느라 잠시 걸려요"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg></button>
+        <button id="mapReset" title="처음으로 (확대·이동·회전 되돌리기)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/></svg></button>
+      </div>
+      <p id="mapNote" class="map-note" hidden></p>
+      <div id="toasts" class="toasts" aria-live="polite"></div>
+    </div>
+    <div id="splitH" class="splitter h" role="separator" aria-orientation="horizontal" tabindex="0" title="끌어서 맵 높이 조절 · 더블클릭: 기본 크기"></div>
+    <div class="card tabs-card">
+      <div class="tabs" role="tablist">
+        <button id="tabRC" role="tab" aria-selected="true">레이스 컨트롤</button>
+        <button id="tabDriver" role="tab" aria-selected="false">드라이버</button>
+        <button id="tabRadio" role="tab" aria-selected="false">팀 라디오</button>
+        <button id="tabStrat" role="tab" aria-selected="false" title="모든 드라이버의 타이어 사용 구간(스틴트)과 피트 시점">타이어 전략</button>
+        <button id="tabTrace" role="tab" aria-selected="false" title="랩마다 선두와의 시간 차이를 선으로 그려요 (결승·스프린트)">갭 차트</button>
+        <button id="tabChamp" role="tab" aria-selected="false" title="지금 순위대로 끝나면 챔피언십 순위가 어떻게 바뀌는지 (결승·스프린트)">챔피언십</button>
+      </div>
+      <div id="rcFilter" class="chips" role="group" aria-label="메시지 종류"></div>
+      <ol id="rc"></ol>
+      <div id="driver" hidden></div>
+      <div id="radioBar" class="trace-bar radio-bar" hidden>
+        <span id="radioLap" class="muted"></span>
+        <div class="seg" role="group" aria-label="팀 라디오 보기"><button data-rv="lap">이번 랩</button><button data-rv="all">랩별 전체</button></div>
+      </div>
+      <ol id="radio" hidden></ol>
+      <div id="champ" hidden>
+        <div class="trace-bar">
+          <span class="muted">지금 순위대로 끝나면</span>
+          <div class="seg" role="group" aria-label="챔피언십 종류"><button data-cs="drivers">드라이버</button><button data-cs="teams">컨스트럭터</button></div>
+        </div>
+        <div id="champTable"></div>
+      </div>
+      <div id="strat" hidden></div>
+      <div id="trace" hidden>
+        <div class="trace-bar">
+          <span class="muted">선두와의 차이</span>
+          <div class="seg" role="group" aria-label="세로축 범위">
+            <button data-range="15">15초</button><button data-range="45">45초</button><button data-range="0">전체</button>
+          </div>
+        </div>
+        <div id="traceChart"></div>
+        <p class="muted trace-note">위로 갈수록 선두에 가까워요. 선이 올라가면 따라잡는 중, 내려가면 뒤처지는 중이에요. 색칠된 구간은 세이프티카·VSC·적색기 랩이라 간격이 줄어들어요. 이름을 누르면 그 드라이버를 집중해서 봐요.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="player" id="player">
+  <button id="play" class="primary" disabled>▶ 재생</button>
+  <select id="speed" disabled aria-label="재생 속도">
+    <option value="1">1배속</option><option value="2">2배속</option><option value="5">5배속</option>
+    <option value="10">10배속</option><option value="30">30배속</option>
+  </select>
+  <button id="toStart" class="ghost" disabled title="세션이 시작된 순간으로 돌아가요">처음으로</button>
+  <input id="seek" type="range" min="0" max="0" value="0" step="1000" disabled aria-label="재생 위치">
+  <span id="elapsed" class="mono">00:00:00 / 00:00:00</span>
+  <span class="hint muted">스페이스바 재생 · ←/→ 5초 · Shift 1분</span>
+</footer>
+
+<div id="schedule" class="drawer" hidden>
+  <div class="drawer-head"><h2>시즌 일정 <small>한국 시간(KST)</small></h2><button id="scheduleClose" class="ghost">닫기</button></div>
+  <p id="nextUp" class="next"></p>
+  <div id="scheduleList" class="drawer-body"></div>
+</div>
+
+<div id="glossary" class="drawer" hidden>
+  <div class="drawer-head"><h2>용어 설명</h2><button id="glossaryClose" class="ghost">닫기</button></div>
+  <dl id="glossaryList" class="drawer-body glossary"></dl>
+</div>
+
+<script src="../shared/ko.js"></script>
+<script src="replay.js"></script>
+<script src="app.js"></script>
+<script type="module" src="map3d.js"></script>
+</body>
+</html>
