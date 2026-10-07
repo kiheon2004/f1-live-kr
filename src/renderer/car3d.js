@@ -43,11 +43,12 @@ function loft(sections, ring = 24, uRange = [-2.6, 2.6], capEnds = true) {
     pos.push(cx, cy, z); uv.push(...uv.slice(i * (ring + 1) * 2, i * (ring + 1) * 2 + 2));
     for (let k = 0; k < ring; k++) { const a = i * (ring + 1) + k; idx.push(...(flip ? [base, a + 1, a] : [base, a, a + 1])); }
   }
+  // sections run rear → front and the ring goes bottom → left → top: this winding faces outwards
+  for (let i = 0; i < idx.length; i += 3) [idx[i + 1], idx[i + 2]] = [idx[i + 2], idx[i + 1]];
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   g.setIndex(idx);
-  // the loft runs from the front to the rear when sections are given nose first: flip so faces point out
   g.computeVertexNormals();
   return g;
 }
@@ -214,8 +215,9 @@ function liveryTexture(l, number) {
   // car number on each side of the engine cover, and on the nose top
   g.fillStyle = l.num; g.textAlign = "center"; g.textBaseline = "middle";
   g.font = "italic 900 54px Arial, sans-serif";
-  // one flank sees the texture back to front: mirror the number there so both read correctly
-  for (const v of [0.36, 0.64]) { g.save(); g.translate(U(-0.85), V(v)); g.scale(v < 0.5 ? -1 : 1, -1); g.fillText(String(number), 0, 0); g.restore(); }
+  // Orientation, from the loft's mapping (left flank = +x = v 0.75, canvas top = v 1, canvas x = rear → front):
+  // on the right flank the canvas already reads front-wards and upright; on the left flank both are reversed.
+  for (const v of [0.36, 0.64]) { g.save(); g.translate(U(-0.85), V(v)); g.scale(v < 0.5 ? 1 : -1, v < 0.5 ? 1 : -1); g.fillText(String(number), 0, 0); g.restore(); }
   g.font = "italic 900 40px Arial, sans-serif"; g.save(); g.translate(U(1.75), V(0.5)); g.rotate(Math.PI / 2); g.fillText(String(number), 0, 0); g.restore();
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;

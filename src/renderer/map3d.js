@@ -664,12 +664,43 @@ function updateCars(dt) {
     c.label.sp.material.opacity = out ? 0.45 : 1;
   }
   for (const [num, c] of cars) if (!seen.has(num)) c.obj.visible = false;
+  separate(dt, seen);
   // F1's archive sometimes stops publishing car positions part-way through a session (e.g. Monaco 2026):
   // say so instead of showing an empty track without explanation.
   const note = document.getElementById("note3d"), msg = "이 시점은 F1이 차량 위치 기록을 공개하지 않아서 차를 그릴 수 없어요. 순위·기록은 그대로 볼 수 있어요.";
   if (!seen.size && Object.keys(drivers).length) { if (note.textContent !== msg) note.textContent = msg; note.hidden = false; }
   else if (note.textContent === msg) note.hidden = true;
   scaleForView();
+}
+// Cars never pass through each other: overlapping pairs (position data is a metre or two off, and only
+// 4 Hz) are moved apart – sideways when side by side, along the track when nose to tail – by the smallest
+// amount (ReplayKit.separateCars). The correction is eased in and out so nothing jumps, and a car pushed
+// sideways stays on the tarmac.
+let sepMemory = {};
+function separate(dt, seen) {
+  const list = [];
+  for (const num of seen) {
+    const c = cars.get(num);
+    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw) });   // c.pos is this frame's raw position
+  }
+  const off = window.ReplayKit.separateCars(list, sepMemory);
+  const k = Math.min(1, dt * 9);
+  for (const o of list) {
+    const c = cars.get(o.id);
+    let [tx, tz] = off[o.id];
+    // keep it between the track edges (with half a car's width to spare)
+    const s = c.sample;
+    if (s && (tx || tz)) {
+      const lat = (o.x + tx - s.p.x) * s.nor.x + (o.z + tz - s.p.z) * s.nor.z, latRaw = (o.x - s.p.x) * s.nor.x + (o.z - s.p.z) * s.nor.z;
+      const hi = (s.L ?? 7) - 0.95, lo = (s.R ?? -7) + 0.95;
+      if (latRaw <= hi && latRaw >= lo) { const cl = Math.max(lo, Math.min(hi, lat)) - lat; tx += s.nor.x * cl; tz += s.nor.z * cl; }
+    }
+    c.sepX = (c.sepX || 0) + (tx - (c.sepX || 0)) * k; c.sepZ = (c.sepZ || 0) + (tz - (c.sepZ || 0)) * k;
+    c.pos.set(o.x + c.sepX, c.pos.y, o.z + c.sepZ);
+    const ground = trackPointFor(c, c.pos.x, c.pos.z);
+    if (ground != null) c.pos.y = ground + 0.02;
+    c.obj.position.copy(c.pos);
+  }
 }
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 function leader() {
@@ -1033,6 +1064,7 @@ function ensureWorld(now) {
   if (world) { scene.remove(world.group); disposeGroup(world.group); }
   for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
   cars.clear();
+  sepMemory = {};
   world = buildWorld(pts);
   if (world) { world.sourceKey = key; world.pts = pts.length; addCorners(); addGrid(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
   note.hidden = !!world;

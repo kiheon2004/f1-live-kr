@@ -427,6 +427,52 @@
     }
   }
 
+  // Keeps cars from passing through each other. Position data is ~4 Hz and good to a metre or two, so when
+  // cars run side by side or one overtakes another, their recorded positions overlap. Cars are treated as
+  // rectangles (length × width) aligned with their shared direction of travel; an overlapping pair is moved
+  // apart by the smallest amount:
+  //   side by side (sideways gap ≥ 0.9 m) → sideways, each keeping the side it is on (remembered per pair,
+  //   so a pair doesn't swap sides from one frame to the next);
+  //   nose to tail → along the track, keeping who's ahead.
+  // cars: [{ id, x, z, hx, hz }] in metres with unit heading (hx, hz); returns { id: [dx, dz] } offsets.
+  // `memory` (an object kept between calls) holds each pair's side.
+  const CAR_LEN = 5.5, CAR_WID = 2.05;
+  function separateCars(cars, memory = {}, iterations = 16, maxShift = 5) {
+    const off = {}, P = cars.map((c) => ({ ...c, ox: 0, oz: 0 }));
+    for (const c of P) off[c.id] = [0, 0];
+    for (let it = 0; it < iterations; it++) {
+      let moved = false;
+      for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
+        const a = P[i], b = P[j];
+        const dx = b.x + b.ox - (a.x + a.ox), dz = b.z + b.oz - (a.z + a.oz);
+        if (dx * dx + dz * dz > CAR_LEN * CAR_LEN + CAR_WID * CAR_WID) continue;
+        let hx = a.hx + b.hx, hz = a.hz + b.hz, hl = Math.hypot(hx, hz);
+        if (hl < 0.5) { hx = a.hx; hz = a.hz; hl = 1; }            // facing opposite ways (a spin): use one of them
+        hx /= hl; hz /= hl;
+        const along = dx * hx + dz * hz, side = dx * -hz + dz * hx;
+        const pa = CAR_LEN - Math.abs(along), ps = CAR_WID - Math.abs(side);
+        if (pa <= 0 || ps <= 0) continue;
+        const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`, flip = a.id < b.id ? 1 : -1;
+        if (Math.abs(side) >= 0.9 || (memory[key] && Math.abs(along) < CAR_LEN * 0.8)) {
+          // side by side: keep the side each car is on
+          let sgn = Math.sign(side) || 1;
+          if (Math.abs(side) < 0.9 && memory[key]) sgn = memory[key] * flip; else memory[key] = sgn * flip;
+          const m = (ps / 2) * sgn;
+          a.ox -= -hz * m; a.oz -= hx * m; b.ox += -hz * m; b.oz += hx * m;
+        } else {
+          // nose to tail: keep the order
+          const m = (pa / 2) * (Math.sign(along) || 1);
+          a.ox -= hx * m; a.oz -= hz * m; b.ox += hx * m; b.oz += hz * m;
+        }
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    // never move a car far from where the data puts it (a pile-up in the data is better left than invented)
+    for (const c of P) { const l = Math.hypot(c.ox, c.oz), k = l > maxShift ? maxShift / l : 1; off[c.id] = [c.ox * k, c.oz * k]; }
+    return off;
+  }
+
   // Car positions at time t. Samples come every ~250 ms; a Catmull-Rom curve through them (instead of
   // straight lines) keeps speed and heading smooth between samples, so cars and the cameras following
   // them don't jerk four times a second. Falls back to straight lines at gaps (pit, garage, data holes).
@@ -662,6 +708,6 @@
   }
 
   const API = { Replay, LiveSource, CarTracks, LapTracker, PitLog, StatusLog, merge, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
-    pitLoss, pitRejoin, gapSec, deletedLaps, carAt, carTrace, timeAtDistance, sampleAt };
+    pitLoss, pitRejoin, gapSec, deletedLaps, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);

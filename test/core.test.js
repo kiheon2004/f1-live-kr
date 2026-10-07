@@ -422,3 +422,20 @@ test("positions between samples follow a smooth curve, not straight segments", (
   const [x, y] = r.positionsAt(5500)[1];
   assert.ok(Math.abs(Math.hypot(x, y) - 1000) < 15, `radius ${Math.hypot(x, y).toFixed(1)}`);   // a chord would be at 966
 });
+
+test("cars that overlap in the data are moved apart: sideways when side by side, along the track when nose to tail", () => {
+  const { separateCars, CAR_LEN, CAR_WID } = require("../src/renderer/replay.js");
+  const mem = {};
+  // side by side, 1.2 m apart, half a car length offset: pushed sideways to a car's width
+  let off = separateCars([{ id: "1", x: 0, z: 0, hx: 0, hz: 1 }, { id: "2", x: 1.2, z: 1, hx: 0, hz: 1 }], mem);
+  assert.ok(Math.abs(1.2 + off["2"][0] - off["1"][0] - CAR_WID) < 1e-6 && off["1"][1] === 0);
+  // the pair keeps its sides even when the data briefly puts them level (no swapping back and forth)
+  off = separateCars([{ id: "1", x: 0, z: 0, hx: 0, hz: 1 }, { id: "2", x: -0.1, z: 1, hx: 0, hz: 1 }], mem);
+  assert.ok(off["2"][0] > off["1"][0]);
+  // nose to tail, 3 m apart: pushed apart along the track, order kept
+  off = separateCars([{ id: "1", x: 0, z: 0, hx: 0, hz: 1 }, { id: "2", x: 0.2, z: 3, hx: 0, hz: 1 }], {});
+  assert.ok(Math.abs(3 + off["2"][1] - off["1"][1] - CAR_LEN) < 1e-6);
+  // far apart: untouched
+  off = separateCars([{ id: "1", x: 0, z: 0, hx: 0, hz: 1 }, { id: "2", x: 10, z: 0, hx: 0, hz: 1 }], {});
+  assert.deepStrictEqual(off, { 1: [0, 0], 2: [0, 0] });
+});
