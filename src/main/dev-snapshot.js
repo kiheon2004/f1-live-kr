@@ -13,6 +13,7 @@
 //   F1KR_RADIO=1     also opens the team radio tab (F1KR_RADIO=all: grouped by lap)
 //   F1KR_SYNC=1      (live) opens the TV sync box and tries a clock sync
 //   F1KR_SIZE=1180x720  window size
+//   F1KR_SHOTS="js;;js" runs each and saves out_1.png, out_2.png, … after it
 //   F1KR_JS="…"      runs this in the page just before the capture (F1KR_JS_WAIT ms afterwards, default 3000)
 //   F1KR_YEAR=2025   (replay) season to pick the session from
 //   F1KR_DELAY=30    (live) broadcast delay in seconds before connecting
@@ -110,6 +111,16 @@ module.exports = function snapshot(win, outFile) {
       if (process.env.F1KR_SCHEDULE) { await run(`document.getElementById("scheduleBtn").click()`); await wait(3000); }
     }
     if (process.env.F1KR_JS) { const r = await run(process.env.F1KR_JS).catch((e) => "error " + e.message); console.log("JSRESULT", typeof r === "string" ? r : JSON.stringify(r)); await wait(+process.env.F1KR_JS_WAIT || 3000); }
+    // F1KR_SHOTS="js1;;js2;;…" – runs each, waits, and saves out_1.png, out_2.png, …
+    if (process.env.F1KR_SHOTS) {
+      const list = process.env.F1KR_SHOTS.split(";;");
+      for (const [i, js] of list.entries()) {
+        const r = await run(js).catch((e) => "error " + e.message);
+        console.log("SHOT", i + 1, typeof r === "string" ? r : JSON.stringify(r));
+        await wait(+process.env.F1KR_SHOT_WAIT || 2500);
+        fs.writeFileSync(outFile.replace(/\.png$/, `_${i + 1}.png`), (await win.webContents.capturePage()).resize({ width: 1600 }).toPNG());
+      }
+    }
     if (process.env.F1KR_JS_AFTER) console.log("JSAFTER", await run(process.env.F1KR_JS_AFTER).catch((e) => "error " + e.message));
     fs.writeFileSync(outFile, (await win.webContents.capturePage()).toPNG());
     app.quit();

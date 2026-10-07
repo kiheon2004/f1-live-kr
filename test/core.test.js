@@ -439,3 +439,19 @@ test("cars that overlap in the data are moved apart: sideways when side by side,
   off = separateCars([{ id: "1", x: 0, z: 0, hx: 0, hz: 1 }, { id: "2", x: 10, z: 0, hx: 0, hz: 1 }], {});
   assert.deepStrictEqual(off, { 1: [0, 0], 2: [0, 0] });
 });
+
+test("grandstand data: every stand lies at its circuit, with sane rows and capacities", () => {
+  const geo = require("../src/main/geo");
+  const { circuits } = JSON.parse(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "data", "grandstands.json"), "utf8"));
+  assert.ok(Object.keys(circuits).length >= 24);
+  for (const [loc, c] of Object.entries(circuits)) {
+    assert.ok(c.total > 0 && c.seats > 0 && c.seats <= c.total, `${loc}: capacity`);
+    const centre = geo.CIRCUITS[loc] || geo.circuitInfo(loc)?.center;
+    assert.ok(centre, `${loc}: known circuit`);
+    const fr = geo.frame(centre);
+    for (const st of c.stands) {
+      for (const p of [st.a, st.b]) { const [x, y] = fr.toXY(p[0], p[1]); assert.ok(Math.hypot(x, y) < 3500, `${loc} ${st.n}: near the circuit`); }
+      assert.ok(st.rows >= 4 && st.rows <= 40, `${loc} ${st.n}: rows`);
+    }
+  }
+});

@@ -7,6 +7,8 @@
 //   circuit   – other mapped tarmac (pit lane, other layouts) and the real barriers along the track
 // Everything is in the scene frame of map3d.js: x = F1 east (m) − centre, z = −(F1 north − centre), y = up.
 import * as THREE from "./vendor/three.module.js";
+import { buildStands } from "./stands.js";
+import { classRaster, groundMaterial } from "./ground.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
 const DEM_ZOOM = 14;
@@ -159,9 +161,10 @@ async function groundCanvas(api, scene, gf, ext, provider, onStep, track) {
     } catch { failed++; }
     if (++done % 8 === 0) onStep?.(`위성 사진 받는 중 ${done}/${tiles.length}`);
   });
-  paintOsm(g, scene, P, mpp, provider !== "google");
+  // (the class-painted ground of ground.js wants the bare imagery: it reads the map data itself)
+  if (track?.paint !== false) paintOsm(g, scene, P, mpp, provider !== "google");
   // Street circuits: pavement and kerbstones beside the track (the 10 m imagery can't show them).
-  if (track?.street) {
+  if (track?.street && track?.paint !== false) {
     const pts = track.samples.map((s) => S(s.p.x, s.p.z));
     const line = () => { g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); };
     g.lineJoin = "round"; g.globalAlpha = 0.95;
@@ -282,6 +285,16 @@ export function trackCorridor(world, margin) {
 }
 
 // ---------- geometry helpers ----------
+// Points every `step` metres along a polyline in F1 metres.
+function densifyF1(pts, step) {
+  const out = [];
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
+    for (let k = 0; k < n; k++) out.push([ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n]);
+  }
+  if (pts.length) out.push(pts[pts.length - 1]);
+  return out;
+}
 function inPoly(x, y, pts) {
   let inside = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -357,9 +370,9 @@ function obb(pts) {
 const at = (o, a, b) => [o.c[0] + o.u[0] * a + o.v[0] * b, o.c[1] + o.u[1] * a + o.v[1] * b];
 
 // All buildings in one geometry: walls with facade UVs (windows) shaded darker towards the ground, and roofs by
-// kind – pitched for houses and small buildings, flat with a parapet and rooftop plant for big blocks – plus
-// tiered grandstands with a canopy, facing the track. Faces carry their own normals (flat shading).
-function buildingsMesh(scene, gf, groundAt, night, trackNear, track) {
+// kind – pitched for houses and small buildings, flat with a parapet and rooftop plant for big blocks.
+// Grandstands are built by stands.js. Faces carry their own normals (flat shading).
+function buildingsMesh(scene, gf, groundAt, night, track, inStand) {
   // geometry goes into ~350 m chunks: off-screen chunks are skipped and line-of-sight tests stay cheap
   const chunks = new Map();
   let pos, nor, uv, col;
@@ -376,10 +389,8 @@ function buildingsMesh(scene, gf, groundAt, night, trackNear, track) {
     block: ["#d6d3cb", "#c4c8cc", "#b9c2c9", "#d9cfbd", "#a7b1ba", "#e2e0da", "#cfc6b8", "#bfc9cf"],
     home: ["#e8ddc8", "#efe7d6", "#d9c8ad", "#f1ece2", "#e3d2bd"],
     shed: ["#c8cbce", "#b7bcc1", "#d4d6d8", "#9ea6ad", "#c2c6b9"],
-    grandstand: ["#4a5563", "#3f4a57", "#56606d"],
   };
   const roofPal = { block: ["#8f9296", "#9a9da1", "#7f8489"], home: ["#8e5a44", "#9b4f3a", "#6f6a66", "#7d4b3c", "#5b5f66"], shed: ["#a5abb1", "#93999f", "#b4b8bc"] };
-  const seatPal = [["#1f4e9c", "#2a62bd"], ["#9a1f24", "#b9282e"], ["#6d737b", "#878d95"], ["#1f6e4a", "#278a5c"], ["#c79a16", "#d9ad22"]];
   const PLAIN = [0.97, 0.5];   // a plain strip of the facade texture (no windows)
   const tmp = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
   // A flat-shaded face (triangle fan); `out` is the side it should face; colours per vertex or one colour.
@@ -408,9 +419,11 @@ function buildingsMesh(scene, gf, groundAt, night, trackNear, track) {
   const shade = (base, k) => base.clone().multiplyScalar(k);
   let count = 0;
   for (const b of scene.buildings) {
+    if (b.kind === "grandstand") continue;   // stands.js builds these, with their seats
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) continue;
+    if (inStand) { let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } if (inStand(cx / pts.length, cz / pts.length)) { dropped++; continue; } }
     // Keep the tarmac clear: corners on the track are pushed back to the edge; a building still over the
     // road after that (or mostly on it) is left out. Overpasses (raised on columns) may stay.
     if (track && !(b.min >= 5)) {
@@ -432,7 +445,6 @@ function buildingsMesh(scene, gf, groundAt, night, trackNear, track) {
     if (b.est && b.kind === "block" && area > 300) H = Math.max(H, 9 + Math.floor(r() * 4) * 3.2);
     const y0 = base + (b.min || 0), y1 = base + Math.max(H, (b.min || 0) + 2.5);
     const kind = b.kind;
-    if (kind === "grandstand" && trackNear) { grandstand(pts, base, Math.max(8, H)); count++; continue; }
     const wall = glass ? new THREE.Color("#eef2f6") : new THREE.Color(/^#[0-9a-f]{6}$/i.test(b.colour || "") ? b.colour : palette[kind][Math.floor(r() * palette[kind].length)]);
     const rp = roofPal[kind === "block" && area < 260 && H <= 13 ? "home" : kind] || roofPal.block;   // small buildings mostly have tiled roofs
     const roofC = new THREE.Color(/^#[0-9a-f]{6}$/i.test(b.roofColour || "") ? b.roofColour : rp[Math.floor(r() * rp.length)]);
@@ -500,43 +512,6 @@ function buildingsMesh(scene, gf, groundAt, night, trackNear, track) {
       }
     }
     count++;
-  }
-  // Grandstand: rows of seats rising away from the track, a back wall, and a roof over the upper rows.
-  function grandstand(pts, base, H) {
-    const o = obb(pts);
-    const [s] = trackNear(o.c[0], o.c[1]);
-    // depth axis = the box axis pointing most towards the track; the front is the side nearer the track
-    let du = o.u, dv = o.v, a0 = o.u0, a1 = o.u1, b0 = o.v0, b1 = o.v1;
-    if (s) {
-      const tx = s.p.x - o.c[0], tz = s.p.z - o.c[1];
-      const alongU = Math.abs(tx * o.u[0] + tz * o.u[1]) > Math.abs(tx * o.v[0] + tz * o.v[1]);
-      if (alongU) { du = o.v; dv = o.u; a0 = o.v0; a1 = o.v1; b0 = o.u0; b1 = o.u1; }
-      // make b run from the front (near the track) to the back
-      if (tx * dv[0] + tz * dv[1] > 0) { dv = [-dv[0], -dv[1]]; [b0, b1] = [-b1, -b0]; }
-    }
-    const P = (a, b, y) => [o.c[0] + du[0] * a + dv[0] * b, y, o.c[1] + du[1] * a + dv[1] * b];
-    const depth = b1 - b0, rows = Math.max(4, Math.min(24, Math.round(depth / 1.4))), rise = (H - 3) / rows;
-    const seats = seatPal[Math.floor(r() * seatPal.length)].map((h) => new THREE.Color(h));
-    const concrete = new THREE.Color("#c9c6bf"), dark = new THREE.Color("#5c6168"), white = new THREE.Color("#eef0f2");
-    const front = [-dv[0], 0, -dv[1]];
-    for (let k = 0; k < rows; k++) {
-      const bA = b0 + (depth * k) / rows, bB = b0 + (depth * (k + 1)) / rows, y = base + 1.5 + rise * (k + 1);
-      face([P(a0, bA, y), P(a1, bA, y), P(a1, bB, y), P(a0, bB, y)], seats[k % 2], [0, 1, 0]);                     // tread with seats
-      face([P(a0, bA, y - rise), P(a1, bA, y - rise), P(a1, bA, y), P(a0, bA, y)], concrete, front);                 // riser
-    }
-    face([P(a0, b0, base), P(a1, b0, base), P(a1, b0, base + 1.5 + rise), P(a0, b0, base + 1.5 + rise)], concrete, front);   // front wall
-    const top = base + 1.5 + rise * rows;
-    face([P(a0, b1, base), P(a1, b1, base), P(a1, b1, top + 4), P(a0, b1, top + 4)], dark, [dv[0], 0, dv[1]]);      // back wall
-    for (const [aa, sgn] of [[a0, -1], [a1, 1]]) {                                                                     // side walls (stepped profile)
-      const prof = [P(aa, b0, base)];
-      for (let k = 0; k < rows; k++) { const y = base + 1.5 + rise * (k + 1); prof.push(P(aa, b0 + (depth * k) / rows, y), P(aa, b0 + (depth * (k + 1)) / rows, y)); }
-      prof.push(P(aa, b1, top + 4), P(aa, b1, base));
-      for (let i = 1; i < prof.length - 1; i++) face([prof[0], prof[i], prof[i + 1]], dark, [du[0] * sgn, 0, du[1] * sgn]);
-    }
-    // cantilevered roof over the upper rows, tilted up towards the track
-    const rb = b0 + depth * 0.55, ry0 = top + 4, ry1 = top + 5.5;
-    face([P(a0 - 1, rb, ry1), P(a1 + 1, rb, ry1), P(a1 + 1, b1 + 0.5, ry0), P(a0 - 1, b1 + 0.5, ry0)], white, [0, 1, 0]);
-    face([P(a0 - 1, rb, ry1 - 0.35), P(a1 + 1, rb, ry1 - 0.35), P(a1 + 1, b1 + 0.5, ry0 - 0.35), P(a0 - 1, b1 + 0.5, ry0 - 0.35)], dark, [0, -1, 0]);
   }
   if (!count) return null;
   const tex = facadeTextures(), gtex = facadeTextures("glass");
@@ -656,6 +631,8 @@ function treesMesh(scene, gf, groundAt, corridor, blocked, lat, ground, clear = 
       for (const [di, dj] of [[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1]]) { const o = ((j + dj) * W + i + di) * 4; R += px[o]; G += px[o + 1]; B += px[o + 2]; }
       R /= 5; G /= 5; B /= 5;
       const lum = 0.3 * R + 0.59 * G + 0.11 * B;
+      if (ground.classAt && !/^[0-37-8]$/.test(String(ground.classAt(jx, jz)))) continue;   // only on grass, meadow, forest, sand, soil, farmland
+      if (ground.isSea?.(jx, jz)) continue;
       if (G > R * 1.06 && G > B * 1.02 && lum < 100 && lum > 18) spots.push([jx, jz, lum < 60 ? 0 : (r() < 0.6 ? 0 : 1), 0.9 + (100 - lum) / 120]);
     }
   }
@@ -729,6 +706,7 @@ function rocksMesh(scene, gf, groundAt, corridor, blocked, lat, ground) {
       const jx = x + (r() - 0.5) * 24, jz = z + (r() - 0.5) * 24, i = Math.floor((jx - ext.x0) / mpp), j = Math.floor((jz - ext.z0) / mpp);
       if (i < 0 || j < 0 || i >= W || j >= H) continue;
       const o = (j * W + i) * 4, R = px[o], G = px[o + 1], B = px[o + 2];
+      if ((ground.classAt && !/^[0-37-8]$/.test(String(ground.classAt(jx, jz)))) || ground.isSea?.(jx, jz)) continue;
       if (R > G && G > B && R - B > 25 && R > 120 && r() < 0.5) spots.push([jx, jz, 0.5 + r() * 0.6]);   // sand / bare earth
     }
   }
@@ -922,20 +900,36 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     uvs[k * 2] = i / nx; uvs[k * 2 + 1] = 1 - j / nz;
   }
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const a = j * (nx + 1) + i, b = a + 1, e = a + nx + 1, f = e + 1; idx.push(a, e, b, b, e, f); }
+  // height of the drawn terrain surface (the grid's triangles), for things that must lie on it
+  const terrainAt = (x, z) => {
+    const fi = ((x - ext.x0) / W) * nx, fj = ((z - ext.z0) / H) * nz;
+    const i = Math.max(0, Math.min(nx - 1, Math.floor(fi))), j = Math.max(0, Math.min(nz - 1, Math.floor(fj))), u = fi - i, v = fj - j;
+    const y = (ii, jj) => pos[(jj * (nx + 1) + ii) * 3 + 1];
+    // triangles a-e-b and b-e-f (a = i,j; b = i+1,j; e = i,j+1; f = i+1,j+1)
+    return u + v <= 1 ? y(i, j) + (y(i + 1, j) - y(i, j)) * u + (y(i, j + 1) - y(i, j)) * v
+      : y(i + 1, j + 1) + (y(i, j + 1) - y(i + 1, j + 1)) * (1 - u) + (y(i + 1, j) - y(i + 1, j + 1)) * (1 - v);
+  };
   const tg = new THREE.BufferGeometry();
   tg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   tg.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   tg.setIndex(idx); tg.computeVertexNormals();
 
-  const ground = await groundCanvas(api, scene, gf, ext, opts.provider, onStep, { street: opts.street, width: opts.trackW || 14, samples: world.samples, night: opts.night });
-  const tex = new THREE.CanvasTexture(ground.canvas);
-  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter;
-  const tmat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.97, metalness: 0 });
+  // Free imagery (10 m pixels) is only the colour reference for the class-painted ground (ground.js), which is
+  // finished below once the grandstands stand; Google's sharp imagery is the ground itself.
+  const classed = opts.provider !== "google";
+  const ground = await groundCanvas(api, scene, gf, ext, opts.provider, onStep, { street: opts.street, width: opts.trackW || 14, samples: world.samples, night: opts.night, paint: !classed });
+  let tmat;
+  if (classed) tmat = new THREE.MeshStandardMaterial({ color: 0x7d8a5c, roughness: 0.97, metalness: 0 });
+  else {
+    const tex = new THREE.CanvasTexture(ground.canvas);
+    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tmat = withDetail(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.97, metalness: 0 }));
+  }
   if (ground.light) {
     const lt = new THREE.CanvasTexture(ground.light); lt.colorSpace = THREE.SRGBColorSpace;
     tmat.emissiveMap = lt; tmat.emissive = new THREE.Color(0xffffff); tmat.emissiveIntensity = 0;   // switched on at night
   }
-  const terrain = new THREE.Mesh(tg, withDetail(tmat));
+  const terrain = new THREE.Mesh(tg, tmat);
   terrain.name = "terrain"; terrain.receiveShadow = true;
   // Edge colour of the imagery, for the endless ground beyond it.
   const eg = ground.canvas.getContext("2d").getImageData(0, 0, ground.canvas.width, 4).data;
@@ -953,7 +947,16 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     group.add(sea);
   }
 
-  // Where nothing may grow or lie: roads, other tarmac, buildings, water (a 2 m raster).
+  // Grandstands (with every seat), before the buildings: small buildings inside a stand's footprint go.
+  let stands = null;
+  if (opts.buildings !== false) {
+    onStep?.("관중석 세우는 중");
+    stands = buildStands({ scene, gf, world, groundAt, corridor, street: opts.street });
+    if (stands) group.add(stands.group);
+  }
+  const inStand = stands ? (x, z) => stands.footprints.some((f) => inPoly(x, z, f)) : null;
+
+  // Where nothing may grow or lie: roads, other tarmac, buildings, grandstands, water (a 2 m raster).
   const MPX = 2, mw = Math.ceil(W / MPX), mh = Math.ceil(H / MPX);
   const mask = new OffscreenCanvas(mw, mh), mg = mask.getContext("2d", { willReadFrequently: true });
   const MP = (pt) => { const [x, z] = gf.xz(pt); return [(x - ext.x0) / MPX, (z - ext.z0) / MPX]; };
@@ -964,15 +967,29 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   }
   for (const a of scene.areas) if (a.k === "water" || a.k === "paved" || a.k === "pitch") { mg.beginPath(); a.pts.forEach((p, i) => { const [x, y] = MP(p); i ? mg.lineTo(x, y) : mg.moveTo(x, y); }); mg.closePath(); mg.fill(); }
   for (const b of scene.buildings) { mg.beginPath(); b.pts.forEach((p, i) => { const [x, y] = MP(p); i ? mg.lineTo(x, y) : mg.moveTo(x, y); }); mg.closePath(); mg.fill(); mg.lineWidth = 3 / MPX; mg.stroke(); }
+  for (const f of stands?.footprints || []) { mg.beginPath(); f.forEach(([x, z], i) => { const px = (x - ext.x0) / MPX, py = (z - ext.z0) / MPX; i ? mg.lineTo(px, py) : mg.moveTo(px, py); }); mg.closePath(); mg.fill(); mg.lineWidth = 6 / MPX; mg.stroke(); }
   const maskPx = mg.getImageData(0, 0, mw, mh).data;
   const blocked = (x, z) => { const i = Math.floor((x - ext.x0) / MPX), j = Math.floor((z - ext.z0) / MPX); return i < 0 || j < 0 || i >= mw || j >= mh || maskPx[(j * mw + i) * 4 + 3] > 0; };
   let groundPx = null;   // read the big ground image once, only if something needs it
-  const groundInfo = { canvas: ground.canvas, mpp: ground.mpp, ext, pixels: () => groundPx || (groundPx = ground.canvas.getContext("2d").getImageData(0, 0, ground.canvas.width, ground.canvas.height).data) };
+  const groundInfo = { canvas: ground.canvas, mpp: ground.mpp, ext, isSea: seaLevel != null ? isSea : null, pixels: () => groundPx || (groundPx = ground.canvas.getContext("2d").getImageData(0, 0, ground.canvas.width, ground.canvas.height).data) };
+
+  if (classed) {
+    onStep?.("땅 표면 만드는 중");
+    const S = (x, z) => [(x - ext.x0) / ground.mpp, (z - ext.z0) / ground.mpp];
+    const P = (p) => S(...gf.xz(p));
+    const R = classRaster(ground, scene, P, S, { samples: world.samples, width: opts.trackW || 14, street: opts.street }, stands?.footprints);
+    const cw = ground.canvas.width, chh = ground.canvas.height;
+    groundInfo.classAt = (x, z) => { const i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); return i < 0 || j < 0 || i >= cw || j >= chh ? 255 : R[j * cw + i]; };
+    const gm = groundMaterial({ R, W: ground.canvas.width, H: ground.canvas.height, ext, mpp: ground.mpp, tintCanvas: ground.canvas });
+    if (tmat.emissiveMap) { gm.material.emissiveMap = tmat.emissiveMap; gm.material.emissive = tmat.emissive; gm.material.emissiveIntensity = 0; }
+    tmat.dispose();
+    terrain.material = gm.material;
+  }
 
   let bld = null;
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");
-    bld = buildingsMesh(scene, gf, groundAt, false, nearTrack, corridor);
+    bld = buildingsMesh(scene, gf, groundAt, false, corridor, inStand);
     if (bld) group.add(bld);
   }
   const w = waterMesh(scene, gf, groundAt);
@@ -997,7 +1014,10 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     if (run.length > 1) extra.push(run);
   }
   const heightNear = (x, z) => { const [s, d] = nearTrack(x, z); return s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); };
-  const tm = tarmacMesh(extra, gf, heightNear);
+  // other tarmac lies on the terrain (never under it: a flat strip at track height let the terrain's triangles
+  // poke through in a sawtooth), sampled every 3 m
+  const tarmacY = (x, z) => Math.max(heightNear(x, z), terrainAt(x, z) + 0.06);
+  const tm = tarmacMesh(extra.map((l) => densifyF1(l, 3)), gf, tarmacY);
   if (tm) group.add(tm);
   // Real barriers within 45 m of the track.
   // Mapped barriers within 45 m of the track, cut where a mapping error puts them on the tarmac.
@@ -1020,10 +1040,12 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   return {
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
-    occluders: bld ? bld.children : [],
+    occluders: bld ? bld.children.concat(stands ? [stands.structure] : []) : stands ? [stands.structure] : [],
+    stands,
     info: { tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped } : null,
-      trees: group.getObjectByName("trees")?.userData.count ?? 0 },
+      trees: group.getObjectByName("trees")?.userData.count ?? 0,
+      stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, rows: stands.info.list.map((s) => `${s.n}:${s.rows}`).join(", ") } : null },
     bounds: ext,
   };
 }

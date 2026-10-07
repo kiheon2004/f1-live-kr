@@ -48,6 +48,14 @@ function areaKind(t) {
   return null;
 }
 
+// Each circuit's grandstands as its spectator map shows them, with the circuit's capacity (src/data/grandstands.json).
+let _stands;
+function standsFor(location) {
+  if (_stands === undefined) { try { _stands = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "data", "grandstands.json"), "utf8")).circuits; } catch { _stands = null; } }
+  if (!_stands) return null;
+  return _stands[location] || Object.values(_stands).find((c) => c.aliases?.includes(location)) || null;
+}
+
 // Point in polygon (even-odd).
 function inside(x, y, pts) {
   let r = false;
@@ -146,7 +154,7 @@ class Scenes {
       if (!inBox(a.pts)) continue;
       const t = a.tags;
       // grandstands mapped only as an area (leisure=grandstand, no building tag) are still grandstands
-      if (t.leisure === "grandstand" && !t.building) { buildings.push({ h: 12, min: 0, kind: "grandstand", est: 1, roof: null, colour: null, roofColour: null, pts: conv(a.pts) }); continue; }
+      if (t.leisure === "grandstand" && !t.building) { buildings.push({ h: 12, min: 0, kind: "grandstand", est: 1, roof: null, colour: null, roofColour: null, name: t.name || null, pts: conv(a.pts) }); continue; }
       if (t.building && !t["building:part"] && hasParts(a.pts)) continue;
       if (t.building || t["building:part"]) {
         if (t.building === "roof" && !t.height && !t["building:levels"]) continue;   // canopies over fuel stations etc.
@@ -155,7 +163,7 @@ class Scenes {
         const kind = t.building === "grandstand" || t.leisure === "grandstand" ? "grandstand" : /^(house|detached|residential|apartments|terrace|semidetached_house)$/.test(t.building || "") ? "home" : /^(industrial|warehouse|hangar|garage|garages|shed|service)$/.test(t.building || "") ? "shed" : "block";
         const est = !(t.height || t["building:height"] || t["building:levels"]);   // height guessed from the kind
         buildings.push({ h: Math.round(h * 10) / 10, min: minH, kind, est: est ? 1 : 0, roof: t["roof:shape"] || null,
-          colour: t["building:colour"] || null, roofColour: t["roof:colour"] || null, pts: conv(a.pts) });
+          colour: t["building:colour"] || null, roofColour: t["roof:colour"] || null, ...(kind === "grandstand" ? { name: t.name || null } : {}), pts: conv(a.pts) });
         continue;
       }
       const k = areaKind(t);
@@ -177,12 +185,18 @@ class Scenes {
     }
     for (const p of scenery.points) if (p.tags.natural === "tree") trees.push(localToF1(p.pt[0], p.pt[1]).map((v) => Math.round(v * 10) / 10));
 
+    // Listed grandstands: ends from latitude/longitude into F1 metres.
+    const sd = standsFor(location);
+    const toF1m = ([lat, lon]) => localToF1(...fr.toXY(lat, lon)).map((v) => Math.round(v * 10) / 10);
+    const stands = sd ? { name: sd.name, total: sd.total || null, seats: sd.seats || null, est: !!sd.est, src: sd.src || null,
+      list: (sd.stands || []).map((st) => ({ ...st, a: toF1m(st.a), b: toF1m(st.b) })) } : null;
+
     return {
       circuit: info ? { name: info.name, length: info.length, opened: info.opened, firstgp: info.firstgp, altitude: info.altitude } : null,
       ok: true, location, center, sea: geo.SEA_LEVEL[location] ?? 0, rms: fit.rms, inliers: fit.inliers, against: fit.against,
       ll: { lat: latRow, lon: lonRow },          // F1 metres → lat/lon
       f1: { x: fxRow, y: fyRow },                // (lat − centre, lon − centre) → F1 metres
-      buildings, areas, lines, trees,
+      buildings, areas, lines, trees, stands,
       sceneryError: scenery.error || null,
     };
   }

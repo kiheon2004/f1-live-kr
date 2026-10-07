@@ -1143,6 +1143,7 @@ function frame(now) {
   if (world) updateCamera(dt);
   updateSun(now);
   thinFarTrees();
+  world?.real?.stands?.update(camera.position);
   if (!devNoHud) paintHud();
   renderer.render(scene, camera);
   adaptResolution(now, dt);
@@ -1195,7 +1196,15 @@ function occlusionTest() {
     for (const off of [0, (s.L ?? 7) - 1, (s.R ?? -7) + 1]) {
       const pt = new THREE.Vector3(s.p.x + s.nor.x * off, s.p.y + 80, s.p.z + s.nor.z * off);
       ray.set(pt, down); ray.far = 79.5;
-      if (ray.intersectObjects(world.occluders, false).length) { res.overhead++; res.where.push(["overhead", i]); break; }
+      const hit = ray.intersectObjects(world.occluders, false)[0];
+      if (hit) {
+        let what = "building";
+        if (hit.object === world.real?.stands?.structure) {
+          const L = world.real.stands.info.list;
+          what = "stand " + L.reduce((b, st) => (Math.hypot(st.c[0] - hit.point.x, st.c[2] - hit.point.z) < Math.hypot(b.c[0] - hit.point.x, b.c[2] - hit.point.z) ? st : b), L[0]).n;
+        }
+        res.overhead++; res.where.push(["overhead", i, what, hit.point.toArray().map(Math.round)]); break;
+      }
     }
     const b = world.samples[(i - 5 + world.n) % world.n];   // ~10 m back along the track
     const cam = new THREE.Vector3(b.p.x + b.nor.x * mid, b.p.y + 3.5, b.p.z + b.nor.z * mid);
@@ -1231,6 +1240,24 @@ window.Map3D = {
     return "ok";
   },
   reset() { if (world) { setCam("heli"); frameCircuit(); } },
+  // development: look at a grandstand (index or name) from `dist` m in front of it, `h` m up, `along` m sideways
+  viewStand(k, dist = 60, h = 12, along = 0) {
+    const L = world?.real?.stands?.info.list || [];
+    const st = typeof k === "number" ? L[k] : L.find((s) => s.n === k);
+    if (!st) return "no stand";
+    setCam("heli"); controls.enabled = false; camMode = "inspect";
+    const [cx, cy, cz] = st.c, [nx, nz] = st.nrm, tx = -nz, tz = nx;
+    camera.position.set(cx - nx * dist + tx * along, cy + h, cz - nz * dist + tz * along);
+    camera.near = 0.3; camera.fov = 50; camera.updateProjectionMatrix();
+    camera.lookAt(cx + nx * 9, cy + 7, cz + nz * 9);
+    return `${st.n} rows ${st.rows} seats ${st.seats}`;
+  },
+  // development: free camera
+  look(px, py, pz, tx, ty, tz, fov = 50) {
+    setCam("heli"); controls.enabled = false; camMode = "inspect";
+    camera.position.set(px, py, pz); camera.near = 0.3; camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(tx, ty, tz);
+    return "ok";
+  },
   debug: () => JSON.stringify({ cam: camera?.position.toArray().map(Math.round), target: controls?.target.toArray().map(Math.round), fov: camera?.fov, aspect: camera?.aspect,
     size: world && [world.size.x, world.size.y, world.size.z].map(Math.round), host: host && [host.clientWidth, host.clientHeight], cars: cars.size, mode: camMode,
     paint: (() => { const c = cars.get(app()?.focus || leader()); const m = c?.model.children[1]?.material; return m && { color: m.color.getHexString(), emissive: m.emissive.getHexString(), ei: m.emissiveIntensity }; })(),
