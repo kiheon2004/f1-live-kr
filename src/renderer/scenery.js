@@ -1045,7 +1045,7 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     info: { tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped } : null,
       trees: group.getObjectByName("trees")?.userData.count ?? 0,
-      stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, rows: stands.info.list.map((s) => `${s.n}:${s.rows}`).join(", ") } : null },
+      stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,
   };
 }

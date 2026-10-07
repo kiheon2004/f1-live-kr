@@ -155,7 +155,8 @@ class Scenes {
       const t = a.tags;
       // grandstands mapped only as an area (leisure=grandstand, no building tag) are still grandstands
       if (t.leisure === "grandstand" && !t.building) { buildings.push({ h: 12, min: 0, kind: "grandstand", est: 1, roof: null, colour: null, roofColour: null, name: t.name || null, pts: conv(a.pts) }); continue; }
-      if (t.building && !t["building:part"] && hasParts(a.pts)) continue;
+      // (grandstands are kept: their seats are built from the outline, not from the parts)
+      if (t.building && !t["building:part"] && t.building !== "grandstand" && hasParts(a.pts)) continue;
       if (t.building || t["building:part"]) {
         if (t.building === "roof" && !t.height && !t["building:levels"]) continue;   // canopies over fuel stations etc.
         const h = buildingHeight(t);
