@@ -7,6 +7,7 @@
 import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
+import { smoothedTracks, steadiness } from "./smooth.js";
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
 
 const DM = 0.1;               // decimetres → metres
@@ -598,10 +599,25 @@ function trackPointFor(c, x, z) {
 }
 
 const posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3();
+// Steadied car tracks per source and world, built a moment after the world (a replay takes a few hundred ms).
+let smooth = { src: null, world: null, tr: null, pending: false };
+function smoothFor(src) {
+  if (devRawTracks) return null;
+  if (smooth.src !== src || smooth.world !== world) {
+    smooth = { src, world, tr: null, pending: true };
+    const job = smooth;
+    setTimeout(() => { if (smooth !== job) return; try { job.tr = smoothedTracks(src, world, window.ReplayKit.CarTracks); } catch (e) { console.warn("smooth", e); } job.pending = false; }, 50);
+  }
+  if (smooth.tr && src.isLive) smooth.tr.update(performance.now());
+  return smooth.tr;
+}
+let devRawTracks = false;
 function updateCars(dt) {
   const A = app(), src = A.src;
   // position and velocity of every car from its smooth track (arrays reused frame to frame)
-  const pos = src.positionsInto ? src.positionsInto(A.t, posBuf, velBuf) : src.positionsAt(A.t);
+  // steadied tracks (smooth.js) once they're built for this source and circuit; the raw ones until then
+  const sm = smoothFor(src);
+  const pos = sm ? sm.all(A.t, posBuf, velBuf) : src.positionsInto ? src.positionsInto(A.t, posBuf, velBuf) : src.positionsAt(A.t);
   const drivers = src.state.DriverList || {}, lines = src.state.TimingData?.Lines || {};
   const appLines = src.state.TimingAppData?.Lines || {}, isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || "");
   const seen = new Set();
@@ -1334,6 +1350,13 @@ function floodTest() {
 
 window.Map3D = {
   floodTest,
+  // development: steadiness of the drawn cars over [t0, t1] (stream ms): raw tracks vs steadied ones
+  steadiness(t0, t1) {
+    const src = app().src; if (!world || !src) return "no world";
+    const a = performance.now(), tr = smoothedTracks(src, world, window.ReplayKit.CarTracks), build = Math.round(performance.now() - a);
+    return JSON.stringify({ buildMs: build, lag: tr.lag, raw: steadiness(src.tracks, src, world, t0, t1, tr.lag), steady: steadiness(tr, src, world, t0, t1, tr.lag) });
+  },
+  rawTracks(on) { devRawTracks = !!on; return "ok"; },
   _real: () => world?.real?.group,
   // development: look at landmark k from `dist` m away (bearing `ang`), `h` m up
   viewLandmark(k = 0, dist = 1, h = 0.6, ang = 0.7) {

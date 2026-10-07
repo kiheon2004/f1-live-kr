@@ -14,7 +14,21 @@
 
   // ---------- state ----------
   let mode = "replay", replay = null, src = null;
-  let t0 = 0, t1 = 0;   // replay range: session start → results confirmed
+  let t0 = 0, t1 = 0, tStart = 0;   // replay range: session start (a race: the grid formed) → results confirmed; tStart: the clock starts
+  // A race's clock starts at lights out. The bar starts a little earlier, 15 s before the last car stops on the
+  // grid, so the start is seen from the standing grid (capped at 2 minutes before the start).
+  function gridFormedAt(r, start) {
+    if (!/Race/.test(r.state?.SessionInfo?.Type || "")) return start;
+    const moving = (t) => { const a = r.positionsAt(t), b = r.positionsAt(t - 1000); let n = 0, all = 0; for (const [k, p] of Object.entries(a)) { const q = b[k]; if (!q) continue; all++; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 15) n++; } return [n, all]; };
+    // back from lights out: the grid has formed while (almost) nobody moves
+    let formed = null;
+    for (let t = start - 1500; t > start - 120000; t -= 1000) {
+      const [n, all] = moving(t);
+      if (all < 5) break;
+      if (n <= Math.max(2, all * 0.15)) formed = t; else if (formed != null) break;   // (pit-lane starters may still be rolling)
+    }
+    return formed == null ? start : Math.max(start - 120000, formed - 15000);
+  }
   let schedule = null, schedulePromise = null;   // season calendar, loaded on first use
   const live = new ReplayKit.LiveSource();
   let liveStatus = { state: "stopped" };
@@ -96,7 +110,8 @@
       rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
       outline = replay.lapShape() || replayFallbackLap(); if (!outline.length) outline = replay.trackOutline(); outlineFor = "replay";
       // The recording starts long before the session (an hour before a race); the bar covers the session itself.
-      t0 = replay.startTime(); t1 = Math.max(t0 + 1000, replay.endTime());
+      tStart = replay.startTime(); replay.seek(tStart);   // (seek first: that reads the session info)
+      t0 = gridFormedAt(replay, tStart); t1 = Math.max(tStart + 1000, replay.endTime());
       $("seek").min = t0; $("seek").max = t1;
       for (const id of ["play", "speed", "toStart", "seek"]) $(id).disabled = false;
       refreshTitle();
@@ -117,7 +132,7 @@
   }
   $("play").addEventListener("click", () => (playing ? pause() : play()));
   $("speed").addEventListener("change", () => { speed = +$("speed").value; });
-  $("toStart").addEventListener("click", () => seekTo(t0));
+  $("toStart").addEventListener("click", () => seekTo(t0));   // (a race: the standing grid)
   $("seek").addEventListener("input", () => seekTo(+$("seek").value));
   // Shortcuts. A clicked button keeps the focus, and Space would also press it a second time (play → pause
   // straight away), so the focus is dropped first.
@@ -287,7 +302,7 @@
   const uiCost = {};   // development: time spent per panel (window.F1KR.uiCost)
   function renderAll(heavy) {
     if (window.F1KR_NOUI && heavy) heavy = false;
-    if (mode === "replay") { $("seek").value = t; $("elapsed").textContent = `${hms(t - t0)} / ${hms(t1 - t0)}`; }
+    if (mode === "replay") { $("seek").value = t; $("elapsed").textContent = `${t < tStart ? `출발 전 ${hms(tStart - t + 999).slice(3)}` : hms(t - tStart)} / ${hms(t1 - tStart)}`; }
     drawMap();
     if (!heavy) return;
     lastHeavy = performance.now();
