@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const geo = require("./geo");
+const overture = require("./overture");
 
 const ROADS = /^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street|pedestrian|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$/;
 const ROAD_W = { motorway: 15, trunk: 13, primary: 11, secondary: 9, tertiary: 8, unclassified: 6, residential: 6, living_street: 5,
@@ -135,6 +136,24 @@ class Scenes {
     try { scenery = await geo.getOsm(this.cacheDir, location, "scenery", mid, Math.min(reach, 3600), center); }
     catch (e) { scenery.error = e.message; }
     const core = { lines: [] };   // roads and raceways are part of the scenery answer
+    // Buildings: Overture Maps (OSM's plus Microsoft/Google footprints, more heights and roof data) when it
+    // can be had, else OSM's own. Grandstands mapped only as an area (leisure=grandstand) always come from OSM.
+    onStep("건물 정보 받는 중");
+    try {
+      const ob = await overture.buildings(this.cacheDir, mid, Math.min(reach, 3600), fr, (d, n) => onStep(`건물 정보 받는 중 ${d}/${n}`));
+      if (ob.length) {
+        // OSM's names (Overture often leaves them out) go to the Overture buildings standing on the same spot
+        const named = scenery.areas.filter((a) => (a.tags.building || a.tags["building:part"] || /^(stadium|sports_centre)$/.test(a.tags.leisure || "")) && a.tags.name && a.pts.length > 3);
+        for (const b of ob) {
+          if (b.tags.name || !named.length) continue;
+          let x = 0, y = 0; for (const p of b.pts) { x += p[0]; y += p[1]; } x /= b.pts.length; y /= b.pts.length;
+          const hit = named.find((a) => inside(x, y, a.pts));
+          if (hit) b.tags.name = hit.tags.name;
+        }
+        scenery = { ...scenery, areas: scenery.areas.filter((a) => !(a.tags.building || a.tags["building:part"])).concat(ob) };
+        scenery.buildingsFrom = "overture";
+      }
+    } catch (e) { scenery.overtureError = e.message; }
 
     const inBox = (pts) => pts.some(([x, y]) => x > minX - 1000 && x < maxX + 1000 && y > minY - 1000 && y < maxY + 1000);
     const conv = (pts) => pts.map(([x, y]) => localToF1(x, y).map((v) => Math.round(v * 10) / 10));
@@ -163,12 +182,17 @@ class Scenes {
         const minH = +(/^\d+(\.\d+)?/.exec(t.min_height || "")?.[0] || 0);
         const kind = t.building === "grandstand" || t.leisure === "grandstand" ? "grandstand" : /^(house|detached|residential|apartments|terrace|semidetached_house)$/.test(t.building || "") ? "home" : /^(industrial|warehouse|hangar|garage|garages|shed|service)$/.test(t.building || "") ? "shed" : "block";
         const est = !(t.height || t["building:height"] || t["building:levels"]);   // height guessed from the kind
+        const num = (v) => { const m = /^\s*(\d+(?:\.\d+)?)/.exec(String(v ?? "")); return m ? +m[1] : null; };
         buildings.push({ h: Math.round(h * 10) / 10, min: minH, kind, est: est ? 1 : 0, roof: t["roof:shape"] || null,
-          colour: t["building:colour"] || null, roofColour: t["roof:colour"] || null, ...(kind === "grandstand" ? { name: t.name || null } : {}), pts: conv(a.pts) });
+          colour: t["building:colour"] || null, roofColour: t["roof:colour"] || null, name: t.name || null,
+          // what the renderer picks the look from: the kind of building, floors, materials, roof details
+          cls: t.building || t["building:part"] || null, part: t["building:part"] ? 1 : 0, lv: num(t["building:levels"]),
+          mat: t["building:material"] || null, rmat: t["roof:material"] || null, rh: num(t["roof:height"]), rd: num(t["roof:direction"]),
+          ro: t["roof:orientation"] || null, ml: /ML|Open Buildings/.test(t["overture:source"] || "") ? 1 : 0, pts: conv(a.pts) });
         continue;
       }
       const k = areaKind(t);
-      if (k) areas.push({ k, pts: conv(a.pts) });
+      if (k) areas.push({ k, ...(t.landuse ? { lu: t.landuse } : {}), pts: conv(a.pts) });
     }
     for (const l of [...core.lines, ...scenery.lines]) {
       if (!inBox(l.pts)) continue;
@@ -198,7 +222,7 @@ class Scenes {
       ll: { lat: latRow, lon: lonRow },          // F1 metres → lat/lon
       f1: { x: fxRow, y: fyRow },                // (lat − centre, lon − centre) → F1 metres
       buildings, areas, lines, trees, stands,
-      sceneryError: scenery.error || null,
+      sceneryError: scenery.error || null, buildingsFrom: scenery.buildingsFrom || "osm",
     };
   }
 }

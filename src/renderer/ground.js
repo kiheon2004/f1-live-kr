@@ -254,15 +254,17 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
       uniform sampler2DArray gDetail; uniform sampler2D gTint;
       uniform float gScale[${N_CLASS}]; uniform float gTintAmt[${N_CLASS}]; uniform vec3 gSatMean[${N_CLASS}];
       varying vec3 vGPos;
-      float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float gHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
       float gNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return mix(mix(gHash(i), gHash(i + vec2(1, 0)), f.x), mix(gHash(i + vec2(0, 1)), gHash(i + vec2(1, 1)), f.x), f.y); }
       // one class's surface here: its detail texture, a second larger-scale sample against tiling, the satellite tint
+      // (lod: 1 close – a second, larger sample breaks up the tiling; 0 further out, one sample is enough)
+      float gLod = 1.0;
       vec3 gSurface(int c, vec2 w, vec3 sat) {
         float s = gScale[c];
         vec3 a = texture(gDetail, vec3(w / s, float(c))).rgb;
-        vec3 b = texture(gDetail, vec3(w / (s * 6.7) + 0.37, float(c))).rgb;
-        vec3 col = a * mix(vec3(1.0), b / max(vec3(0.02), gSatMeanDetail(c)), 0.35);
+        vec3 col = a;
+        if (gLod > 0.0) { vec3 b = texture(gDetail, vec3(w / (s * 6.7) + 0.37, float(c))).rgb; col = a * mix(vec3(1.0), b / max(vec3(0.02), gSatMeanDetail(c)), 0.35 * gLod); }
         vec3 t = clamp(sat / max(gSatMean[c], vec3(0.004)), vec3(0.55), vec3(1.6));
         return col * mix(vec3(1.0), t, gTintAmt[c]);
       }`).replace("#include <map_fragment>", `#include <map_fragment>
@@ -271,7 +273,14 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
         vec2 uv = (w - gExt.xy) / gExt.zw;
         vec3 sat = texture(gTint, vec2(uv.x, 1.0 - uv.y)).rgb;
         // class boundaries: a little noise so they wander like real edges, then a narrow blend between texels
-        vec2 jit = (vec2(gNoise(w * 0.13), gNoise(w * 0.13 + 17.3)) - 0.5) * 1.4 + (vec2(gNoise(w * 0.7), gNoise(w * 0.7 + 5.1)) - 0.5) * 0.5;
+        // detail by distance: full close up, lighter further out, the plain colours far away (cheap on big views)
+        float gd = distance(vGPos, cameraPosition);
+        gLod = 1.0 - smoothstep(300.0, 500.0, gd);
+        vec2 jit = vec2(0.0);
+        if (gd < 900.0) {
+          jit = (vec2(gNoise(w * 0.13), gNoise(w * 0.13 + 17.3)) - 0.5) * 1.4;
+          if (gd < 300.0) jit += (vec2(gNoise(w * 0.7), gNoise(w * 0.7 + 5.1)) - 0.5) * 0.5;
+        }
         vec2 tc = uv * gClsSize + jit - 0.5;
         ivec2 i0 = ivec2(floor(tc)); vec2 f = fract(tc);
         ivec2 mx = ivec2(gClsSize) - 1;
@@ -281,7 +290,13 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
         int c11 = int(texelFetch(gCls, clamp(i0 + ivec2(1, 1), ivec2(0), mx), 0).r * 255.0 + 0.5);
         c00 = min(c00, ${N_CLASS - 1}); c10 = min(c10, ${N_CLASS - 1}); c01 = min(c01, ${N_CLASS - 1}); c11 = min(c11, ${N_CLASS - 1});
         vec3 col;
-        if (c00 == c10 && c00 == c01 && c00 == c11) col = gSurface(c00, w, sat);
+        if (gd > 1500.0) {
+          // far: each class's mean colour, tinted by the satellite – no texture reads
+          int cn = f.x < 0.5 ? (f.y < 0.5 ? c00 : c01) : (f.y < 0.5 ? c10 : c11);
+          col = gDetailMean[cn] * mix(vec3(1.0), clamp(sat / max(gSatMean[cn], vec3(0.004)), vec3(0.55), vec3(1.6)), gTintAmt[cn]);
+        }
+        else if (c00 == c10 && c00 == c01 && c00 == c11) col = gSurface(c00, w, sat);
+        else if (gd > 700.0) col = gSurface(f.x < 0.5 ? (f.y < 0.5 ? c00 : c01) : (f.y < 0.5 ? c10 : c11), w, sat);
         else col = mix(mix(gSurface(c00, w, sat), gSurface(c10, w, sat), f.x), mix(gSurface(c01, w, sat), gSurface(c11, w, sat), f.x), f.y);
         // mown stripes on grass
         float grassW = (c00 == 0 ? (1.0 - f.x) * (1.0 - f.y) : 0.0) + (c10 == 0 ? f.x * (1.0 - f.y) : 0.0) + (c01 == 0 ? (1.0 - f.x) * f.y : 0.0) + (c11 == 0 ? f.x * f.y : 0.0);

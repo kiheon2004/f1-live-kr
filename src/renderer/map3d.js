@@ -66,8 +66,9 @@ function init() {
   controls.screenSpacePanning = false;
 
   new ResizeObserver(resize).observe(host);
-  canvas.addEventListener("click", pickCar);
-  canvas.addEventListener("dblclick", () => { if (camMode === "heli") setCam("chase"); });
+  canvas.addEventListener("click", (e) => { if (look.dragged) { look.dragged = false; return; } pickCar(e); });
+  canvas.addEventListener("dblclick", () => { if (camMode === "heli") setCam("chase"); else resetLook(); });
+  initLook();
   document.querySelectorAll("[data-cam]").forEach((b) => b.addEventListener("click", () => setCam(b.dataset.cam)));
   document.getElementById("cam3dPrev").addEventListener("click", () => cycleCar(-1));
   document.getElementById("cam3dNext").addEventListener("click", () => cycleCar(1));
@@ -602,6 +603,7 @@ function updateCars(dt) {
   // position and velocity of every car from its smooth track (arrays reused frame to frame)
   const pos = src.positionsInto ? src.positionsInto(A.t, posBuf, velBuf) : src.positionsAt(A.t);
   const drivers = src.state.DriverList || {}, lines = src.state.TimingData?.Lines || {};
+  const appLines = src.state.TimingAppData?.Lines || {}, isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || "");
   const seen = new Set();
   const focusNum = A.focus || leader();
   const k = 1 - Math.exp(-dt * 25), kSlow = 1 - Math.exp(-dt * 5);   // the heading is smooth already: only a touch of damping
@@ -641,6 +643,20 @@ function updateCars(dt) {
       const lat = (v.x - c.sample.p.x) * c.sample.nor.x + (v.z - c.sample.p.z) * c.sample.nor.z, i = c.sample.i;
       const L = c.sample.L ?? 7, R = c.sample.R ?? -7, m = world.kerbMark;
       c.onKerb = (lat > L - 1.6 && (m.inside[i] === 1 || m.outside[i] === 1)) || (lat < R + 1.6 && (m.inside[i] === -1 || m.outside[i] === -1));
+    }
+    // On the grid: a car standing near its slot is drawn in it (the data has the whole grid in single file);
+    // once it pulls away the offset fades over ~2 s, so the field merges from the stagger as it really does.
+    (c.raw || (c.raw = new THREE.Vector3())).copy(v);
+    const slot = world.slots && isRace && world.slots.get(+(appLines[num]?.GridPos || 0));
+    if (!c.gridOff) c.gridOff = { x: 0, z: 0 };
+    if (slot && speed < 1 && Math.hypot(slot.x - v.x, slot.z - v.z) < 14) {
+      const kk = c.has ? 1 - Math.exp(-dt * 8) : 1;
+      c.gridOff.x += (slot.x - v.x - c.gridOff.x) * kk; c.gridOff.z += (slot.z - v.z - c.gridOff.z) * kk;
+      c.yaw = slot.yaw;
+    } else { const fade = Math.exp(-dt * 1.4); c.gridOff.x *= fade; c.gridOff.z *= fade; }
+    if (Math.abs(c.gridOff.x) + Math.abs(c.gridOff.z) > 0.01) {
+      v.x += c.gridOff.x; v.z += c.gridOff.z;
+      const g2 = trackPointFor(c, v.x, v.z); if (g2 != null) v.y = g2 + 0.02;
     }
     c.pos.copy(v); c.has = true;
     c.obj.position.copy(v);
@@ -742,7 +758,7 @@ let camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), camInit = false
 // camera moves in. Onboard: the camera sits at the driver's eye on the car itself – same transform as
 // the car, so the halo, mirrors, nose and front wheels stay put in the frame.
 const chase = { yaw: 0, yawVel: 0, y: 0, init: false };
-const ray = new THREE.Raycaster(), qTmp = new THREE.Quaternion(), qShake = new THREE.Quaternion(), shakeE = new THREE.Euler();
+const ray = new THREE.Raycaster(), qTmp = new THREE.Quaternion(), qShake = new THREE.Quaternion(), shakeE = new THREE.Euler(), qLook = new THREE.Quaternion(), lookE = new THREE.Euler();
 function updateCamera(dt) {
   const A = app();
   if (camMode === "inspect") return;
@@ -761,9 +777,11 @@ function updateCamera(dt) {
     const n1 = Math.sin(now * 61.3) * 0.6 + Math.sin(now * 97.1 + 1.3) * 0.4, n2 = Math.sin(now * 53.7 + 2.1) * 0.6 + Math.sin(now * 83.9) * 0.4;
     shakeE.set(-0.06 + n1 * amp, Math.PI + n2 * amp * 0.5, n2 * amp * 0.6, "YXZ");
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
+    // free look: turn the head round the car's own up axis, then tilt
+    if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
     camera.position.y += n1 * amp * 0.25;
     setNear(0.05);
-    if (camera.fov !== 74) { camera.fov = 74; camera.updateProjectionMatrix(); }
+    if (camera.fov !== look.fov) { camera.fov = look.fov; camera.updateProjectionMatrix(); }
     camLook.copy(c.pos); camInit = true;
     return;
   }
@@ -776,9 +794,10 @@ function updateCamera(dt) {
     chase.yawVel += acc * h; chase.yaw += chase.yawVel * h;
   }
   chase.y += (c.pos.y - chase.y) * (1 - Math.exp(-dt * 4));
-  const back = new THREE.Vector3(-Math.sin(chase.yaw), 0, -Math.cos(chase.yaw));
+  // the camera on a sphere round the car: behind it and a little above by default, turned by free look
   const head = new THREE.Vector3(c.pos.x, chase.y + 1.1, c.pos.z);
-  const want = head.clone().addScaledVector(back, 10.5).addScaledVector(UP, 2.4);
+  const az = chase.yaw + Math.PI + look.yaw, el = Math.atan2(2.4, 10.5) + look.pitch, r = Math.hypot(2.4, 10.5) * (look.dist / 10.5);
+  const want = head.clone().add(new THREE.Vector3(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r));
   // keep a clear line of sight to the car
   const dir = want.clone().sub(head), len = dir.length(); dir.normalize();
   ray.set(head, dir); ray.far = len;
@@ -789,6 +808,9 @@ function updateCamera(dt) {
   camera.position.copy(want);
   const fwd = new THREE.Vector3(Math.sin(c.yaw), 0, Math.cos(c.yaw));
   camLook.copy(c.pos).addScaledVector(fwd, 7).setY(chase.y + 1.0);
+  // turned away from straight behind, the camera looks at the car itself
+  const turned = Math.min(1, (Math.abs(look.yaw) + Math.abs(look.pitch) * 0.7) / 0.6);
+  if (turned) camLook.lerp(head, turned);
   camera.up.copy(UP);
   camera.lookAt(camLook);
   camInit = true;
@@ -796,8 +818,43 @@ function updateCamera(dt) {
 }
 function setNear(n) { if (camera.near !== n) { camera.near = n; camera.updateProjectionMatrix(); } }
 
+// Free look in the chase and onboard cameras: drag (or swipe sideways with two fingers) to turn the view all
+// the way round, up and down; scroll / pinch to move the chase camera nearer or further (onboard: zoom).
+// Double-click returns to the straight-ahead view. The angles are kept relative to the car, so the view
+// turns with it through the corners.
+const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 74, dragged: false, down: null };
+function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 74; }
+function initLook() {
+  const active = () => camMode === "chase" || camMode === "onboard";
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!active() || e.button !== 0) return;
+    look.down = { x: e.clientX, y: e.clientY, yaw: look.yaw, pitch: look.pitch, moved: 0 };
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!look.down || !active()) return;
+    const dx = e.clientX - look.down.x, dy = e.clientY - look.down.y;
+    look.down.moved = Math.max(look.down.moved, Math.hypot(dx, dy));
+    const k = camMode === "onboard" ? 0.0055 : 0.007;
+    look.yaw = wrap(look.down.yaw - dx * k);
+    look.pitch = Math.max(camMode === "onboard" ? -0.9 : -0.35, Math.min(camMode === "onboard" ? 0.7 : 1.25, look.down.pitch + dy * k * (camMode === "onboard" ? -1 : 1)));
+  });
+  const up = (e) => { if (!look.down) return; if (look.down.moved > 4) look.dragged = true; look.down = null; try { canvas.releasePointerCapture(e.pointerId); } catch {} };
+  canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  canvas.addEventListener("wheel", (e) => {
+    if (!active()) return;
+    e.preventDefault();
+    // a sideways two-finger swipe turns the view; up/down and pinch zoom
+    if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) { look.yaw = wrap(look.yaw - e.deltaX * 0.006); return; }
+    const d = e.deltaY * (e.ctrlKey ? 0.02 : 0.004);
+    if (camMode === "chase") look.dist = Math.max(4.5, Math.min(60, look.dist * Math.exp(d)));
+    else look.fov = Math.max(35, Math.min(100, look.fov * Math.exp(d)));
+  }, { passive: false });
+}
+
 function setCam(mode) {
   if (mode === camMode) return;
+  resetLook();
   camera.up.copy(UP); chase.init = false;
   if (mode === "heli") {
     // take over from wherever the chase camera was, orbiting the selected car
@@ -872,8 +929,8 @@ const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "aut
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
-  eox: "© OpenStreetMap 기여자 · Sentinel-2 cloudless – EOX (Copernicus 2023) · 지형 Mapzen/AWS",
-  google: "© OpenStreetMap 기여자 · 지형 Mapzen/AWS",
+  eox: "© OpenStreetMap 기여자 · 건물 Overture Maps Foundation · Sentinel-2 cloudless – EOX (Copernicus 2023) · 지형 Mapzen/AWS",
+  google: "© OpenStreetMap 기여자 · 건물 Overture Maps Foundation · 지형 Mapzen/AWS",
 };
 let geoJob = 0;
 function geoStatus(text, bad = false) {
@@ -1027,6 +1084,8 @@ function applyLighting() {
   const real = world.real?.group.getObjectByName("terrain");
   if (real) { real.material.color.set(night ? 0x5c6270 : 0xffffff); if (real.material.emissiveMap) real.material.emissiveIntensity = night ? 1.1 : 0; }
   for (const bm of world.real?.group.getObjectByName("buildings")?.userData.materials || []) { bm.emissive.set(night ? 0xffffff : 0); bm.emissiveIntensity = night ? 0.9 : 0; }
+  // landmarks with lights of their own (the Sphere's LEDs, the Flame Towers, W hotel's gridshell, lit glass)
+  world.real?.group.getObjectByName("landmarks")?.traverse((o) => { const m = o.material; if (m?.userData?.nightE) m.emissiveIntensity = m.userData.nightE[night ? 1 : 0]; });
   world.syn.terrain.material?.color.set(night ? 0x3a3f4a : 0xffffff);
   const sea = world.real?.group.getObjectByName("sea"), water = world.real?.group.getObjectByName("water");
   for (const w of [sea, water]) if (w) { w.material.emissive = new THREE.Color(night ? 0x0c1a2a : 0); }
@@ -1076,23 +1135,53 @@ function showNote(text) { const n = document.getElementById("note3d"); n.textCon
 function disposeGroup(g) { g.traverse((o) => { o.geometry?.dispose(); if (o.material) [].concat(o.material).forEach((m) => { m.map?.dispose(); m.emissiveMap?.dispose(); m.dispose(); }); }); }
 
 // Start line, light gantry and grid boxes from where the cars stood before a race start.
+// The starting grid as it is painted: F1's position data puts every car on the lap line at uneven gaps, but
+// the real grid is a 2-by-2 staggered formation – one slot every 8 m along the track, alternately left and
+// right of the centre, pole on the side of the racing line. Built from the cars' standing positions before
+// a start: pole's spot fixes where the grid begins. Map of grid position → { x, z, y, yaw, s }.
+const GRID_GAP = 8;
+function gridSlots(spots) {
+  const n = world.n, step = world.samples[1].p.distanceTo(world.samples[0].p);
+  const onTrack = spots.map((sp) => { const v = toWorld(sp.p, world.center), [s, d] = world.grid.nearest(v.x, v.z, 1); return { ...sp, v, s, d }; })
+    .filter((o) => o.s && o.d <= Math.max(edgeOf(o.s, 1), -edgeOf(o.s, -1)) + 1)   // pit-lane starters left out
+    .sort((a, b) => a.grid - b.grid);
+  if (!onTrack.length) return null;
+  // where pole stands along the track: from the front-most car on the grid, moved up by its grid position
+  const f = onTrack[0], along0 = f.s.i * step + (f.v.x - f.s.p.x) * f.s.tan.x + (f.v.z - f.s.p.z) * f.s.tan.z + (f.grid - 1) * GRID_GAP;
+  const ps = world.samples[((Math.round(along0 / step) % n) + n) % n];
+  const centre = (edgeOf(ps, 1) + edgeOf(ps, -1)) / 2;
+  const poleSide = Math.sign((ps.M ?? centre) - centre) || 1;
+  const slots = new Map();
+  const last = Math.max(22, ...spots.map((sp) => sp.grid));
+  for (let g = 1; g <= last; g++) {
+    const along = along0 - (g - 1) * GRID_GAP, fi = along / step, i0 = Math.floor(fi), t = fi - i0;
+    const a = world.samples[((i0 % n) + n) % n], b = world.samples[(((i0 + 1) % n) + n) % n];
+    const c = (edgeOf(a, 1) + edgeOf(a, -1)) / 2, w = Math.max(2.2, Math.min(3.8, (edgeOf(a, 1) - edgeOf(a, -1)) / 4));
+    const lat = c + (g % 2 ? poleSide : -poleSide) * w;
+    const x = a.p.x + (b.p.x - a.p.x) * t + a.nor.x * lat, z = a.p.z + (b.p.z - a.p.z) * t + a.nor.z * lat;
+    slots.set(g, { x, z, y: a.p.y + (b.p.y - a.p.y) * t, yaw: Math.atan2(a.tan.x, a.tan.z), s: a });
+  }
+  return slots;
+}
 function addGrid() {
   const spots = app().gridSpots?.();
+  world.slots = null;
   if (!spots?.length) return;
+  world.slots = gridSlots(spots);
+  if (!world.slots) return;
   const white = new THREE.MeshStandardMaterial({ color: 0xf4f4f4, roughness: 0.6 });   // lifted 12 cm instead of a depth offset, which drew them over the cars
   const g = new THREE.Group();
   let pole = null;
   const flat = (cx, cy, cz, w, l, yaw) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.02, l), white); m.position.set(cx, cy + 0.12, cz); m.rotation.y = yaw; m.receiveShadow = true; g.add(m); };
-  for (const sp of spots) {
-    const v = toWorld(sp.p, world.center), [s, d] = world.grid.nearest(v.x, v.z, 1);
-    if (!s || d > Math.max(edgeOf(s, 1), -edgeOf(s, -1)) + 2) continue;
-    const yaw = Math.atan2(s.tan.x, s.tan.z), fx = s.tan.x, fz = s.tan.z, nx = s.nor.x, nz = s.nor.z, y = s.p.y;
+  for (const [g, sl] of world.slots) {
+    if (g > 22) break;
+    const { s, yaw } = sl, fx = s.tan.x, fz = s.tan.z, nx = s.nor.x, nz = s.nor.z, y = sl.y;
     // the slot: a line just ahead of the car's nose and two short side marks
-    const lx = v.x + fx * 3, lz = v.z + fz * 3;
+    const lx = sl.x + fx * 3, lz = sl.z + fz * 3;
     flat(lx, y, lz, 2.6, 0.22, yaw);
     const side = (k) => flat(lx + nx * 1.25 * k - fx * 0.6, y, lz + nz * 1.25 * k - fz * 0.6, 0.18, 1.2, yaw);
     side(1); side(-1);
-    if (sp.grid === 1) pole = { s, x: v.x, z: v.z, yaw };
+    if (g === 1) pole = { s, x: sl.x, z: sl.z, yaw };
   }
   if (pole) {
     // start line ~9 m ahead of pole, across the whole track, and the gantry with its five red lights above it
@@ -1147,6 +1236,7 @@ function frame(now) {
   updateSun(now);
   thinFarTrees();
   world?.real?.stands?.update(camera.position);
+  world?.real?.group.getObjectByName("buildings")?.userData.update?.(camera.position);
   if (!devNoHud) paintHud();
   renderer.render(scene, camera);
   adaptResolution(now, dt);
@@ -1244,6 +1334,33 @@ function floodTest() {
 
 window.Map3D = {
   floodTest,
+  _real: () => world?.real?.group,
+  // development: look at landmark k from `dist` m away (bearing `ang`), `h` m up
+  viewLandmark(k = 0, dist = 1, h = 0.6, ang = 0.7) {
+    const sp = world?.real?.landmarks?.spots?.[k]; if (!sp) return "none";
+    const [x, z, r] = sp, g = world.real.groundAt(x, z), d = r * 2.2 * dist;
+    return window.Map3D.look(x + Math.cos(ang) * d, g + d * h, z + Math.sin(ang) * d, x, g + r * 0.25, z, 45);
+  },
+  setLook(yaw = 0, pitch = 0, dist = 10.5) { look.yaw = yaw; look.pitch = pitch; look.dist = dist; return "ok"; },
+  // development: a look down the grid from behind and above (pole at the far end)
+  viewGrid(h = 22, back = 60, side = 14) {
+    const sl = world?.slots; if (!sl) return "no grid";
+    const p1 = sl.get(1), p12 = sl.get(12) || p1, fx = Math.sin(p1.yaw), fz = Math.cos(p1.yaw);
+    return window.Map3D.look(p12.x - fx * back + fz * side, p12.y + h, p12.z - fz * back - fx * side, (p1.x + p12.x) / 2, p1.y, (p1.z + p12.z) / 2, 45);
+  },
+  // development: where the cars stand across the track (lateral offset from the lap line, m) and along it
+  gridDebug() {
+    const out = [];
+    for (const [num, c] of cars) {
+      if (!c.has) continue;
+      const [s] = world.grid.nearest(c.pos.x, c.pos.z, 2); if (!s) continue;
+      const raw = c.raw || c.pos;
+      out.push({ num, i: s.i, lat: +((c.pos.x - s.p.x) * s.nor.x + (c.pos.z - s.p.z) * s.nor.z).toFixed(2), rawLat: +((raw.x - s.p.x) * s.nor.x + (raw.z - s.p.z) * s.nor.z).toFixed(2), L: +(s.L ?? 0).toFixed(1), R: +(s.R ?? 0).toFixed(1) });
+    }
+    out.sort((a, b) => b.i - a.i);
+    const spots = (app().gridSpots?.() || []).map((sp) => { const v = toWorld(sp.p, world.center), [s] = world.grid.nearest(v.x, v.z, 2); return s && { grid: sp.grid, i: s.i, lat: +((v.x - s.p.x) * s.nor.x + (v.z - s.p.z) * s.nor.z).toFixed(2) }; }).filter(Boolean).sort((a, b) => a.grid - b.grid);
+    return { cars: out, spots };
+  },
   show() {
     if (!renderer) {
       init();

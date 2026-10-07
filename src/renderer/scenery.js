@@ -10,6 +10,8 @@ import * as THREE from "./vendor/three.module.js";
 import { buildStands } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
+import { buildingsMesh } from "./buildings.js";
+import { buildLandmarks } from "./landmarks.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
 const DEM_ZOOM = 14;
@@ -306,237 +308,6 @@ function inPoly(x, y, pts) {
 }
 const polyArea = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return a / 2; };
 function rand(seed) { let a = seed | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-
-// Window texture: the upper-left 7/8 is a wall with windows (repeats per storey and bay), the last column is
-// plain wall used for roofs. Returns { map, emissive } (emissive: some windows lit, for night).
-// Wall textures, one tile = 4 bays (14 m) × 4 storeys (12.8 m); the last eighth of the width is plain wall,
-// used for roofs and windowless walls. "facade": rendered walls with framed windows, sills and floor slabs;
-// "glass": curtain walls for tall buildings – mullions, dark spandrels and sky reflected in the panes.
-// Each comes with an emissive map (some windows lit) that switches on at night.
-function facadeTextures(style = "facade") {
-  const n = 512, cv = document.createElement("canvas"); cv.width = cv.height = n;
-  const g = cv.getContext("2d");
-  const e = document.createElement("canvas"); e.width = e.height = n;
-  const ge = e.getContext("2d"); ge.fillStyle = "#000"; ge.fillRect(0, 0, n, n);
-  const r = rand(style === "glass" ? 13 : 11);
-  const cols = 4, rows = 4, cw = (n * 7) / 8 / cols, rh = n / rows;
-  if (style === "glass") {
-    const sky = g.createLinearGradient(0, 0, 0, n);
-    sky.addColorStop(0, "#9fb6c9"); sky.addColorStop(0.5, "#6f8aa1"); sky.addColorStop(1, "#4d6478");
-    g.fillStyle = sky; g.fillRect(0, 0, n, n);
-    for (let k = 0; k < 6; k++) { g.fillStyle = `rgba(255,255,255,${0.04 + r() * 0.06})`; g.fillRect(r() * n, 0, 8 + r() * 30, n); }   // reflections
-    for (let j = 0; j < rows; j++) {
-      g.fillStyle = "#3a4450"; g.fillRect(0, j * rh + rh * 0.82, n, rh * 0.18);                           // spandrel at each floor
-      for (let i = 0; i < cols * 3; i++) { const x = (i * (n * 7) / 8) / (cols * 3); g.fillStyle = "#2c333b"; g.fillRect(x, j * rh, 3, rh); }   // mullions
-      for (let i = 0; i < cols * 3; i++) if (r() < 0.35) { const x = (i * (n * 7) / 8) / (cols * 3); ge.fillStyle = r() < 0.6 ? "#fff1d6" : "#d7e8ff"; ge.fillRect(x + 3, j * rh + 4, (n * 7) / 8 / (cols * 3) - 6, rh * 0.74); }
-    }
-  } else {
-    g.fillStyle = "#ffffff"; g.fillRect(0, 0, n, n);
-    for (let k = 0; k < 2500; k++) { g.fillStyle = `rgba(0,0,0,${r() * 0.035})`; g.fillRect(r() * n, r() * n, 2, 2); }   // render grain
-    for (let j = 0; j < rows; j++) {
-      g.fillStyle = "rgba(0,0,0,0.10)"; g.fillRect(0, j * rh + rh - 7, n, 7);                                   // floor slab line
-      for (let i = 0; i < cols; i++) {
-        const x = i * cw + cw * 0.2, y = j * rh + rh * 0.24, w = cw * 0.6, h = rh * 0.52;
-        g.fillStyle = "rgba(0,0,0,0.18)"; g.fillRect(x - 4, y - 4, w + 8, h + 8);                               // reveal / frame shadow
-        g.fillStyle = "#e9e6df"; g.fillRect(x - 2, y - 2, w + 4, h + 4);                                         // frame
-        const gl = g.createLinearGradient(0, y, 0, y + h); const sh = 80 + Math.floor(r() * 40);
-        gl.addColorStop(0, `rgb(${sh + 40},${sh + 55},${sh + 75})`); gl.addColorStop(1, `rgb(${sh - 25},${sh - 15},${sh})`);
-        g.fillStyle = gl; g.fillRect(x, y, w, h);
-        if (r() < 0.25) { g.fillStyle = "rgba(235,225,200,0.85)"; g.fillRect(x, y, w, h * (0.3 + r() * 0.6)); }  // blinds
-        g.fillStyle = "#4a4a4a"; g.fillRect(x + w / 2 - 1, y, 2, h);                                              // mullion
-        g.fillStyle = "#d8d4cc"; g.fillRect(x - 6, y + h + 2, w + 12, 6);                                         // sill
-        if (r() < 0.45) { ge.fillStyle = r() < 0.7 ? "#ffd9a0" : "#cfe4ff"; ge.fillRect(x, y, w, h); }
-      }
-    }
-  }
-  // the plain strip (roofs, windowless walls)
-  g.fillStyle = "#ffffff"; g.fillRect((n * 7) / 8, 0, n / 8, n); ge.fillStyle = "#000"; ge.fillRect((n * 7) / 8, 0, n / 8, n);
-  const map = new THREE.CanvasTexture(cv), emissive = new THREE.CanvasTexture(e);
-  for (const t of [map, emissive]) { t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
-  return { map, emissive };
-}
-
-// Oriented box of a footprint (principal axes): { c, u, v, u0, u1, v0, v1 } with u the long axis.
-function obb(pts) {
-  let cx = 0, cz = 0;
-  for (const [x, z] of pts) { cx += x; cz += z; }
-  cx /= pts.length; cz /= pts.length;
-  let sxx = 0, szz = 0, sxz = 0;
-  for (const [x, z] of pts) { sxx += (x - cx) ** 2; szz += (z - cz) ** 2; sxz += (x - cx) * (z - cz); }
-  const th = 0.5 * Math.atan2(2 * sxz, sxx - szz), u = [Math.cos(th), Math.sin(th)], v = [-u[1], u[0]];
-  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
-  for (const [x, z] of pts) { const a = (x - cx) * u[0] + (z - cz) * u[1], b = (x - cx) * v[0] + (z - cz) * v[1]; u0 = Math.min(u0, a); u1 = Math.max(u1, a); v0 = Math.min(v0, b); v1 = Math.max(v1, b); }
-  return u1 - u0 >= v1 - v0 ? { c: [cx, cz], u, v, u0, u1, v0, v1 } : { c: [cx, cz], u: v, v: [-u[0], -u[1]], u0: v0, u1: v1, v0: -u1, v1: -u0 };
-}
-const at = (o, a, b) => [o.c[0] + o.u[0] * a + o.v[0] * b, o.c[1] + o.u[1] * a + o.v[1] * b];
-
-// All buildings in one geometry: walls with facade UVs (windows) shaded darker towards the ground, and roofs by
-// kind – pitched for houses and small buildings, flat with a parapet and rooftop plant for big blocks.
-// Grandstands are built by stands.js. Faces carry their own normals (flat shading).
-function buildingsMesh(scene, gf, groundAt, night, track, inStand) {
-  // geometry goes into ~350 m chunks: off-screen chunks are skipped and line-of-sight tests stay cheap
-  const chunks = new Map();
-  let pos, nor, uv, col;
-  const useChunk = (x, z, style = "facade") => {
-    const key = `${style}|${Math.floor(x / 350)},${Math.floor(z / 350)}`;
-    let ch = chunks.get(key);
-    if (!ch) chunks.set(key, (ch = { pos: [], nor: [], uv: [], col: [] }));
-    ({ pos, nor, uv, col } = ch);
-  };
-  let dropped = 0, moved = 0;
-  const c = new THREE.Color();
-  const r = rand(5);
-  const palette = {
-    block: ["#d6d3cb", "#c4c8cc", "#b9c2c9", "#d9cfbd", "#a7b1ba", "#e2e0da", "#cfc6b8", "#bfc9cf"],
-    home: ["#e8ddc8", "#efe7d6", "#d9c8ad", "#f1ece2", "#e3d2bd"],
-    shed: ["#c8cbce", "#b7bcc1", "#d4d6d8", "#9ea6ad", "#c2c6b9"],
-  };
-  const roofPal = { block: ["#8f9296", "#9a9da1", "#7f8489"], home: ["#8e5a44", "#9b4f3a", "#6f6a66", "#7d4b3c", "#5b5f66"], shed: ["#a5abb1", "#93999f", "#b4b8bc"] };
-  const PLAIN = [0.97, 0.5];   // a plain strip of the facade texture (no windows)
-  const tmp = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
-  // A flat-shaded face (triangle fan); `out` is the side it should face; colours per vertex or one colour.
-  function face(vs, color, out, uvs) {
-    e1.set(vs[1][0] - vs[0][0], vs[1][1] - vs[0][1], vs[1][2] - vs[0][2]);
-    e2.set(vs[2][0] - vs[0][0], vs[2][1] - vs[0][1], vs[2][2] - vs[0][2]);
-    tmp.crossVectors(e1, e2);
-    if (tmp.lengthSq() < 1e-8) return;
-    tmp.normalize();
-    let order = vs.map((_, i) => i);
-    if (out && tmp.x * out[0] + tmp.y * out[1] + tmp.z * out[2] < 0) { order = order.reverse(); tmp.negate(); }
-    const cols = Array.isArray(color) ? color : vs.map(() => color);
-    for (let i = 1; i < order.length - 1; i++) for (const k of [order[0], order[i], order[i + 1]]) {
-      pos.push(...vs[k]); nor.push(tmp.x, tmp.y, tmp.z); col.push(cols[k].r, cols[k].g, cols[k].b);
-      uv.push(...(uvs ? uvs[k] : PLAIN));
-    }
-  }
-  const box = (cx, cz, y, w, d, h, ang, color) => {
-    const cu = Math.cos(ang), su = Math.sin(ang), P = (a, b, yy) => [cx + cu * a - su * b, yy, cz + su * a + cu * b];
-    const xs = [-w / 2, w / 2], zs = [-d / 2, d / 2];
-    const top = [P(xs[0], zs[0], y + h), P(xs[1], zs[0], y + h), P(xs[1], zs[1], y + h), P(xs[0], zs[1], y + h)];
-    face(top, color, [0, 1, 0]);
-    const bot = [P(xs[0], zs[0], y), P(xs[1], zs[0], y), P(xs[1], zs[1], y), P(xs[0], zs[1], y)];
-    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4, mx = (bot[i][0] + bot[j][0]) / 2 - cx, mz = (bot[i][2] + bot[j][2]) / 2 - cz; face([bot[i], bot[j], top[j], top[i]], color, [mx, 0, mz]); }
-  };
-  const shade = (base, k) => base.clone().multiplyScalar(k);
-  let count = 0;
-  for (const b of scene.buildings) {
-    if (b.kind === "grandstand") continue;   // stands.js builds these, with their seats
-    let pts = b.pts.map(gf.xz);
-    if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
-    if (pts.length < 3) continue;
-    if (inStand) { let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } if (inStand(cx / pts.length, cz / pts.length)) { dropped++; continue; } }
-    // Keep the tarmac clear: corners on the track are pushed back to the edge; a building still over the
-    // road after that (or mostly on it) is left out. Overpasses (raised on columns) may stay.
-    if (track && !(b.min >= 5)) {
-      const fixed = track.clearPolygon(pts);
-      if (!fixed) { dropped++; continue; }
-      if (fixed !== pts) { moved++; pts = fixed; }
-    }
-    const area = Math.abs(polyArea(pts));
-    if (area < 6) continue;
-    // tall office blocks get glass curtain walls
-    const glass = b.kind === "block" && b.h > 30 && r() < 0.7;
-    { let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } useChunk(cx / pts.length, cz / pts.length, glass ? "glass" : "facade"); }
-    let base = Infinity;
-    for (const [x, z] of pts) base = Math.min(base, groundAt(x, z));
-    if (!Number.isFinite(base)) continue;
-    // guessed heights vary a little so a district isn't one flat slab
-    let H = b.h;
-    if (b.est) H *= 0.75 + r() * 0.6;
-    if (b.est && b.kind === "block" && area > 300) H = Math.max(H, 9 + Math.floor(r() * 4) * 3.2);
-    const y0 = base + (b.min || 0), y1 = base + Math.max(H, (b.min || 0) + 2.5);
-    const kind = b.kind;
-    const wall = glass ? new THREE.Color("#eef2f6") : new THREE.Color(/^#[0-9a-f]{6}$/i.test(b.colour || "") ? b.colour : palette[kind][Math.floor(r() * palette[kind].length)]);
-    const rp = roofPal[kind === "block" && area < 260 && H <= 13 ? "home" : kind] || roofPal.block;   // small buildings mostly have tiled roofs
-    const roofC = new THREE.Color(/^#[0-9a-f]{6}$/i.test(b.roofColour || "") ? b.roofColour : rp[Math.floor(r() * rp.length)]);
-    const windows = kind === "block" || (kind === "home" && H > 9);
-    const o = obb(pts), lenU = o.u1 - o.u0, lenV = o.v1 - o.v0, rect = area / Math.max(1, lenU * lenV);
-    // roof type
-    let roof = "flat";
-    const tag = b.roof;
-    if (tag === "gabled" || tag === "hipped" || tag === "pyramidal") roof = tag;
-    else if (tag === "flat") roof = "flat";
-    else if ((kind === "home" || (b.est && kind !== "shed" && area < 260)) && H <= 13 && area < 450) roof = rect > 0.72 ? (lenU / Math.max(1, lenV) < 1.3 ? "pyramidal" : "gabled") : "flat";
-    const parapet = roof === "flat" && kind === "block" && area > 80 ? 0.9 : 0;
-    // walls (darker at the foot: a cheap stand-in for ambient occlusion)
-    const foot = shade(wall, 0.62), top = wall;
-    let gx = 0, gz = 0; for (const [x, z] of pts) { gx += x; gz += z; } gx /= pts.length; gz /= pts.length;
-    for (let i = 0; i < pts.length; i++) {
-      const [ax, az] = pts[i], [bx, bz] = pts[(i + 1) % pts.length], len = Math.hypot(bx - ax, bz - az);
-      if (len < 0.2) continue;
-      let nx = (bz - az) / len, nz = -(bx - ax) / len;
-      if (inPoly((ax + bx) / 2 + nx * 0.3, (az + bz) / 2 + nz * 0.3, pts)) { nx = -nx; nz = -nz; }   // point outwards
-      const yt = y1 + parapet;
-      const u1 = windows ? (len / 14) * 0.875 : PLAIN[0], v0 = windows ? (y0 - base) / 12.8 : PLAIN[1], v1 = windows ? (yt - base) / 12.8 : PLAIN[1];
-      const quad = [[ax, y0, az], [bx, y0, bz], [bx, yt, bz], [ax, yt, az]];
-      face(quad, [foot, foot, top, top], [nx, 0, nz], windows ? [[0, v0], [u1, v0], [u1, v1], [0, v1]] : null);
-      if (parapet) {
-        // inner face and cap of the parapet, 0.35 m thick
-        const ix = -nx * 0.35, iz = -nz * 0.35, cap = shade(wall, 0.9);
-        face([[ax + ix, y1, az + iz], [bx + ix, y1, bz + iz], [bx + ix, yt, bz + iz], [ax + ix, yt, az + iz]], shade(wall, 0.8), [-nx, 0, -nz]);
-        face([[ax, yt, az], [bx, yt, bz], [bx + ix, yt, bz + iz], [ax + ix, yt, az + iz]], cap, [0, 1, 0]);
-      }
-    }
-    // roof
-    if (roof === "gabled" || roof === "hipped") {
-      const ov = 0.45, rh = Math.min(4.5, Math.max(1.6, lenV * 0.42));
-      const A = at(o, o.u0 - ov, o.v0 - ov), B = at(o, o.u1 + ov, o.v0 - ov), C = at(o, o.u1 + ov, o.v1 + ov), D = at(o, o.u0 - ov, o.v1 + ov);
-      const inset = roof === "hipped" ? lenV / 2 : -ov;   // a gable ridge runs out over the overhang
-      const R1 = at(o, o.u0 + inset, (o.v0 + o.v1) / 2), R2 = at(o, o.u1 - inset, (o.v0 + o.v1) / 2);
-      const e = y1 - 0.15, ry = y1 + rh, lc = roofC, dc = shade(roofC, 0.82);
-      const P3 = (p, y) => [p[0], y, p[1]];
-      face([P3(A, e), P3(B, e), P3(R2, ry), P3(R1, ry)], lc, [-o.v[0], 1, -o.v[1]]);
-      face([P3(C, e), P3(D, e), P3(R1, ry), P3(R2, ry)], dc, [o.v[0], 1, o.v[1]]);
-      face([P3(D, e), P3(A, e), P3(R1, ry)], roof === "hipped" ? lc : wall, [-o.u[0], 0.3, -o.u[1]]);   // gable ends are wall
-      face([P3(B, e), P3(C, e), P3(R2, ry)], roof === "hipped" ? dc : wall, [o.u[0], 0.3, o.u[1]]);
-    } else if (roof === "pyramidal") {
-      const rh = Math.min(4, Math.max(1.5, Math.min(lenU, lenV) * 0.38)), apex = [gx, y1 + rh, gz];
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i], q = pts[(i + 1) % pts.length];
-        const k = 0.78 + 0.22 * ((i % 2) ? 1 : 0.85);
-        face([[p[0], y1, p[1]], [q[0], y1, q[1]], apex], shade(roofC, k), [(p[0] + q[0]) / 2 - gx, 1, (p[1] + q[1]) / 2 - gz]);
-      }
-    } else {
-      let tris;
-      try { tris = THREE.ShapeUtils.triangulateShape(pts.map(([x, z]) => new THREE.Vector2(x, z)), []); } catch { tris = []; }
-      for (const [i, j, k] of tris) face([[pts[i][0], y1, pts[i][1]], [pts[j][0], y1, pts[j][1]], [pts[k][0], y1, pts[k][1]]], roofC, [0, 1, 0]);
-      // rooftop plant on big flat roofs
-      if (area > 350 && kind !== "home") {
-        const n = Math.min(5, 1 + Math.floor(area / 600));
-        for (let k = 0, tries = 0; k < n && tries < 30; tries++) {
-          const a = o.u0 + r() * lenU, bb = o.v0 + r() * lenV, [x, z] = at(o, a, bb);
-          const w = 2 + r() * 4, d = 2 + r() * 3;
-          if (!inPoly(x, z, pts) || !inPoly(x + o.u[0] * w / 2, z + o.u[1] * w / 2, pts) || !inPoly(x - o.u[0] * w / 2, z - o.u[1] * w / 2, pts)) continue;
-          box(x, z, y1, w, d, 1.2 + r() * 2, Math.atan2(o.u[1], o.u[0]), new THREE.Color(r() < 0.5 ? "#9fa4a9" : "#b8bcc0"));
-          k++;
-        }
-      }
-    }
-    count++;
-  }
-  if (!count) return null;
-  const tex = facadeTextures(), gtex = facadeTextures("glass");
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.map, roughness: 0.85, metalness: 0.02,
-    emissiveMap: tex.emissive, emissive: new THREE.Color(night ? 0xffffff : 0x000000), emissiveIntensity: night ? 0.9 : 0 });
-  const gmat = new THREE.MeshStandardMaterial({ vertexColors: true, map: gtex.map, roughness: 0.22, metalness: 0.12,
-    emissiveMap: gtex.emissive, emissive: new THREE.Color(night ? 0xffffff : 0x000000), emissiveIntensity: night ? 0.9 : 0 });
-  const group = new THREE.Group();
-  group.name = "buildings";
-  for (const [key, ch] of chunks) {
-    if (!ch.pos.length) continue;
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute("position", new THREE.Float32BufferAttribute(ch.pos, 3));
-    geom.setAttribute("normal", new THREE.Float32BufferAttribute(ch.nor, 3));
-    geom.setAttribute("uv", new THREE.Float32BufferAttribute(ch.uv, 2));
-    geom.setAttribute("color", new THREE.Float32BufferAttribute(ch.col, 3));
-    geom.computeBoundingSphere(); geom.computeBoundingBox();
-    const mesh = new THREE.Mesh(geom, key.startsWith("glass") ? gmat : mat);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-  }
-  group.userData = { material: mat, materials: [mat, gmat], dropped, moved, count };
-  return group;
-}
 
 // ---------- vegetation and rocks ----------
 // Shared, merged geometries (built once): broadleaf crowns of several lobes, layered conifers, palms with
@@ -970,19 +741,23 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     terrain.material = gm.material;
   }
 
-  let bld = null;
+  let bld = null, lm = null;
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");
-    bld = buildingsMesh(scene, gf, groundAt, false, corridor, inStand);
+    const toTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); if (!s) return [1, 0]; const dx = s.p.x - x, dz = s.p.z - z, l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
+    lm = buildLandmarks({ scene, gf, groundAt, location: scene.location, toTrack });
+    if (lm.group) group.add(lm.group);
+    bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm }, corridor, inStand);
     if (bld) group.add(bld);
   }
+  const blockedTrees = lm ? (x, z) => blocked(x, z) || lm.keepOut(x, z) : blocked;
   const w = waterMesh(scene, gf, groundAt);
   if (w) group.add(w);
   if (opts.trees !== false) {
     onStep?.("나무 심는 중");
-    const t = treesMesh(scene, gf, groundAt, corridor, blocked, scene.center[0], opts.provider === "google" ? null : groundInfo, opts.street ? 4 : 14);
+    const t = treesMesh(scene, gf, groundAt, corridor, blockedTrees, scene.center[0], opts.provider === "google" ? null : groundInfo, opts.street ? 4 : 14);
     if (t) group.add(t);
-    const rk = rocksMesh(scene, gf, groundAt, corridor, blocked, scene.center[0], opts.provider === "google" ? null : groundInfo);
+    const rk = rocksMesh(scene, gf, groundAt, corridor, blockedTrees, scene.center[0], opts.provider === "google" ? null : groundInfo);
     if (rk) group.add(rk);
   }
   // Other tarmac of the venue: mapped raceways that are not on the F1 lap (pit lane, other layouts).
@@ -1024,13 +799,13 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   return {
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
-    occluders: bld ? bld.children.concat(stands ? [stands.structure] : []) : stands ? [stands.structure] : [],
+    occluders: (bld ? bld.children : []).concat(stands ? [stands.structure] : []),
     satAt: (x, z) => { const px = groundInfo.pixels(), W = ground.canvas.width, i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); if (i < 0 || j < 0 || i >= W || j >= ground.canvas.height) return null; const o = (j * W + i) * 4; return [px[o], px[o + 1], px[o + 2]]; },
     isSea: seaLevel != null ? isSea : null, landAt: seaR ? (x, z) => seaR.landAt(x, z) : null,
-    stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
+    landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
     info: { tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped } : null,
-      trees: group.getObjectByName("trees")?.userData.count ?? 0,
+      trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,
   };
