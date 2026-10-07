@@ -54,6 +54,7 @@ module.exports = function snapshot(win, outFile) {
         dbg = JSON.parse(await run(`window.Map3D.debug()`));
         await wait(1500);
         const test = await run(`JSON.stringify(window.Map3D.occlusionTest())`);
+        console.log("FLOOD", JSON.stringify({ item, loc: dbg.loc, flood: JSON.parse(await run(`JSON.stringify(window.Map3D.floodTest())`)) }));
         console.log("SWEEP", JSON.stringify({ item, loc: dbg.loc, real: dbg.real, info: dbg.info, fps: dbg.fps, mem: dbg.mem, test: JSON.parse(test) }));
         fs.writeFileSync(outFile.replace(/\.png$/, "") + "_" + (dbg.loc || year).replace(/[^A-Za-z0-9]+/g, "_") + ".png", (await win.webContents.capturePage()).resize({ width: 1000 }).toPNG());
       }

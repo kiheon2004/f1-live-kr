@@ -8,7 +8,8 @@
 // Everything is in the scene frame of map3d.js: x = F1 east (m) − centre, z = −(F1 north − centre), y = up.
 import * as THREE from "./vendor/three.module.js";
 import { buildStands } from "./stands.js";
-import { classRaster, groundMaterial } from "./ground.js";
+import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
+import { seaRaster } from "./sea.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
 const DEM_ZOOM = 14;
@@ -837,47 +838,30 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   // The elevation tiles include the sea floor. Where OSM maps a coastline, points on its sea side (OSM draws
   // coastlines with the land on the left) sit under a sea surface at the local sea level, and land is kept
   // just above it – so harbours look like water instead of a hole, and polders don't flood.
-  const coast = [];
-  for (const l of scene.lines) if (l.k === "coast") { const p = l.pts.map(gf.xz); for (let i = 1; i < p.length; i++) coast.push([p[i - 1], p[i]]); }
-  const coastCells = new Map();
-  for (const seg of coast) {
-    const [a, b] = seg, n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 100);
-    for (let k = 0; k <= n; k++) {
-      const key = `${Math.floor((a[0] + ((b[0] - a[0]) * k) / n) / 200)},${Math.floor((a[1] + ((b[1] - a[1]) * k) / n) / 200)}`;
-      let arr = coastCells.get(key);
-      if (!arr) coastCells.set(key, (arr = []));
-      if (arr[arr.length - 1] !== seg) arr.push(seg);
-    }
-  }
-  const isSea = (x, z) => {
-    if (!coast.length) return false;
-    const cx = Math.floor(x / 200), cz = Math.floor(z / 200);
-    let best = null, bd = Infinity;
-    for (let r = 0; r <= 12 && !best; r++) for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) {
-      if (Math.max(Math.abs(i), Math.abs(j)) !== r) continue;
-      for (const seg of coastCells.get(`${cx + i},${cz + j}`) || []) {
-        const [a, b] = seg, dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1;
-        const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L));
-        const d = Math.hypot(a[0] + dx * t - x, a[1] + dz * t - z);
-        if (d < bd) { bd = d; best = seg; }
-      }
-    }
-    if (!best) return false;
-    const [a, b] = best;
-    // Scene z points south, which flips the sign: land (left of the way on the map) gives a negative cross
-    // product here, sea a positive one.
-    return (b[0] - a[0]) * (z - a[1]) - (b[1] - a[1]) * (x - a[0]) > 0;
-  };
-  const seaLevel = demOk && coast.length ? (scene.sea ?? 0) + offset : null;
-  let seaCells = 0;
+  const coastLines = scene.lines.filter((l) => l.k === "coast").map((l) => l.pts.map(gf.xz));
+  const seaR = demOk ? seaRaster(coastLines, ext, (mask, W, H, toPx, cell) => {
+    const P = (p) => toPx(...gf.xz(p));
+    for (const a of scene.areas) if (a.k !== "water") fillPolygon(mask, W, H, a.pts.map(P), 1);
+    for (const bl of scene.buildings) fillPolygon(mask, W, H, bl.pts.map(P), 1);
+    for (const l of scene.lines) if ((l.k === "road" || l.k === "raceway" || l.k === "rail") && !l.bridge) strokeLine(mask, W, H, l.pts.map(P), Math.max(0.6, l.w / 2 / cell), 1);
+    const tp = world.samples.map((s) => toPx(s.p.x, s.p.z));
+    strokeLine(mask, W, H, tp.concat([tp[0]]), ((opts.trackW || 14) / 2 + 6) / cell, 1);
+  }) : null;
+  const isSea = seaR ? (x, z) => seaR.at(x, z) : () => false;
+  const coast = coastLines;
   // Ground height: the elevation model far away, eased into the track's own height near the tarmac.
   const lowTrack = Math.min(...world.samples.map((s) => s.p.y));
+  // The sea surface, in scene height. The elevation model is only good to a few metres on flat reclaimed land
+  // (Yas Island, Monaco's port), and levelling it to the track can leave the track itself under the sea:
+  // no circuit is, so the sea stays at least 1.2 m below the lowest point of the lap.
+  const seaLevel = demOk && coast.length ? Math.min((scene.sea ?? 0) + offset, lowTrack - 1.2) : null;
+  let seaCells = 0;
   const groundAt = (x, z) => {
     let h = demOk ? dem(...gf.toLL(x, z)) : null, sea = false;
     if (h != null && seaLevel != null) {
-      const sea0 = scene.sea ?? 0;
+      // (heights here are before the offset: the sea floor 3 m under the surface, land 0.4 m above it)
       sea = isSea(x, z);
-      if (sea) { seaCells++; h = Math.min(h, sea0 - 3); } else h = Math.max(h, sea0 + 0.4);
+      if (sea) { seaCells++; h = Math.min(h, seaLevel - offset - 3); } else h = Math.max(h, seaLevel - offset + 0.4);
     }
     const far = h != null ? h + offset : demOk ? lowTrack : lowTrack - 2.5;
     const [s, d] = nearTrack(x, z);
@@ -892,7 +876,7 @@ export async function buildScenery(api, scene, world, opts, onStep) {
 
   // terrain mesh
   onStep?.("지형 만드는 중");
-  const nx = 240, nz = 240, W = ext.x1 - ext.x0, H = ext.z1 - ext.z0;
+  const nx = coast.length ? 380 : 240, nz = nx, W = ext.x1 - ext.x0, H = ext.z1 - ext.z0;   // finer near a coast: the shoreline
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3), uvs = new Float32Array((nx + 1) * (nz + 1) * 2), idx = [];
   for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
     const k = j * (nx + 1) + i, x = ext.x0 + (W * i) / nx, z = ext.z0 + (H * j) / nz;
@@ -1041,7 +1025,9 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
     occluders: bld ? bld.children.concat(stands ? [stands.structure] : []) : stands ? [stands.structure] : [],
-    stands,
+    satAt: (x, z) => { const px = groundInfo.pixels(), W = ground.canvas.width, i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); if (i < 0 || j < 0 || i >= W || j >= ground.canvas.height) return null; const o = (j * W + i) * 4; return [px[o], px[o + 1], px[o + 2]]; },
+    isSea: seaLevel != null ? isSea : null, landAt: seaR ? (x, z) => seaR.landAt(x, z) : null,
+    stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
     info: { tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped } : null,
       trees: group.getObjectByName("trees")?.userData.count ?? 0,

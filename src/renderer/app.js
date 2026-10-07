@@ -1148,9 +1148,10 @@
       ctx.fillStyle = o.hl ? "#ffffff" : "#e8ecf0"; ctx.fillText(label, spot[0] + 1, spot[1] + lh / 2 + fs * 0.35);
     }
     ctx.globalAlpha = 1;
-    if (sat) {
-      ctx.font = "10px -apple-system, sans-serif"; ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.fillText(sat.provider === "google" ? "Google · © OpenStreetMap 기여자" : "© OpenStreetMap 기여자 · Sentinel-2 cloudless – EOX (Copernicus 2023)", w - 8, h - 6);
+    // Map credits are listed in the 🛰 지도 panel; Google's terms ask for its logo on the imagery itself.
+    if (sat?.provider === "google") {
+      ctx.font = "700 11px Arial, sans-serif"; ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillText("Google", w - 8, h - 6);
       ctx.textAlign = "start";
     }
   }

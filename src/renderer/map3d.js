@@ -911,8 +911,11 @@ async function loadGeo(w) {
     w.real = built;
     w.occluders = built.occluders;
     applyLighting();
-    attr.hidden = false;
-    attr.innerHTML = provider === "google" ? `<b class="g-logo">Google</b> <span id="geo3dGAttr"></span> · ${ATTR.google}` : ATTR.eox;
+    // credits are listed in the 🛰 지도 panel; only Google's imagery must carry its logo and data credits on the map
+    const credits = document.getElementById("geo3dCredits");
+    if (credits) credits.textContent = provider === "google" ? `Google 위성 사진 · ${ATTR.google}` : ATTR.eox;
+    attr.hidden = provider !== "google";
+    if (provider === "google") attr.innerHTML = `<b class="g-logo">Google</b> <span id="geo3dGAttr"></span>`;
     if (provider === "google") {
       const b = built.bounds.ll;
       window.api.geo.googleAttribution(built.info.zoom, b.n, b.s, b.e, b.w).then((t) => { const el = document.getElementById("geo3dGAttr"); if (el) el.textContent = t; });
@@ -1217,7 +1220,30 @@ function occlusionTest() {
   return res;
 }
 
+// Self-check: land (not water on the map) under a water surface – the sea plane or a lake/harbour mesh.
+// Walks the terrain every 12 m; reports the flooded share of land and where the biggest patches are.
+function floodTest() {
+  const R = world?.real;
+  if (!R) return { real: false };
+  const water = [R.group.getObjectByName("water")].filter(Boolean);
+  const down = new THREE.Vector3(0, -1, 0), b = R.bounds;
+  let land = 0, wet = 0, dry = 0;   // dry: flooded although the map has land (buildings, roads, land use) there
+  const cells = new Map();
+  for (let x = b.x0 + 6; x < b.x1; x += 12) for (let z = b.z0 + 6; z < b.z1; z += 12) {
+    if (R.classAt(x, z) === 9) continue;
+    const g = R.groundAt(x, z);
+    land++;
+    let top = R.seaLevel ?? -Infinity;
+    if (water.length) { ray.set(tmp.set(x, g + 200, z), down); ray.far = 400; const h = ray.intersectObjects(water, false)[0]; if (h) top = Math.max(top, h.point.y); }
+    const mapped = R.landAt ? R.landAt(x, z) : false;   // a building, road, land use or the track is here
+    if (top > g + 0.05) { wet++; if (mapped) dry++; }
+    if (top > g + 0.05 && mapped) { const k = `${Math.floor(x / 200)},${Math.floor(z / 200)}`; cells.set(k, (cells.get(k) || 0) + 1); }
+  }
+  return { land, wet, dry, dryShare: +(dry / Math.max(1, land)).toFixed(4), sea: R.seaLevel, top: [...cells].sort((a, c) => c[1] - a[1]).slice(0, 5) };
+}
+
 window.Map3D = {
+  floodTest,
   show() {
     if (!renderer) {
       init();

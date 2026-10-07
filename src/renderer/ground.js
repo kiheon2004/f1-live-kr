@@ -121,7 +121,7 @@ const srgbToLin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow(
 
 // ---------- the class raster ----------
 // Rasterizers without anti-aliasing (a class is a label, not a colour).
-function fillPolygon(R, W, H, pts, v) {
+export function fillPolygon(R, W, H, pts, v) {
   let y0 = Infinity, y1 = -Infinity;
   for (const [, y] of pts) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   y0 = Math.max(0, Math.ceil(y0 - 0.5)); y1 = Math.min(H - 1, Math.floor(y1 - 0.5));
@@ -139,7 +139,7 @@ function fillPolygon(R, W, H, pts, v) {
     }
   }
 }
-function strokeLine(R, W, H, pts, half, v) {
+export function strokeLine(R, W, H, pts, half, v) {
   for (let i = 1; i < pts.length; i++) {
     const [ax, ay] = pts[i - 1], [bx, by] = pts[i], dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1;
     const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - half)), x1 = Math.min(W - 1, Math.ceil(Math.max(ax, bx) + half));
