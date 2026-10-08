@@ -435,5 +435,8 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
     sh.uniforms.gDetailMean = { value: L.mean.map((m) => new THREE.Vector3(...m)) };
   };
   mat.customProgramCacheKey = () => "classGround";
-  return { material: mat, textures: [cls, cls2, tint] };
+  // the per-circuit textures this material owns (only reachable through shader uniforms, which a generic dispose
+  // doesn't see); the shared detail textures stay for the app's lifetime
+  mat.userData.ownedTextures = [cls, cls2, tint].filter(Boolean);
+  return { material: mat, textures: mat.userData.ownedTextures };
 }

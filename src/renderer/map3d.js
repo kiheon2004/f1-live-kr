@@ -562,7 +562,8 @@ function shadowTex() {
   const x = c.getContext("2d"), r = x.createRadialGradient(32, 32, 4, 32, 32, 32);
   r.addColorStop(0, "rgba(0,0,0,0.55)"); r.addColorStop(1, "rgba(0,0,0,0)");
   x.fillStyle = r; x.fillRect(0, 0, 64, 64);
-  return (_shadow = new THREE.CanvasTexture(c));
+  _shadow = new THREE.CanvasTexture(c); _shadow.userData.shared = true;   // (one for every car)
+  return _shadow;
 }
 
 // Name tag that keeps the same size on screen.
@@ -1073,13 +1074,16 @@ function paintHud() {
   hud.hidden = false;
   const KO = window.KO;
   const gap = l.GapToLeader || l.TimeDiffToFastest || "", int = l.IntervalToPositionAhead?.Value || l.TimeDiffToPositionAhead || "";
-  const html = `<span class="bar" style="background:#${d.TeamColour || "888"}"></span>
-    <b class="p">P${l.Position || "–"}</b><b>${KO.surname(d.Tla, d.LastName)}</b><span class="t">${d.Tla} · ${KO.TEAMS[d.TeamName] || d.TeamName}</span>
-    ${l.Position === "1" ? `<span class="g">선두</span>` : gap ? `<span class="g">선두와 ${gap}</span>` : ""}${int && l.Position !== "1" ? `<span class="g">앞 차 ${int}</span>` : ""}
-    ${l.LastLapTime?.Value ? `<span class="g">최근 랩 ${l.LastLapTime.Value}</span>` : ""}`;
+  // (feed values escaped; the colour only as six hex digits)
+  const e = (x) => String(x ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  const colour = /^[0-9a-f]{6}$/i.test(d.TeamColour || "") ? d.TeamColour : "888";
+  const html = `<span class="bar" style="background:#${colour}"></span>
+    <b class="p">P${e(l.Position || "–")}</b><b>${e(KO.surname(d.Tla, d.LastName))}</b><span class="t">${e(d.Tla)} · ${e(KO.TEAMS[d.TeamName] || d.TeamName)}</span>
+    ${l.Position === "1" ? `<span class="g">선두</span>` : gap ? `<span class="g">선두와 ${e(gap)}</span>` : ""}${int && l.Position !== "1" ? `<span class="g">앞 차 ${e(int)}</span>` : ""}
+    ${l.LastLapTime?.Value ? `<span class="g">최근 랩 ${e(l.LastLapTime.Value)}</span>` : ""}`;
   // live car data: speed, gear, pedals
   const c = A.src?.carAt?.(num, A.t);
-  const tel = c ? `<span class="tel"><b>${Math.round(c.speed)}</b><small>km/h</small><b class="gear">${c.gear || "N"}</b><i class="thr" style="--v:${Math.min(100, c.thr)}%"></i><i class="brk" style="--v:${c.brk ? 100 : 0}%"></i></span>` : "";
+  const tel = c ? `<span class="tel"><b>${Math.round(c.speed)}</b><small>km/h</small><b class="gear">${e(c.gear || "N")}</b><i class="thr" style="--v:${Math.max(0, Math.min(100, +c.thr || 0))}%"></i><i class="brk" style="--v:${c.brk ? 100 : 0}%"></i></span>` : "";
   const full = html + tel;
   if (hud.dataset.html !== full) { hud.innerHTML = full; hud.dataset.html = full; }
 }
@@ -1290,18 +1294,45 @@ function ensureWorld(now) {
   const key = A.sourceKey(), note = document.getElementById("note3d");
   if (world && world.sourceKey === key && key.startsWith("replay:")) return;    // a replay's track never changes
   const pts = trackPoints();
-  if (pts.length < 60) { if (!world) showNote("이 서킷은 아직 주행 기록이 없어 3D로 그릴 수 없어요."); else note.hidden = true; return; }
+  if (pts.length < 60) {
+    // (another session without a track yet: the previous circuit isn't left on screen as if it were this one)
+    if (world && sessionOf(world.sourceKey) !== sessionOf(key)) { disposeWorld(); geoJob++; }
+    if (!world) showNote("이 서킷은 아직 주행 기록이 없어 3D로 그릴 수 없어요."); else note.hidden = true;
+    return;
+  }
   if (world && world.sourceKey === key && Math.abs(pts.length - world.pts) < 400) return;
-  if (world) { scene.remove(world.group); disposeGroup(world.group); }
-  for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
-  cars.clear();
+  disposeWorld();
   sepMemory = {};
   world = buildWorld(pts);
   if (world) { world.sourceKey = key; world.pts = pts.length; addCorners(); addGrid(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
   note.hidden = !!world;
 }
 function showNote(text) { const n = document.getElementById("note3d"); n.textContent = text; n.hidden = false; }
-function disposeGroup(g) { g.traverse((o) => { o.geometry?.dispose(); if (o.material) [].concat(o.material).forEach((m) => { m.map?.dispose(); m.emissiveMap?.dispose(); m.dispose(); }); }); }
+// Frees the GPU side of everything under g (geometries, materials, their maps and the textures a material owns
+// through shader uniforms – userData.ownedTextures), each once even when shared within g.
+function disposeGroup(g) {
+  const done = new Set(), once = (x) => { if (x && !done.has(x) && !x.userData?.shared) { done.add(x); x.dispose(); } };
+  g.traverse((o) => {
+    once(o.geometry);
+    // (a group can list materials it swaps its meshes between – buildings near / far – of which only one may be on
+    // a mesh right now)
+    const mats = [].concat(o.material || [], Array.isArray(o.userData?.materials) ? o.userData.materials : []);
+    for (const m of mats) { if (!m?.isMaterial) continue; once(m.map); once(m.emissiveMap); (m.userData?.ownedTextures || []).forEach(once); once(m); }
+  });
+}
+// The whole world: its group, plus the generic surroundings taken out of it while the real map is shown (they're
+// kept to put back, so the group alone doesn't reach them), and the cars.
+function disposeWorld() {
+  if (world) {
+    scene.remove(world.group); disposeGroup(world.group);
+    for (const o of Object.values(world.syn || {})) if (o && !o.parent) disposeGroup(o);
+    world = null;
+  }
+  for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
+  cars.clear();
+}
+// the session a source key belongs to (a live key also carries the outline's length, which grows)
+const sessionOf = (key) => (key || "").startsWith("live:") ? key.split(":").slice(0, 2).join(":") : key || "";
 
 // Start line, light gantry and grid boxes from where the cars stood before a race start.
 // The starting grid as it is painted: F1's position data puts every car on the lap line at uneven gaps, but

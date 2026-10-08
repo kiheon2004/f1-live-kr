@@ -1,6 +1,7 @@
 // Corner numbers and a fallback track shape from the MultiViewer circuit API.
 // Coordinates share F1 live timing's Position system, so they overlay the map directly.
 const fs = require("node:fs");
+const V = require("./validate");
 const path = require("node:path");
 
 const API = "https://api.multiviewer.app/api/v1/circuits";
@@ -17,6 +18,7 @@ async function fetchYear(key, year) {
 
 // Tries the session year, then the two before it (new layouts appear late). Results are cached on disk.
 async function getCircuit(cacheDir, key, year) {
+  key = V.circuitKey(key); year = V.year(year);
   const file = path.join(cacheDir, `circuit_${key}_${year}.json`);
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
   for (const y of [year, year - 1, year - 2]) {

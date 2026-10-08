@@ -1,5 +1,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
+  // a team colour as F1 sends it ("3671C6"), else the fallback – never anything that could end a style attribute
+  const hexColour = (c, fallback) => (/^[0-9a-f]{6}$/i.test(c || "") ? c : fallback);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const KST = (opts) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", ...opts });
   const kstFull = KST({ month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
@@ -60,17 +62,22 @@
   // StartDate is local track time; GmtOffset turns it into UTC.
   const toOffset = (off) => { const m = /^(-?)(\d\d):(\d\d)/.exec(off || "00:00"); return `${m[1] ? "-" : "+"}${m[2]}:${m[3]}`; };
 
+  // (each request numbered: a slow answer for a year since changed doesn't replace the newer list)
+  let listReq = 0, loadJob = 0;
   async function loadSessionList() {
+    const req = ++listReq;
     store.set("year", +$("year").value);
     $("session").innerHTML = ""; $("loadBar").hidden = true; $("progress").textContent = "목록 불러오는 중…";
     try {
-      sessions = (await window.api.listSessions(+$("year").value)).reverse();
+      const list = (await window.api.listSessions(+$("year").value)).reverse();
+      if (req !== listReq) return;
+      sessions = list;
       for (const s of sessions) {
         const label = `${KO.gpName(s.meeting)} · ${KO.sessionName(s.name)} — ${kstFull.format(new Date(s.start + toOffset(s.gmtOffset)))}`;
         $("session").add(new Option(label, s.path));
       }
       $("progress").textContent = "";
-    } catch (e) { $("progress").textContent = `목록을 불러오지 못했어요 (${e.message})`; }
+    } catch (e) { if (req === listReq) $("progress").textContent = `목록을 불러오지 못했어요 (${e.message})`; }
   }
   $("year").addEventListener("change", loadSessionList);
   // Loading runs in stages; the bar maps them onto one 0–100%:
@@ -98,15 +105,20 @@
 
   $("load").addEventListener("click", async () => {
     const path = $("session").value; if (!path) return;
+    const info = sessions.find((s) => s.path === path), job = ++loadJob;   // (what was picked, kept as it was at the click)
     pause(); $("load").disabled = true;
     showLoad(0, "연결 중 ·");
     try {
       const data = await window.api.loadSession(path);
+      if (job !== loadJob) return;
       showLoad(95, "화면 준비 중 ·");
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));   // paint 95% before the rebuild
       replay = new ReplayKit.Replay(data);
-      replayInfo = sessions.find((s) => s.path === path);
-      src = replay; prevPos = {};
+      replayInfo = info;
+      // (switched to live while it downloaded: the replay is ready for when replay is picked again, but the screen
+      // stays on live)
+      if (mode === "replay") src = replay;
+      prevPos = {};
       rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
       outline = replay.lapShape() || replayFallbackLap(); if (!outline.length) outline = replay.trackOutline(); outlineFor = "replay";
       // The recording starts long before the session (an hour before a race); the bar covers the session itself.
@@ -156,6 +168,7 @@
   live.delayMs = store.get("delay", 0) * 1000;
   $("delay").value = live.delayMs / 1000;
   const MAX_DELAY = 600;
+  live.maxDelayMs = MAX_DELAY * 1000;
   const delayText = (s) => (s >= 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s}초`);
   const paintDelay = () => { $("delayOut").textContent = delayText(Math.round(live.delayMs / 1000)); };
   const setDelay = (s) => { s = Math.max(0, Math.min(MAX_DELAY, Math.round(s))); live.delayMs = s * 1000; $("delay").value = s; store.set("delay", s); paintDelay(); };
@@ -277,6 +290,8 @@
 
   // ---------- frame loop ----------
   function frame(now) {
+    // (a live connection keeps its state current while a replay is on screen, so its queue doesn't pile up)
+    if (mode !== "live" && live.queue.length) live.tick();
     if (mode === "replay" && playing && replay) {
       t += (now - lastFrame) * speed; lastFrame = now;
       if (t >= t1) { t = t1; pause(); }
@@ -331,7 +346,7 @@
     $("part").hidden = !(sessionType() === "Qualifying" && part);
     $("part").textContent = `${isSprint() ? "SQ" : "Q"}${part}`;
     const lc = s.LapCount;
-    $("lap").innerHTML = lc?.CurrentLap ? `랩 <b>${lc.CurrentLap}</b> / ${lc.TotalLaps || "?"}` : "";
+    $("lap").innerHTML = lc?.CurrentLap ? `랩 <b>${esc(lc.CurrentLap)}</b> / ${esc(lc.TotalLaps || "?")}` : "";
     const clk = s.ExtrapolatedClock;
     let rem = parseClock(clk?.Remaining);
     if (rem != null && clk.Extrapolating) { const nowUtc = src.utcAt(src.now()); if (nowUtc) rem -= nowUtc - ReplayKit.parseUtc(clk.Utc); }
@@ -343,7 +358,7 @@
     $("sessStatus").hidden = !ss; $("sessStatus").textContent = ss || "";
     $("sessStatus").className = "chip " + (s.SessionStatus?.Status === "Started" ? "ok" : "");
     const w = s.WeatherData;
-    $("weather").innerHTML = w ? `기온 <b>${w.AirTemp}°</b> 노면 <b>${w.TrackTemp}°</b> 습도 ${w.Humidity}% 풍속 ${w.WindSpeed}m/s${w.Rainfall === "1" ? " · <b>비</b>" : ""}` : "";
+    $("weather").innerHTML = w ? `기온 <b>${esc(w.AirTemp)}°</b> 노면 <b>${esc(w.TrackTemp)}°</b> 습도 ${esc(w.Humidity)}% 풍속 ${esc(w.WindSpeed)}m/s${w.Rainfall === "1" ? " · <b>비</b>" : ""}` : "";
   }
 
   // ---------- leaderboard ----------
@@ -478,7 +493,7 @@
       return `<tr class="${cls}" data-num="${esc(num)}">
         <td class="pos">${esc(l.Position || "")}</td>
         <td class="chg">${chg > 0 ? `<span class="up"><b>↑</b>${chg}</span>` : chg < 0 ? `<span class="down"><b>↓</b>${-chg}</span>` : type === "Race" && grid ? `<span class="same">–</span>` : ""}</td>
-        <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(d.TeamColour || "888")}"></span>
+        <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
           <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span><span class="tla">${esc(d.Tla)}</span><span class="team">${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span></div></td>
         <td class="time c">${esc(gap)}</td>
         <td class="time c ${close ? "close" : ""}">${esc(interval)}${trendTag(trend[num])}</td>
@@ -616,7 +631,7 @@
       <ol class="strat-list">${list.map(({ n, l, parts }) => {
         const d = drivers[n] || {};
         return `<li class="${n === focus ? "focus" : ""}${l.Retired || l.Stopped ? " out" : ""}" data-num="${esc(n)}">
-          <span class="p">${esc(l.Position || "")}</span><span class="b" style="background:#${esc(d.TeamColour || "888")}"></span><b>${esc(d.Tla || n)}</b>
+          <span class="p">${esc(l.Position || "")}</span><span class="b" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span><b>${esc(d.Tla || n)}</b>
           <div class="lane">${ticks.join("")}${race && now ? `<em class="now" style="left:${pct(Math.min(total, now))}"></em>` : ""}${parts.map(({ x, from, laps }) => {
             const ty = KO.TYRES[x.Compound] || { short: "?", color: "#666", ko: x.Compound || "알 수 없음" };
             return `<div class="st${x.New === "false" ? " used" : ""}" style="left:${pct(from)};width:${pct(Math.max(laps, 0.6))};--c:${ty.color}" title="${esc(`${ty.ko} · ${from + 1}~${from + laps}랩 (${laps}랩)${x.New === "false" ? ` · 중고 타이어 (${x.StartLaps}랩 사용)` : " · 새 타이어"}`)}">${laps >= 3 ? `${ty.short}${laps}` : ""}</div>`;
@@ -653,7 +668,7 @@
       const move = (r.CurrentPosition || 0) - r.PredictedPosition, gain = (r.PredictedPoints || 0) - (r.CurrentPoints || 0);
       const d = drivers[k];
       const who = champKind === "drivers"
-        ? `<span class="team-bar" style="background:#${esc(d?.TeamColour || "888")}"></span><b>${esc(d ? KO.surname(d.Tla, d.LastName) : k + "번")}</b>${d ? `<span class="tla">${esc(d.Tla)}</span>` : ""}`
+        ? `<span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span><b>${esc(d ? KO.surname(d.Tla, d.LastName) : k + "번")}</b>${d ? `<span class="tla">${esc(d.Tla)}</span>` : ""}`
         : `<b>${esc(teamKo(k))}</b>`;
       return `<tr class="${champKind === "drivers" && k === focus ? "focus" : ""}" ${champKind === "drivers" ? `data-num="${esc(k)}"` : ""}>
         <td class="c pos">${r.PredictedPosition}</td>
@@ -677,19 +692,14 @@
   paintRange();
   // Gap per lap from cumulative race time (sum of lap times): steady through pit stops, unlike the
   // live "gap to leader" value which jumps around when the leader pits. A driver's line stops at a missing lap.
+  // Gap to the leader at the end of each lap: F1's own gap as it stood when the lap was completed, else (lapped cars,
+  // whose gap F1 gives as "1L") the difference between when this car and the first car crossed the line on that lap.
+  // Each lap stands on its own – not a sum of lap times, which has no lap 1 (F1 sends no time for it) and drifts
+  // from any lap missing in the history.
   function traceSeries(nums) {
-    const cum = {};
-    for (const n of nums) {
-      const m = new Map(); let total = 0, expect = null;
-      for (const x of src.laps(n)) {
-        if (!x.sec || (expect != null && x.lap !== expect)) break;
-        total += x.sec; m.set(x.lap, total); expect = x.lap + 1;
-      }
-      cum[n] = m;
-    }
-    const best = new Map();
-    for (const m of Object.values(cum)) for (const [lap, v] of m) if (!(best.get(lap) <= v)) best.set(lap, v);
-    return nums.map((n) => ({ n, pts: [...cum[n]].map(([lap, v]) => ({ lap, gap: v - best.get(lap) })) }));
+    const laps = {}, first = new Map();
+    for (const n of nums) { laps[n] = src.laps(n); for (const x of laps[n]) if (!(first.get(x.lap) <= x.ms)) first.set(x.lap, x.ms); }
+    return nums.map((n) => ({ n, pts: laps[n].map((x) => ({ lap: x.lap, gap: x.gap != null ? x.gap : (x.ms - first.get(x.lap)) / 1000 })) }));
   }
   function renderTrace() {
     if (panel !== "trace" || !src) return;
@@ -699,7 +709,7 @@
     const W = Math.max(280, box.clientWidth), H = Math.max(220, $("trace").clientHeight - 90);
     // Redraw only when something visible changed (new laps, focus, range, size).
     const lapTotal = nums.reduce((a, n) => a + src.laps(n).length, 0);
-    const key = [lapTotal, src.neutralPeriods().length, focus, compare, traceRange, W, H].join("|");
+    const key = [lapTotal, src.neutralPeriods().map((p) => `${p.from}-${p.to}`).join(","), focus, compare, traceRange, W, H].join("|");
     if (key === traceKey) return; traceKey = key;
     const series = traceSeries(nums).map((s) => ({ ...s, d: drivers[s.n] }));
     const all = series.flatMap((s) => s.pts);
@@ -727,7 +737,7 @@
     out += `<g clip-path="url(#traceClip)">`;
     for (const s of series.sort((a, b) => rank(a) - rank(b))) {
       if (s.pts.length < 2 || !s.d) continue;
-      const hl = rank(s) > 0, dim = (focus || compare) && !hl, color = "#" + esc(s.d.TeamColour || "888");
+      const hl = rank(s) > 0, dim = (focus || compare) && !hl, color = "#" + esc(hexColour(s.d?.TeamColour, "888"));
       out += `<polyline fill="none" stroke="${color}" stroke-width="${hl ? 2.6 : 1.4}" stroke-opacity="${dim ? 0.3 : 0.9}" stroke-linejoin="round"
         points="${s.pts.map((x) => `${X(x.lap).toFixed(1)},${Y(x.gap).toFixed(1)}`).join(" ")}"/>`;
       const last = s.pts[s.pts.length - 1];
@@ -782,7 +792,7 @@
     const clips = list.map(clipInfo).sort((a, b) => (b.utc || 0) - (a.utc || 0));
     const item = (x) => {
       const d = drivers[x.c.RacingNumber] || {};
-      return `<li class="${x.c.RacingNumber === focus ? "mine" : ""}"><span class="team-bar" style="background:#${esc(d.TeamColour || "888")}"></span>
+      return `<li class="${x.c.RacingNumber === focus ? "mine" : ""}"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
         <div class="who">${esc(KO.DRIVERS[d.Tla] || d.Tla || x.c.RacingNumber)}${x.lap ? `<span class="lap-tag">${x.lap}랩</span>` : ""}<small>${x.utc ? kstTime.format(x.utc) + " KST" : ""}</small>
           ${!src.isLive && x.ms != null ? `<button class="jump" data-ms="${Math.round(x.ms)}" title="이 무전이 나온 순간으로 재생 위치를 옮겨요">이 장면으로</button>` : ""}</div>
         <audio controls preload="none" src="https://livetiming.formula1.com/static/${esc(base)}${esc(x.c.Path)}"></audio></li>`;
@@ -938,7 +948,7 @@
     if (telemRef === "compare" && cmpOn) { const cl = src.laps(compare, src.now()); refNum = compare; refLap = cl[cl.length - 1]?.lap; refLabel = `${src.state.DriverList[compare].Tla} 최근 랩`; }
     const a = last ? src.lapTrace(num, last.lap) : null;
     const b = refLap && !(refNum === num && refLap === last?.lap) ? src.lapTrace(refNum, refLap) : null;
-    const focusColor = "#ffffff", cmpColor = cmpOn ? "#" + (src.state.DriverList[compare].TeamColour || "b46cff") : "#b46cff";
+    const focusColor = "#ffffff", cmpColor = cmpOn ? "#" + (hexColour(src.state.DriverList[compare]?.TeamColour, "b46cff")) : "#b46cff";
     return `<div class="d-section"><h4>텔레메트리 <span class="seg mini" role="group" aria-label="비교 기준"><button data-tref="best" aria-pressed="${telemRef === "best"}">개인 최고 랩과</button><button data-tref="compare" aria-pressed="${telemRef === "compare"}"${cmpOn ? "" : " disabled title=\"Shift+클릭으로 비교할 드라이버를 고르세요\""}>비교 드라이버와</button></span></h4>
       <div class="gauges">${gauge(num, focusColor)}${cmpOn ? gauge(compare, cmpColor) : ""}</div>
       ${a ? traceChart(a, b, focusColor, b ? (refNum === num ? "#b46cff" : cmpColor) : null, `${last.lap}랩 ${last.time || ""}`, b ? `${refLabel} ${b.lap}랩 ${b.time || ""}` : "") : `<p class="muted note">한 랩을 마치면 속도 그래프를 그려요.</p>`}</div>`;
@@ -1015,14 +1025,14 @@
       return;
     }
     const d = drivers[focus], l = src.state.TimingData?.Lines?.[focus] || {}, a = src.state.TimingAppData?.Lines?.[focus] || {};
-    const name = KO.DRIVERS[d.Tla] || d.FullName, color = "#" + (d.TeamColour || "888");
+    const name = KO.DRIVERS[d.Tla] || d.FullName, color = "#" + (hexColour(d?.TeamColour, "888"));
     const stints = src.stints(focus);
     const tNow = src.now();
     const series = [{ laps: src.laps(focus, tNow), color: "#ffffff", label: name }];
     let cmpName = "";
     if (compare && drivers[compare]) {
       const cd = drivers[compare]; cmpName = KO.DRIVERS[cd.Tla] || cd.Tla;
-      series.push({ laps: src.laps(compare, tNow), color: "#" + (cd.TeamColour || "b46cff"), label: cmpName });
+      series.push({ laps: src.laps(compare, tNow), color: "#" + (hexColour(cd?.TeamColour, "b46cff")), label: cmpName });
     }
     box.innerHTML = `
       <div class="d-head"><span class="team-bar" style="background:${color}"></span>
@@ -1058,12 +1068,15 @@
   const view = { zoom: 1, panX: 0, panY: 0, rot: 0 };
   function ensureCircuit() {
     const si = src.state.SessionInfo, key = si?.Meeting?.Circuit?.Key;
-    if (!key || circuitFor === key) return;
-    circuitFor = key; circuit = null;
-    Object.assign(view, { zoom: 1, panX: 0, panY: 0, rot: store.get("mapRot:" + key, 0) }); paintMapTools();
-    const year = +(si.Path || replayInfo?.path || "").slice(0, 4) || thisYear;
+    if (!key) return;
+    // (per circuit and year: a layout can change between seasons)
+    const year = +(si.Path || replayInfo?.path || "").slice(0, 4) || thisYear, want = `${year}:${key}`;
+    if (circuitFor === want) return;
+    const sameCircuit = circuitFor?.split(":")[1] === String(key);
+    circuitFor = want; circuit = null;
+    if (!sameCircuit) { Object.assign(view, { zoom: 1, panX: 0, panY: 0, rot: store.get("mapRot:" + key, 0) }); paintMapTools(); }
     window.api.trackCircuit(key, year).then((c) => {
-      if (circuitFor !== key) return;
+      if (circuitFor !== want) return;
       circuit = c; drawMap();   // corners (and maybe the shape) arrived: draw now even when paused
     }).catch(() => {});
   }
@@ -1143,7 +1156,7 @@
       const hl = num === focus || num === compare, r = (hl ? 6 : 4.6) * k;   // a touch smaller so the track shows
       ctx.globalAlpha = gone(num) ? 0.25 : focus && !hl ? 0.55 : 1;
       if (hl) { ctx.strokeStyle = num === focus ? "#ffffff" : "#b46cff"; ctx.lineWidth = 2.5 * k; ctx.beginPath(); ctx.arc(x, y, r + 3 * k, 0, Math.PI * 2); ctx.stroke(); }
-      ctx.fillStyle = "#" + (d.TeamColour || "888"); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#" + (hexColour(d?.TeamColour, "888")); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "#0e1013"; ctx.lineWidth = 1.5 * k; ctx.stroke();
       if (!gone(num)) dots.push({ num, d, x, y, r, hl });
     }
@@ -1175,30 +1188,36 @@
   // Built once per circuit from the same fitted map data as the 3D view (src/renderer/scenery.js).
   let satOn = store.get("mapSat", false), sat2d = null, satKey = null, satBusy = false;
   const paintSat = () => { $("mapSat").setAttribute("aria-pressed", String(satOn)); };
-  $("mapSat").addEventListener("click", () => { satOn = !satOn; store.set("mapSat", satOn); paintSat(); drawMap(); });
+  $("mapSat").addEventListener("click", () => { satOn = !satOn; store.set("mapSat", satOn); satFail = null; paintSat(); drawMap(); });
   paintSat();
+  // (satKey: what the picture on screen was made for; the request in flight has its own key, and only the newest
+  // one's result is shown. A failure is tried again after 30 s, or at once when the button is pressed again. The key
+  // has the imagery setting and the outline's shape in it, not only its length.)
+  let satFail = null, satWant = null;
   function satFor(shape) {
     if (!satOn || !src) return null;
     const loc = window.F1KR.location();
     if (!loc || shape.length < 60) return null;
-    const key = `${loc}|${shape.length}`;
+    let geoOpts = {}; try { geoOpts = JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}"); } catch {}
+    const pick = (i) => shape[Math.floor(i)].map((v) => Math.round(v / 10)).join(",");
+    const key = `${loc}|${geoOpts.provider || "eox"}|${shape.length}|${pick(0)}|${pick(shape.length / 2)}|${pick(shape.length - 1)}`;
     if (satKey === key) return sat2d;
-    if (satBusy) return null;
-    satBusy = true; satKey = key; sat2d = null;
+    const shown = sat2d && satKey?.split("|")[0] === loc ? sat2d : null;   // (the old picture stays while a new one for the same place is made)
+    if (satBusy || (satFail && satFail.key === key && Date.now() - satFail.at < 30e3)) return shown;
+    satBusy = true; satWant = key;
     const lap = ReplayKit.extractLap(shape);
     (async () => {
       try {
         const scene = await window.api.geo.scene(loc, lap);
-        if (!scene.ok) { toast(`위성 사진을 못 깔았어요: ${scene.reason}`, ""); return; }
+        if (!scene.ok) throw new Error(scene.reason);
         const mod = await import("./scenery.js");
-        let geoOpts = {}; try { geoOpts = JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}"); } catch {}
         const provider = geoOpts.provider === "google" && (await window.api.geo.googleCheck()).ok ? "google" : "eox";
         const g = await mod.buildGround2D(window.api, scene, lap, { provider });
-        if (satKey === key) { sat2d = { ...g, provider }; drawMap(); }
-      } catch (e) { toast(`위성 사진을 못 깔았어요 (${e.message})`, ""); }
+        if (satWant === key) { sat2d = { ...g, provider }; satKey = key; satFail = null; drawMap(); }
+      } catch (e) { satFail = { key, at: Date.now() }; toast(`위성 사진을 못 깔았어요 (${e.message})`, ""); }
       finally { satBusy = false; }
     })();
-    return null;
+    return shown;
   }
 
   // ---------- resizable layout ----------
@@ -1325,7 +1344,7 @@
     const drivers = src.state.DriverList || {};
     const rows = rowsNow().map(([num, l]) => {
       const d = drivers[num] || {}, gap = l.Position === "1" ? "" : koGap(l.IntervalToPositionAhead?.Value || l.TimeDiffToPositionAhead || "");
-      return `<li class="${num === focus ? "focus" : ""}" data-num="${esc(num)}"><span class="n">${esc(l.Position || "")}</span><span class="b" style="background:#${esc(d.TeamColour || "888")}"></span><b>${esc(KO.surname(d.Tla, d.LastName))}</b><span class="g">${esc(gap)}</span></li>`;
+      return `<li class="${num === focus ? "focus" : ""}" data-num="${esc(num)}"><span class="n">${esc(l.Position || "")}</span><span class="b" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span><b>${esc(KO.surname(d.Tla, d.LastName))}</b><span class="g">${esc(gap)}</span></li>`;
     }).join("");
     if (rows === miniKey && !force) return;
     miniKey = rows; $("miniBoard").innerHTML = rows;
@@ -1355,12 +1374,12 @@
   $("mapZoomOut").addEventListener("click", () => zoomBy(1 / 1.5));
   $("mapRotate").addEventListener("click", () => {
     view.rot = (view.rot + 90) % 360; view.panX = view.panY = 0;
-    if (circuitFor) store.set("mapRot:" + circuitFor, view.rot);
+    if (circuitFor) store.set("mapRot:" + circuitFor.split(":")[1], view.rot);
     paintMapTools(); drawMap();
   });
   $("mapReset").addEventListener("click", () => {
     Object.assign(view, { zoom: 1, panX: 0, panY: 0, rot: 0 });
-    if (circuitFor) store.set("mapRot:" + circuitFor, 0);
+    if (circuitFor) store.set("mapRot:" + circuitFor.split(":")[1], 0);
     paintMapTools(); drawMap();
   });
   // Trackpad: pinch zooms at the cursor, two-finger scroll moves a zoomed map. Mouse: drag to move.

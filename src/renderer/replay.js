@@ -5,17 +5,24 @@
   const isIndexObject = (o) => o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).every((k) => /^\d+$/.test(k));
 
   // F1 feeds send partial updates. Objects merge recursively; an index-keyed object patches an array.
+  // (keys that would reach an object's prototype are never merged: the feed is outside data)
+  const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
+  const own = (o, k) => (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined);
   function merge(target, src) {
     if (src === null || typeof src !== "object") return src;
     if (Array.isArray(src)) return src.map((v) => merge(undefined, v));
     if (Array.isArray(target) && isIndexObject(src)) {
-      for (const [k, v] of Object.entries(src)) target[+k] = merge(target[+k], v);
+      for (const [k, v] of Object.entries(src)) target[+k] = merge(own(target, +k), v);
       return target;
     }
     const out = target && typeof target === "object" && !Array.isArray(target) ? target : {};
     for (const [k, v] of Object.entries(src)) {
-      if (k === "_deleted") { for (const d of v) delete out[d]; continue; }
-      out[k] = merge(out[k], v);
+      if (UNSAFE.has(k)) continue;
+      if (k === "_deleted") {
+        if (Array.isArray(v)) for (const d of v) if ((typeof d === "string" || typeof d === "number") && !UNSAFE.has(String(d))) delete out[d];
+        continue;
+      }
+      out[k] = merge(own(out, k), v);
     }
     return out;
   }
@@ -34,27 +41,45 @@
 
   // Builds each driver's lap list (time, position) and pit-entry laps from TimingData deltas.
   class LapTracker {
-    constructor() { this.cur = {}; this.lapList = {}; this.pitList = {}; }
+    constructor() { this.cur = {}; this.lapList = {}; this.pitList = {}; this.fixed = {}; }
     feed(ms, lines) {
       for (const [num, l] of Object.entries(lines || {})) {
         const c = this.cur[num] || (this.cur[num] = {});
         if (l.NumberOfLaps != null) c.n = l.NumberOfLaps;
         if (l.Position) c.pos = +l.Position;
+        if (typeof l.GapToLeader === "string") c.gap = l.GapToLeader;
         if (l.InPit === true && !c.inPit) (this.pitList[num] || (this.pitList[num] = [])).push({ lap: (c.n || 0) + 1, ms });
         if (l.InPit != null) c.inPit = l.InPit;
         const v = l.LastLapTime?.Value;
+        if (!v) continue;
         const list = this.lapList[num] || (this.lapList[num] = []);
-        const prev = list.length ? list[list.length - 1].lap : 0;
-        // A new lap is a new time, or the same time again when the lap counter moved on with it
-        // (two laps can be timed identically to the thousandth).
-        if (v && (v !== c.last || (l.NumberOfLaps != null && l.NumberOfLaps > prev))) {
-          c.last = v;
-          const lap = c.n && c.n > prev ? c.n : prev + 1;
-          list.push({ lap, time: v, sec: toSec(v), pos: c.pos, ms });
+        const last = list[list.length - 1], prev = last ? last.lap : 0;
+        // Which lap a time belongs to. The lap counter decides when it's known (F1 sends it with the time; it can
+        // also come a message earlier): a counter past the last recorded lap is a new lap even with the same time as
+        // before (two laps can be timed identically to the thousandth); the counter on the last recorded lap with a
+        // different time is that lap corrected – kept with when it was corrected, not a lap more. Without a
+        // counter, a new time is the next lap.
+        const n = l.NumberOfLaps != null ? l.NumberOfLaps : c.n;
+        if (n != null && n > prev) {
+          list.push({ lap: n, time: v, sec: toSec(v), pos: c.pos, ms, gap: gapSec(c.gap) });
+        } else if (l.NumberOfLaps != null) {
+          // (a counter behind the last recorded lap – an older picture – changes nothing)
+          if (last && n === prev && v !== last.time) { (last.fix || (last.fix = [[last.ms, last.time]])).push([ms, v]); last.time = v; last.sec = toSec(v); this.fixed[num] = true; }
+        } else if (v !== c.last) {
+          list.push({ lap: prev + 1, time: v, sec: toSec(v), pos: c.pos, ms, gap: gapSec(c.gap) });
         }
+        c.last = v;
       }
     }
-    laps(num, t = Infinity) { return (this.lapList[num] || []).filter((x) => x.ms <= t); }
+    laps(num, t = Infinity) {
+      const list = (this.lapList[num] || []).filter((x) => x.ms <= t);
+      if (!this.fixed[num]) return list;
+      return list.map((x) => {
+        if (!x.fix || x.fix[x.fix.length - 1][0] <= t) return x;
+        let time = x.fix[0][1]; for (const [m, v] of x.fix) { if (m > t) break; time = v; }
+        return { ...x, time, sec: toSec(time) };
+      });
+    }
     pits(num, t = Infinity) { return (this.pitList[num] || []).filter((x) => x.ms <= t); }
   }
 
@@ -72,13 +97,21 @@
           if (!e?.Lap) continue;
           const list = this.stops[num] || (this.stops[num] = []);
           let rec = list.find((x) => x.lap === +e.Lap);
-          if (!rec) { rec = { lap: +e.Lap, ms }; list.push(rec); list.sort((a, b) => a.lap - b.lap); }
-          if (e.Duration || e.PitLaneTime) rec.lane = +(e.PitLaneTime || e.Duration);
-          if (e.PitStopTime) rec.stop = +e.PitStopTime;
+          if (!rec) { rec = { lap: +e.Lap, ms, hist: [] }; list.push(rec); list.sort((a, b) => a.lap - b.lap); }
+          // (each value is kept with the time it arrived: a time corrected later doesn't show before it was sent)
+          if (e.Duration || e.PitLaneTime) { rec.lane = +(e.PitLaneTime || e.Duration); rec.hist.push([ms, "lane", rec.lane]); }
+          if (e.PitStopTime) { rec.stop = +e.PitStopTime; rec.hist.push([ms, "stop", rec.stop]); }
         }
       }
     }
-    list(num, t = Infinity) { return (this.stops[num] || []).filter((x) => x.ms <= t); }
+    list(num, t = Infinity) {
+      return (this.stops[num] || []).filter((x) => x.ms <= t).map((x) => {
+        if (!x.hist.length || x.hist[x.hist.length - 1][0] <= t) return x;
+        const o = { lap: x.lap, ms: x.ms, hist: x.hist };
+        for (const [m, k, v] of x.hist) { if (m > t) break; o[k] = v; }
+        return o;
+      });
+    }
     all(t = Infinity) { return Object.keys(this.stops).flatMap((n) => this.list(n, t)); }
   }
 
@@ -151,20 +184,28 @@
 
   // Laps run under safety car, virtual safety car or red flag, from TrackStatus and the leader's lap count.
   const NEUTRAL = { 4: "SC", 6: "VSC", 7: "VSC", 5: "RED" };
+  // (a period's last lap grows as laps go by under it; every step is kept with its time, so a replay seeking back
+  // sees the period as it stood then, not how far it ran later)
   class StatusLog {
     constructor() { this.lap = 0; this.kind = null; this.list = []; }
     feed(ms, topic, data) {
       if (topic === "LapCount" && data.CurrentLap) {
         this.lap = data.CurrentLap;
-        if (this.kind) this.list[this.list.length - 1].to = this.lap;
+        if (this.kind) { const p = this.list[this.list.length - 1]; p.to = this.lap; p.ends.push([ms, this.lap]); }
       }
       if (topic !== "TrackStatus" || !data.Status) return;
       const kind = NEUTRAL[data.Status] || null;
       if (kind === this.kind) return;
       this.kind = kind;
-      if (kind) this.list.push({ kind, from: this.lap, to: this.lap, ms });
+      if (kind) this.list.push({ kind, from: this.lap, to: this.lap, ms, ends: [[ms, this.lap]] });
     }
-    periods(t = Infinity) { return this.list.filter((p) => p.ms <= t); }
+    periods(t = Infinity) {
+      return this.list.filter((p) => p.ms <= t).map((p) => {
+        if (p.ends[p.ends.length - 1][0] <= t) return p;
+        let to = p.from; for (const [m, l] of p.ends) { if (m > t) break; to = l; }
+        return { ...p, to };
+      });
+    }
   }
 
   // F1 sometimes rewrites a driver's stint list in place, shifted down ({"0":…,"1":…} after a cleanup),
@@ -400,7 +441,9 @@
       let lo = 0, hi = n - 1;
       while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (T[mid] <= t) lo = mid; else hi = mid; }
       const t0 = T[lo], t1 = T[hi], h = t1 - t0;
-      if (h > 4000) { out[0] = c.x[lo]; out[1] = c.y[lo]; out[2] = c.z[lo]; if (vel) vel[0] = vel[1] = vel[2] = 0; return true; }
+      // a gap in the data: the last position for 4 s (as after the last sample), then no car until data comes back –
+      // a car that stopped being sent (retired, data lost) doesn't stand there as a ghost
+      if (h > 4000) { if (t - t0 > 4000) return false; out[0] = c.x[lo]; out[1] = c.y[lo]; out[2] = c.z[lo]; if (vel) vel[0] = vel[1] = vel[2] = 0; return true; }
       const s = (t - t0) / h, s2 = s * s, s3 = s2 * s;
       const h00 = 2 * s3 - 3 * s2 + 1, h10 = s3 - 2 * s2 + s, h01 = -2 * s3 + 3 * s2, h11 = s3 - s2;
       const d00 = (6 * s2 - 6 * s) / h, d10 = (3 * s2 - 4 * s + 1), d01 = (-6 * s2 + 6 * s) / h, d11 = (3 * s2 - 2 * s);
@@ -562,6 +605,8 @@
       this.skew = 0;        // server clock − this computer's clock (ms), from heartbeats
       this.epoch = 0;       // goes up whenever a full snapshot replaces the state (the UI resets its lists)
       this.held = null;     // when paused: the moment the pause began
+      this.shownAt = -Infinity;      // receive time of the newest update applied (the screen never shows a moment before it)
+      this.maxDelayMs = Infinity;    // the longest delay (and pause) the app supports; set by the app
       this.resetHistory(); this.t = Date.now();
     }
     resetHistory() {
@@ -644,11 +689,17 @@
       applyTo(this, topic, data);
     }
     // Apply everything older than the chosen delay. While paused nothing moves.
+    // Applied updates can't be taken back (the live state isn't rewound), so when the delay is raised the clock
+    // holds at the moment already shown until the delayed time passes it – like pausing for the extra seconds –
+    // instead of going back with the standings left ahead. A pause longer than the longest supported delay moves
+    // on at that delay (what resuming would give anyway), so the queue never holds more than that.
     tick(now = Date.now()) {
-      if (this.held != null) return;
-      const due = now - this.delayMs;
-      while (this.queue.length && this.queue[0].at <= due) this.apply(this.queue.shift());
-      this.t = due;
+      const due = this.held != null ? now - this.maxDelayMs : now - this.delayMs;
+      let k = 0;
+      while (k < this.queue.length && this.queue[k].at <= due) { const item = this.queue[k++]; this.apply(item); if (item.at > this.shownAt) this.shownAt = item.at; }
+      if (k) this.queue.splice(0, k);   // (one splice per tick: shift() per item is slow on a long queue)
+      if (this.held != null) { if (k) this.t = Math.max(this.t, due); return; }
+      this.t = Math.max(due, this.shownAt);
     }
     // Pause / resume (e.g. when the TV stream is paused): resuming adds the paused time to the delay.
     pause(now = Date.now()) { if (this.held == null) this.held = now; }

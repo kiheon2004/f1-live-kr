@@ -168,6 +168,9 @@ function template() {
     light: boxAt(0.012, 0.05, 0.36, 0, 0, 0), rain: boxAt(0.06, 0.05, 0.02, 0, 0.36, -2.6),
     helmet: new THREE.SphereGeometry(0.15, 16, 12),
   };
+  // (shared by every car: marked so freeing one car's model leaves them alone)
+  const mark = (o) => { if (o?.isBufferGeometry) o.userData.shared = true; else if (o && typeof o === "object") Object.values(o).forEach(mark); };
+  mark(T);
   return T;
 }
 
@@ -225,7 +228,7 @@ function liveryTexture(l, number) {
 
 // ---------- one car ----------
 const MAT = {};
-const mat = (key, make) => MAT[key] || (MAT[key] = make());
+const mat = (key, make) => MAT[key] || (MAT[key] = Object.assign(make(), { userData: { shared: true } }));
 export const TYRE_COLOURS = { SOFT: "#e8392f", MEDIUM: "#f2c230", HARD: "#eef0f2", INTERMEDIATE: "#3cb54a", WET: "#2f7fe0" };
 export function makeCar({ teamName, teamColour, number }) {
   const t = template(), l = liveryFor(teamName, teamColour), tex = liveryTexture(l, number);

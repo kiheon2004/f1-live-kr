@@ -12,28 +12,61 @@ const URL = "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/ti
 const UA = { "User-Agent": "f1-live-kr/0.8 (personal, non-commercial desktop app)" };
 
 // ---------- bytes ----------
-async function range(url, off, len) {
+// Only a real partial answer for exactly these bytes is taken: 206 with a Content-Range starting at `off` and the
+// body `len` long (or shorter at the end of the file). A server ignoring Range answers 200 with the whole archive –
+// hundreds of GB here – which would be read as if it were these bytes: refused without reading the body.
+async function range(url, off, len, fetchImpl = fetch) {
   let last;
   for (let i = 0; i < 3; i++) {
     try {
-      const res = await fetch(url, { headers: { ...UA, Range: `bytes=${off}-${off + len - 1}` }, signal: AbortSignal.timeout(30000) });
-      if (res.status === 206 || res.status === 200) return Buffer.from(await res.arrayBuffer());
-      last = new Error(`HTTP ${res.status}`);
+      const res = await fetchImpl(url, { headers: { ...UA, Range: `bytes=${off}-${off + len - 1}` }, signal: AbortSignal.timeout(30000) });
+      if (res.status === 206) {
+        const m = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(res.headers.get("content-range") || "");
+        if (!m || +m[1] !== off || +m[2] - +m[1] + 1 > len) { await res.body?.cancel?.(); throw new Error("range answer for other bytes"); }
+        const b = Buffer.from(await res.arrayBuffer());
+        if (b.length !== +m[2] - +m[1] + 1) throw new Error("range answer cut short");
+        return b;
+      }
+      await res.body?.cancel?.();
+      last = new Error(res.status === 200 ? "server ignored the byte range" : `HTTP ${res.status}`);
+      if (res.status === 200) break;
     } catch (e) { last = e; }
     await new Promise((r) => setTimeout(r, 800 * (i + 1)));
   }
   throw last;
 }
-const gunzip = (b) => (b[0] === 0x1f && b[1] === 0x8b ? zlib.gunzipSync(b) : b);
+// (a directory or tile is at most a few MB unpacked; more is refused)
+const gunzip = (b) => (b[0] === 0x1f && b[1] === 0x8b ? zlib.gunzipSync(b, { maxOutputLength: 64 * 1024 * 1024 }) : b);
 
 // ---------- protobuf ----------
+// (reads past the end, varints over 10 bytes and unknown wire types throw: a damaged tile is skipped, not misread)
 class Pbf {
   constructor(buf) { this.buf = buf; this.pos = 0; this.len = buf.length; }
-  varint() { let v = 0, s = 0, b; do { b = this.buf[this.pos++]; v += (b & 0x7f) * 2 ** s; s += 7; } while (b >= 0x80); return v; }
+  varint() {
+    let v = 0, s = 0, b;
+    do {
+      if (this.pos >= this.len) throw new Error("pbf: truncated varint");
+      if (s > 63) throw new Error("pbf: varint too long");
+      b = this.buf[this.pos++]; v += (b & 0x7f) * 2 ** s; s += 7;
+    } while (b >= 0x80);
+    return v;
+  }
   svarint() { const v = this.varint(); return v % 2 === 1 ? (v + 1) / -2 : v / 2; }
-  bytes() { const n = this.varint(), b = this.buf.subarray(this.pos, this.pos + n); this.pos += n; return b; }
-  skip(t) { if (t === 0) this.varint(); else if (t === 1) this.pos += 8; else if (t === 2) this.pos += this.varint(); else if (t === 5) this.pos += 4; }
-  fields(fn, end = this.len) { while (this.pos < end) { const k = this.varint(), f = k >> 3, t = k & 7, p = this.pos; fn(f, t, this); if (this.pos === p) this.skip(t); } }
+  advance(n) { if (n < 0 || this.pos + n > this.len) throw new Error("pbf: read past the end"); this.pos += n; }
+  bytes() { const n = this.varint(), at = this.pos; this.advance(n); return this.buf.subarray(at, at + n); }
+  // (the length is read first: `this.pos += this.varint()` would add it to the position from before the length)
+  skip(t) {
+    if (t === 0) this.varint();
+    else if (t === 1) this.advance(8);
+    else if (t === 2) { const n = this.varint(); this.advance(n); }
+    else if (t === 5) this.advance(4);
+    else throw new Error(`pbf: unknown wire type ${t}`);
+  }
+  fields(fn, end = this.len) {
+    if (end > this.len) throw new Error("pbf: message past the end");
+    while (this.pos < end) { const k = this.varint(), f = k >> 3, t = k & 7, p = this.pos; fn(f, t, this); if (this.pos === p) this.skip(t); }
+    if (this.pos > end) throw new Error("pbf: field past the message end");
+  }
 }
 
 // ---------- PMTiles v3 ----------
@@ -51,6 +84,7 @@ function zxyToId(z, x, y) {
 }
 function readDir(buf) {
   const p = new Pbf(buf), n = p.varint(), e = [];
+  if (n > buf.length) throw new Error("PMTiles directory: more entries than bytes");   // (each entry takes ≥ 4 bytes)
   let id = 0;
   for (let i = 0; i < n; i++) { id += p.varint(); e.push({ id, run: 0, len: 0, off: 0 }); }
   for (const x of e) x.run = p.varint();
@@ -69,8 +103,11 @@ class PMTiles {
   async header() {
     if (this.h) return this.h;
     const b = await range(this.url, 0, 16384), r = (o) => Number(b.readBigUInt64LE(o));
-    this.h = { rootOff: r(8), rootLen: r(16), leafOff: r(40), dataOff: r(56), minZ: b[100], maxZ: b[101] };
-    this.root = readDir(gunzip(b.subarray(this.h.rootOff, this.h.rootOff + this.h.rootLen)));
+    if (b.length < 127 || b.toString("latin1", 0, 7) !== "PMTiles" || b[7] !== 3) throw new Error("not a PMTiles v3 archive");
+    const h = { rootOff: r(8), rootLen: r(16), leafOff: r(40), dataOff: r(56), minZ: b[100], maxZ: b[101] };
+    if (h.rootOff + h.rootLen > b.length) throw new Error("PMTiles root directory out of range");
+    this.root = readDir(gunzip(b.subarray(h.rootOff, h.rootOff + h.rootLen)));
+    this.h = h;
     return this.h;
   }
   async dir(off, len) {
@@ -217,7 +254,8 @@ async function buildings(cacheDir, center, r, fr, onProgress) {
       try { buf = await pm.tile(z, tx, ty); } catch { /* a missing tile: OSM still has the area */ }
       onProgress?.(++done, jobs.length);
       if (!buf) continue;
-      const layers = decodeMvt(buf);
+      let layers;
+      try { layers = decodeMvt(buf); } catch { continue; }   // (a damaged tile: the rest still come)
       for (const [name, L] of Object.entries(layers)) {
         const part = /part/.test(name);
         if (!/building/.test(name)) continue;
@@ -255,4 +293,4 @@ async function buildings(cacheDir, center, r, fr, onProgress) {
   });
 }
 
-module.exports = { buildings, decodeMvt, zxyToId, PMTiles, URL };
+module.exports = { buildings, decodeMvt, zxyToId, PMTiles, URL, Pbf, range };

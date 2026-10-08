@@ -16,8 +16,10 @@ const TOPICS = [
 
 const stripBom = (s) => (s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
 
+// (a compressed message is a few kB; more than 32 MB unpacked is not position data, and is refused)
+const INFLATE_MAX = 32 * 1024 * 1024;
 function inflateZ(b64) {
-  return JSON.parse(zlib.inflateRawSync(Buffer.from(b64, "base64")).toString("utf8"));
+  return JSON.parse(zlib.inflateRawSync(Buffer.from(b64, "base64"), { maxOutputLength: INFLATE_MAX }).toString("utf8"));
 }
 
 // "HH:MM:SS.mmm{json}" per line; time is offset from the start of the stream.
@@ -93,6 +95,22 @@ class Archive {
     fs.mkdirSync(cacheDir, { recursive: true });
   }
 
+  // Session recordings pile up (~20 MB a session): past `maxBytes` the ones used longest ago are deleted down to
+  // `target` (they download again if needed). Returns the bytes freed.
+  prune(maxBytes = 3 * 1024 ** 3, target = 2 * 1024 ** 3) {
+    let files;
+    try { files = fs.readdirSync(this.cacheDir).filter((f) => f.endsWith(".jsonStream")).map((f) => { const p = path.join(this.cacheDir, f), st = fs.statSync(p); return { p, size: st.size, used: st.mtimeMs }; }); }
+    catch { return 0; }
+    let total = files.reduce((a, f) => a + f.size, 0), freed = 0;
+    if (total <= maxBytes) return 0;
+    files.sort((a, b) => a.used - b.used);
+    for (const f of files) {
+      if (total <= target) break;
+      try { fs.unlinkSync(f.p); total -= f.size; freed += f.size; } catch {}
+    }
+    return freed;
+  }
+
   cachePath(key) {
     return path.join(this.cacheDir, key.replace(/[^A-Za-z0-9._-]+/g, "_"));
   }
@@ -103,7 +121,11 @@ class Archive {
     const file = this.cachePath(rel);
     try {
       const st = fs.statSync(file);
-      if (Date.now() - st.mtimeMs < maxAgeMs) { onBytes?.(st.size, st.size); return fs.readFileSync(file, "utf8"); }
+      if (Date.now() - st.mtimeMs < maxAgeMs) {
+        // (a kept-for-good file is marked as just used, so pruning takes the ones not opened for longest)
+        if (maxAgeMs === Infinity) { try { const now = new Date(); fs.utimesSync(file, now, now); } catch {} }
+        onBytes?.(st.size, st.size); return fs.readFileSync(file, "utf8");
+      }
     } catch { /* not cached */ }
     let res;
     try { res = await fetch(BASE + rel, { signal: AbortSignal.timeout(60000) }); }

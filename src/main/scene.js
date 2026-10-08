@@ -67,6 +67,7 @@ function inside(x, y, pts) {
   return r;
 }
 
+const MEM_SCENES = 4;
 class Scenes {
   constructor(cacheDir) { this.cacheDir = cacheDir; this.mem = new Map(); }
 
@@ -74,9 +75,11 @@ class Scenes {
   async build(location, lap, onStep = () => {}) {
     const sig = crypto.createHash("md5").update(JSON.stringify(lap.filter((_, i) => i % 10 === 0).map((p) => [Math.round(p[0] / 50), Math.round(p[1] / 50)]))).digest("hex").slice(0, 10);
     const key = `${location}|${sig}`;
-    if (this.mem.has(key)) return this.mem.get(key);
+    if (this.mem.has(key)) { const j = this.mem.get(key); this.mem.delete(key); this.mem.set(key, j); return j; }
     const job = this.make(location, lap, sig, onStep).catch((e) => ({ ok: false, reason: e.message }));
     this.mem.set(key, job);
+    // (a scene is tens of MB: only the last few circuits stay in memory; older ones rebuild from the disk cache)
+    while (this.mem.size > MEM_SCENES) this.mem.delete(this.mem.keys().next().value);
     const out = await job;
     if (!out.ok) this.mem.delete(key);   // try again next time (e.g. after coming back online)
     return out;

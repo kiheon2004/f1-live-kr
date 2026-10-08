@@ -8,6 +8,8 @@ const { getCircuit } = require("./circuit");
 const { Scenes } = require("./scene");
 const { GoogleTiles } = require("./google");
 const geo = require("./geo");
+const V = require("./validate");
+const { pathToFileURL } = require("node:url");
 
 // Same data folder in development and in the packaged app; the bundle uses an ASCII name
 // (Electron can't start from a Korean bundle name) but menus show the Korean one.
@@ -15,6 +17,7 @@ app.setPath("userData", path.join(app.getPath("appData"), "f1-live-kr"));
 app.setName("라이브 타이밍 KR");
 
 let archive, auth, live, mainWin, scenes, google;
+const PAGE = path.join(__dirname, "..", "renderer", "index.html"), PAGE_URL = pathToFileURL(PAGE).href;
 
 function createWindow() {
   mainWin = new BrowserWindow({
@@ -26,9 +29,11 @@ function createWindow() {
       contextIsolation: true, nodeIntegration: false, sandbox: true,
     },
   });
-  mainWin.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
-  // External links open in the browser, never inside the app.
-  mainWin.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
+  mainWin.loadFile(PAGE);
+  // External links open in the browser, never inside the app – and only web pages (http/https). The window itself
+  // never navigates away from the app's page.
+  mainWin.webContents.setWindowOpenHandler(({ url }) => { if (V.externalUrl(url)) shell.openExternal(url); return { action: "deny" }; });
+  mainWin.webContents.on("will-navigate", (e, url) => { if (url !== PAGE_URL) { e.preventDefault(); if (V.externalUrl(url)) shell.openExternal(url); } });
   if (process.env.F1KR_SNAPSHOT) require("./dev-snapshot")(mainWin, process.env.F1KR_SNAPSHOT);
 }
 
@@ -37,6 +42,7 @@ const send = (channel, ...args) => { if (mainWin && !mainWin.isDestroyed()) main
 app.whenReady().then(() => {
   const data = app.getPath("userData");
   archive = new Archive(path.join(data, "cache"));
+  setTimeout(() => archive.prune(), 5000);   // (old session recordings, past 3 GB)
   auth = new Auth(data);
   live = new LiveClient({ getToken: () => auth.getToken() });
   scenes = new Scenes(path.join(data, "cache"));
@@ -47,29 +53,44 @@ app.whenReady().then(() => {
   live.on("feed", (topic, d, ts) => send("live:feed", topic, d, ts));
   live.on("status", (s) => send("live:status", s));
 
-  ipcMain.handle("sessions:list", (_e, year) => archive.listSessions(year));
-  ipcMain.handle("session:load", (e, sessionPath) =>
-    archive.loadSession(sessionPath, (p) => e.sender.send("session:progress", p)));
-  ipcMain.handle("schedule:get", (_e, year) => getSchedule(year));
-  ipcMain.handle("track:outline", (_e, location) => { const y = new Date().getFullYear(); return archive.findOutline(location, [y, y - 1, y - 2]); });
-  ipcMain.handle("track:circuit", (_e, key, year) => getCircuit(path.join(data, "cache"), key, year));
+  // Every IPC call is answered only for the app's own page (main window, top frame), and its arguments are checked
+  // before they reach a URL or a file path.
+  const handle = (channel, fn) => ipcMain.handle(channel, (e, ...args) => {
+    if (!V.trustedSender(e.senderFrame, mainWin, PAGE_URL)) throw new Error("IPC from an untrusted sender");
+    return fn(e, ...args);
+  });
+  const num = (v) => { if (!Number.isFinite(v)) throw new Error("bad number"); return v; };
+  handle("sessions:list", (_e, year) => archive.listSessions(V.year(year)));
+  handle("session:load", (e, sessionPath) =>
+    archive.loadSession(V.sessionPath(sessionPath), (p) => { if (!e.sender.isDestroyed()) e.sender.send("session:progress", p); }));
+  handle("schedule:get", (_e, year) => getSchedule(V.year(year)));
+  handle("track:outline", (_e, location) => { const y = new Date().getFullYear(); return archive.findOutline(V.text(location, 80), [y, y - 1, y - 2]); });
+  handle("track:circuit", (_e, key, year) => getCircuit(path.join(data, "cache"), key, year));
   // Real-world 3D surroundings: fitted scene, map tiles (terrain heights, imagery), optional Google imagery.
-  ipcMain.handle("geo:scene", (e, location, lap) => scenes.build(location, lap, (step) => { if (!e.sender.isDestroyed()) e.sender.send("geo:progress", step); }));
-  ipcMain.handle("geo:tile", (_e, source, z, x, y) => (source === "google" ? google.tile(z, x, y) : geo.getTile(path.join(data, "cache"), source, z, x, y)));
-  ipcMain.handle("geo:google", () => ({ hasKey: google.hasKey() }));
-  ipcMain.handle("geo:googleCheck", () => google.check());
-  ipcMain.handle("geo:googleKey", (_e, key) => google.setKey(key));
-  ipcMain.handle("geo:googleAttribution", (_e, zoom, n, s, eLon, w) => google.attribution(zoom, n, s, eLon, w).catch(() => "Google"));
-  ipcMain.handle("live:start", () => { live.start(); });
-  ipcMain.handle("live:stop", () => { live.stop(); });
-  ipcMain.handle("auth:status", () => auth.status());
-  ipcMain.handle("auth:login", () => auth.login(mainWin));
-  ipcMain.handle("auth:logout", () => auth.logout());
+  handle("geo:scene", (e, location, lap) => {
+    if (!Array.isArray(lap) || lap.length < 2 || lap.length > 50000 || !lap.every((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))) throw new Error("bad lap");
+    return scenes.build(V.text(location, 80), lap, (step) => { if (!e.sender.isDestroyed()) e.sender.send("geo:progress", step); });
+  });
+  handle("geo:tile", (_e, source, z, x, y) => {
+    [z, x, y] = V.tileArgs(z, x, y);
+    if (source === "google") return google.tile(z, x, y);
+    if (source !== "eox" && source !== "terrain") throw new Error("unknown tile source");
+    return geo.getTile(path.join(data, "cache"), source, z, x, y);
+  });
+  handle("geo:google", () => ({ hasKey: google.hasKey() }));
+  handle("geo:googleCheck", () => google.check());
+  handle("geo:googleKey", (_e, key) => { if (typeof key !== "string" || key.length > 300) throw new Error("bad key"); return google.setKey(key); });
+  handle("geo:googleAttribution", (_e, zoom, n, s, eLon, w) => google.attribution(V.tileArgs(zoom, 0, 0)[0], num(n), num(s), num(eLon), num(w)).catch(() => "Google"));
+  handle("live:start", () => { live.start(); });
+  handle("live:stop", () => { live.stop(); });
+  handle("auth:status", () => auth.status());
+  handle("auth:login", () => auth.login(mainWin));
+  handle("auth:logout", () => auth.logout());
   // Keep the window above a full-screen stream (Coupang Play, F1 TV) while watching.
-  ipcMain.handle("win:pin", (_e, on) => { if (mainWin && !mainWin.isDestroyed()) { mainWin.setAlwaysOnTop(!!on, "floating"); mainWin.setVisibleOnAllWorkspaces(!!on, { visibleOnFullScreen: true, skipTransformProcessType: true }); } return !!on; });
+  handle("win:pin", (_e, on) => { if (mainWin && !mainWin.isDestroyed()) { mainWin.setAlwaysOnTop(!!on, "floating"); mainWin.setVisibleOnAllWorkspaces(!!on, { visibleOnFullScreen: true, skipTransformProcessType: true }); } return !!on; });
   // Compact timing tower: a narrow window; the previous size comes back when it is switched off.
   let fullBounds = null;
-  ipcMain.handle("win:compact", (_e, on) => {
+  handle("win:compact", (_e, on) => {
     if (!mainWin || mainWin.isDestroyed()) return;
     if (on) {
       if (!fullBounds) fullBounds = mainWin.getBounds();
@@ -82,7 +103,7 @@ app.whenReady().then(() => {
       fullBounds = null;
     }
   });
-  ipcMain.handle("notify", (_e, title, body) => { if (Notification.isSupported()) new Notification({ title, body, silent: false }).show(); });
+  handle("notify", (_e, title, body) => { if (Notification.isSupported()) new Notification({ title: V.text(title, 200), body: V.text(body, 2000), silent: false }).show(); });
 
   createWindow();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

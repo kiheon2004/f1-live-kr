@@ -3,6 +3,7 @@
 // circuit as "highway=raceway" lines, so the F1 lap is fitted onto those (rotation, mirror, shift, scale) and
 // everything else – buildings, grandstands, water, woods, roads, barriers, terrain height and satellite
 // imagery – can then be placed around the track where it really is.
+const { tileArgs, inside } = require("./validate");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -400,11 +401,13 @@ const TILE_SOURCES = {
 };
 
 // One map tile as bytes (cached on disk when the source allows it). Google tiles go through google.js instead.
+// (z, x, y are checked to be a real tile, and the cache file to be inside the cache)
 async function getTile(cacheDir, source, z, x, y) {
-  const src = TILE_SOURCES[source];
+  const src = Object.prototype.hasOwnProperty.call(TILE_SOURCES, source) ? TILE_SOURCES[source] : null;
   if (!src) throw new Error("unknown tile source");
-  const dir = path.join(cacheDir, "tiles", source, String(z));
-  const file = path.join(dir, `${x}_${y}`);
+  [z, x, y] = tileArgs(z, x, y);
+  const root = path.join(cacheDir, "tiles"), dir = inside(root, path.join(source, String(z)));
+  const file = inside(root, path.join(source, String(z), `${x}_${y}`));
   if (src.cache) { try { return fs.readFileSync(file); } catch {} }
   const res = await fetch(src.url(z, x, y), { headers: UA, signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`tile HTTP ${res.status}`);
