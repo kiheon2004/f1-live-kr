@@ -404,3 +404,12 @@ test("old session recordings are pruned past the limit, least recently used firs
     assert.deepStrictEqual(fs.readdirSync(dir).sort(), ["2025_Index.json", "new_TimingData.jsonStream"]);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("H2: the page check matches the app's page however its address is encoded (packaged app.asar path)", () => {
+  const PAGE = "file:///Applications/LiveTimingKR.app/Contents/Resources/app.asar/src/renderer/index.html";
+  const mk = (url) => { const mainFrame = { url }; return [mainFrame, { isDestroyed: () => false, webContents: { mainFrame } }]; };
+  assert.strictEqual(V.trustedSender(...mk(PAGE + "#x"), PAGE), true);
+  assert.strictEqual(V.trustedSender(...mk("file:///Users/a%20b/%EB%9D%BC/index.html"), "file:///Users/a b/라/index.html"), true);
+  assert.strictEqual(V.trustedSender(...mk("file:///Applications/Other.app/index.html"), PAGE), false);
+  assert.strictEqual(V.trustedSender(...mk("https://example.com/src/renderer/index.html"), PAGE), false);
+});

@@ -36,7 +36,10 @@ function externalUrl(url) {
 function trustedSender(frame, win, pageUrl) {
   if (!frame || !win || win.isDestroyed?.()) return false;
   if (frame !== win.webContents.mainFrame) return false;
-  return frame.url === pageUrl || frame.url.startsWith(pageUrl + "#") || frame.url.startsWith(pageUrl + "?");
+  // (compared without hash or query and with percent-encoding undone: the packaged app's page sits in app.asar)
+  const norm = (u) => { try { const x = new URL(u); return x.protocol === "file:" ? decodeURIComponent(x.pathname) : null; } catch { return null; } };
+  const a = norm(frame.url);
+  return a != null && a === norm(pageUrl);
 }
 
 module.exports = { tileArgs, inside, year, circuitKey, text, sessionPath, externalUrl, trustedSender };
