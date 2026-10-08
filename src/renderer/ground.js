@@ -212,8 +212,68 @@ export function classRaster(sat, scene, P, S, track, pavedPolys = []) {
   let veg = 0, tot = 0;
   for (let i = 0; i < W * H; i += 97) { const o = i * 4; tot++; if (2 * px[o + 1] - px[o] - px[o + 2] > 14) veg++; }
   const dry = veg / tot < 0.12;
-  for (let i = 0; i < W * H; i++) if (R[i] === 255) R[i] = classify(px[i * 4], px[i * 4 + 1], px[i * 4 + 2], NEAR[i] === 1, dry);
+  const free = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) if (R[i] === 255) { free[i] = 1; R[i] = classify(px[i * 4], px[i * 4 + 1], px[i * 4 + 2], NEAR[i] === 1, dry); }
+  // classified pixel by pixel, the satellite areas have blocky, ragged outlines: rounded off by a majority
+  // filter (only those pixels change, so the mapped roads and paths keep their exact lines)
+  majority(R, free, W, H, 2); majority(R, free, W, H, 2);
+  if (!track.street) cleanShoulders(R, W, H, track.samples, S, mpp);
   return R;
+}
+
+// Every pixel with free[i] takes the most common class within ±r pixels (box counts per class, separable).
+function majority(R, free, W, H, r) {
+  const n = W * H, best = new Uint8Array(n), bestN = new Uint8Array(n), row = new Uint8Array(n), seen = new Uint8Array(N_CLASS);
+  for (let i = 0; i < n; i += 7) if (R[i] < N_CLASS) seen[R[i]] = 1;
+  for (let k = 0; k < N_CLASS; k++) {
+    if (!seen[k]) continue;
+    // horizontal counts
+    for (let y = 0; y < H; y++) {
+      const o = y * W; let c = 0;
+      for (let x = 0; x <= Math.min(r, W - 1); x++) c += R[o + x] === k;
+      for (let x = 0; x < W; x++) {
+        row[o + x] = c;
+        if (x + r + 1 < W) c += R[o + x + r + 1] === k;
+        if (x - r >= 0) c -= R[o + x - r] === k;
+      }
+    }
+    // vertical sums of those → counts in the box; keep the best class per pixel
+    for (let x = 0; x < W; x++) {
+      let c = 0;
+      for (let y = 0; y <= Math.min(r, H - 1); y++) c += row[y * W + x];
+      for (let y = 0; y < H; y++) {
+        const i = y * W + x;
+        if (c > bestN[i]) { bestN[i] = c; best[i] = k; }
+        if (y + r + 1 < H) c += row[(y + r + 1) * W + x];
+        if (y - r >= 0) c -= row[(y - r) * W + x];
+      }
+    }
+  }
+  for (let i = 0; i < n; i++) if (free[i] && bestN[i]) R[i] = best[i];
+}
+
+// The mapped / photographed tarmac never lines up exactly with the track drawn from the cars' positions, so a
+// ragged dark fringe showed beyond the white lines. Within 3 m of each edge the ground takes the surface found
+// 5 m out, unless that is tarmac or concrete as well (a paved run-off, which carries on up to the edge).
+function cleanShoulders(R, W, H, samples, S, mpp) {
+  const at = (x, z) => { const [i, j] = S(x, z), a = Math.floor(i), b = Math.floor(j); return a >= 0 && b >= 0 && a < W && b < H ? b * W + a : -1; };
+  const paved = (c) => c === CLASS.asphalt || c === CLASS.concrete;
+  const step = Math.min(0.5, mpp / 2), n = samples.length;
+  for (let i = 0; i < n; i++) {
+    const s = samples[i], t = samples[(i + 1) % n];
+    for (const side of [1, -1]) {
+      const edge = side > 0 ? s.L ?? 7 : s.R ?? -7, k = at(s.p.x + s.nor.x * (edge + side * 5), s.p.z + s.nor.z * (edge + side * 5));
+      if (k < 0 || paved(R[k])) continue;
+      const fill = R[k];
+      // the 2 m to the next sample, across 0–3 m beyond the edge
+      for (let f = 0; f < 1; f += step / 2) {
+        const px = s.p.x + (t.p.x - s.p.x) * f, pz = s.p.z + (t.p.z - s.p.z) * f;
+        const nx = s.nor.x + (t.nor.x - s.nor.x) * f, nz = s.nor.z + (t.nor.z - s.nor.z) * f;
+        const e = edge + ((side > 0 ? t.L ?? 7 : t.R ?? -7) - edge) * f;
+        for (let o = -0.5; o <= 3; o += step) { const q = at(px + nx * (e + side * o), pz + nz * (e + side * o)); if (q >= 0) R[q] = fill; }
+      }
+    }
+  }
 }
 
 // ---------- material ----------
@@ -267,19 +327,31 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
         if (gLod > 0.0) { vec3 b = texture(gDetail, vec3(w / (s * 6.7) + 0.37, float(c))).rgb; col = a * mix(vec3(1.0), b / max(vec3(0.02), gSatMeanDetail(c)), 0.35 * gLod); }
         vec3 t = clamp(sat / max(gSatMean[c], vec3(0.004)), vec3(0.55), vec3(1.6));
         return col * mix(vec3(1.0), t, gTintAmt[c]);
+      }
+      // a class's plain colour (far away: no texture reads)
+      vec3 gFlat(int c, vec3 sat) { return gDetailMean[c] * mix(vec3(1.0), clamp(sat / max(gSatMean[c], vec3(0.004)), vec3(0.55), vec3(1.6)), gTintAmt[c]); }
+      // corner weights from each class's bilinear share of the four texels, sharpened (share⁸): boundaries follow
+      // the share's ½ contour, not the texel staircase (cheap version of the close-up blend)
+      vec4 gShare2(int c00, int c10, int c01, int c11, vec2 f) {
+        vec4 b = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+        ivec4 c = ivec4(c00, c10, c01, c11);
+        vec4 s = vec4(dot(b, vec4(equal(c, ivec4(c00))))), t = vec4(0.0);
+        s.y = dot(b, vec4(equal(c, ivec4(c10)))); s.z = dot(b, vec4(equal(c, ivec4(c01)))); s.w = dot(b, vec4(equal(c, ivec4(c11))));
+        t = b / max(s, vec4(1e-4)) * pow(s, vec4(8.0));
+        return t / max(t.x + t.y + t.z + t.w, 1e-12);
       }`).replace("#include <map_fragment>", `#include <map_fragment>
       {
         vec2 w = vGPos.xz;
         vec2 uv = (w - gExt.xy) / gExt.zw;
         vec3 sat = texture(gTint, vec2(uv.x, 1.0 - uv.y)).rgb;
-        // class boundaries: a little noise so they wander like real edges, then a narrow blend between texels
+        // class boundaries: a little noise so they wander like real edges, then smooth contours between texels
         // detail by distance: full close up, lighter further out, the plain colours far away (cheap on big views)
         float gd = distance(vGPos, cameraPosition);
         gLod = 1.0 - smoothstep(300.0, 500.0, gd);
         vec2 jit = vec2(0.0);
         if (gd < 900.0) {
-          jit = (vec2(gNoise(w * 0.13), gNoise(w * 0.13 + 17.3)) - 0.5) * 1.4;
-          if (gd < 300.0) jit += (vec2(gNoise(w * 0.7), gNoise(w * 0.7 + 5.1)) - 0.5) * 0.5;
+          // (gentle and long: with the sharp contours below, short wiggles read as torn edges)
+          jit = (vec2(gNoise(w * 0.06), gNoise(w * 0.06 + 17.3)) - 0.5) * 1.2;
         }
         vec2 tc = uv * gClsSize + jit - 0.5;
         ivec2 i0 = ivec2(floor(tc)); vec2 f = fract(tc);
@@ -292,12 +364,47 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
         vec3 col;
         if (gd > 1500.0) {
           // far: each class's mean colour, tinted by the satellite – no texture reads
-          int cn = f.x < 0.5 ? (f.y < 0.5 ? c00 : c01) : (f.y < 0.5 ? c10 : c11);
-          col = gDetailMean[cn] * mix(vec3(1.0), clamp(sat / max(gSatMean[cn], vec3(0.004)), vec3(0.55), vec3(1.6)), gTintAmt[cn]);
+          vec4 wf = gShare2(c00, c10, c01, c11, f);
+          col = gFlat(c00, sat) * wf.x + gFlat(c10, sat) * wf.y + gFlat(c01, sat) * wf.z + gFlat(c11, sat) * wf.w;
         }
         else if (c00 == c10 && c00 == c01 && c00 == c11) col = gSurface(c00, w, sat);
-        else if (gd > 700.0) col = gSurface(f.x < 0.5 ? (f.y < 0.5 ? c00 : c01) : (f.y < 0.5 ? c10 : c11), w, sat);
-        else col = mix(mix(gSurface(c00, w, sat), gSurface(c10, w, sat), f.x), mix(gSurface(c01, w, sat), gSurface(c11, w, sat), f.x), f.y);
+        else if (gd > 700.0) {
+          // (further out the cheaper 2×2 blend; the texels are too coarse there for more to show)
+          vec4 wf = gShare2(c00, c10, c01, c11, f);
+          col = vec3(0.0);
+          if (wf.x > 0.001) col += gSurface(c00, w, sat) * wf.x;
+          if (wf.y > 0.001) col += gSurface(c10, w, sat) * wf.y;
+          if (wf.z > 0.001) col += gSurface(c01, w, sat) * wf.z;
+          if (wf.w > 0.001) col += gSurface(c11, w, sat) * wf.w;
+          col /= max(0.001, dot(wf, vec4(greaterThan(wf, vec4(0.001)))));
+        }
+        else {
+          // Each of the (up to four) classes here gets its share of the 3×3 texels around, weighted by a quadratic
+          // B-spline (a smooth bump, so the share changes smoothly across texels), then sharpened (share⁸): two
+          // classes meet along the smooth ½ contour of their shares, not along the texels' staircase.
+          vec2 tq = uv * gClsSize + jit - 0.5, cq = floor(tq + 0.5), u = tq - cq;
+          vec3 wx = vec3(0.5 * (0.5 - u.x) * (0.5 - u.x), 0.75 - u.x * u.x, 0.5 * (0.5 + u.x) * (0.5 + u.x));
+          vec3 wy = vec3(0.5 * (0.5 - u.y) * (0.5 - u.y), 0.75 - u.y * u.y, 0.5 * (0.5 + u.y) * (0.5 + u.y));
+          ivec4 cand = ivec4(c00, c10, c01, c11);
+          vec4 share = vec4(0.0);
+          for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) {
+            int c = min(int(texelFetch(gCls, clamp(ivec2(cq) + ivec2(i - 1, j - 1), ivec2(0), mx), 0).r * 255.0 + 0.5), ${N_CLASS - 1});
+            float wgt = wx[i] * wy[j];
+            share += wgt * vec4(equal(cand, ivec4(c)));
+          }
+          // a class listed twice counts once
+          if (cand.y == cand.x) share.y = 0.0;
+          if (cand.z == cand.x || cand.z == cand.y) share.z = 0.0;
+          if (cand.w == cand.x || cand.w == cand.y || cand.w == cand.z) share.w = 0.0;
+          vec4 wv = pow(share, vec4(8.0));
+          float wt = max(wv.x + wv.y + wv.z + wv.w, 1e-12);
+          col = vec3(0.0);
+          if (wv.x > 1e-4 * wt) col += gSurface(cand.x, w, sat) * wv.x;
+          if (wv.y > 1e-4 * wt) col += gSurface(cand.y, w, sat) * wv.y;
+          if (wv.z > 1e-4 * wt) col += gSurface(cand.z, w, sat) * wv.z;
+          if (wv.w > 1e-4 * wt) col += gSurface(cand.w, w, sat) * wv.w;
+          col /= wt;
+        }
         // mown stripes on grass
         float grassW = (c00 == 0 ? (1.0 - f.x) * (1.0 - f.y) : 0.0) + (c10 == 0 ? f.x * (1.0 - f.y) : 0.0) + (c01 == 0 ? (1.0 - f.x) * f.y : 0.0) + (c11 == 0 ? f.x * f.y : 0.0);
         col *= 1.0 + grassW * 0.07 * sign(sin(w.x * 0.39 + w.y * 0.12));

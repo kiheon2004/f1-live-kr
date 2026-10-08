@@ -170,7 +170,19 @@ function buildWorld(points) {
   const raw = [];
   for (const p of lap) { const v = toWorld(p, center); if (!raw.length || raw[raw.length - 1].distanceTo(v) > 3) raw.push(v); }
   if (raw.length > 3 && raw[0].distanceTo(raw[raw.length - 1]) < 15) raw.pop();
-  const curve = new THREE.CatmullRomCurve3(raw, true, "centripetal");
+  // The lap is one car's positions, each a metre or so off: a curve through them wiggles, and the edges, lines and
+  // kerbs built along it wiggle too. So: 1 m steps, then a Gaussian of σ 4 m along the lap (it shifts the apex of a
+  // 15 m hairpin by ~0.5 m), then the final curve.
+  const rough = new THREE.CatmullRomCurve3(raw, true, "centripetal");
+  rough.arcLengthDivisions = raw.length * 8;
+  const m1 = Math.max(200, Math.round(rough.getLength())), fine = rough.getSpacedPoints(m1).slice(0, m1);
+  const SIG = 4, K = 12, wts = Array.from({ length: 2 * K + 1 }, (_, k) => Math.exp(-0.5 * ((k - K) / SIG) ** 2));
+  const wsum = wts.reduce((a, b) => a + b, 0);
+  const soft = fine.map((_, i) => { const v = new THREE.Vector3(); for (let k = -K; k <= K; k++) v.addScaledVector(fine[(i + k + m1) % m1], wts[k + K]); return v.multiplyScalar(1 / wsum); });
+  const curve = new THREE.CatmullRomCurve3(soft.filter((_, i) => i % 2 === 0), true, "centripetal");
+  // (three.js measures a curve's length in 200 pieces by default: on a 5 km lap the "evenly spaced" points
+  // then come 0.5–3.7 m apart)
+  curve.arcLengthDivisions = m1 * 2;
   const n = Math.max(200, Math.round(curve.getLength() / 2));
   const pts = curve.getSpacedPoints(n).slice(0, n);
   // Heights from position data jitter a little; average them along the track (±20 m).
@@ -415,7 +427,10 @@ function kerbs(samples) {
         const off = edgeOf(s, sd) + sd * o;
         pos.push(s.p.x + s.nor.x * off, s.p.y + 0.07 + lift, s.p.z + s.nor.z * off); col.push(c.r, c.g, c.b);
       }
-      idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
+      // wound to face up (a face seen from behind gets its normal flipped: kerbs on one side came out black)
+      const P = (k) => pos.slice((v + k) * 3, (v + k) * 3 + 3), a = P(0), b = P(1), q = P(2);
+      const up = (b[2] - a[2]) * (q[0] - a[0]) - (b[0] - a[0]) * (q[2] - a[2]) > 0;
+      if (up) idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2); else idx.push(v, v + 2, v + 1, v + 1, v + 2, v + 3);
     }
   };
   const stripes = (i) => (i % 2 ? red : white);
@@ -1419,6 +1434,12 @@ window.Map3D = {
     return `${st.n} rows ${st.rows} seats ${st.seats}`;
   },
   // development: free camera
+  // development: look at the track at fraction f of the lap from `back` m behind, `h` m up, `side` m to the left
+  viewTrack(f = 0, h = 25, back = 50, side = 0, fov = 50) {
+    if (!world) return "no world";
+    const s = world.samples[Math.floor((((f % 1) + 1) % 1) * world.n)];
+    return this.look(s.p.x - s.tan.x * back + s.nor.x * side, s.p.y + h, s.p.z - s.tan.z * back + s.nor.z * side, s.p.x, s.p.y, s.p.z, fov);
+  },
   look(px, py, pz, tx, ty, tz, fov = 50) {
     setCam("heli"); controls.enabled = false; camMode = "inspect";
     camera.position.set(px, py, pz); camera.near = 0.3; camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(tx, ty, tz);
