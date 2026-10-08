@@ -735,7 +735,24 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     const R = classRaster(ground, scene, P, S, { samples: world.samples, width: opts.trackW || 14, street: opts.street }, stands?.footprints);
     const cw = ground.canvas.width, chh = ground.canvas.height;
     groundInfo.classAt = (x, z) => { const i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); return i < 0 || j < 0 || i >= cw || j >= chh ? 255 : R[j * cw + i]; };
-    const gm = groundMaterial({ R, W: ground.canvas.width, H: ground.canvas.height, ext, mpp: ground.mpp, tintCanvas: ground.canvas });
+    // around the circuit (120 m beyond its outline) a second, finer raster: ~0.5 m texels, so the edges of
+    // run-offs, gravel traps and service roads seen from the cars and the helicopter aren't stepped
+    let fine = null;
+    {
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const s of world.samples) { x0 = Math.min(x0, s.p.x); x1 = Math.max(x1, s.p.x); z0 = Math.min(z0, s.p.z); z1 = Math.max(z1, s.p.z); }
+      x0 = Math.max(ext.x0, x0 - 120); z0 = Math.max(ext.z0, z0 - 120); x1 = Math.min(ext.x1, x1 + 120); z1 = Math.min(ext.z1, z1 + 120);
+      const fmpp = Math.max(0.5, Math.max(x1 - x0, z1 - z0) / 4096);
+      if (x1 > x0 && z1 > z0 && fmpp < ground.mpp * 0.75) {
+        onStep?.("트랙 주변 땅 다듬는 중");
+        const fW = Math.ceil((x1 - x0) / fmpp), fH = Math.ceil((z1 - z0) / fmpp);
+        const FS = (x, z) => [(x - x0) / fmpp, (z - z0) / fmpp], FP = (p) => FS(...gf.xz(p));
+        const src = [(x0 - ext.x0) / ground.mpp, (z0 - ext.z0) / ground.mpp, (fW * fmpp) / ground.mpp, (fH * fmpp) / ground.mpp];
+        const R2 = classRaster(ground, scene, FP, FS, { samples: world.samples, width: opts.trackW || 14, street: opts.street }, stands?.footprints, { W: fW, H: fH, mpp: fmpp, src });
+        fine = { R: R2, W: fW, H: fH, ext: { x0, z0 }, mpp: fmpp };
+      }
+    }
+    const gm = groundMaterial({ R, W: ground.canvas.width, H: ground.canvas.height, ext, mpp: ground.mpp, tintCanvas: ground.canvas, fine });
     if (tmat.emissiveMap) { gm.material.emissiveMap = tmat.emissiveMap; gm.material.emissive = tmat.emissive; gm.material.emissiveIntensity = 0; }
     tmat.dispose();
     terrain.material = gm.material;

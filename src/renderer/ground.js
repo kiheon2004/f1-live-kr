@@ -181,8 +181,10 @@ function classify(r, g, b, near, dry) {
 // Builds the class raster (one byte per ground-canvas pixel) for the scene.
 //   sat: { canvas, mpp, ext } – the satellite-only ground canvas; P(pt) → canvas px for F1 metres;
 //   track: { samples, width, street }, pavedPolys: outlines to pave (scene x, z; e.g. under grandstands)
-export function classRaster(sat, scene, P, S, track, pavedPolys = []) {
-  const W = sat.canvas.width, H = sat.canvas.height, mpp = sat.mpp;
+//   grid (optional): a finer raster over part of the canvas – { W, H, mpp, src: [sx, sy, sw, sh] canvas px it covers };
+//   P and S then map to that raster's pixels
+export function classRaster(sat, scene, P, S, track, pavedPolys = [], grid = null) {
+  const W = grid ? grid.W : sat.canvas.width, H = grid ? grid.H : sat.canvas.height, mpp = grid ? grid.mpp : sat.mpp;
   const R = new Uint8Array(W * H).fill(255);
   for (const k of AREA_ORDER) {
     const v = AREA_CLASS[k];
@@ -206,7 +208,10 @@ export function classRaster(sat, scene, P, S, track, pavedPolys = []) {
   // everything else from the satellite colour, lightly blurred first so class edges follow smooth contours
   const blur = document.createElement("canvas"); blur.width = W; blur.height = H;
   const bg = blur.getContext("2d", { willReadFrequently: true });
-  bg.filter = `blur(${Math.max(1, 3 / mpp).toFixed(1)}px)`; bg.drawImage(sat.canvas, 0, 0); bg.filter = "none";
+  // (the free imagery is 10 m per pixel: blurred less, its pixels' squares show in the class outlines)
+  bg.filter = `blur(${Math.max(1, 7 / mpp).toFixed(1)}px)`;
+  if (grid) bg.drawImage(sat.canvas, ...grid.src, 0, 0, W, H); else bg.drawImage(sat.canvas, 0, 0);
+  bg.filter = "none";
   const px = bg.getImageData(0, 0, W, H).data;
   // a desert circuit: little vegetation anywhere in the picture (bare ground there is sand, not soil)
   let veg = 0, tot = 0;
@@ -216,7 +221,8 @@ export function classRaster(sat, scene, P, S, track, pavedPolys = []) {
   for (let i = 0; i < W * H; i++) if (R[i] === 255) { free[i] = 1; R[i] = classify(px[i * 4], px[i * 4 + 1], px[i * 4 + 2], NEAR[i] === 1, dry); }
   // classified pixel by pixel, the satellite areas have blocky, ragged outlines: rounded off by a majority
   // filter (only those pixels change, so the mapped roads and paths keep their exact lines)
-  majority(R, free, W, H, 2); majority(R, free, W, H, 2);
+  const mr = Math.max(2, Math.round(1.5 / mpp));   // (~3 m either way)
+  majority(R, free, W, H, mr); majority(R, free, W, H, mr);
   if (!track.street) cleanShoulders(R, W, H, track.samples, S, mpp);
   return R;
 }
@@ -279,11 +285,16 @@ function cleanShoulders(R, W, H, samples, S, mpp) {
 // ---------- material ----------
 // Terrain material painting classes. tintCanvas: the satellite image (any size, covering ext); R: class raster
 // W×H covering ext; ext: { x0, z0, x1, z1 } scene metres of the raster/canvas.
-export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
+// fine (optional): { R, W, H, ext, mpp } – a finer class raster near the track, used where it covers
+export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
   const L = detailLayers();
   const cls = new THREE.DataTexture(R, W, H, THREE.RedFormat, THREE.UnsignedByteType);
   cls.magFilter = cls.minFilter = THREE.NearestFilter; cls.generateMipmaps = false; cls.flipY = false; cls.needsUpdate = true;
   cls.unpackAlignment = 1;
+  const F = fine || { R: new Uint8Array(1).fill(255), W: 1, H: 1, ext: { x0: 0, z0: 0 }, mpp: 1 };
+  const cls2 = new THREE.DataTexture(F.R, F.W, F.H, THREE.RedFormat, THREE.UnsignedByteType);
+  cls2.magFilter = cls2.minFilter = THREE.NearestFilter; cls2.generateMipmaps = false; cls2.flipY = false; cls2.needsUpdate = true;
+  cls2.unpackAlignment = 1;
   // satellite tint: small and soft (its job is the large-scale colour only)
   const tw = 1024, th = Math.max(1, Math.round((tw * tintCanvas.height) / tintCanvas.width));
   const tc = document.createElement("canvas"); tc.width = tw; tc.height = th;
@@ -304,6 +315,7 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
       gCls: { value: cls }, gClsSize: { value: new THREE.Vector2(W, H) }, gExt: { value: new THREE.Vector4(ext.x0, ext.z0, W * mpp, H * mpp) },
+      gCls2: { value: cls2 }, gCls2Size: { value: new THREE.Vector2(F.W, F.H) }, gExt2: { value: new THREE.Vector4(F.ext.x0, F.ext.z0, F.W * F.mpp, F.H * F.mpp) }, gFine: { value: fine ? 1 : 0 },
       gDetail: { value: L.tex }, gTint: { value: tint }, gScale: { value: SCALE }, gTintAmt: { value: TINT }, gSatMean: { value: satMean },
     });
     sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vGPos;")
@@ -311,6 +323,13 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", `#include <common>
       precision highp sampler2DArray;
       uniform sampler2D gCls; uniform vec2 gClsSize; uniform vec4 gExt;
+      uniform sampler2D gCls2; uniform vec2 gCls2Size; uniform vec4 gExt2; uniform float gFine;
+      bool gUseFine = false; ivec2 gMx = ivec2(0);
+      // the class at texel i of the raster in use (the fine one near the track, else the whole-area one)
+      int gClass(ivec2 i) {
+        float v = gUseFine ? texelFetch(gCls2, clamp(i, ivec2(0), gMx), 0).r : texelFetch(gCls, clamp(i, ivec2(0), gMx), 0).r;
+        return min(int(v * 255.0 + 0.5), ${N_CLASS - 1});
+      }
       uniform sampler2DArray gDetail; uniform sampler2D gTint;
       uniform float gScale[${N_CLASS}]; uniform float gTintAmt[${N_CLASS}]; uniform vec3 gSatMean[${N_CLASS}];
       varying vec3 vGPos;
@@ -348,19 +367,19 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
         // detail by distance: full close up, lighter further out, the plain colours far away (cheap on big views)
         float gd = distance(vGPos, cameraPosition);
         gLod = 1.0 - smoothstep(300.0, 500.0, gd);
-        vec2 jit = vec2(0.0);
+        vec2 jit = vec2(0.0);   // metres
         if (gd < 900.0) {
           // (gentle and long: with the sharp contours below, short wiggles read as torn edges)
-          jit = (vec2(gNoise(w * 0.06), gNoise(w * 0.06 + 17.3)) - 0.5) * 1.2;
+          jit = (vec2(gNoise(w * 0.06), gNoise(w * 0.06 + 17.3)) - 0.5) * 2.0;
         }
-        vec2 tc = uv * gClsSize + jit - 0.5;
+        // near the track the finer raster (a few texels in from its border, so the 3×3 reads stay inside)
+        vec2 uv2 = (w - gExt2.xy) / gExt2.zw, m2 = 3.0 / gCls2Size;
+        gUseFine = gFine > 0.5 && all(greaterThan(uv2, m2)) && all(lessThan(uv2, 1.0 - m2));
+        vec2 gSize = gUseFine ? gCls2Size : gClsSize;
+        vec2 tc = (gUseFine ? uv2 : uv) * gSize + jit * gSize / (gUseFine ? gExt2.zw : gExt.zw) - 0.5;
+        gMx = ivec2(gSize) - 1;
         ivec2 i0 = ivec2(floor(tc)); vec2 f = fract(tc);
-        ivec2 mx = ivec2(gClsSize) - 1;
-        int c00 = int(texelFetch(gCls, clamp(i0, ivec2(0), mx), 0).r * 255.0 + 0.5);
-        int c10 = int(texelFetch(gCls, clamp(i0 + ivec2(1, 0), ivec2(0), mx), 0).r * 255.0 + 0.5);
-        int c01 = int(texelFetch(gCls, clamp(i0 + ivec2(0, 1), ivec2(0), mx), 0).r * 255.0 + 0.5);
-        int c11 = int(texelFetch(gCls, clamp(i0 + ivec2(1, 1), ivec2(0), mx), 0).r * 255.0 + 0.5);
-        c00 = min(c00, ${N_CLASS - 1}); c10 = min(c10, ${N_CLASS - 1}); c01 = min(c01, ${N_CLASS - 1}); c11 = min(c11, ${N_CLASS - 1});
+        int c00 = gClass(i0), c10 = gClass(i0 + ivec2(1, 0)), c01 = gClass(i0 + ivec2(0, 1)), c11 = gClass(i0 + ivec2(1, 1));
         vec3 col;
         if (gd > 1500.0) {
           // far: each class's mean colour, tinted by the satellite – no texture reads
@@ -382,13 +401,13 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
           // Each of the (up to four) classes here gets its share of the 3×3 texels around, weighted by a quadratic
           // B-spline (a smooth bump, so the share changes smoothly across texels), then sharpened (share⁸): two
           // classes meet along the smooth ½ contour of their shares, not along the texels' staircase.
-          vec2 tq = uv * gClsSize + jit - 0.5, cq = floor(tq + 0.5), u = tq - cq;
+          vec2 tq = tc, cq = floor(tq + 0.5), u = tq - cq;
           vec3 wx = vec3(0.5 * (0.5 - u.x) * (0.5 - u.x), 0.75 - u.x * u.x, 0.5 * (0.5 + u.x) * (0.5 + u.x));
           vec3 wy = vec3(0.5 * (0.5 - u.y) * (0.5 - u.y), 0.75 - u.y * u.y, 0.5 * (0.5 + u.y) * (0.5 + u.y));
           ivec4 cand = ivec4(c00, c10, c01, c11);
           vec4 share = vec4(0.0);
           for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) {
-            int c = min(int(texelFetch(gCls, clamp(ivec2(cq) + ivec2(i - 1, j - 1), ivec2(0), mx), 0).r * 255.0 + 0.5), ${N_CLASS - 1});
+            int c = gClass(ivec2(cq) + ivec2(i - 1, j - 1));
             float wgt = wx[i] * wy[j];
             share += wgt * vec4(equal(cand, ivec4(c)));
           }
@@ -416,5 +435,5 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas }) {
     sh.uniforms.gDetailMean = { value: L.mean.map((m) => new THREE.Vector3(...m)) };
   };
   mat.customProgramCacheKey = () => "classGround";
-  return { material: mat, textures: [cls, tint] };
+  return { material: mat, textures: [cls, cls2, tint] };
 }
