@@ -329,3 +329,50 @@ test("buildings: a guessed-height sliver (a line mapped as an area) is no buildi
   assert.strictEqual(isSliver({ est: 1 }, [[0, 0], [20, 0], [20, 1], [0, 1]]), false, "short: a shed");
   assert.strictEqual(isSliver({ est: 1 }, [[0, 0], [100, 0], [100, 8], [0, 8]]), false, "8 m wide: a building");
 });
+
+// ---------- teams at their garages (garages.js) ----------
+test("garages: teams placed from the session's own pit stops – not standings or list order; neutral without data", async () => {
+  const G = await import("../src/renderer/garages.js");
+  const slots = Array.from({ length: 40 }, (_, k) => ({ k, uc: -170 + k * 8.4 + 4.2 }));
+  const drivers = { 4: { TeamName: "McLaren", TeamColour: "F47600", Tla: "NOR" }, 81: { TeamName: "McLaren", TeamColour: "F47600", Tla: "PIA" },
+    16: { TeamName: "Ferrari", TeamColour: "ED1131", Tla: "LEC" }, 44: { TeamName: "Ferrari", TeamColour: "ED1131", Tla: "HAM" } };
+  const still = { 4: { stops: [{ u: -76, t: 1 }, { u: -75.8, t: 2 }], long: [] }, 81: { stops: [{ u: -77, t: 3 }, { u: 91, t: 4 }], long: [] },
+    16: { stops: [{ u: -48, t: 5 }, { u: -47.5, t: 6 }], long: [] }, 44: { stops: [{ u: -47.3, t: 7 }], long: [] } };
+  const pos = G.workPositions(still, drivers);
+  assert.ok(Math.abs(pos[81].u + 76.5) < 1.5, "an odd stop elsewhere doesn't move the team's box");
+  const a = G.allocate(slots, 8.4, drivers, pos);
+  assert.deepStrictEqual(a.map((t) => t.team), ["McLaren", "Ferrari"]);
+  // reversing the driver list (as standings change) gives the same allocation
+  const rev = Object.fromEntries(Object.entries(drivers).reverse());
+  assert.strictEqual(G.allocationKey(G.allocate(slots, 8.4, rev, G.workPositions(still, rev))), G.allocationKey(a));
+  assert.deepStrictEqual(G.allocate(slots, 8.4, drivers, G.workPositions({}, drivers)), [], "no data: no teams");
+  // qualifying-style: a driver's garage from repeated long stays
+  const q = G.workPositions({ 4: { stops: [], long: [{ u: 10, t: 1 }, { u: 11, t: 2 }] }, 81: { stops: [], long: [{ u: 50, t: 3 }] } }, {});
+  assert.strictEqual(q[4].from, "garage"); assert.strictEqual(q[81], undefined, "seen once: not enough");
+});
+
+test("garages: standstills only count in front of the garages, and a short one only after entering the pits", async () => {
+  const G = await import("../src/renderer/garages.js");
+  const car = (pts) => ({ t: pts.map((p) => p[0]), x: pts.map((p) => p[1] * 10), y: pts.map((p) => p[2] * 10), n: pts.length });
+  const still3s = (t0, x, y) => [[t0, x, y], [t0 + 1000, x, y], [t0 + 3000, x, y], [t0 + 3500, x + 20, y]];
+  const project = (x, z) => ({ u: x, off: -z - 0 });   // garages along x at z = 0, the pit lane towards −z
+  const cars = { 1: car(still3s(10000, 50, 5)), 2: car(still3s(10000, 50, 40)), 3: car(still3s(500000, 60, 5)) };
+  const r = G.standstills(cars, ([X, Y]) => [X, -Y], project, [0, 300], { 1: [5000], 3: [100000] });
+  assert.strictEqual(r[1].stops.length, 1);
+  assert.strictEqual(r[2], undefined, "40 m out: on the track, not at a garage");
+  assert.strictEqual(r[3], undefined, "long after entering: a queue, not a stop");
+});
+
+test("pit builder: real garage bays with their floor on the pit lane's surface", async () => {
+  const F = await load();
+  const scene = { location: "T", buildings: [{ name: "Pits", kind: "block", cls: "yes", est: 1, pts: rect(-150, 0, 150, 30), min: 0, h: 8 }] };
+  const spec = { id: "g", loc: ["T"], status: "trial", replaces: { names: /^Pits$/ }, builder: "pitBuilding",
+    params: { garages: 30, height: 12, plate: 0.8, overhang: { pit: 2, paddock: 1, end: 1 }, facade: { pit: "pitGlass", paddock: "paddockPanels" } } };
+  const r = await F.buildFacilities({ scene, gf, groundAt: () => 10, surfaceAt: () => 10.3, location: "T", toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec] });
+  const G = r.group.children[0].userData.garages;
+  assert.strictEqual(G.slots.length, 30);
+  assert.ok(G.slots.every((s) => Math.abs(s.floor - 10.3) < 1e-6), "floors level with the pit lane");
+  assert.ok(Math.abs(G.pitch - 10) < 0.01);
+  const p = G.project(0, -35); assert.ok(Math.abs(p.off - 5) < 0.01, "5 m in front of the garages");
+  assert.ok(r.group.getObjectByName("garageInteriors"));
+});

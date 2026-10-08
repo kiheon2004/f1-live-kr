@@ -768,7 +768,10 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     // the circuit's own facilities (facilities.js): models of the real buildings, replacing their map records
     // (the way the cars run past a point: the lap line's direction there)
     const alongTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); return s?.tan ? [s.tan.x, s.tan.z] : [1, 0]; };
-    const fac = await buildFacilities({ scene, gf, groundAt, location: scene.location, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false,
+    // (the pit lane's tarmac height, for garage floors: as the other tarmac is laid below – on the terrain, at the
+    // track's height near it)
+    const surfaceAt = (x, z) => { const [s, d] = nearTrack(x, z); const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06); };
+    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, location: scene.location, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false,
       readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
     lm = combine(lm, fac);

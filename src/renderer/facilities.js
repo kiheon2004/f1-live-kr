@@ -358,6 +358,8 @@ FACADES.yasPaddock = { width: () => 7.5, draw(g, w, h, lit) {
   for (const [y0, y1] of [[6.6, 8.6], [10.6, 12.6]]) glassBand(g, w, h, y0, y1, ["#4c6170", "#2a3842"], w / 2, 0, lit);
   if (!lit) { g.fillStyle = "#ddd2bd"; g.fillRect(0, yPx(h, 12.6), w * 0.08, yPx(h, 6.6) - yPx(h, 12.6)); g.fillRect(w * 0.92, yPx(h, 12.6), w * 0.08, yPx(h, 6.6) - yPx(h, 12.6)); }
 } };
+// height of the garage band (openings, their frames) in each pit-side facade texture
+const GARAGE_TOP = { pitGlass: 4.8, pitStand: 5.6, imolaBox: 4.6 };
 function facadeTex(name, p, lit) {
   const F = FACADES[name];
   return canvasTex(`${name}:${lit ? "lit" : "day"}`, 256, 1024, (g, w, h) => F.draw(g, w, h, lit));
@@ -476,12 +478,30 @@ function pitBuilding(ctx, p) {
   const facadeKey = (side) => "facade:" + (side > 0 ? p.facade.pit : p.facade.paddock);
   const facW = (side) => (side > 0 ? pitch : FACADES[p.facade.paddock].width(p));
   const wallTop = (st) => (st.u >= uRoot ? roofAt(st.u) - t : baseAt(st.u) + st.baseTop);
+  // The garages: a run along the pit side, one bay every `gp` m (the published count over the building's length,
+  // else the facility's pitch). Each has a real opening – pillars, a lintel, the rolled-up shutter – and an inside as
+  // deep as can be seen from the pit lane (floor, walls, ceiling and its lights), its floor level with the pit lane
+  // (ctx.surfaceAt: the tarmac's height there), so a car stopping at its box stands on the same surface.
+  const gStart = Math.max(uMin, uRoot), gEnd = uMax, G = p.garageBay !== false ? (GARAGE_TOP[p.facade.pit] || 4.8) : 0;
+  const nGar = Math.max(1, Math.round((gEnd - gStart) / pitch)), gp = (gEnd - gStart) / nGar;
+  const stationAt = (uu) => { let i = 0; while (i + 1 < stations.length && stations[i + 1].u < uu) i++; const a = stations[i], b = stations[Math.min(i + 1, stations.length - 1)]; const f = b.u > a.u ? Math.max(0, Math.min(1, (uu - a.u) / (b.u - a.u))) : 0; return [a, b, f]; };
+  const frontV = (uu) => { const [a, b, f] = stationAt(uu); return sideV(a, 1) + (sideV(b, 1) - sideV(a, 1)) * f; };
+  const floorAt = (uu) => { const g = baseAt(uu); if (!ctx.surfaceAt) return g; const [x, z] = P(uu, frontV(uu) + vTrack * 1.5); const sy = ctx.surfaceAt(x, z); return Number.isFinite(sy) ? Math.max(g, sy) : g; };
+  const inGarages = (uu) => G > 0 && uu >= gStart - 1e-6 && uu <= gEnd + 1e-6;
   // walls along both long sides, station to station
   for (let i = 0; i + 1 < stations.length; i++) {
     const a = stations[i], b = stations[i + 1], ga = baseAt(a.u), gb = baseAt(b.u);
     for (const side of [1, -1]) {
       const [x0, z0] = P(a.u, sideV(a, side)), [x1, z1] = P(b.u, sideV(b, side)), ya = wallTop(a), yb = wallTop(b);
       const block = a.u < uRoot, key = block ? "panels" : facadeKey(side), w = block ? 6 : facW(side), u0 = (a.u - uRoot) / w, u1 = (b.u - uRoot) / w, H = block ? 6 : H_TEX;
+      if (side > 0 && !block && inGarages(a.u) && inGarages(b.u)) {
+        // over the garages: the facade from the top of their openings (its texture's bands kept at their heights over
+        // the garage floor); under the floor, the plinth
+        const fa = floorAt(a.u), fb = floorAt(b.u);
+        F.poly(key, [[x0, fa + G, z0], [x1, fb + G, z1], [x1, yb, z1], [x0, ya, z0]], [[u0, G / H], [u1, G / H], [u1, (yb - fb) / H], [u0, (ya - fa) / H]], outV(side));
+        if (fa > ga + 0.02 || fb > gb + 0.02) F.poly("panels", [[x0, ga, z0], [x1, gb, z1], [x1, fb, z1], [x0, fa, z0]], null, outV(side));
+        continue;
+      }
       F.poly(key, [[x0, ga, z0], [x1, gb, z1], [x1, yb, z1], [x0, ya, z0]], [[u0, 0], [u1, 0], [u1, (yb - gb) / H], [u0, (ya - ga) / H]], outV(side));
     }
   }
@@ -604,7 +624,34 @@ function pitBuilding(ctx, p) {
     wall([u0, v0], [u0, v1], u0, u0, [-u[0], 0, -u[1]], v1 - v0); wall([u1, v0], [u1, v1], u1, u1, [u[0], 0, u[1]], v1 - v0);
     F.poly("roofTop", [S(u0, v0, y(u0)), S(u1, v0, y(u1)), S(u1, v1, y(u1)), S(u0, v1, y(u0))], [[0, 0], [1, 0], [1, 1], [0, 1]], [0, 1, 0]);
   }
+  // the garages themselves: openings in front (with the facade), their insides apart (seen only from close by)
+  const FI = new Faces(), slots = [], inward = [-v[0] * vTrack, -v[1] * vTrack], depth = Math.min(p.garageDepth || 9, Math.max(4, Math.min(...stations.map((s2) => s2.v1 - s2.v0)) * 0.45));
+  if (G > 0) {
+    const fw = 0.5, hO = G - 0.55, ceil = hO + 0.35, out = outV(1), inv = [inward[0], 0, inward[1]];
+    const at = (uu, d, y) => { const [x, z] = P(uu, frontV(uu) - vTrack * d); return [x, y, z]; };
+    for (let k = 0; k < nGar; k++) {
+      const u0 = gStart + k * gp, u1 = u0 + gp, a0 = u0 + fw / 2, a1 = u1 - fw / 2, fl = floorAt((u0 + u1) / 2);
+      // front: the pillar at its start (and the last one at the run's end), the lintel over the opening
+      for (const [b0, b1] of k === nGar - 1 ? [[u0 - fw / 2, a0], [a1, u1 + fw / 2]] : [[u0 - fw / 2, a0]]) F.poly("garFrame", [at(b0, 0, fl), at(b1, 0, fl), at(b1, 0, fl + G), at(b0, 0, fl + G)], null, out);
+      F.poly("garFrame", [at(a0, 0, fl + hO), at(a1, 0, fl + hO), at(a1, 0, fl + G), at(a0, 0, fl + G)], null, out);
+      F.poly("garFrame", [at(a0, 0, fl + hO), at(a1, 0, fl + hO), at(a1, 0.6, fl + hO), at(a0, 0.6, fl + hO)], null, [0, -1, 0]);
+      // the rolled-up shutter in its box under the lintel
+      F.poly("garShutter", [at(a0, 0.6, fl + hO - 0.4), at(a1, 0.6, fl + hO - 0.4), at(a1, 0.6, fl + hO), at(a0, 0.6, fl + hO)], null, out);
+      F.poly("garShutter", [at(a0, 0.25, fl + hO - 0.4), at(a1, 0.25, fl + hO - 0.4), at(a1, 0.6, fl + hO - 0.4), at(a0, 0.6, fl + hO - 0.4)], null, [0, -1, 0]);
+      // inside: floor, side walls, back wall, ceiling with two light strips
+      FI.poly("garFloor", [at(a0, 0, fl + 0.01), at(a1, 0, fl + 0.01), at(a1, depth, fl + 0.01), at(a0, depth, fl + 0.01)], [[0, 0], [1, 0], [1, depth / 3], [0, depth / 3]], [0, 1, 0]);
+      FI.poly("garWall", [at(a0, 0, fl), at(a0, depth, fl), at(a0, depth, fl + ceil), at(a0, 0, fl + ceil)], null, [u[0], 0, u[1]]);
+      FI.poly("garWall", [at(a1, 0, fl), at(a1, depth, fl), at(a1, depth, fl + ceil), at(a1, 0, fl + ceil)], null, [-u[0], 0, -u[1]]);
+      FI.poly("garBack", [at(a0, depth, fl), at(a1, depth, fl), at(a1, depth, fl + ceil), at(a0, depth, fl + ceil)], null, out);
+      FI.poly("garCeil", [at(a0, 0.6, fl + ceil), at(a1, 0.6, fl + ceil), at(a1, depth, fl + ceil), at(a0, depth, fl + ceil)], null, [0, -1, 0]);
+      for (const q of [0.3, 0.7]) { const c0 = a0 + (a1 - a0) * q - 0.25, c1 = c0 + 0.5; FI.poly("garLight", [at(c0, 1.2, fl + ceil - 0.03), at(c1, 1.2, fl + ceil - 0.03), at(c1, depth - 0.8, fl + ceil - 0.03), at(c0, depth - 0.8, fl + ceil - 0.03)], null, [0, -1, 0]); }
+      const [fx, fz] = P((u0 + u1) / 2, frontV((u0 + u1) / 2));
+      slots.push({ k, u0, u1, uc: (u0 + u1) / 2, floor: fl, front: [fx, fz], along: [u[0], u[1]], inward, width: a1 - a0, height: hO, ceil, depth });
+    }
+  }
   const meshes = F.meshes((key) => facilityMaterial(key, p));
+  let interior = null;
+  if (FI.m.size) { interior = new THREE.Group(); interior.name = "garageInteriors"; for (const m of FI.meshes((key) => facilityMaterial(key, p))) { m.castShadow = false; interior.add(m); } meshes.push(interior); }
   // a pod at one end (Suzuka's silver capsule): a long rounded body lying along the building, sticking out `out` m
   if (p.pod) {
     // (its width from the widest span within its length of that end: an outline can narrow right at the end)
@@ -630,7 +677,10 @@ function pitBuilding(ctx, p) {
   }
   const footprint = [...stations.map((st) => P(st.u, st.v0)), ...stations.slice().reverse().map((st) => P(st.u, st.v1))];
   const ground = stations.map((st) => st.g);
-  return { meshes, footprint, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
+  // where a point is along the garages (u) and how far out in front of them (off: towards the track)
+  const project = (x, z) => { const uu = (x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], vv = (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]; return { u: uu, off: (vv - frontV(Math.max(gStart, Math.min(gEnd, uu)))) * vTrack }; };
+  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior } : null;
+  return { meshes, footprint, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
       heightFrom: parts.some((q) => q.guessed) ? "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
@@ -654,6 +704,14 @@ function facilityMaterial(key, p) {
     case "bladeSide": return std({ color: "#c9cdd1", map: panelTex(), roughness: 0.5, metalness: 0.2 });
     case "checker": return std({ color: 0xffffff, map: checkerTex(), roughness: 0.6 });
     case "slab": return std({ color: "#e4e5e3", roughness: 0.8 });
+    // the garages: dark frames, a light epoxy floor, white walls and ceiling, light strips (lit day and night)
+    case "garFrame": return std({ color: "#33383d", roughness: 0.5, metalness: 0.3 });
+    case "garShutter": return std({ color: "#5b6168", roughness: 0.45, metalness: 0.4 });
+    case "garFloor": return std({ color: "#c9ccce", roughness: 0.35, metalness: 0.05 });
+    case "garWall": return std({ color: "#eceeee", roughness: 0.8 });
+    case "garBack": return std({ color: "#d6d9db", roughness: 0.8 });
+    case "garCeil": return std({ color: "#f2f3f3", roughness: 0.9 });
+    case "garLight": return std({ color: "#ffffff", emissive: "#fff6e8", emissiveIntensity: 1.0, roughness: 0.4 });
     case "rail": return std({ color: "#c7d3d8", roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.55 });
     case "column": return std({ color: "#eceeee", roughness: 0.5, metalness: 0.2 });
     // (no environment map in the scene: a strongly metallic surface would show black – brushed, light silver)
@@ -776,7 +834,7 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
 // opts: { scene, gf, groundAt, location, year, toTrack, trial (setting on), readModel(file) → bytes,
 // isCurrent() → false once the result would land in a world that's gone }. Returns the contract, plus `info`
 // (one line per facility: built how, or why not), or null when no longer current (everything made is freed).
-export async function buildFacilities({ scene, gf, groundAt, location, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }) {
+export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, location, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }) {
   const group = new THREE.Group(); group.name = "facilities";
   const skip = new Set(), zones = [], spots = [], info = [], used = new Set();
   const free = () => { for (const o of group.children) freeOwned(o); };
@@ -797,9 +855,10 @@ export async function buildFacilities({ scene, gf, groundAt, location, year, toT
       try {
         const parts = selectReplaced(spec, scene.buildings, gf);
         if (!parts.length) throw new Error("its map buildings aren't in the data");
-        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, toTrack, alongTrack, scene }, spec.params || {});
+        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, toTrack, alongTrack, scene }, spec.params || {});
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
-        made = { object: g, footprint: r.footprint, top: r.top, info: r.info }; how = "builder";
+        if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
+        made = { object: g, footprint: r.footprint, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
       } catch (e) { reason = (reason ? reason + "; " : "") + e.message; }
     }
     if (!made) { info.push({ id: spec.id, how: "fallback", reason }); continue; }   // the map's buildings stay
@@ -814,6 +873,11 @@ export async function buildFacilities({ scene, gf, groundAt, location, year, toT
   }
   if (!isCurrent()) { free(); return null; }
   modelsInUse = used;
+  // close-by detail (the garages' insides) only within 400 m of the camera
+  const lod = [];
+  group.traverse((o) => { if (o.name === "garageInteriors") { const b = new THREE.Box3().setFromObject(o); lod.push({ o, b }); } });
+  const tmp = new THREE.Vector3();
+  group.userData.update = (cam) => { for (const { o, b } of lod) o.visible = b.distanceToPoint(tmp.copy(cam)) < 400; };
   return {
     group: group.children.length ? group : null, skip: (b) => skip.has(b), restyle: () => null,
     // trees keep 4 m off a facility

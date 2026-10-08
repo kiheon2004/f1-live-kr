@@ -8,6 +8,7 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine } from "./smooth.js";
+import { standstills, workPositions, mergeStandstills, allocate, allocationKey, teamLayer } from "./garages.js";
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
 
 const DM = 0.1;               // decimetres → metres
@@ -123,6 +124,43 @@ function initGeoSettings() {
     paint();
   });
   document.getElementById("geoKey").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("geoKeySave").click(); e.stopPropagation(); });
+}
+
+// Teams at their garages (garages.js): from the session's own pit positions – a replay's whole session, a live
+// feed's standstills gathered as they come (it keeps only minutes of positions). Rebuilt only when the allocation
+// changes; neutral (no layer) where the session doesn't show it. Checked every 2 s (live: 15 s).
+let pitTeams = { key: null, group: null, facility: null, session: null, still: {}, last: 0 };
+function clearPitTeams() {
+  if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); }
+  pitTeams.group = null; pitTeams.key = null;
+}
+function updatePitTeams() {
+  const now = performance.now(), A = app(), src = A?.src;
+  if (now - pitTeams.last < (src?.isLive ? 15000 : 2000)) return;
+  pitTeams.last = now;
+  let fac = null;
+  world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!fac && o.userData?.garages) fac = o; });
+  const session = A?.sourceKey?.()?.replace(/:\d+$/, "") || null;
+  if (session !== pitTeams.session) { pitTeams.session = session; pitTeams.still = {}; clearPitTeams(); }
+  if (!fac || !src?.tracks?.cars) { if (pitTeams.group) clearPitTeams(); pitTeams.facility = fac; return; }
+  if (fac !== pitTeams.facility) { clearPitTeams(); pitTeams.facility = fac; }
+  const G = fac.userData.garages, c = world.center;
+  const pitIn = {}; for (const num of Object.keys(src.tracks.cars)) pitIn[num] = (src.tracker?.pits(num) || []).map((x) => x.ms);
+  const found = standstills(src.tracks.cars, ([X, Y]) => [X - c.x, -(Y - c.z)], G.project, [G.gStart, G.gEnd], pitIn);
+  if (src.isLive) mergeStandstills(pitTeams.still, found); else pitTeams.still = found;
+  const teams = allocate(G.slots, G.pitch, src.state?.DriverList || {}, workPositions(pitTeams.still, src.state?.DriverList || {}));
+  const key = allocationKey(teams);
+  if (key === pitTeams.key) return;
+  clearPitTeams();
+  pitTeams.key = key;
+  if (!teams.length) return;   // neutral garages
+  pitTeams.group = teamLayer(G, teams, src.state?.DriverList || {});
+  fac.add(pitTeams.group);
+}
+// development: the current allocation (teams, their garages and how each driver's place is known)
+function pitTeamsInfo() {
+  const g = pitTeams.group; let tris = 0; g?.traverse((o) => { if (o.isMesh) tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1); });
+  return { key: pitTeams.key, session: pitTeams.session, meshes: g ? g.children.length : 0, tris };
 }
 
 // Back to the generic surroundings, then load the real ones again with the current settings.
@@ -1442,6 +1480,8 @@ function frame(now) {
   thinFarTrees();
   world?.real?.stands?.update(camera.position);
   world?.real?.group.getObjectByName("buildings")?.userData.update?.(camera.position);
+  world?.real?.group.getObjectByName("facilities")?.userData.update?.(camera.position);
+  updatePitTeams();
   if (!devNoHud) paintHud();
   renderer.render(scene, camera);
   adaptResolution(now, dt);
@@ -1685,6 +1725,7 @@ window.Map3D = {
     return JSON.stringify({ info: r?.info, texture: img ? [img.width, img.height] : null });
   },
   // development: how many facility models stand in the current world, and what the renderer holds
+  pitTeams() { pitTeams.last = 0; updatePitTeams(); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|").map((x) => x.replace(/:[0-9,]+:/, " garages ").slice(0, 120)) }); },
   facilityState() {
     const g = world?.real?.group; let n = 0; g?.traverse((o) => { if (o.userData?.facility) n++; });
     return JSON.stringify({ facilities: n, info: world?.real?.info?.facilities, mem: renderer?.info.memory, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles });
