@@ -100,9 +100,9 @@ function initGeoSettings() {
   document.addEventListener("click", (e) => { if (!pop.hidden && !e.target.closest("#geo3dPop, #geo3dBtn")) { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); } });
   const change = (patch, rebuildGeo = true) => { saveGeoSettings({ ...geoSettings(), ...patch }); if (rebuildGeo) rebuild(); else applyLighting(); };
   document.querySelectorAll('input[name="geoProvider"]').forEach((r) => r.addEventListener("change", async () => {
-    if (r.value === "google" && !(await window.api.geo.google()).hasKey) {
-      const m = document.getElementById("geoKeyMsg"); m.textContent = "먼저 Google Maps API 키를 저장해 주세요."; m.classList.add("bad");
-      paint(); return;
+    if (r.value === "google") {
+      const m = document.getElementById("geoKeyMsg"), g = await window.api.geo.googleCheck();
+      if (!g.ok) { m.textContent = g.hasKey ? g.message : "먼저 Google Maps API 키를 저장해 주세요."; m.classList.add("bad"); paint(); return; }
     }
     change({ provider: r.value });
   }));
@@ -1107,7 +1107,14 @@ async function loadGeo(w) {
   const location = A.location?.();
   if (!location || !w.lap?.length) return;
   let provider = opts.provider;
-  if (provider === "google" && !(await window.api.geo.google()).hasKey) provider = "eox";
+  // (Google: checked with Google each time – a key deleted or the API switched off in the Cloud console falls
+  // back to the free imagery, with a word why, instead of a map with no imagery)
+  let googleNote = "";
+  if (provider === "google") {
+    const g = await window.api.geo.googleCheck();
+    if (job !== geoJob) return;
+    if (!g.ok) { provider = "eox"; saveGeoSettings({ ...geoSettings(), provider: "eox" }); googleNote = g.hasKey ? `${g.message} 무료 위성 사진으로 바꿨어요.` : ""; }
+  }
   const off = window.api.geo.onProgress((step) => { if (job === geoJob) geoStatus(`실제 지도 · ${step}…`); });
   try {
     geoStatus("실제 지도 · 준비 중…");
@@ -1139,6 +1146,7 @@ async function loadGeo(w) {
       window.api.geo.googleAttribution(built.info.zoom, b.n, b.s, b.e, b.w).then((t) => { const el = document.getElementById("geo3dGAttr"); if (el) el.textContent = t; });
     }
     const ci = data.circuit;
+    if (googleNote) { geoStatus(googleNote, true); setTimeout(() => job === geoJob && geoStatus(""), 10000); return; }
     geoStatus(`${ci ? `${ci.name} · ${ci.length.toLocaleString()}m · ${ci.opened}년 개장 · 첫 F1 ${ci.firstgp}년 · ` : ""}트랙 위치 오차 약 ${data.rms.toFixed(1)}m${data.sceneryError ? " · 건물 정보는 못 받았어요" : ""}`);
     setTimeout(() => job === geoJob && geoStatus(""), 6000);
   } catch (e) {

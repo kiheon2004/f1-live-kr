@@ -1192,7 +1192,7 @@
         if (!scene.ok) { toast(`위성 사진을 못 깔았어요: ${scene.reason}`, ""); return; }
         const mod = await import("./scenery.js");
         let geoOpts = {}; try { geoOpts = JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}"); } catch {}
-        const provider = geoOpts.provider === "google" && (await window.api.geo.google()).hasKey ? "google" : "eox";
+        const provider = geoOpts.provider === "google" && (await window.api.geo.googleCheck()).ok ? "google" : "eox";
         const g = await mod.buildGround2D(window.api, scene, lap, { provider });
         if (satKey === key) { sat2d = { ...g, provider }; drawMap(); }
       } catch (e) { toast(`위성 사진을 못 깔았어요 (${e.message})`, ""); }

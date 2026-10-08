@@ -20,7 +20,7 @@ class GoogleTiles {
   // Saves (or with an empty key, removes) the key after checking it works. Returns { ok, message }.
   async setKey(key) {
     key = String(key || "").trim();
-    this.session = null; this.tiles.clear();
+    this.session = null; this.tiles.clear(); this.checked = null;
     if (!key) { try { fs.unlinkSync(this.file); } catch {} return { ok: true, message: "API 키를 지웠어요." }; }
     try { await this.newSession(key); }
     catch (e) { return { ok: false, message: e.message }; }
@@ -29,6 +29,17 @@ class GoogleTiles {
     return { ok: true, message: "Google 위성 지도를 쓸 수 있어요." };
   }
   hasKey() { return !!this.getKey(); }
+  // Whether Google will serve tiles for the saved key right now: a fresh session, so a key deleted or an API
+  // switched off in the Cloud console since it was saved shows up. Kept for a minute. Returns { hasKey, ok, message }.
+  async check() {
+    if (!this.hasKey()) return { hasKey: false, ok: false, message: "저장된 Google Maps API 키가 없어요." };
+    if (this.checked && Date.now() - this.checked.at < 60e3) return this.checked.r;
+    let r;
+    try { await this.newSession(); r = { hasKey: true, ok: true, message: "" }; }
+    catch (e) { this.session = null; r = { hasKey: true, ok: false, message: e.message }; }
+    this.checked = { at: Date.now(), r };
+    return r;
+  }
 
   async newSession(key = this.getKey()) {
     if (!key) throw new Error("Google Maps API 키가 없어요");

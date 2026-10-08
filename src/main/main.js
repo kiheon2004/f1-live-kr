@@ -57,6 +57,7 @@ app.whenReady().then(() => {
   ipcMain.handle("geo:scene", (e, location, lap) => scenes.build(location, lap, (step) => { if (!e.sender.isDestroyed()) e.sender.send("geo:progress", step); }));
   ipcMain.handle("geo:tile", (_e, source, z, x, y) => (source === "google" ? google.tile(z, x, y) : geo.getTile(path.join(data, "cache"), source, z, x, y)));
   ipcMain.handle("geo:google", () => ({ hasKey: google.hasKey() }));
+  ipcMain.handle("geo:googleCheck", () => google.check());
   ipcMain.handle("geo:googleKey", (_e, key) => google.setKey(key));
   ipcMain.handle("geo:googleAttribution", (_e, zoom, n, s, eLon, w) => google.attribution(zoom, n, s, eLon, w).catch(() => "Google"));
   ipcMain.handle("live:start", () => { live.start(); });
