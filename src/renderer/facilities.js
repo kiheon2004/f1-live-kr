@@ -50,6 +50,81 @@ export const FACILITIES = [
     checked: "2026-10-08: trial (estimated height)",
   },
   {
+    id: "imola-box", name: "Autodromo Enzo e Dino Ferrari – corpo box", kind: "pit-building",
+    loc: ["Imola"], years: [2007, null],
+    status: "trial",
+    // the map's "Box" record by the pits (238 × 18 m; 3.2 m – one level's worth, not a measured height)
+    replaces: { names: /^Box$/, near: [44.344357, 11.717614], within: 40 },
+    builder: "pitBuilding",
+    params: {
+      // confirmed: 32 modular garages of 100 m² facing paddock 1 and the straight, ~250 m together; their roof is a
+      // terrace (for 5,500 people) – xzonextreme 2009, Tesori d'Italia 2019; the roof terrace and a canopy along
+      // the paddock side, red garage doors under a red / white band – photo 2018.
+      // estimated (photo): ~6.2 m to the terrace, the canopies' depth
+      garages: 32, height: 6.2, roofRail: 1.1,
+      balconies: [{ y: 5.0, depth: 4.5, side: "paddock", rail: false, thick: 0.4 }, { y: 5.0, depth: 2.5, rail: false, thick: 0.4 }],
+      plate: 0.5, overhang: { pit: 0.3, paddock: 0.3, end: 0.3 },
+      facade: { pit: "imolaBox", paddock: "imolaBox" }, roofTop: "#8e9196", fascia: "fasciaWhite",
+    },
+    sources: [
+      "https://xzonextreme.altervista.org/2009/06/circuiti-imola/ – 'I 32 nuovi box, autorimesse modulari di 100 mq ciascuna', ~250 m; the Terrazza roofs the boxes; Direzione Gara on 3 levels",
+      "https://www.tesoriditaliamagazine.it/2019/02/autodromo-enzo-e-dino-ferrari-di-imola/ – 32 box (previously 18); Tilke, completed September 2007",
+      "https://www.ilrestodelcarlino.it/imola/cronaca/autodromo-nuova-terrazza-dxaop99a (23.10.2024) – a building planned on the box roof terrace, first lot 2026",
+      "Photo: 'Paddock Autodromo Imola' (Danysan1, Wikimedia Commons, CC BY-SA 3.0, 2018)",
+    ],
+    checked: "2026-10-09: trial (height estimated from a photo; a building on the terrace is planned from 2026)",
+  },
+  {
+    id: "red-bull-ring-pits", name: "Red Bull Ring – Boxengebäude", kind: "pit-building",
+    loc: ["Spielberg"], years: [2011, null],
+    status: "trial",
+    // the map's two "Box" records along the pit lane (190 m + 117 m; heights only guessed: 8 m)
+    replaces: { names: /^Box$/, near: [47.220102, 14.764084], within: 220 },
+    builder: "pitBuilding",
+    params: {
+      // confirmed: an elongated building, workshop boxes on the ground floor with lift gates to the pit lane, VIP
+      // lounges on the 1st floor with inclined glazing and loggias, aluminium-glass facade – nextroom (Domenig &
+      // Wallner, 2011); 30 boxes – auto motor und sport (2025); the glazing leaning out over the pit lane under a
+      // white roof – photo 2021. estimated (photo): ~12 m to the roof, the glazing's lean, the roof's overhang.
+      // (the 2025/26 extension east and the 2027 roof terrace aren't in the map data: not modelled)
+      garages: 30, height: 12, slopedGlass: { y0: 5.8, y1: 10.4, lean: 2.6 },
+      plate: 0.9, overhang: { pit: 5, paddock: 1.5, end: 2 },
+      facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#e9ecee", fascia: "fasciaWhite",
+    },
+    sources: [
+      "https://www.nextroom.at/building.php?id=36412&inc=datenblatt – Domenig & Wallner 2011: Werkstättengebäude, EG boxes with lift gates to the pit lane, 1. OG VIP lounges with inclined glazing and loggias; aluminium-glass facade",
+      "https://www.auto-motor-und-sport.de/formel-1/umbau-red-bull-ring-spielberg-boxengebaeude/ – 30 boxes (2025), extension east",
+      "Photo: '2021 4 Hours of Red Bull Ring – Paddock' (United Autosports, Wikimedia Commons, CC BY-SA 2.0)",
+    ],
+    checked: "2026-10-09: trial (height and the glazing's lean estimated from a photo)",
+  },
+  {
+    id: "yas-marina-pits", name: "Yas Marina Circuit – pit building", kind: "pit-building",
+    loc: ["Yas Island", "Yas Marina", "Abu Dhabi"], years: [2009, null],
+    status: "trial",
+    // the map's pit building record (375 × 30 m, no name; height only guessed: 8 m) – the one at this point
+    replaces: { near: [24.469576, 54.605952], within: 20 },
+    builder: "pitBuilding",
+    params: {
+      // confirmed: 40 air-conditioned garages (published). seen in photos: garages under a canopy on the pit lane,
+      // glazed floors above (2021); from the paddock, two floors of windows in light stone-coloured walls behind the
+      // domed team buildings, a row of white peaked fabric canopies on the roof (2010).
+      // estimated (photos): ~14 m to the roof, the canopies' size and spacing
+      garages: 40, height: 14,
+      balconies: [{ y: 5.4, depth: 4, rail: false, thick: 0.5 }],
+      tents: { spacing: 25, peak: 9, lift: 1.5, cover: 0.9 },
+      plate: 0.7, overhang: { pit: 1, paddock: 1, end: 1 },
+      facade: { pit: "pitGlass", paddock: "yasPaddock" }, roofTop: "#c9c6bf", fascia: "fasciaWhite",
+    },
+    sources: [
+      "https://www.formula1.com/en/racing/2017/United_Arab_Emirates.html – 'the state-of-the-art pit building boasts 40 air-conditioned garages'",
+      "https://en.wikipedia.org/wiki/Yas_Marina_Circuit – 'a team building behind the pit building, Media Center, Dragster Track and VIP Tower'",
+      "https://www.cebarco.com.bh/project/yas-marina-circuit/ – pit building and paddock club, Tilke & Partners, December 2008",
+      "Photos (for comparison only): Alexander Yee, Flickr 4531657341 / 4532275554 (CC BY-NC-ND 2.0, 2010); 'Asian Le Mans Series 2021 – Race 4 – Pitlane exit before start' (Wikimedia Commons, CC BY-SA 2.0)",
+    ],
+    checked: "2026-10-09: trial (height and the roof canopies estimated from photos)",
+  },
+  {
     id: "silverstone-wing", name: "Silverstone Wing", kind: "pit-building",
     loc: ["Silverstone"], years: [2011, null],
     status: "permanent",
@@ -266,6 +341,23 @@ FACADES.pitStand = { width: (p) => p.garagePitch || 9, draw(g, w, h, lit) {
   }
   if (!lit) band(10.6, 11.4, "#f2f3f3");
 } };
+// Imola: dark grey garage block, red doors, a red / white band above them (photo, 2018)
+FACADES.imolaBox = { width: (p) => p.garagePitch || 6.6, draw(g, w, h, lit) {
+  g.fillStyle = lit ? "#000" : "#4b5056"; g.fillRect(0, 0, w, h);
+  if (lit) return;
+  const band = (y0, y1, col) => { g.fillStyle = col; g.fillRect(0, yPx(h, y1), w, yPx(h, y0) - yPx(h, y1)); };
+  g.fillStyle = "#c8102e"; g.fillRect(w * 0.14, yPx(h, 4.2), w * 0.72, yPx(h, 0) - yPx(h, 4.2));
+  g.fillStyle = "rgba(0,0,0,0.18)"; for (let y = 0.2; y < 4.2; y += 0.3) g.fillRect(w * 0.14, yPx(h, y), w * 0.72, 2);
+  band(4.6, 5.5, "#2f3337"); band(4.85, 5.0, "#c8102e"); band(5.05, 5.2, "#f2f2f2");
+  g.fillStyle = "rgba(255,255,255,0.08)"; g.fillRect(0, yPx(h, 4.6), 3, yPx(h, 0) - yPx(h, 4.6));
+} };
+// Yas Marina, paddock side: light stone-coloured walls with rows of windows (photo, 2010)
+FACADES.yasPaddock = { width: () => 7.5, draw(g, w, h, lit) {
+  g.fillStyle = lit ? "#000" : "#ddd2bd"; g.fillRect(0, 0, w, h);
+  if (!lit) { g.fillStyle = "#5a5f63"; g.fillRect(w * 0.1, yPx(h, 4.4), w * 0.8, yPx(h, 0) - yPx(h, 4.4)); }
+  for (const [y0, y1] of [[6.6, 8.6], [10.6, 12.6]]) glassBand(g, w, h, y0, y1, ["#4c6170", "#2a3842"], w / 2, 0, lit);
+  if (!lit) { g.fillStyle = "#ddd2bd"; g.fillRect(0, yPx(h, 12.6), w * 0.08, yPx(h, 6.6) - yPx(h, 12.6)); g.fillRect(w * 0.92, yPx(h, 12.6), w * 0.08, yPx(h, 6.6) - yPx(h, 12.6)); }
+} };
 function facadeTex(name, p, lit) {
   const F = FACADES[name];
   return canvasTex(`${name}:${lit ? "lit" : "day"}`, 256, 1024, (g, w, h) => F.draw(g, w, h, lit));
@@ -302,8 +394,10 @@ function pitBuilding(ctx, p) {
   let u = ax.u, v = ax.v;
   const toUV = ([x, z]) => [(x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]];
   // heights: the data's, except where it only guessed one and the facility's height is known
+  // (a height worked out from a number of floors – levels × 3.2 m in scene.js – is no measured height either)
+  const fromLevels = (b) => b.lv != null && Math.abs(b.h - b.lv * 3.2) < 0.06;
   let parts = recs.map((r) => {
-    const guessed = !!r.b.est && p.height;
+    const guessed = (!!r.b.est || fromLevels(r.b)) && p.height;
     return { ...r, uv: r.pts.map(toUV), min: r.b.min || 0, h: guessed ? p.height : r.b.h, rh: !guessed && r.b.roof && r.b.roof !== "flat" ? r.b.rh || 0 : 0, guessed };
   });
   const flip = () => { u = [-u[0], -u[1]]; v = [-v[0], -v[1]]; parts = parts.map((q) => ({ ...q, uv: q.uv.map(([a, b]) => [-a, -b]) })); };
@@ -424,15 +518,52 @@ function pitBuilding(ctx, p) {
     const y = roofY(e.u), A = P(e.u, e.a), B = P(e.u, e.b);
     F.poly("fascia", [[A[0], y - t, A[1]], [B[0], y - t, B[1]], [B[0], y, B[1]], [A[0], y, A[1]]], [[0, 0], [1, 0], [1, 1], [0, 1]], [u[0] * dir, 0, u[1] * dir]);
   }
-  // balconies on the pit side: slabs projecting from the facade, a balustrade along their edge
+  // balconies / canopies: slabs projecting from a facade (side "pit", the default, or "paddock"), with a balustrade
+  // along their edge unless rail: false (a canopy)
   for (const bc of p.balconies || []) {
+    const side = bc.side === "paddock" ? -1 : 1, sv = side * vTrack;
     for (let i = 0; i + 1 < roofSt.length; i++) {
       const a = roofSt[i], b = roofSt[i + 1], ya = baseAt(a.u) + bc.y, yb = baseAt(b.u) + bc.y;
-      const va = sideV(a, 1), vb = sideV(b, 1), fa = va + vTrack * bc.depth, fb = vb + vTrack * bc.depth;
-      const A0 = P(a.u, va), B0 = P(b.u, vb), A1 = P(a.u, fa), B1 = P(b.u, fb);
+      const va = sideV(a, side), vb = sideV(b, side), fa = va + sv * bc.depth, fb = vb + sv * bc.depth;
+      const A0 = P(a.u, va), B0 = P(b.u, vb), A1 = P(a.u, fa), B1 = P(b.u, fb), th = bc.thick || 0.35;
       F.poly("slab", [[A0[0], ya, A0[1]], [B0[0], yb, B0[1]], [B1[0], yb, B1[1]], [A1[0], ya, A1[1]]], null, [0, 1, 0]);
-      F.poly("slab", [[A0[0], ya - 0.35, A0[1]], [B0[0], yb - 0.35, B0[1]], [B1[0], yb - 0.35, B1[1]], [A1[0], ya - 0.35, A1[1]]], null, [0, -1, 0]);
-      F.poly("rail", [[A1[0], ya - 0.35, A1[1]], [B1[0], yb - 0.35, B1[1]], [B1[0], yb + 1.1, B1[1]], [A1[0], ya + 1.1, A1[1]]], [[0, 0], [1, 0], [1, 1], [0, 1]], outV(1));
+      F.poly("slab", [[A0[0], ya - th, A0[1]], [B0[0], yb - th, B0[1]], [B1[0], yb - th, B1[1]], [A1[0], ya - th, A1[1]]], null, [0, -1, 0]);
+      if (bc.rail === false) F.poly("slab", [[A1[0], ya - th, A1[1]], [B1[0], yb - th, B1[1]], [B1[0], yb, B1[1]], [A1[0], ya, A1[1]]], null, outV(side));
+      else F.poly("rail", [[A1[0], ya - th, A1[1]], [B1[0], yb - th, B1[1]], [B1[0], yb + 1.1, B1[1]], [A1[0], ya + 1.1, A1[1]]], [[0, 0], [1, 0], [1, 1], [0, 1]], outV(side));
+    }
+  }
+  // a railing round the roof's edge (a roof terrace)
+  if (p.roofRail) {
+    for (let i = 0; i + 1 < roofSt.length; i++) {
+      const a = roofSt[i], b = roofSt[i + 1];
+      for (const side of [1, -1]) {
+        const ex = side > 0 ? ov.pit : ov.paddock, A = P(a.u, sideV(a, side) + side * vTrack * ex), B = P(b.u, sideV(b, side) + side * vTrack * ex), ya = roofAt(a.u), yb = roofAt(b.u);
+        F.poly("rail", [[A[0], ya, A[1]], [B[0], yb, B[1]], [B[0], yb + p.roofRail, B[1]], [A[0], ya + p.roofRail, A[1]]], [[0, 0], [1, 0], [1, 1], [0, 1]], outV(side));
+      }
+    }
+  }
+  // glazing leaning out over the pit lane (Red Bull Ring: the VIP lounges' inclined glass), y0 → y1, `lean` m out
+  if (p.slopedGlass) {
+    const sg = p.slopedGlass;
+    for (let i = 0; i + 1 < roofSt.length; i++) {
+      const a = roofSt[i], b = roofSt[i + 1], va = sideV(a, 1), vb = sideV(b, 1);
+      const A0 = P(a.u, va), B0 = P(b.u, vb), A1 = P(a.u, va + vTrack * sg.lean), B1 = P(b.u, vb + vTrack * sg.lean);
+      const ga = baseAt(a.u), gb = baseAt(b.u), u0 = (a.u - uRoot) / pitch, u1 = (b.u - uRoot) / pitch;
+      F.poly("slopedGlass", [[A0[0], ga + sg.y0, A0[1]], [B0[0], gb + sg.y0, B0[1]], [B1[0], gb + sg.y1, B1[1]], [A1[0], ga + sg.y1, A1[1]]], [[u0, 0], [u1, 0], [u1, 1], [u0, 1]], [v[0] * vTrack, 0.6, v[1] * vTrack]);
+      F.poly("slab", [[A1[0], ga + sg.y1, A1[1]], [B1[0], gb + sg.y1, B1[1]], [B0[0], gb + sg.y1, B0[1]], [A0[0], ga + sg.y1, A0[1]]], null, [0, 1, 0]);
+    }
+  }
+  // peaked fabric canopies along the roof (Yas Marina): four-sided tents, one every `spacing` m
+  if (p.tents) {
+    const tn = p.tents, run = (roofSt[roofSt.length - 1].u - roofSt[0].u), n = Math.max(1, Math.round(run / tn.spacing)), w = run / n;
+    for (let k = 0; k < n; k++) {
+      const uc = roofSt[0].u + w * (k + 0.5), st = roofSt.reduce((a, s2) => (Math.abs(s2.u - uc) < Math.abs(a.u - uc) ? s2 : a));
+      const v0 = st.v0 + (st.v1 - st.v0) * (1 - (tn.cover || 0.9)) / 2, v1 = st.v1 - (st.v1 - st.v0) * (1 - (tn.cover || 0.9)) / 2, vc = (v0 + v1) / 2;
+      const y0 = roofAt(uc) + (tn.lift || 2.5), apex = [...P(uc, vc)], top = [apex[0], y0 + tn.peak, apex[1]];
+      const C = [P(uc - w / 2 + 0.3, v0), P(uc + w / 2 - 0.3, v0), P(uc + w / 2 - 0.3, v1), P(uc - w / 2 + 0.3, v1)].map(([x, z]) => [x, y0, z]);
+      for (let e = 0; e < 4; e++) { const A = C[e], B = C[(e + 1) % 4], mx = (A[0] + B[0]) / 2 - apex[0], mz = (A[2] + B[2]) / 2 - apex[1]; F.poly("tent", [A, B, top], [[0, 0], [1, 0], [0.5, 1]], [mx, 1, mz]); }   // (fabric: double-sided)
+      // its mast
+      const [mx0, mz0] = P(uc, vc); F.poly("column", [[mx0 - 0.2, roofAt(uc), mz0], [mx0 + 0.2, roofAt(uc), mz0], [mx0 + 0.2, top[1], mz0], [mx0 - 0.2, top[1], mz0]], null, [u[0], 0, u[1]]);
     }
   }
   // columns under the roof's pit-side edge (from the top of the garages up)
@@ -502,7 +633,7 @@ function pitBuilding(ctx, p) {
   return { meshes, footprint, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
-      heightFrom: parts.some((q) => q.guessed) ? "facility (the data only guessed it)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
+      heightFrom: parts.some((q) => q.guessed) ? "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
 }
 
 // Materials of the builders (per model: they're cheap; their textures are shared)
@@ -528,6 +659,9 @@ function facilityMaterial(key, p) {
     // (no environment map in the scene: a strongly metallic surface would show black – brushed, light silver)
     case "pod": return std({ color: "#d7dce0", roughness: 0.35, metalness: 0.3 });
     case "podWindow": return lit(std({ color: "#1f2c34", roughness: 0.1, metalness: 0.3, emissive: "#ffd9a0" }), 0, 0.8);
+    // (light and only a little metallic: with no environment map a mirror-like glass would show near black)
+    case "slopedGlass": return lit(std({ color: "#9fbcc8", roughness: 0.25, metalness: 0.1, emissive: "#ffd9a0", side: THREE.DoubleSide }), 0, 0.6);
+    case "tent": return std({ color: "#f4f3ef", roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
     default: return std({ color: "#cccccc" });
   }
 }
@@ -622,11 +756,13 @@ function placeModel(root, m, gf, groundAt) {
 // ---------- the facilities of one circuit ----------
 // The map records a facility stands for: named ones (and, for a model file, within `within` m of its anchor);
 // plus unnamed parts whose centre lies inside the built footprint (no doubles left standing in it).
+// replaces: { names (regex), near: [lat, lon] and within (m) – only records that close to the point (the point inside
+// the outline, or within that many metres of its edge); with near and no names, the records at the point }.
 export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ = null) {
   const r = spec.replaces || {};
-  // (within: the anchor inside the outline or within that many metres of its edge)
-  const reach = (b) => { const pts = ring(b, gf); return inPoly(anchorXZ[0], anchorXZ[1], pts) || near(anchorXZ[0], anchorXZ[1], pts, r.within); };
-  const named = buildings.filter((b) => b.kind !== "grandstand" && r.names?.test(b.name || "") && (!r.within || !anchorXZ || reach(b)));
+  if (r.near) anchorXZ = gf.fromLL(r.near[0], r.near[1]);
+  const reach = (b) => { const pts = ring(b, gf); return inPoly(anchorXZ[0], anchorXZ[1], pts) || near(anchorXZ[0], anchorXZ[1], pts, r.within || 0); };
+  const named = buildings.filter((b) => b.kind !== "grandstand" && (r.names ? r.names.test(b.name || "") : !!r.near) && (!(r.within || r.near) || !anchorXZ || reach(b)));
   if (!footprint) return named;
   const set = new Set(named);
   for (const b of buildings) {

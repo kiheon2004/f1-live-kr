@@ -234,7 +234,7 @@ test("pit builder: follows the ground along a slope, uses the facility's height 
   for (const dir of [1, -1]) {   // cars running towards +x, then towards −x: the pod goes to the upstream end each time
     const r = await F.buildFacilities({ scene, gf, groundAt: (x) => ground(x), location: "Slope", toTrack: (x, z) => [0, -1], alongTrack: () => [dir, 0], registry: [spec] });
     const i = r.info[0];
-    assert.strictEqual(i.heightFrom, "facility (the data only guessed it)");
+    assert.strictEqual(i.heightFrom, "facility (the data only guessed it, or counted floors)");
     assert.ok(Math.abs(i.groundFall - 9.8) < 0.3, `ground fall ${i.groundFall}`);
     assert.strictEqual(i.profile[0][1], 16.5);
     const pod = r.group.getObjectByName("pod");
@@ -258,7 +258,9 @@ test("registry: every facility says where it is, what it replaces, how it's made
   for (const f of FACILITIES) {
     assert.ok(/^[a-z0-9-]+$/.test(f.id) && !ids.has(f.id), f.id); ids.add(f.id);
     assert.ok(Array.isArray(f.loc) && f.loc.length, f.id);
-    assert.ok(f.replaces?.names instanceof RegExp, f.id);
+    // what it replaces: by name, or by position (a point inside the record, or within some metres of it)
+    assert.ok(f.replaces?.names instanceof RegExp || (Array.isArray(f.replaces?.near) && f.replaces.near.length === 2), f.id);
+    if (!f.replaces.names) assert.ok(!f.replaces.within || f.replaces.within <= 60, `${f.id}: a position-only selection stays tight`);
     assert.ok(f.builder || f.model?.file, f.id);
     assert.ok(["trial", "permanent"].includes(f.status), f.id);
     assert.ok(Array.isArray(f.sources) && f.sources.length >= 1, `${f.id}: sources`);
@@ -268,4 +270,62 @@ test("registry: every facility says where it is, what it replaces, how it's made
   }
   assert.strictEqual(FACILITIES.find((f) => f.id === "silverstone-wing").status, "permanent");
   assert.strictEqual(FACILITIES.find((f) => f.id === "suzuka-pit-building").status, "trial");
+});
+
+test("pit builder: a height counted from floors gives way to the facility's; a measured one doesn't", async () => {
+  const F = await load();
+  const mk = (b) => ({ location: "T", buildings: [{ name: "Box", kind: "block", cls: "garage", part: 0, pts: rect(-120, 0, 120, 18), min: 0, ...b }] });
+  const spec = { id: "t", loc: ["T"], status: "trial", replaces: { names: /^Box$/ }, builder: "pitBuilding",
+    params: { garages: 32, height: 6.2, plate: 0.5, overhang: { pit: 0.3, paddock: 0.3, end: 0.3 }, facade: { pit: "imolaBox", paddock: "imolaBox" } } };
+  const run = (scene) => F.buildFacilities({ scene, gf, groundAt: () => 0, location: "T", toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec] });
+  const counted = await run(mk({ h: 3.2, lv: 1, est: 0 }));
+  assert.strictEqual(counted.info[0].profile[0][1], 6.2);
+  const measured = await run(mk({ h: 3.2, lv: null, est: 0 }));
+  assert.strictEqual(measured.info[0].profile[0][1], 3.2);
+  assert.strictEqual(measured.info[0].heightFrom, "data");
+  assert.ok(Math.abs(counted.info[0].garagePitch - 240 / 32) < 0.01);
+});
+
+test("facility selected by position: only the record at that point, not a same-shaped neighbour", async () => {
+  const F = await load();
+  const A = { name: null, kind: "block", cls: "yes", est: 1, pts: rect(0, 0, 300, 30), min: 0, h: 8 };
+  const B = { name: null, kind: "block", cls: "yes", est: 1, pts: rect(0, 60, 300, 90), min: 0, h: 8 };   // 30 m away
+  const ll = (X, Y) => [LAT0 + Y / M_LAT, LON0 + X / M_LON];
+  const spec = { id: "p", loc: ["T"], status: "trial", replaces: { near: ll(150, 15), within: 20 }, builder: "pitBuilding",
+    params: { garages: 30, height: 14, plate: 0.7, overhang: { pit: 1, paddock: 1, end: 1 }, facade: { pit: "pitGlass", paddock: "yasPaddock" } } };
+  const scene = { location: "T", buildings: [A, B] };
+  const r = await F.buildFacilities({ scene, gf, groundAt: () => 0, location: "T", toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec] });
+  assert.strictEqual(r.info[0].how, "builder");
+  assert.deepStrictEqual(scene.buildings.map((b) => r.skip(b)), [true, false]);
+});
+
+test("pit builder: paddock-side canopy, roof railing, sloped glazing and roof tents stand where they should", async () => {
+  const F = await load();
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const scene = { location: "T", buildings: [{ name: "Pits", kind: "block", cls: "yes", est: 1, pts: rect(-150, 0, 150, 30), min: 0, h: 8 }] };
+  const spec = { id: "f", loc: ["T"], status: "trial", replaces: { names: /^Pits$/ }, builder: "pitBuilding",
+    params: { garages: 30, height: 12, roofRail: 1.1, slopedGlass: { y0: 5.8, y1: 10.4, lean: 2.6 }, tents: { spacing: 25, peak: 7, lift: 1.5 },
+      balconies: [{ y: 5, depth: 4.5, side: "paddock", rail: false }], plate: 0.8, overhang: { pit: 5, paddock: 1, end: 2 }, facade: { pit: "pitGlass", paddock: "paddockPanels" } } };
+  // the track towards scene −z: the building spans z −30..0, the pit side is at z = −30
+  const r = await F.buildFacilities({ scene, gf, groundAt: () => 0, location: "T", toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec] });
+  const box = (name) => new THREE.Box3().setFromObject(r.group.getObjectByName(name));
+  const glass = box("slopedGlass");
+  assert.ok(glass.min.z < -32 && glass.max.y <= 10.4 + 1e-6 && glass.min.y >= 5.8 - 1e-6, "glazing leans out over the pit lane");
+  const tents = box("tent");
+  assert.ok(tents.max.y > 12 + 7 && tents.max.y < 12 + 1.5 + 7 + 0.01, `tents peak ${tents.max.y}`);
+  const rail = box("rail");
+  assert.ok(Math.abs(rail.max.y - 13.1) < 0.01, "railing 1.1 m over the roof");
+  const slab = box("slab");
+  assert.ok(slab.max.z > 4, "the canopy reaches out on the paddock side (z > 0)");
+  // 300 m / 25 m: twelve tents
+  const tg = r.group.getObjectByName("tent").geometry; assert.strictEqual(tg.attributes.position.count / 3, 12 * 4);
+});
+
+test("buildings: a guessed-height sliver (a line mapped as an area) is no building; a thin piece with a real height stays", async () => {
+  const { isSliver } = await import("../src/renderer/buildings.js");
+  const line = [[-171, 25], [96, 24], [118, 21], [280, -15], [280, -16], [118, 20], [96, 23], [-171, 26]];   // Imola's, roughly
+  assert.strictEqual(isSliver({ est: 1 }, line), true);
+  assert.strictEqual(isSliver({ est: 0 }, line), false, "a real height: kept (a tile-cut piece)");
+  assert.strictEqual(isSliver({ est: 1 }, [[0, 0], [20, 0], [20, 1], [0, 1]]), false, "short: a shed");
+  assert.strictEqual(isSliver({ est: 1 }, [[0, 0], [100, 0], [100, 8], [0, 8]]), false, "8 m wide: a building");
 });

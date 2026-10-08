@@ -399,6 +399,17 @@ export function mergeSameOutline(buildings) {
   }
   return { merged, twice };
 }
+// A "building" no wider than a wall (average width under 2 m) over more than 30 m, whose height the data only guessed:
+// a line mapped as an area (Imola's pit wall canopy edge: 456 m × 1.2 m, drawn as a 15 m wall with windows across the
+// pit lane), not a building. Thin pieces with a real height stay – they're often the edge of a building cut by a
+// map tile, and fit against its other piece.
+export function isSliver(b, pts) {
+  if (!b.est) return false;
+  let A = 0, P = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { A += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); P += Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]); }
+  const len = P / 2;
+  return len > 30 && Math.abs(A / 2) / len < 2;
+}
 export { obbDir, turned, darkFloor };
 
 // ---------- the mesh ----------
@@ -634,6 +645,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) continue;
+    if (isSliver(b, pts)) { dropped++; continue; }
     if (inStand) { let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } if (inStand(cx / pts.length, cz / pts.length)) { dropped++; continue; } }
     if (track && !(b.min >= 5)) {
       const fixed = track.clearPolygon(pts);
