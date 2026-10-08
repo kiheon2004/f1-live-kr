@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("api", {
     tile: (source, z, x, y) => ipcRenderer.invoke("geo:tile", source, z, x, y),
     google: () => ipcRenderer.invoke("geo:google"),
     googleCheck: () => ipcRenderer.invoke("geo:googleCheck"),
+    model: (file) => ipcRenderer.invoke("geo:model", file),
     setGoogleKey: (key) => ipcRenderer.invoke("geo:googleKey", key),
     googleAttribution: (zoom, n, s, e, w) => ipcRenderer.invoke("geo:googleAttribution", zoom, n, s, e, w),
     onProgress: listen("geo:progress"),

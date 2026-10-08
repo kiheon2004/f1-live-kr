@@ -12,6 +12,7 @@ import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.j
 import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
 import { buildLandmarks } from "./landmarks.js";
+import { buildFacilities, combine } from "./facilities.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
 const DEM_ZOOM = 14;
@@ -586,7 +587,8 @@ function barriersMesh(lines, gf, heightAt) {
 
 // ---------- the whole thing ----------
 // world: { samples, grid, center, box, n } from map3d; nearestTrack(x, z) → [sample, dist].
-// opts: { provider: "eox" | "google", buildings, trees, night }
+// opts: { provider: "eox" | "google", buildings, trees, night, facilities (trial facility models on), year,
+//   isCurrent() → false once this build's world is gone (a facility model still loading is then dropped) }
 export async function buildScenery(api, scene, world, opts, onStep) {
   const c = world.center, gf = geoFrame(scene, c);
   const box = world.box;
@@ -763,6 +765,13 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     onStep?.("건물 세우는 중");
     const toTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); if (!s) return [1, 0]; const dx = s.p.x - x, dz = s.p.z - z, l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
     lm = buildLandmarks({ scene, gf, groundAt, location: scene.location, toTrack });
+    // the circuit's own facilities (facilities.js): models of the real buildings, replacing their map records
+    // (the way the cars run past a point: the lap line's direction there)
+    const alongTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); return s?.tan ? [s.tan.x, s.tan.z] : [1, 0]; };
+    const fac = await buildFacilities({ scene, gf, groundAt, location: scene.location, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false,
+      readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
+    // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
+    lm = combine(lm, fac);
     if (lm.group) group.add(lm.group);
     bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm }, corridor, inStand);
     if (bld) group.add(bld);
@@ -816,13 +825,15 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   return {
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
-    occluders: (bld ? bld.children : []).concat(stands ? [stands.structure] : []),
+    // (the camera's line-of-sight test isn't recursive: the facilities' meshes themselves)
+    occluders: (bld ? bld.children : []).concat(stands ? [stands.structure] : [], (() => { const out = []; lm?.group?.getObjectByName("facilities")?.traverse((o) => { if (o.isMesh) out.push(o); }); return out; })()),
     satAt: (x, z) => { const px = groundInfo.pixels(), W = ground.canvas.width, i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); if (i < 0 || j < 0 || i >= W || j >= ground.canvas.height) return null; const o = (j * W + i) * 4; return [px[o], px[o + 1], px[o + 2]]; },
     isSea: seaLevel != null ? isSea : null, landAt: seaR ? (x, z) => seaR.landAt(x, z) : null,
+    geo: gf,   // the frame's maps (F1 metres / lat-lon ↔ scene), for placing things by their real position
     landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
     info: { tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped } : null,
-      trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, region: bld?.userData.region,
+      trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,
   };

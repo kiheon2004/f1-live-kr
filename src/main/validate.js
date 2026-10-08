@@ -42,4 +42,7 @@ function trustedSender(frame, win, pageUrl) {
   return a != null && a === norm(pageUrl);
 }
 
-module.exports = { tileArgs, inside, year, circuitKey, text, sessionPath, externalUrl, trustedSender };
+// a facility model file name (src/data/models): "silverstone-wing.glb"
+const modelFile = (v) => { if (typeof v !== "string" || !/^[a-z0-9][a-z0-9_-]{0,80}\.glb$/.test(v)) throw new Error("bad model file"); return v; };
+
+module.exports = { modelFile, tileArgs, inside, year, circuitKey, text, sessionPath, externalUrl, trustedSender };

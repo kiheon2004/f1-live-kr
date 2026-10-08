@@ -1313,6 +1313,7 @@
       return gridOk(saved) ? saved : null;
     },
     location: () => src?.state.SessionInfo?.Meeting?.Location || (mode === "replay" ? replayInfo?.location : null),
+    sessionYear: () => +(src?.state.SessionInfo?.Path || (mode === "replay" ? replayInfo?.path : "") || "").slice(0, 4) || null,
     sessionHour: () => { const m = /T(\d\d):(\d\d)/.exec(src?.state.SessionInfo?.StartDate || (mode === "replay" ? replayInfo?.start : "") || ""); return m ? +m[1] + +m[2] / 60 : null; },
     sourceKey: () => (mode === "replay" ? `replay:${replayInfo?.path || ""}` : `live:${live.state.SessionInfo?.Key || ""}:${liveShape().length}`),
     trackPoints: () => (mode === "replay" ? (replay ? replay.lapShape() || replayFallbackLap() : []) : liveShape()),

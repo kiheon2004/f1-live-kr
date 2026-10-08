@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src https://livetiming.formula1.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; media-src https://livetiming.formula1.com">
 <title>라이브 타이밍 KR</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -130,6 +130,7 @@
             <label><input type="checkbox" id="geoBuildings"> 건물</label>
             <label><input type="checkbox" id="geoTrees"> 나무</label>
             <label title="해의 실제 위치(세션 시각·서킷 좌표)로 그림자를 그려요"><input type="checkbox" id="geoShadows"> 그림자</label>
+            <label title="피트 빌딩 같은 서킷 시설을 실제 모습(공개 자료·사진 기준)으로 그려요. 끄면 지도 데이터의 건물로 돌아가요(시험 중인 시설만)."><input type="checkbox" id="geoFacilities"> 정밀 시설</label>
             <label>밤 경기 <select id="geoNight"><option value="auto">자동</option><option value="on">밤</option><option value="off">낮</option></select></label>
           </fieldset>
           <p class="muted tiny">지도 출처: <span id="geo3dCredits">© OpenStreetMap 기여자 · Sentinel-2 cloudless – EOX (Copernicus 2023) · 지형 Mapzen/AWS</span></p>

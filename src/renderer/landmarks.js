@@ -5,7 +5,7 @@
 //   Abu Dhabi: W hotel's LED gridshell over the track, Ferrari World's red roof
 //   Bahrain: Sakhir Tower (VIP tower with its flared top)       Austin: COTA observation tower (77 m, red veil)
 //   Miami: Hard Rock Stadium (bowl, canopy, four masts)
-// (Silverstone's Wing needs nothing: Overture maps it in detail as parts with their heights.)
+// (Circuit facilities – Silverstone's Wing, Suzuka's pit building – are in facilities.js.)
 import * as THREE from "./vendor/three.module.js";
 
 const polyArea = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return a / 2; };

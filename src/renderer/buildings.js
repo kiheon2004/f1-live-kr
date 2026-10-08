@@ -331,14 +331,14 @@ function styleOf(b, area, H, lu, region, r) {
   else if (/stone|sandstone|limestone|marble/.test(mat)) { s.layer = LAYER.PUNCHED; s.tint = pick(["#e2d6bc", "#d6c8a8", "#cfc2a6"]); }
   else if (/plaster|stucco/.test(mat)) { s.layer = region === "med" ? LAYER.STUCCO : LAYER.PUNCHED; }
   else if (/concrete/.test(mat) && s.layer === LAYER.STUCCO) s.layer = LAYER.PUNCHED;
-  if (/^#[0-9a-f]{6}$/i.test(b.colour || "")) s.tint = b.colour;
+  if (/^#[0-9a-f]{6}$/i.test(b.colour || "")) s.tint = darkFloor(b.colour);
   const rm = String(b.rmat || "").toLowerCase();
   if (/tile/.test(rm)) s.roofLayer = region === "japan" || region === "china" ? LAYER.R_JTILE : LAYER.R_TERRACOTTA;
   else if (/slate/.test(rm)) s.roofLayer = LAYER.R_SLATE;
   else if (/metal|tin|copper|zinc/.test(rm)) s.roofLayer = LAYER.R_METAL;
   else if (/shingle|asphalt/.test(rm)) s.roofLayer = LAYER.R_SHINGLE;
   else if (/concrete|gravel|tar|roof_tiles/.test(rm)) s.roofLayer = LAYER.R_FLAT;
-  if (/^#[0-9a-f]{6}$/i.test(b.roofColour || "")) s.roofTint = b.roofColour;
+  if (/^#[0-9a-f]{6}$/i.test(b.roofColour || "")) s.roofTint = darkFloor(b.roofColour);
   const tag = String(b.roof || "").toLowerCase().replace(/-/g, "_");
   const MAP = { gabled: "gabled", hipped: "hipped", half_hipped: "hipped", pyramidal: "pyramidal", skillion: "skillion", lean_to: "skillion", dome: "dome", onion: "onion", round: "round", gambrel: "gambrel", mansard: "mansard", saltbox: "gabled", flat: "flat", cone: "pyramidal", side_hipped: "hipped" };
   if (MAP[tag]) {
@@ -364,9 +364,42 @@ function obb(pts, dirDeg = null) {
   for (const [x, z] of pts) { const a = (x - cx) * u[0] + (z - cz) * u[1], b = (x - cx) * v[0] + (z - cz) * v[1]; u0 = Math.min(u0, a); u1 = Math.max(u1, a); v0 = Math.min(v0, b); v1 = Math.max(v1, b); }
   return u1 - u0 >= v1 - v0 ? { c: [cx, cz], u, v, u0, u1, v0, v1 } : { c: [cx, cz], u: v, v: [-u[0], -u[1]], u0: v0, u1: v1, v0: -u1, v1: -u0 };
 }
+// the box laid along a roof's direction (roof:direction – where the roof faces, down its slope – as a unit vector
+// d in scene x, z): the ridge runs across d (u), the roof rises against d (v), so a skillion's high side is uphill
+function obbDir(pts, d) {
+  let cx = 0, cz = 0;
+  for (const [x, z] of pts) { cx += x; cz += z; }
+  cx /= pts.length; cz /= pts.length;
+  const u = [-d[1], d[0]], v = [-d[0], -d[1]];
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (const [x, z] of pts) { const a = (x - cx) * u[0] + (z - cz) * u[1], b = (x - cx) * v[0] + (z - cz) * v[1]; u0 = Math.min(u0, a); u1 = Math.max(u1, a); v0 = Math.min(v0, b); v1 = Math.max(v1, b); }
+  return { c: [cx, cz], u, v, u0, u1, v0, v1 };
+}
+// the box turned a quarter (roof:orientation=across: the ridge across the long side)
+const turned = (o) => ({ c: o.c, u: o.v, v: [-o.u[0], -o.u[1]], u0: o.v0, u1: o.v1, v0: -o.u1, v1: -o.u0 });
+// A colour from the data that's (nearly) black – often a placeholder, and no real facade or roof is: a dark charcoal
+const darkFloor = (hex) => { const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return Math.max(r, g, b) < 0x30 ? "#3a3e42" : hex; };
 const at = (o, a, b) => [o.c[0] + o.u[0] * a + o.v[0] * b, o.c[1] + o.u[1] * a + o.v[1] * b];
 // a polygon shrunk towards its centre (podium → tower, crowns); fine for the convex-ish footprints it's used on
 function shrink(pts, k) { let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } cx /= pts.length; cz /= pts.length; return pts.map(([x, z]) => [cx + (x - cx) * k, cz + (z - cz) * k]); }
+
+// Records on the very same outline whose height ranges overlap → { merged: first record → one record spanning
+// both, twice: the records folded into it }. Stacked records (one above the other) are left as they are.
+export function mergeSameOutline(buildings) {
+  const sameOutline = new Map(), merged = new Map(), twice = new Set();
+  for (const b of buildings) {
+    if (b.kind === "grandstand") continue;
+    const k = JSON.stringify(b.pts), a = sameOutline.get(k);
+    if (!a) { sameOutline.set(k, b); continue; }
+    const m = merged.get(a) || a, lo = Math.max(m.min || 0, b.min || 0), hi = Math.min(m.h, b.h);
+    if (hi <= lo + 0.1) continue;
+    const top = b.h > m.h ? b : m;
+    merged.set(a, { ...m, min: Math.min(m.min || 0, b.min || 0), h: top.h, roof: top.roof, rh: top.rh, rd: top.rd, ro: top.ro, colour: m.colour || b.colour, roofColour: top.roofColour || m.roofColour, name: m.name || b.name, est: m.est && b.est ? 1 : 0 });
+    twice.add(b);
+  }
+  return { merged, twice };
+}
+export { obbDir, turned, darkFloor };
 
 // ---------- the mesh ----------
 // scene: fitted scene; gf: geo frame; groundAt(x, z); track: trackCorridor (clearPolygon); inStand(x, z);
@@ -585,10 +618,19 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     return y1 + par;
   }
 
+  // Parts on the very same outline whose heights overlap (the data has the odd building twice, e.g. a podium part
+  // and a full-height part): one building spanning both – two would stand in each other with flickering walls.
+  const { merged, twice } = mergeSameOutline(scene.buildings);
+  // north and east in scene axes (for roof directions, which are compass bearings)
+  const north = (() => { const [la, lo] = scene.center || [0, 0], [x0, z0] = gf.fromLL(la, lo), [x1, z1] = gf.fromLL(la + 0.001, lo), l = Math.hypot(x1 - x0, z1 - z0) || 1; return [(x1 - x0) / l, (z1 - z0) / l]; })();
+  const compass = (deg) => { const r = (deg * Math.PI) / 180, E = [-north[1], north[0]]; return [north[0] * Math.cos(r) + E[0] * Math.sin(r), north[1] * Math.cos(r) + E[1] * Math.sin(r)]; };
+
   let dropped = 0, moved = 0, count = 0;
-  for (const b of scene.buildings) {
-    if (b.kind === "grandstand") continue;   // stands.js builds these, with their seats
-    if (opts.landmarks?.skip(b)) continue;   // modelled as the real building (landmarks.js)
+  for (const b0 of scene.buildings) {
+    if (b0.kind === "grandstand") continue;   // stands.js builds these, with their seats
+    if (opts.landmarks?.skip(b0)) continue;   // modelled as the real building (landmarks.js, facilities.js)
+    if (twice.has(b0)) continue;              // (merged into the other record on its outline)
+    const b = merged.get(b0) || b0;
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) continue;
@@ -613,12 +655,14 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     if (b.est) H *= 0.75 + r() * 0.6;
     if (b.est && area > 300 && H < 9) H = Math.max(H, 6 + Math.floor(r() * 4) * 3.1);
     const st = styleOf(b, area, H, luAt(gx, gz), region, r);
-    if (opts.landmarks?.restyle(b)?.glass) { st.layer = H > 60 ? LAYER.HOTEL : LAYER.GLASS_BLUE; st.tint = "#f2f2ee"; st.roof = "flat"; st.plant = false; st.crown = false; st.podium = false; }
+    if (opts.landmarks?.restyle(b0)?.glass) { st.layer = H > 60 ? LAYER.HOTEL : LAYER.GLASS_BLUE; st.tint = "#f2f2ee"; st.roof = "flat"; st.plant = false; st.crown = false; st.podium = false; }
     if (b.lv && !b.est) st.storey = Math.max(2.6, Math.min(6, (H - (st.roof !== "flat" && b.rh ? b.rh : 0)) / b.lv));
     st.rh = b.rh || null;
     // the walls stop below a pitched roof's height when the total height is tagged
     const pitchedRoof = !["flat", "dome", "onion"].includes(st.roof);
-    const o = obb(pts), lenU = o.u1 - o.u0, lenV = o.v1 - o.v0, rect = area / Math.max(1, lenU * lenV);
+    const o0 = obb(pts), lenU = o0.u1 - o0.u0, lenV = o0.v1 - o0.v0, rect = area / Math.max(1, lenU * lenV);
+    // a pitched roof laid as the data says: its direction (roof:direction), or across the building (roof:orientation)
+    const o = pitchedRoof && Number.isFinite(b.rd) ? obbDir(pts, compass(b.rd)) : pitchedRoof && /across/i.test(b.ro || "") ? turned(o0) : o0;
     let roof = st.roof;
     if (pitchedRoof && roof !== "pyramidal" && (rect < 0.72 || area > 4000)) roof = rect > 0.55 && area < 900 ? "pyramidal" : "flat";
     if (roof === "flat" && pitchedRoof) { st.roofLayer = st.roofLayer === LAYER.R_METAL ? LAYER.R_METAL : LAYER.R_FLAT; st.parapet = st.parapet || 0.6; }

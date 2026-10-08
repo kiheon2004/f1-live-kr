@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell, Notification, powerMonitor } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
 const { Archive } = require("./archive");
 const { getSchedule } = require("./schedule");
 const { LiveClient } = require("./live");
@@ -76,6 +77,15 @@ app.whenReady().then(() => {
     if (source === "google") return google.tile(z, x, y);
     if (source !== "eox" && source !== "terrain") throw new Error("unknown tile source");
     return geo.getTile(path.join(data, "cache"), source, z, x, y);
+  });
+  // facility models (facilities.js): self-contained GLB files shipped in src/data/models (also inside app.asar)
+  const MODELS = path.join(__dirname, "..", "data", "models");
+  handle("geo:model", async (_e, file) => {
+    const p = V.inside(MODELS, V.modelFile(file));
+    const st = await fs.promises.stat(p).catch(() => null);
+    if (!st) throw new Error("모델 파일이 없어요: " + file);
+    if (st.size > 64 * 1024 * 1024) throw new Error("모델 파일이 너무 커요");
+    return fs.promises.readFile(p);
   });
   handle("geo:google", () => ({ hasKey: google.hasKey() }));
   handle("geo:googleCheck", () => google.check());

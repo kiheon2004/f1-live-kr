@@ -86,6 +86,7 @@ function initGeoSettings() {
     document.getElementById("geoBuildings").checked = o.buildings !== false;
     document.getElementById("geoTrees").checked = o.trees !== false;
     document.getElementById("geoShadows").checked = o.shadows !== false;
+    document.getElementById("geoFacilities").checked = o.facilities !== false;
     document.getElementById("geoNight").value = o.night || "auto";
   };
   btn.addEventListener("click", async () => {
@@ -109,6 +110,7 @@ function initGeoSettings() {
   document.getElementById("geoBuildings").addEventListener("change", (e) => change({ buildings: e.target.checked }));
   document.getElementById("geoTrees").addEventListener("change", (e) => change({ trees: e.target.checked }));
   document.getElementById("geoShadows").addEventListener("change", (e) => change({ shadows: e.target.checked }, false));
+  document.getElementById("geoFacilities").addEventListener("change", (e) => change({ facilities: e.target.checked }));
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
@@ -1090,7 +1092,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -1128,7 +1130,8 @@ async function loadGeo(w) {
     w.geoCenter = data.center;
     // A light map is painted when the session is (or runs into) the night: switched on and off with the sun.
     const evening = isNight() || (app().sessionHour?.() ?? 0) >= 15.5;
-    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
+    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width,
+      facilities: opts.facilities, year: A.sessionYear?.() || null, isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
     if (job !== geoJob || world !== w) { disposeGroup(built.group); return; }
     // swap the generic surroundings for the real ones
     w.group.remove(w.syn.terrain, w.syn.trees);
@@ -1316,8 +1319,10 @@ function disposeGroup(g) {
     once(o.geometry);
     // (a group can list materials it swaps its meshes between – buildings near / far – of which only one may be on
     // a mesh right now)
+    // (every texture a material holds – map, emissive, normal, roughness, metalness, AO, alpha, … as model files
+    // bring – unless shared)
     const mats = [].concat(o.material || [], Array.isArray(o.userData?.materials) ? o.userData.materials : []);
-    for (const m of mats) { if (!m?.isMaterial) continue; once(m.map); once(m.emissiveMap); (m.userData?.ownedTextures || []).forEach(once); once(m); }
+    for (const m of mats) { if (!m?.isMaterial) continue; for (const k in m) if (m[k]?.isTexture) once(m[k]); (m.userData?.ownedTextures || []).forEach(once); once(m); }
   });
 }
 // The whole world: its group, plus the generic surroundings taken out of it while the real map is shown (they're
@@ -1657,6 +1662,45 @@ window.Map3D = {
     const sp = world?.real?.landmarks?.spots?.[k]; if (!sp) return "none";
     const [x, z, r] = sp, g = world.real.groundAt(x, z), d = r * 2.2 * dist;
     return window.Map3D.look(x + Math.cos(ang) * d, g + d * h, z + Math.sin(ang) * d, x, g + r * 0.25, z, 45);
+  },
+  // development: look at a real-world point (lat, lon) from `dist` m away on bearing `brg` (degrees from north,
+  // where the camera stands), `h` m up; or at a point in F1 metres (viewF1)
+  viewLL(lat, lon, dist = 150, h = 40, brg = 180, fov = 45, aimH = 8) {
+    const gf = world?.real?.geo; if (!gf) return "no map";
+    const [x, z] = gf.fromLL(lat, lon); return this.viewAt(x, z, dist, h, brg, fov, aimH);
+  },
+  viewF1(X, Y, dist = 150, h = 40, brg = 180, fov = 45, aimH = 8) {
+    const gf = world?.real?.geo; if (!gf) return "no map";
+    const [x, z] = gf.xz([X, Y]); return this.viewAt(x, z, dist, h, brg, fov, aimH);
+  },
+  // development: load a model file from src/data/models through the real path (main process → GLTFLoader) and
+  // stand it at (lat, lon); answers how it went and whether its texture decoded
+  async facilityTest(file, lat, lon, heading = 0) {
+    const gf = world?.real?.geo; if (!gf) return "no map";
+    const { buildFacilities } = await import("./facilities.js");
+    const r = await buildFacilities({ scene: { buildings: [] }, gf, groundAt: world.real.groundAt, location: "test", year: null, toTrack: () => [1, 0],
+      readModel: (f) => window.api.geo.model(f), registry: [{ id: "test:" + file, loc: ["test"], status: "trial", replaces: { names: /^$/ }, model: { file, anchor: [lat, lon], heading } }] });
+    const fg = r?.group; if (fg) world.real.group.add(fg);
+    const mesh = fg?.getObjectByProperty("isMesh", true), img = mesh?.material?.map?.image;
+    return JSON.stringify({ info: r?.info, texture: img ? [img.width, img.height] : null });
+  },
+  // development: how many facility models stand in the current world, and what the renderer holds
+  facilityState() {
+    const g = world?.real?.group; let n = 0; g?.traverse((o) => { if (o.userData?.facility) n++; });
+    return JSON.stringify({ facilities: n, info: world?.real?.info?.facilities, mem: renderer?.info.memory, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles });
+  },
+  // development: eye and target in F1 metres, heights above the ground there
+  lookF1(ex, ey, eh, tx, ty, th, fov = 40) {
+    const gf = world?.real?.geo; if (!gf) return "no map";
+    const [a, b] = gf.xz([ex, ey]), [c, d] = gf.xz([tx, ty]), g = world.real.groundAt;
+    return this.look(a, g(a, b) + eh, b, c, g(c, d) + th, d, fov);
+  },
+  viewAt(x, z, dist, h, brg, fov = 45, aimH = 8) {
+    const g = world.real.groundAt(x, z), gf = world.real.geo;
+    // the bearing in scene axes: north is the direction of increasing latitude in this frame
+    const [la, lo] = gf.toLL(x, z), [nx, nz] = gf.fromLL(la + 0.001, lo), nl = Math.hypot(nx - x, nz - z) || 1, N = [(nx - x) / nl, (nz - z) / nl], E = [-N[1], N[0]];
+    const b = (brg * Math.PI) / 180, dx = N[0] * Math.cos(b) + E[0] * Math.sin(b), dz = N[1] * Math.cos(b) + E[1] * Math.sin(b);
+    return this.look(x + dx * dist, g + h, z + dz * dist, x, g + aimH, z, fov);
   },
   setLook(yaw = 0, pitch = 0, dist = 10.5) { look.yaw = yaw; look.pitch = pitch; look.dist = dist; return "ok"; },
   // development: a look down the grid from behind and above (pole at the far end)
