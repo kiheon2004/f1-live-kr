@@ -376,3 +376,74 @@ test("pit builder: real garage bays with their floor on the pit lane's surface",
   const p = G.project(0, -35); assert.ok(Math.abs(p.off - 5) < 0.01, "5 m in front of the garages");
   assert.ok(r.group.getObjectByName("garageInteriors"));
 });
+
+test("pit inference: a team's box needs agreeing working stops; a queue, a breakdown, a hole in the data or one stop isn't enough", async () => {
+  const G = await import("../src/renderer/garages.js");
+  const D = { 1: { TeamName: "A", TeamColour: "ff0000" }, 2: { TeamName: "A" }, 3: { TeamName: "B", TeamColour: "0000ff" }, 4: { TeamName: "B" }, 5: { TeamName: "C" }, 6: { TeamName: "C" } };
+  const st = (u, dur, t) => ({ u, dur, t });
+  const ev = G.teamEvidence({
+    1: { stops: [st(-76, 2500, 1)], long: [] }, 2: { stops: [st(-76.8, 3100, 2)], long: [] },          // A: two working stops agree
+    3: { stops: [st(20, 9000, 3)], long: [] }, 4: { stops: [st(20.5, 1200, 4)], long: [] },           // B: too long (breakdown) / too short (queue)
+    5: { stops: [st(60, 2700, 5)], long: [] },                                                          // C: one stop only
+  }, D);
+  const by = Object.fromEntries(ev.map((e) => [e.team, e]));
+  assert.strictEqual(by.A.ok, true); assert.ok(Math.abs(by.A.u + 76.4) < 0.5);
+  assert.strictEqual(by.B.ok, false); assert.strictEqual(by.C.ok, false); assert.match(by.C.reason, /one stop/);
+  // two teams whose boxes come out within 5 m: neither trusted
+  const clash = G.teamEvidence({ 1: { stops: [st(10, 2500, 1), st(10.5, 2600, 2)], long: [] }, 3: { stops: [st(13, 2500, 3), st(13.4, 2500, 4)], long: [] } }, D);
+  assert.ok(clash.every((e) => !e.ok));
+  // practice: repeated long stays of one driver are not enough; both drivers of the team close together are
+  const L = (u, n) => Array.from({ length: n }, (_, i) => st(u + i * 0.3, 60000, i));
+  const one = G.teamEvidence({ 1: { stops: [], long: L(40, 4) } }, D);
+  assert.strictEqual(one[0].ok, false);
+  const both = G.teamEvidence({ 1: { stops: [], long: L(40, 3) }, 2: { stops: [], long: L(48, 3) } }, D, 8.4);
+  assert.strictEqual(both[0].ok, true); assert.strictEqual(both[0].from, "garage");
+});
+
+test("pit inference: a standstill across a hole in the position data isn't one; a replay counts only what has happened", async () => {
+  const G = await import("../src/renderer/garages.js");
+  const car = (pts) => ({ t: pts.map((p) => p[0]), x: pts.map((p) => p[1] * 10), y: pts.map((p) => p[2] * 10), n: pts.length });
+  const project = (x, z) => ({ u: x, off: -z });
+  const gap = car([[1000, 50, 5], [1300, 50, 5], [4800, 50, 5], [5000, 70, 5]]);           // 3.5 s without samples
+  const ok = car([[1000, 50, 5], [1500, 50, 5], [2500, 50, 5], [3600, 50, 5], [3800, 70, 5]]);
+  const r = G.standstills({ 1: gap, 2: ok }, ([X, Y]) => [X, -Y], project, [0, 300]);
+  assert.strictEqual(r[1], undefined); assert.strictEqual(r[2].stops.length, 1);
+  assert.strictEqual(G.standstills({ 2: ok }, ([X, Y]) => [X, -Y], project, [0, 300], null, 2000)[2], undefined, "the stop hasn't happened yet at 2 s");
+});
+
+test("pit inference: places stay put with small changes, move only on trusted evidence a garage away; key ignores small moves", async () => {
+  const G = await import("../src/renderer/garages.js");
+  const D = { 1: { TeamName: "A", TeamColour: "ff0000", Tla: "AAA" }, 2: { TeamName: "A", Tla: "BBB" } };
+  const inf = new G.PitInference();
+  const S = (us) => ({ 1: { stops: us.map((u, i) => ({ u, dur: 2500, t: i * 1e5 })), long: [] } });
+  inf.observe(S([-76, -76.5]), false); let r = inf.update(D, 8.4);
+  const slots = Array.from({ length: 40 }, (_, k) => ({ k, uc: -170 + k * 8.4 + 4.2 }));
+  const k1 = G.allocationKey(G.allocatePlaces(slots, 8.4, D, r.places));
+  inf.observe(S([-76, -76.5, -75.4]), false); r = inf.update(D, 8.4);
+  assert.strictEqual(G.allocationKey(G.allocatePlaces(slots, 8.4, D, r.places)), k1, "a stop 1 m off: nothing moves");
+  assert.ok(Math.abs(r.places[0].u + 76.25) < 0.01, "the place itself stays where first trusted");
+  inf.observe(S([-40, -40.3, -39.8]), false); r = inf.update(D, 8.4);
+  assert.ok(Math.abs(r.places[0].u + 40) < 0.5, "three agreeing stops 36 m away: moved");
+  const a = G.allocatePlaces(slots, 8.4, D, r.places);
+  assert.strictEqual(a[0].link, "inferred"); assert.strictEqual(a[0].box, r.places[0].u);
+  assert.deepStrictEqual(a[0].drivers.map((d) => d.tla), ["AAA", "BBB"], "the team's drivers from the session's list");
+});
+
+test("pit wall at the track's edge; the estimated paddock only for its year and with the trial setting on", async () => {
+  const F = await load();
+  const scene = { location: "T", buildings: [{ name: "Pits", kind: "block", cls: "yes", est: 1, pts: rect(-150, 0, 150, 30), min: 0, h: 8 }] };
+  const spec = { id: "w", loc: ["T"], status: "permanent", checked: "t", replaces: { names: /^Pits$/ }, builder: "pitBuilding",
+    params: { garages: 30, height: 12, plate: 0.8, overhang: { pit: 2, paddock: 1, end: 1 }, facade: { pit: "pitGlass", paddock: "paddockPanels" },
+      pitWall: { height: 1.1, thick: 0.5, fence: 3, walk: 8, deck: 1 }, paddock: { years: [2026, 2026], margin: 6, street: 20, awning: { d: 4, h: 3.6 }, unit: { w: 18, d: 14, h: 8.5, gap: 4 } } } };
+  // the track's edge 30 m out from the garages (scene z = −60: the building's pit side is z = −30)
+  const trackEdge = (x, z) => z + 60;   // metres to the edge, negative past it
+  const run = (year, trial) => F.buildFacilities({ scene, gf, groundAt: () => 0, trackEdge, location: "T", year, trial, toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec] });
+  const r = await run(2026, true);
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const wall = new THREE.Box3().setFromObject(r.group.getObjectByName("pitWall"));
+  assert.ok(wall.min.z > -60.6 && wall.min.z < -59.4, `wall at the edge (z ${wall.min.z.toFixed(2)})`);
+  assert.ok(r.group.children[0].userData.garages.wallAt(0), "stands have a place on the walkway");
+  assert.strictEqual(r.info[0].paddock.units > 0, true);
+  assert.strictEqual((await run(2025, true)).info[0].paddock, null, "not seen that year");
+  assert.strictEqual((await run(2026, false)).info[0].paddock, null, "an estimate: trial setting off, no paddock");
+});

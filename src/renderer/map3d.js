@@ -8,7 +8,7 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine } from "./smooth.js";
-import { standstills, workPositions, mergeStandstills, allocate, allocationKey, teamLayer } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer } from "./garages.js";
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
 
 const DM = 0.1;               // decimetres → metres
@@ -126,36 +126,46 @@ function initGeoSettings() {
   document.getElementById("geoKey").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("geoKeySave").click(); e.stopPropagation(); });
 }
 
-// Teams at their garages (garages.js): from the session's own pit positions – a replay's whole session, a live
-// feed's standstills gathered as they come (it keeps only minutes of positions). Rebuilt only when the allocation
-// changes; neutral (no layer) where the session doesn't show it. Checked every 2 s (live: 15 s).
-let pitTeams = { key: null, group: null, facility: null, session: null, still: {}, last: 0 };
+// Teams at their garages (garages.js): inferred from the session's own pit positions. A replay uses only what has
+// happened by the moment shown (no future: seeking back takes places away again); a live feed gathers standstills
+// as they come (it keeps only minutes of positions) and keeps places stable (PitInference). Neutral where the
+// evidence isn't enough. Checked every 2 s (live: 15 s).
+let pitTeams = { key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null };
 function clearPitTeams() {
   if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); }
   pitTeams.group = null; pitTeams.key = null;
 }
-function updatePitTeams() {
+function updatePitTeams(force = false) {
   const now = performance.now(), A = app(), src = A?.src;
-  if (now - pitTeams.last < (src?.isLive ? 15000 : 2000)) return;
+  if (!force && now - pitTeams.last < (src?.isLive ? 15000 : 2000)) return;
   pitTeams.last = now;
   let fac = null;
   world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!fac && o.userData?.garages) fac = o; });
   const session = A?.sourceKey?.()?.replace(/:\d+$/, "") || null;
-  if (session !== pitTeams.session) { pitTeams.session = session; pitTeams.still = {}; clearPitTeams(); }
-  if (!fac || !src?.tracks?.cars) { if (pitTeams.group) clearPitTeams(); pitTeams.facility = fac; return; }
+  if (session !== pitTeams.session) { pitTeams.session = session; pitTeams.inf.reset(); clearPitTeams(); }
+  if (!fac || !src?.tracks?.cars) { if (pitTeams.group) clearPitTeams(); pitTeams.facility = fac; pitTeamNote(null); return; }
   if (fac !== pitTeams.facility) { clearPitTeams(); pitTeams.facility = fac; }
-  const G = fac.userData.garages, c = world.center;
+  const G = fac.userData.garages, c = world.center, drivers = src.state?.DriverList || {};
   const pitIn = {}; for (const num of Object.keys(src.tracks.cars)) pitIn[num] = (src.tracker?.pits(num) || []).map((x) => x.ms);
-  const found = standstills(src.tracks.cars, ([X, Y]) => [X - c.x, -(Y - c.z)], G.project, [G.gStart, G.gEnd], pitIn);
-  if (src.isLive) mergeStandstills(pitTeams.still, found); else pitTeams.still = found;
-  const teams = allocate(G.slots, G.pitch, src.state?.DriverList || {}, workPositions(pitTeams.still, src.state?.DriverList || {}));
+  const found = standstills(src.tracks.cars, ([X, Y]) => [X - c.x, -(Y - c.z)], G.project, [G.gStart, G.gEnd], pitIn, src.isLive ? Infinity : A.t);
+  pitTeams.inf.observe(found, !!src.isLive);
+  const r = pitTeams.inf.update(drivers, G.pitch);
+  const teams = allocatePlaces(G.slots, G.pitch, drivers, r.places);
+  pitTeams.info = { evidence: r.evidence, live: !!src.isLive };
+  pitTeamNote(teams.length ? (teams.some((t) => t.from === "box") ? "팀 차고: 피트 스톱 위치로 추론" : "팀 차고: 반복 정차 위치로 추론") + (src.isLive ? "" : " (현재 재생 시점까지)") : null);
   const key = allocationKey(teams);
   if (key === pitTeams.key) return;
   clearPitTeams();
   pitTeams.key = key;
   if (!teams.length) return;   // neutral garages
-  pitTeams.group = teamLayer(G, teams, src.state?.DriverList || {});
+  pitTeams.group = teamLayer(G, teams, drivers);
   fac.add(pitTeams.group);
+}
+// a small note in the 3D view saying the team garages are an inference, and from what
+function pitTeamNote(text) {
+  let el = document.getElementById("pitTeamNote");
+  if (!el && text) { el = document.createElement("div"); el.id = "pitTeamNote"; el.style.cssText = "position:absolute;left:12px;bottom:40px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:3"; host?.appendChild(el); }
+  if (el) { el.textContent = text || ""; el.hidden = !text; }
 }
 // development: the current allocation (teams, their garages and how each driver's place is known)
 function pitTeamsInfo() {
@@ -1725,7 +1735,7 @@ window.Map3D = {
     return JSON.stringify({ info: r?.info, texture: img ? [img.width, img.height] : null });
   },
   // development: how many facility models stand in the current world, and what the renderer holds
-  pitTeams() { pitTeams.last = 0; updatePitTeams(); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|").map((x) => x.replace(/:[0-9,]+:/, " garages ").slice(0, 120)) }); },
+  pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: pitTeams.info?.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
   facilityState() {
     const g = world?.real?.group; let n = 0; g?.traverse((o) => { if (o.userData?.facility) n++; });
     return JSON.stringify({ facilities: n, info: world?.real?.info?.facilities, mem: renderer?.info.memory, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles });

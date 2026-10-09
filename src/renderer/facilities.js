@@ -139,12 +139,22 @@ export const FACILITIES = [
       plate: 1.6, overhang: { pit: 3, paddock: 2, end: 2 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" },
       roofTop: "#565b61", fascia: "fasciaRedWhite",
+      // the pit wall at the track's edge (data); a raised walkway behind it with a railing to the pit lane and the
+      // catch fence over the wall (photo 2011, geograph 2542970); the walkway ~8 m wide (the mapped footway band,
+      // 26.6–36 m out from the Wing's axis). Heights estimated from the photo.
+      pitWall: { height: 1.1, thick: 0.5, fence: 3.0, walk: 8, deck: 1.0 },
+      // the paddock at the 2026 British GP (photos 3 July 2026): black awnings along the garages' back, two-storey
+      // hospitality units across the paddock street. Their sizes and spacing are estimates; which team's is where isn't
+      // known, so they're neutral.
+      paddock: { years: [2026, 2026], margin: 6, street: 20, awning: { d: 4, h: 3.6 }, unit: { w: 18, d: 14, h: 8.5, gap: 4 } },
     },
     sources: [
       "New Steel Construction, 'Wing heralds new era for famous circuit' (2011): 390 m long; blade 16.5 m at 40°, tip 30 m; 41 garages",
       "Motor Sport magazine, August 2011, 'A Wing-win situation': 390 m long, 30 m high",
       "WikiArquitectura, Silverstone Wing: garages on the ground floor, hospitality and media on the two floors above, glass facade",
       "Photos (Wikimedia Commons): Ian S, geograph 4590068 (CC BY-SA 2.0); Supermac1961 (CC BY 2.0); 'Endurance Legends in front of the Wing' (CC BY 2.0)",
+      "Pit wall: 'View of the new pits at Silverstone from the pit wall' (geograph 2542970, CC BY-SA 2.0, 2011)",
+      "Paddock 2026: 'F1 Paddock at British Grand Prix 2026 Silverstone' (Flickr 55383877828, 55382810457, 55382810427 via Wikimedia Commons, CC BY-SA 4.0, 3 July 2026)",
     ],
     // compared with the real building: the footprint and heights are the map's (21 parts, 377 × 29 m against a
     // published 390 m); the blade's 30 m tip, 40° and 16.5 m from the published figures; the roofline (blade, a low
@@ -649,6 +659,73 @@ function pitBuilding(ctx, p) {
       slots.push({ k, u0, u1, uc: (u0 + u1) / 2, floor: fl, front: [fx, fz], along: [u[0], u[1]], inward, width: a1 - a0, height: hO, ceil, depth });
     }
   }
+  // The pit wall (p.pitWall): along the garages, where the track's measured edge is (ctx.trackEdge: metres from a
+  // point to the edge of the tarmac) – a concrete wall with the catch fence over it on the track side, and behind it a
+  // raised walkway with a railing on the pit lane side (the mapped footway band; photo). Stands for the teams on it are
+  // added with the teams (garages.js: wallAt).
+  let wallAt = null;
+  if (p.pitWall && ctx.trackEdge && G > 0) {
+    const pw = p.pitWall, W = [];
+    for (let uu = gStart; uu <= gEnd + 1e-6; uu += 3) {
+      // out from the garages towards the track until the tarmac's edge
+      let d = 4;
+      while (d < 60) { const [x, z] = P(uu, frontV(uu) + vTrack * d); if (ctx.trackEdge(x, z) <= 0.3) break; d += 0.5; }
+      if (d < 60) W.push({ u: uu, d });
+    }
+    if (W.length > 3) {
+      // the wall's line smoothed (a wall is straight where the edge wobbles in the data)
+      const dS = W.map((w, i) => { const near = W.filter((o) => Math.abs(o.u - w.u) <= 15); return near.reduce((a, o) => a + o.d, 0) / near.length; });
+      const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, frontV(W[i].u) + vTrack * (dS[i] - dd)); return [x, floorAt(W[i].u) + y, z]; };
+      for (let i = 0; i + 1 < W.length; i++) {
+        const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
+        // wall (track face, top, pit face), fence above it
+        F.poly("pitWall", [ptAt(i, 0, 0), ptAt(i + 1, 0, 0), ptAt(i + 1, 0, pw.height), ptAt(i, 0, pw.height)], null, o);
+        F.poly("pitWall", [ptAt(i, 0, pw.height), ptAt(i + 1, 0, pw.height), ptAt(i + 1, pw.thick, pw.height), ptAt(i, pw.thick, pw.height)], null, [0, 1, 0]);
+        F.poly("fence", [ptAt(i, 0.05, pw.height), ptAt(i + 1, 0.05, pw.height), ptAt(i + 1, 0.05, pw.height + pw.fence), ptAt(i, 0.05, pw.height + pw.fence)], [[W[i].u / 2, 0], [W[i + 1].u / 2, 0], [W[i + 1].u / 2, pw.fence / 2], [W[i].u / 2, pw.fence / 2]], o);
+        // the walkway: deck, its edge to the pit lane, the railing
+        const w0 = pw.thick, w1 = pw.thick + pw.walk;
+        F.poly("walkway", [ptAt(i, w0, pw.deck), ptAt(i + 1, w0, pw.deck), ptAt(i + 1, w1, pw.deck), ptAt(i, w1, pw.deck)], null, [0, 1, 0]);
+        F.poly("pitWall", [ptAt(i, w1, 0), ptAt(i + 1, w1, 0), ptAt(i + 1, w1, pw.deck), ptAt(i, w1, pw.deck)], null, io);
+        F.poly("rail", [ptAt(i, w1, pw.deck), ptAt(i + 1, w1, pw.deck), ptAt(i + 1, w1, pw.deck + 1.1), ptAt(i, w1, pw.deck + 1.1)], [[0, 0], [1, 0], [1, 1], [0, 1]], io);
+      }
+      // the walkway's centre at u (for the teams' stands): [x, y, z], facing the pit lane
+      wallAt = (uu) => { let i = 0; while (i + 1 < W.length && W[i + 1].u < uu) i++; const [x, y, z] = ptAt(i, pw.thick + pw.walk / 2, pw.deck); return { p: [x, y, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]] }; };
+    }
+  }
+  // The paddock behind the garages (p.paddock, for the years it was seen): awnings along the garages' back and a row
+  // of hospitality units across the paddock street – neutral (which team's unit stands where isn't known).
+  let paddockInfo = null;
+  // (estimated: only with the trial setting on, even on a permanent facility)
+  if (p.paddock && ctx.trial !== false && (!p.paddock.years || (ctx.year && ctx.year >= p.paddock.years[0] && ctx.year <= (p.paddock.years[1] ?? 9999)))) {
+    const pd = p.paddock, run0 = Math.max(uMin, uRoot) + pd.margin, run1 = uMax - pd.margin;
+    const backV = (uu) => { const [a, b, f] = stationAt(uu); return sideV(a, -1) + (sideV(b, -1) - sideV(a, -1)) * f; };
+    const PB = (uu, d, y) => { const [x, z] = P(uu, backV(uu) - vTrack * d); return [x, baseAt(uu) + y, z]; };
+    const back = [-v[0] * vTrack, 0, -v[1] * vTrack], front = [v[0] * vTrack, 0, v[1] * vTrack];
+    // awnings: a sloping canopy on posts, the length of the garages' back
+    for (let uu = run0; uu < run1 - 1; uu += 6) {
+      const u1 = Math.min(run1, uu + 6);
+      F.poly("awning", [PB(uu, 0, pd.awning.h), PB(u1, 0, pd.awning.h), PB(u1, pd.awning.d, pd.awning.h - 0.8), PB(uu, pd.awning.d, pd.awning.h - 0.8)], null, [0, 1, 0]);
+      F.poly("awning", [PB(uu, pd.awning.d, pd.awning.h - 0.8), PB(u1, pd.awning.d, pd.awning.h - 0.8), PB(u1, pd.awning.d, pd.awning.h - 1.4), PB(uu, pd.awning.d, pd.awning.h - 1.4)], null, back);
+    }
+    // hospitality units: two storeys, a glass band upstairs, across the street from the garages
+    let n = 0;
+    for (let uu = run0; uu + pd.unit.w <= run1; uu += pd.unit.w + pd.unit.gap) {
+      const d0 = pd.street, d1 = d0 + pd.unit.d, h = pd.unit.h, u1 = uu + pd.unit.w;
+      const box = (key, a0, a1, e0, e1, y0, y1) => {
+        F.poly(key, [PB(a0, e0, y0), PB(a1, e0, y0), PB(a1, e0, y1), PB(a0, e0, y1)], null, front);
+        F.poly(key, [PB(a0, e1, y0), PB(a1, e1, y0), PB(a1, e1, y1), PB(a0, e1, y1)], null, back);
+        F.poly(key, [PB(a0, e0, y0), PB(a0, e1, y0), PB(a0, e1, y1), PB(a0, e0, y1)], null, [-u[0], 0, -u[1]]);
+        F.poly(key, [PB(a1, e0, y0), PB(a1, e1, y0), PB(a1, e1, y1), PB(a1, e0, y1)], null, [u[0], 0, u[1]]);
+        F.poly("unitRoof", [PB(a0, e0, y1), PB(a1, e0, y1), PB(a1, e1, y1), PB(a0, e1, y1)], null, [0, 1, 0]);
+      };
+      box("unitWall", uu, u1, d0, d1, 0, h);
+      // (the street side faces the garages)
+      F.poly("unitGlass", [PB(uu + 0.6, d0 - 0.02, h * 0.55), PB(u1 - 0.6, d0 - 0.02, h * 0.55), PB(u1 - 0.6, d0 - 0.02, h - 0.6), PB(uu + 0.6, d0 - 0.02, h - 0.6)], null, front);
+      F.poly("unitGlass", [PB(uu + 2, d0 - 0.02, 0.2), PB(u1 - 2, d0 - 0.02, 0.2), PB(u1 - 2, d0 - 0.02, 3), PB(uu + 2, d0 - 0.02, 3)], null, front);
+      n++;
+    }
+    paddockInfo = { units: n, estimated: true };
+  }
   const meshes = F.meshes((key) => facilityMaterial(key, p));
   let interior = null;
   if (FI.m.size) { interior = new THREE.Group(); interior.name = "garageInteriors"; for (const m of FI.meshes((key) => facilityMaterial(key, p))) { m.castShadow = false; interior.add(m); } meshes.push(interior); }
@@ -679,10 +756,11 @@ function pitBuilding(ctx, p) {
   const ground = stations.map((st) => st.g);
   // where a point is along the garages (u) and how far out in front of them (off: towards the track)
   const project = (x, z) => { const uu = (x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], vv = (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]; return { u: uu, off: (vv - frontV(Math.max(gStart, Math.min(gEnd, uu)))) * vTrack }; };
-  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior } : null;
+  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt } : null;
   return { meshes, footprint, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
+      paddock: paddockInfo, pitWall: !!wallAt,
       heightFrom: parts.some((q) => q.guessed) ? "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
 }
 
@@ -705,6 +783,13 @@ function facilityMaterial(key, p) {
     case "checker": return std({ color: 0xffffff, map: checkerTex(), roughness: 0.6 });
     case "slab": return std({ color: "#e4e5e3", roughness: 0.8 });
     // the garages: dark frames, a light epoxy floor, white walls and ceiling, light strips (lit day and night)
+    case "pitWall": return std({ color: "#d9d9d4", roughness: 0.85 });
+    case "fence": return std({ color: "#9aa3aa", roughness: 0.5, metalness: 0.4, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+    case "walkway": return std({ color: "#7d8287", roughness: 0.9 });
+    case "awning": return std({ color: "#202326", roughness: 0.8, side: THREE.DoubleSide });
+    case "unitWall": return std({ color: "#3f4347", roughness: 0.6, metalness: 0.2 });
+    case "unitRoof": return std({ color: "#55595d", roughness: 0.8 });
+    case "unitGlass": return lit(std({ color: "#2c3b45", roughness: 0.1, metalness: 0.3, emissive: "#ffd9a0" }), 0, 0.7);
     case "garFrame": return std({ color: "#33383d", roughness: 0.5, metalness: 0.3 });
     case "garShutter": return std({ color: "#5b6168", roughness: 0.45, metalness: 0.4 });
     case "garFloor": return std({ color: "#c9ccce", roughness: 0.35, metalness: 0.05 });
@@ -834,7 +919,7 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
 // opts: { scene, gf, groundAt, location, year, toTrack, trial (setting on), readModel(file) → bytes,
 // isCurrent() → false once the result would land in a world that's gone }. Returns the contract, plus `info`
 // (one line per facility: built how, or why not), or null when no longer current (everything made is freed).
-export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, location, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }) {
+export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, trackEdge = null, location, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }) {
   const group = new THREE.Group(); group.name = "facilities";
   const skip = new Set(), zones = [], spots = [], info = [], used = new Set();
   const free = () => { for (const o of group.children) freeOwned(o); };
@@ -855,7 +940,7 @@ export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, l
       try {
         const parts = selectReplaced(spec, scene.buildings, gf);
         if (!parts.length) throw new Error("its map buildings aren't in the data");
-        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, toTrack, alongTrack, scene }, spec.params || {});
+        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, year, trial, toTrack, alongTrack, scene }, spec.params || {});
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
         made = { object: g, footprint: r.footprint, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
@@ -873,11 +958,19 @@ export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, l
   }
   if (!isCurrent()) { free(); return null; }
   modelsInUse = used;
-  // close-by detail (the garages' insides) only within 400 m of the camera
+  // Close-by detail by the distance to the garages themselves (their fronts, not a bounding box: a long building at an
+  // angle has a box far bigger than itself): the insides within 400 m (an opening 4.8 m high is ~10 px there in a
+  // 1000 px view), the teams' layer (garages.js, added later as "pitTeams") within 300 m.
   const lod = [];
-  group.traverse((o) => { if (o.name === "garageInteriors") { const b = new THREE.Box3().setFromObject(o); lod.push({ o, b }); } });
-  const tmp = new THREE.Vector3();
-  group.userData.update = (cam) => { for (const { o, b } of lod) o.visible = b.distanceToPoint(tmp.copy(cam)) < 400; };
+  group.traverse((o) => { const G = o.userData?.garages; if (G) lod.push({ o, pts: G.slots.filter((_, i) => i % 3 === 0 || i === G.slots.length - 1).map((sl) => [sl.front[0], sl.floor, sl.front[1]]) }); });
+  group.userData.update = (cam) => {
+    for (const { o, pts } of lod) {
+      let d = Infinity; for (const [x, y, z] of pts) d = Math.min(d, Math.hypot(cam.x - x, cam.y - y, cam.z - z));
+      const inside = o.getObjectByName("garageInteriors"), teams = o.getObjectByName("pitTeams");
+      if (inside) inside.visible = d < 400;
+      if (teams) teams.visible = d < 300;
+    }
+  };
   return {
     group: group.children.length ? group : null, skip: (b) => skip.has(b), restyle: () => null,
     // trees keep 4 m off a facility

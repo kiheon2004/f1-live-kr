@@ -22,22 +22,26 @@ const STOP_MIN = 1500, STOP_MAX = 8000, LONG = 20000, STILL = 0.8;
 // standstill began – the same one seen twice, as a live feed is looked at again, is one).
 // pitIn: { num: [ms the car entered the pit lane] } (TimingData's InPit) – when given, a short standstill counts as a
 // pit stop only within 60 s of entering (a queue at the pit exit before the start, or one held up there, doesn't).
-export function standstills(cars, toScene, project, span, pitIn = null) {
+// upTo: only samples up to this time (a replay: what has happened by the moment shown – no future). A run of "still"
+// samples with a gap of more than 2 s between two of them is a hole in the data, not a standstill.
+export function standstills(cars, toScene, project, span, pitIn = null, upTo = Infinity) {
   const out = {};
   for (const [num, c] of Object.entries(cars || {})) {
-    const n = c.n ?? c.t.length; if (!n) continue;
+    let n = c.n ?? c.t.length; if (!n) continue;
+    if (upTo < Infinity) { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (c.t[m] <= upTo) lo = m + 1; else hi = m; } n = lo; if (!n) continue; }
     const res = { stops: [], long: [] };
     let k = 0;
     while (k < n) {
       let e = k;
       const x0 = c.x[k], y0 = c.y[k];
-      while (e + 1 < n && Math.hypot(c.x[e + 1] - x0, c.y[e + 1] - y0) < STILL * 10) e++;
+      let gap = false, spread = 0;
+      while (e + 1 < n && Math.hypot(c.x[e + 1] - x0, c.y[e + 1] - y0) < STILL * 10) { if (c.t[e + 1] - c.t[e] > 2000) gap = true; spread = Math.max(spread, Math.hypot(c.x[e + 1] - x0, c.y[e + 1] - y0) / 10); e++; }
       const dur = c.t[e] - c.t[k];
-      if (dur >= STOP_MIN) {
+      if (dur >= STOP_MIN && !gap) {
         const [x, z] = toScene([x0 / 10, y0 / 10]), p = project(x, z);
         if (p.off > -2 && p.off < 16 && p.u >= span[0] - 5 && p.u <= span[1] + 5) {
           const t0 = c.t[k], afterEntry = !pitIn || (pitIn[num] || []).some((ms) => t0 >= ms - 2000 && t0 <= ms + 60000);
-          if (dur <= STOP_MAX) { if (afterEntry) res.stops.push({ u: p.u, t: t0 }); } else if (dur >= LONG) res.long.push({ u: p.u, t: t0 });
+          if (dur <= STOP_MAX) { if (afterEntry) res.stops.push({ u: p.u, t: t0, dur, off: p.off }); } else if (dur >= LONG) res.long.push({ u: p.u, t: t0, dur, off: p.off });
         }
       }
       k = e + 1;
@@ -99,6 +103,95 @@ export function allocate(slots, pitch, drivers, positions) {
     const t = list[i], prev = list[i - 1], next = list[i + 1];
     const lo = Math.max(t.centre - pitch * 2.5, prev ? (prev.centre + t.centre) / 2 : -Infinity);
     const hi = Math.min(t.centre + pitch * 2.5, next ? (next.centre + t.centre) / 2 : Infinity);
+    t.slots = slots.filter((s) => s.uc >= lo && s.uc < hi && !used.has(s.k)).map((s) => s.k);
+    t.slots.forEach((k) => used.add(k));
+    t.drivers.sort((a, b) => a.u - b.u || a.num.localeCompare(b.num));
+  }
+  return list.filter((t) => t.slots.length);
+}
+
+// ---------- confidence ----------
+// A team's box is taken as known only when the evidence agrees: at least two pit stops (of either driver) within
+// ±1.5 m of each other along the pit lane, the stops 1.8–6 s long (a working stop), and no other team's box within
+// 5 m (a mix-up). A practice / qualifying garage needs three long stays of the driver within ±2 m, and the team's
+// other driver's within two garages of it. Anything less: no place (the garages stay neutral). Each team's result
+// says why: { team, u, from, n, spread, ok, reason }.
+const spreadOf = (a) => { const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); };
+function cluster(vals, tol) { let best = []; for (const v of vals) { const g = vals.filter((w) => Math.abs(w.u - v.u) <= tol); if (g.length > best.length) best = g; } return best; }
+export function teamEvidence(still, drivers, pitch = 8) {
+  const teams = new Map(), team = (num) => drivers?.[num]?.TeamName;
+  for (const [num, s] of Object.entries(still)) {
+    const t = team(num); if (!t) continue;
+    if (!teams.has(t)) teams.set(t, { team: t, stops: [], long: {} });
+    const e = teams.get(t);
+    e.stops.push(...s.stops.filter((x) => x.dur == null || (x.dur >= 1800 && x.dur <= 6000)).map((x) => ({ ...x, num })));
+    e.long[num] = s.long;
+  }
+  const out = [];
+  for (const e of teams.values()) {
+    const c = cluster(e.stops, 1.5);
+    if (c.length >= 2) {
+      const us = c.map((x) => x.u);
+      out.push({ team: e.team, u: median(us), off: median(c.map((x) => x.off ?? 6)), from: "box", n: c.length, spread: +spreadOf(us).toFixed(2), drivers: [...new Set(c.map((x) => x.num))], ok: true, reason: "stops agree" });
+      continue;
+    }
+    // garages from long stays: each driver's own place, the two of the team close together
+    const own = {};
+    for (const [num, l] of Object.entries(e.long)) { const g = cluster(l, 2); if (g.length >= 3) own[num] = { u: median(g.map((x) => x.u)), n: g.length, spread: spreadOf(g.map((x) => x.u)) }; }
+    const nums = Object.keys(own);
+    if (nums.length >= 2 && Math.abs(own[nums[0]].u - own[nums[1]].u) <= pitch * 2.2) {
+      out.push({ team: e.team, u: median(nums.map((n) => own[n].u)), from: "garage", n: nums.reduce((a, n) => a + own[n].n, 0), spread: +Math.max(...nums.map((n) => own[n].spread)).toFixed(2), drivers: nums, own, ok: true, reason: "both drivers' long stays agree" });
+      continue;
+    }
+    out.push({ team: e.team, u: c.length ? c[0].u : null, from: null, n: c.length + nums.length, ok: false, reason: c.length === 1 ? "one stop only" : nums.length === 1 ? "one driver's garage only" : "no repeated place" });
+  }
+  // a mix-up: two teams' places within 5 m – neither is trusted
+  const clash = out.map((a) => out.find((b) => a !== b && a.ok && b.ok && Math.abs(a.u - b.u) < 5));
+  out.forEach((a, i) => { if (clash[i]) { a.ok = false; a.reason = "too close to " + clash[i].team; } });
+  return out.sort((a, b) => (a.u ?? 1e9) - (b.u ?? 1e9));
+}
+
+// Keeps a stable allocation as evidence comes in (live) or as a replay moves on: a team's place, once known, moves
+// only when the new evidence puts it more than a garage away and is itself trusted with at least three observations
+// (so boards don't wander with every small change).
+export class PitInference {
+  constructor() { this.reset(); }
+  reset() { this.still = {}; this.places = new Map(); }
+  // replace (a replay: everything observed up to the moment shown) or merge (live: a window of recent positions)
+  observe(found, merge) { if (merge) mergeStandstills(this.still, found); else this.still = found; }
+  update(drivers, pitch) {
+    const ev = teamEvidence(this.still, drivers, pitch);
+    const seen = new Set();
+    for (const e of ev) {
+      seen.add(e.team);
+      const cur = this.places.get(e.team);
+      if (!e.ok) { if (cur && !this.keepWithout) continue; continue; }
+      if (!cur || (Math.abs(cur.u - e.u) > pitch && e.n >= 3)) this.places.set(e.team, { ...e });
+      else this.places.set(e.team, { ...cur, n: e.n, spread: e.spread });
+    }
+    for (const t of [...this.places.keys()]) if (!seen.has(t)) this.places.delete(t);   // (a team no longer in the session)
+    return { evidence: ev, places: [...this.places.values()] };
+  }
+}
+
+// Garages for the trusted places. A race's place is the team's pit box in the pit lane – where the cars stop, not a
+// garage: it's linked to the garages in front of which it lies (the box is 2–14 m out from their openings along the
+// pit lane's direction, checked when the standstill was found), and that link is an inference, marked so (link:
+// "inferred"). Each team gets the garages within half the way to its neighbours (at most 2.5 garages either side);
+// each driver's board goes on the garage nearest their own place (a garage) or, at a shared box, side by side.
+// Returns the same shape as allocate() plus box (the box position, u) and from / link.
+export function allocatePlaces(slots, pitch, drivers, places) {
+  const members = (team) => Object.entries(drivers || {}).filter(([, d]) => d?.TeamName === team).map(([num, d]) => ({ num, tla: d.Tla || num }));
+  const list = places.filter((p) => p.ok).map((p) => {
+    const d0 = Object.values(drivers || {}).find((d) => d?.TeamName === p.team);
+    const colour = /^[0-9a-f]{6}$/i.test(d0?.TeamColour || "") ? "#" + d0.TeamColour : "#9aa0a6";
+    const ds = members(p.team).map((m) => ({ ...m, u: p.from === "garage" && p.own?.[m.num] ? p.own[m.num].u : p.u, from: p.from }));
+    return { team: p.team, colour, centre: p.u, box: p.from === "box" ? p.u : null, boxOff: p.off ?? 6, from: p.from, link: p.from === "box" ? "inferred" : "own", drivers: ds };
+  }).sort((a, b) => a.centre - b.centre);
+  const used = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const t = list[i], prev = list[i - 1], next = list[i + 1];
+    const lo = Math.max(t.centre - pitch * 2.5, prev ? (prev.centre + t.centre) / 2 : -Infinity), hi = Math.min(t.centre + pitch * 2.5, next ? (next.centre + t.centre) / 2 : Infinity);
     t.slots = slots.filter((s) => s.uc >= lo && s.uc < hi && !used.has(s.k)).map((s) => s.k);
     t.slots.forEach((k) => used.add(k));
     t.drivers.sort((a, b) => a.u - b.u || a.num.localeCompare(b.num));
@@ -214,6 +307,29 @@ export function teamLayer(garages, teams, drivers) {
       quad(labels, at(s, 0.9, shift, s.height - 0.55), along.clone().multiplyScalar(1.76), new THREE.Vector3(0, 0.22, 0), out, lab.uv(d.row));
     });
   }
+  // the team's box painted in the pit lane where its cars stopped (yellow, as in the photos), and its stand on the
+  // pit wall walkway opposite (a roofed desk with screens) – both only where the box is known
+  const marks = { pos: [], col: [], nor: [] }, yellow = new THREE.Color("#f2c200");
+  for (const t of teams) {
+    if (t.box == null) continue;
+    const s = garages.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p));
+    const along = new THREE.Vector3(s.along[0], 0, s.along[1]), out = new THREE.Vector3(-s.inward[0], 0, -s.inward[1]), up = new THREE.Vector3(0, 1, 0);
+    const c0 = new THREE.Vector3(s.front[0], s.floor + 0.03, s.front[1]).addScaledVector(along, t.box - s.uc).addScaledVector(out, t.boxOff);
+    for (const [da, dw, la, lw] of [[0, -1.1, 5.6, 0.14], [0, 1.1, 5.6, 0.14], [-2.8, 0, 0.14, 2.3], [2.8, 0, 0.14, 2.3]]) {
+      const c = c0.clone().addScaledVector(along, da).addScaledVector(out, dw);
+      quad(marks, c, along.clone().multiplyScalar(la), out.clone().multiplyScalar(lw), up, null, yellow);
+    }
+    const w = garages.wallAt?.(t.box);
+    if (w) {
+      col.set(t.colour);
+      const p = new THREE.Vector3(...w.p), A = new THREE.Vector3(w.along[0], 0, w.along[1]), O = new THREE.Vector3(w.out[0], 0, w.out[1]);
+      // desk (front panel in the team's colour), the roof over it, the screens' dark band
+      quad(panels, p.clone().addScaledVector(up, 0.55).addScaledVector(O, 1.2), A.clone().multiplyScalar(4.5), up.clone().multiplyScalar(1.1), O, null, col);
+      quad(panels, p.clone().addScaledVector(up, 2.6), A.clone().multiplyScalar(4.8), O.clone().multiplyScalar(3.2), up, null, col.clone().multiplyScalar(0.55));
+      quad(panels, p.clone().addScaledVector(up, 1.5).addScaledVector(O, 0.9), A.clone().multiplyScalar(4.2), up.clone().multiplyScalar(0.6), O, null, new THREE.Color("#15181b"));
+      quad(labels, p.clone().addScaledVector(up, 2.2).addScaledVector(O, 1.62), A.clone().multiplyScalar(3.2), up.clone().multiplyScalar(0.4), O, lab.uv(t.row));
+    }
+  }
   const mesh = (store, mat, name) => {
     const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(store.pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(store.nor, 3));
     if (store.uv?.length) g.setAttribute("uv", new THREE.Float32BufferAttribute(store.uv, 2));
@@ -222,6 +338,7 @@ export function teamLayer(garages, teams, drivers) {
   };
   if (panels.pos.length) mesh(panels, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide }), "teamPanels");
   if (labels.pos.length) mesh(labels, labelMat, "teamLabels");
+  if (marks.pos.length) mesh(marks, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }), "boxMarks");
   // instanced equipment
   const instanced = (geo, mat, list, name, coloured) => {
     if (!list.length) return;
@@ -239,4 +356,5 @@ export function teamLayer(garages, teams, drivers) {
 }
 
 // A key for an allocation (to rebuild only when it changes)
-export const allocationKey = (teams) => teams.map((t) => `${t.team}:${t.colour}:${t.slots.join(",")}:${t.drivers.map((d) => `${d.num}@${Math.round(d.u)}`).join("+")}`).join("|");
+// (garage indices only – a place moving within its garage doesn't rebuild anything)
+export const allocationKey = (teams) => teams.map((t) => `${t.team}:${t.colour}:${t.slots.join(",")}:${t.drivers.map((d) => d.num).join("+")}:${t.from}`).join("|");

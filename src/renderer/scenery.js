@@ -771,7 +771,9 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     // (the pit lane's tarmac height, for garage floors: as the other tarmac is laid below – on the terrain, at the
     // track's height near it)
     const surfaceAt = (x, z) => { const [s, d] = nearTrack(x, z); const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06); };
-    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, location: scene.location, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false,
+    // metres from a point to the edge of the track's tarmac (the measured half width), negative on it
+    const trackEdge = (x, z) => { const [s, d] = nearTrack(x, z); return s ? d - Math.max(s.L ?? 7, -(s.R ?? -7)) : Infinity; };
+    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, location: scene.location, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false,
       readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
     lm = combine(lm, fac);
