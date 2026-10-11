@@ -115,6 +115,9 @@ class PMTiles {
     if (!this.dirs.has(k)) this.dirs.set(k, range(this.url, this.h.leafOff + off, len).then((b) => readDir(gunzip(b))));
     return this.dirs.get(k);
   }
+  // a cached tile that turned out damaged: dropped, so it's downloaded again next time
+  forget(z, x, y) { try { fs.unlinkSync(path.join(this.cacheDir, "overture", `${z}_${x}_${y}.mvt`)); } catch {} }
+  // the tile's bytes; null when the archive has no tile there (no buildings – a real answer); throws when it can't be had
   async tile(z, x, y) {
     const file = path.join(this.cacheDir, "overture", `${z}_${x}_${y}.mvt`);
     try { return fs.readFileSync(file); } catch {}
@@ -237,25 +240,31 @@ function tagsOf(props, part) {
 }
 
 // Buildings around a centre (lat, lon), r metres; fr: geo.frame (lat/lon → local metres). Cached per tile.
-async function buildings(cacheDir, center, r, fr, onProgress) {
-  const pm = new PMTiles(URL, cacheDir);
+// Returns { areas: [{ tags, pts, tile }], tiles: [{ x, y, status, ring }], partial } – each tile's status: "ok",
+// "empty" (the archive has no buildings there), "failed" (couldn't be downloaded) or "damaged" (couldn't be read: its
+// cached copy is dropped); ring: the tile's square in local metres. partial: some tile failed or was damaged – the
+// caller keeps OSM's buildings there (and doesn't keep the result for good). Outlines drawn in detail as parts keep
+// "overture:hasParts" (the scene decides, by how much of them the parts cover).
+async function buildings(cacheDir, center, r, fr, onProgress, { pm = new PMTiles(URL, cacheDir) } = {}) {
   const z = 14, n = 2 ** z, deg = Math.PI / 180;
   const lon2x = (lon) => ((lon + 180) / 360) * n, lat2y = (lat) => ((1 - Math.log(Math.tan(lat * deg) + 1 / Math.cos(lat * deg)) / Math.PI) / 2) * n;
   const dLat = r / 111000, dLon = r / (111000 * Math.cos(center[0] * deg));
   const x0 = Math.floor(lon2x(center[1] - dLon)), x1 = Math.floor(lon2x(center[1] + dLon)), y0 = Math.floor(lat2y(center[0] + dLat)), y1 = Math.floor(lat2y(center[0] - dLat));
   const jobs = [];
   for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) jobs.push([x, y]);
-  const areas = [];
+  const areas = [], tiles = [];
   let done = 0, i = 0;
   const work = async () => {
     while (i < jobs.length) {
       const [tx, ty] = jobs[i++];
+      const T = { x: tx, y: ty, status: "ok" };
+      tiles.push(T);
       let buf = null;
-      try { buf = await pm.tile(z, tx, ty); } catch { /* a missing tile: OSM still has the area */ }
+      try { buf = await pm.tile(z, tx, ty); } catch { T.status = "failed"; }   // (OSM still has the area)
       onProgress?.(++done, jobs.length);
-      if (!buf) continue;
+      if (!buf) { if (T.status === "ok") T.status = "empty"; continue; }
       let layers;
-      try { layers = decodeMvt(buf); } catch { continue; }   // (a damaged tile: the rest still come)
+      try { layers = decodeMvt(buf); } catch { T.status = "damaged"; pm.forget?.(z, tx, ty); continue; }   // (the rest still come)
       for (const [name, L] of Object.entries(layers)) {
         const part = /part/.test(name);
         if (!/building/.test(name)) continue;
@@ -282,15 +291,10 @@ async function buildings(cacheDir, center, r, fr, onProgress) {
     }
   };
   await Promise.all(Array.from({ length: 6 }, work));
-  // outlines whose parts are here give way to them; ones whose parts are missing stay
-  const partC = areas.filter((a) => a.tags["building:part"]).map((a) => { let x = 0, y = 0; for (const p of a.pts) { x += p[0]; y += p[1]; } return [x / a.pts.length, y / a.pts.length]; });
-  const inside = (x, y, pts) => { let r = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) r = !r; } return r; };
   // (a building cut by tile edges appears in each tile: the pieces are kept, they fit edge to edge)
-  return areas.filter((a) => {
-    if (!a.tags["overture:hasParts"]) return true;
-    delete a.tags["overture:hasParts"];
-    return !partC.some(([x, y]) => inside(x, y, a.pts));
-  });
+  const corner = (x, y) => fr.toXY(Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) / deg, (x / n) * 360 - 180).map((v) => Math.round(v * 10) / 10);
+  for (const T of tiles) T.ring = [corner(T.x, T.y), corner(T.x + 1, T.y), corner(T.x + 1, T.y + 1), corner(T.x, T.y + 1)];
+  return { areas, tiles, partial: tiles.some((T) => T.status === "failed" || T.status === "damaged") };
 }
 
 module.exports = { buildings, decodeMvt, zxyToId, PMTiles, URL, Pbf, range };

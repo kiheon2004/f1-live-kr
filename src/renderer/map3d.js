@@ -8,9 +8,10 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine } from "./smooth.js";
-import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
-import { NL, GLOW, nightLit, lightField, glowPoints } from "./nightlights.js";
+import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
+import { disposeGroup } from "./dispose.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -131,11 +132,13 @@ function initGeoSettings() {
 // happened by the moment shown (no future: seeking back takes places away again); a live feed gathers standstills
 // as they come (it keeps only minutes of positions) and keeps places stable (PitInference). Neutral where the
 // evidence isn't enough. Checked every 2 s (live: 15 s).
-let pitTeams = { key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null };
+let pitTeams = { key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null, frame: null };
 function clearPitTeams() {
   if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); }
   pitTeams.group = null; pitTeams.key = null;
 }
+// (the layer went with the world or the real map it was in: nothing of it is freed again, the next check rebuilds it)
+function forgetPitTeams() { pitTeams.group = null; pitTeams.key = null; pitTeams.facility = null; pitTeams.last = 0; }
 function updatePitTeams(force = false) {
   const now = performance.now(), A = app(), src = A?.src;
   if (!force && now - pitTeams.last < (src?.isLive ? 15000 : 2000)) return;
@@ -147,19 +150,29 @@ function updatePitTeams(force = false) {
   if (!fac || !src?.tracks?.cars) { if (pitTeams.group) clearPitTeams(); pitTeams.facility = fac; pitTeamNote(null); return; }
   if (fac !== pitTeams.facility) { clearPitTeams(); pitTeams.facility = fac; }
   const G = fac.userData.garages, c = world.center, drivers = src.state?.DriverList || {};
+  // The frame the standstills are placed in: this pit building in this world. A rebuilt building (settings, a new map)
+  // or a new world is a new frame: what was seen is placed in it again (garages.js PitInference.update).
+  if (pitTeams.frame?.G !== G || pitTeams.frame.c !== c) {
+    pitTeams.frame = { G, c, rev: (pitTeams.frame?.rev || 0) + 1, toScene: ([X, Y]) => [X - c.x, -(Y - c.z)], project: G.project, span: [G.gStart, G.gEnd] };
+  }
+  const frame = pitTeams.frame;
   const pitIn = {}; for (const num of Object.keys(src.tracks.cars)) pitIn[num] = (src.tracker?.pits(num) || []).map((x) => x.ms);
-  const found = standstills(src.tracks.cars, ([X, Y]) => [X - c.x, -(Y - c.z)], G.project, [G.gStart, G.gEnd], pitIn, src.isLive ? Infinity : A.t);
+  const found = standstills(src.tracks.cars, frame.toScene, G.project, frame.span, pitIn, src.isLive ? Infinity : A.t);
   pitTeams.inf.observe(found, !!src.isLive);
-  const r = pitTeams.inf.update(drivers, G.pitch);
-  const teams = allocatePlaces(G.slots, G.pitch, drivers, r.places);
+  const r = pitTeams.inf.update(drivers, G.pitch, frame);
+  const teams = allocatePlaces(G.slots, G.pitch, drivers, r.places, overridesFor(G.facility, A.sessionYear?.() || null, session));
   pitTeams.info = { evidence: r.evidence, live: !!src.isLive };
-  pitTeamNote(teams.length ? (teams.some((t) => t.from === "box") ? "팀 차고: 피트 스톱 위치로 추론" : "팀 차고: 반복 정차 위치로 추론") + (src.isLive ? "" : " (현재 재생 시점까지)") : null);
+  // (how many garages a team has and which driver's is which are estimates: the data shows only where the cars stopped)
+  const est = teams.filter((t) => t.estimated);
+  pitTeamNote(!teams.length ? null : !est.length ? "팀 차고: 공개된 배치 자료" : (est.some((t) => t.from === "box") ? "팀 차고 위치: 피트 스톱 위치로 추정" : "팀 차고 위치: 반복 정차 위치로 추정") + (src.isLive ? "" : " (현재 재생 시점까지)") + " · 칸 수·배정은 추정");
   const key = allocationKey(teams);
   if (key === pitTeams.key) return;
   clearPitTeams();
   pitTeams.key = key;
   if (!teams.length) return;   // neutral garages
   pitTeams.group = teamLayer(G, teams, drivers);
+  // a layer added at night takes the light field too (its own materials only – the rest of the world has it already)
+  pitTeams.group.traverse((o) => { for (const m of [].concat(o.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
 }
 // the pit lane's direction at (x, z) if that's in front of a facility's garages (0–16 m out), else null
@@ -187,7 +200,8 @@ function pitTeamsInfo() {
 // Back to the generic surroundings, then load the real ones again with the current settings.
 function rebuild() {
   if (!world) return;
-  if (world.real) { world.group.remove(world.real.group); disposeGroup(world.real.group); world.real = null; world.occluders = []; }
+  if (world.real) { world.group.remove(world.real.group); disposeReal(world.real); world.real = null; world.occluders = []; }
+  forgetPitTeams();   // (its layer was in the real map just freed)
   for (const k of ["terrain", "trees", "walls"]) if (!world.syn[k].parent) world.group.add(world.syn[k]);
   world.farBase = world.far.material.color.clone().set(0x4f7a3c);
   applyLighting();
@@ -1218,7 +1232,7 @@ async function loadGeo(w) {
     const evening = isNight() || (app().sessionHour?.() ?? 0) >= 15.5;
     const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width,
       facilities: opts.facilities, year: A.sessionYear?.() || null, isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
-    if (job !== geoJob || world !== w) { disposeGroup(built.group); built.night?.dispose(); return; }
+    if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
     w.group.remove(w.syn.terrain, w.syn.trees);
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
@@ -1236,11 +1250,12 @@ async function loadGeo(w) {
     if (provider === "google") attr.innerHTML = `<b class="g-logo">Google</b> <span id="geo3dGAttr"></span>`;
     if (provider === "google") {
       const b = built.bounds.ll;
-      window.api.geo.googleAttribution(built.info.zoom, b.n, b.s, b.e, b.w).then((t) => { const el = document.getElementById("geo3dGAttr"); if (el) el.textContent = t; });
+      // (an answer for an earlier map – rebuilt or another circuit since – isn't written over the current one's)
+      window.api.geo.googleAttribution(built.info.zoom, b.n, b.s, b.e, b.w).then((t) => { if (job !== geoJob || world !== w || w.real !== built) return; const el = document.getElementById("geo3dGAttr"); if (el) el.textContent = t; }).catch(() => {});
     }
     const ci = data.circuit;
     if (googleNote) { geoStatus(googleNote, true); setTimeout(() => job === geoJob && geoStatus(""), 10000); return; }
-    geoStatus(`${ci ? `${ci.name} · ${ci.length.toLocaleString()}m · ${ci.opened}년 개장 · 첫 F1 ${ci.firstgp}년 · ` : ""}트랙 위치 오차 약 ${data.rms.toFixed(1)}m${data.sceneryError ? " · 건물 정보는 못 받았어요" : ""}`);
+    geoStatus(`${ci ? `${ci.name} · ${ci.length.toLocaleString()}m · ${ci.opened}년 개장 · 첫 F1 ${ci.firstgp}년 · ` : ""}트랙 위치 오차 약 ${data.rms.toFixed(1)}m${data.sceneryError ? " · 건물 정보는 못 받았어요" : data.buildingsPartial ? " · 일부 건물 타일을 못 받아 OSM 건물로 채웠어요" : ""}`);
     setTimeout(() => job === geoJob && geoStatus(""), 6000);
   } catch (e) {
     if (job === geoJob) { geoStatus(`실제 지도를 못 불러왔어요 (${e.message})`, true); setTimeout(() => job === geoJob && geoStatus(""), 8000); }
@@ -1437,29 +1452,30 @@ function ensureWorld(now) {
   note.hidden = !!world;
 }
 function showNote(text) { const n = document.getElementById("note3d"); n.textContent = text; n.hidden = false; }
-// Frees the GPU side of everything under g (geometries, materials, their maps and the textures a material owns
-// through shader uniforms – userData.ownedTextures), each once even when shared within g.
-function disposeGroup(g) {
-  const done = new Set(), once = (x) => { if (x && !done.has(x) && !x.userData?.shared) { done.add(x); x.dispose(); } };
-  g.traverse((o) => {
-    once(o.geometry);
-    // (a group can list materials it swaps its meshes between – buildings near / far – of which only one may be on
-    // a mesh right now)
-    // (every texture a material holds – map, emissive, normal, roughness, metalness, AO, alpha, … as model files
-    // bring – unless shared)
-    const mats = [].concat(o.material || [], Array.isArray(o.userData?.materials) ? o.userData.materials : []);
-    for (const m of mats) { if (!m?.isMaterial) continue; for (const k in m) if (m[k]?.isTexture) once(m[k]); (m.userData?.ownedTextures || []).forEach(once); once(m); }
-  });
+// (disposeGroup, dispose.js: geometries, materials, their textures, instanced meshes' own buffers – each once, shared
+// ones left alone)
+// The real surroundings of a world (or a build that came too late or failed): their meshes, and the night light field,
+// whose textures live outside the group (the shared uniforms are pointed away from them).
+function disposeReal(real, done = new Set()) {
+  if (!real) return done;
+  disposeGroup(real.group, done);
+  releaseField(real.night);
+  return done;
 }
-// The whole world: its group, plus the generic surroundings taken out of it while the real map is shown (they're
-// kept to put back, so the group alone doesn't reach them), and the cars.
+// The whole world: its group, the real surroundings and the generic ones taken out of it while the real map is shown
+// (they're kept to put back, so the group alone doesn't reach them), the light fields, and the cars. What pointed into
+// it (the floodlights, the teams' layer) is let go.
 function disposeWorld() {
   if (world) {
-    scene.remove(world.group); disposeGroup(world.group);
-    world.real?.night?.dispose(); world.trackField?.dispose();
-    for (const o of Object.values(world.syn || {})) if (o && !o.parent) disposeGroup(o);
+    scene.remove(world.group);
+    const done = disposeGroup(world.group);
+    disposeReal(world.real, done);
+    releaseField(world.trackField);
+    for (const o of Object.values(world.syn || {})) if (o && !o.parent) disposeGroup(o, done);
     world = null;
   }
+  lit = null;
+  forgetPitTeams();
   for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
   cars.clear();
 }
@@ -1816,6 +1832,20 @@ window.Map3D = {
     const fg = r?.group; if (fg) world.real.group.add(fg);
     const mesh = fg?.getObjectByProperty("isMesh", true), img = mesh?.material?.map?.image;
     return JSON.stringify({ info: r?.info, texture: img ? [img.width, img.height] : null });
+  },
+  // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
+  viewPits(k = 20, back = 28, h = 9, side = 0, fov = 50) {
+    let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
+    if (!G) return "no garages";
+    const s = G.slots[Math.max(0, Math.min(G.slots.length - 1, k))], [ix, iz] = s.inward;
+    return this.look(s.front[0] - ix * back + s.along[0] * side, s.floor + h, s.front[1] - iz * back + s.along[1] * side, s.front[0] + ix * 3, s.floor + 2, s.front[1] + iz * 3, fov);
+  },
+  // development: look down at the paddock behind garage k (from beyond it, over the units towards the building)
+  viewPaddock(k = 20, out = 70, h = 30, fov = 50) {
+    let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
+    if (!G) return "no garages";
+    const s = G.slots[Math.max(0, Math.min(G.slots.length - 1, k))], [ix, iz] = s.inward;
+    return this.look(s.front[0] + ix * (s.depth + out), s.floor + h, s.front[1] + iz * (s.depth + out), s.front[0] + ix * (s.depth + 18), s.floor + 3, s.front[1] + iz * (s.depth + 18), fov);
   },
   // development: how many facility models stand in the current world, and what the renderer holds
   pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: pitTeams.info?.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },

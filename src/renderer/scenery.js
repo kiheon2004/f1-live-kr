@@ -13,7 +13,8 @@ import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
 import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine } from "./facilities.js";
-import { lightField, lampMeshes, glowPoints } from "./nightlights.js";
+import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
+import { disposeGroup } from "./dispose.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
 const DEM_ZOOM = 14;
@@ -565,7 +566,14 @@ function barriersMesh(lines, gf, heightAt) {
 // world: { samples, grid, center, box, n } from map3d; nearestTrack(x, z) → [sample, dist].
 // opts: { provider: "eox" | "google", buildings, trees, night, facilities (trial facility models on), year,
 //   isCurrent() → false once this build's world is gone (a facility model still loading is then dropped) }
+// (a build that fails part way frees what it made – its meshes, a facility's hold on a model file, the night field –
+// and the error goes on to the caller; a build that finishes hands everything over in the result)
 export async function buildScenery(api, scene, world, opts, onStep) {
+  const own = { group: new THREE.Group(), night: null, t0: performance.now() };
+  try { return await buildReal(api, scene, world, opts, onStep, own); }
+  catch (e) { disposeGroup(own.group); releaseField(own.night); throw e; }
+}
+async function buildReal(api, scene, world, opts, onStep, own) {
   const c = world.center, gf = geoFrame(scene, c);
   const box = world.box;
   const ext = { x0: box.min.x - MARGIN, x1: box.max.x + MARGIN, z0: box.min.z - MARGIN, z1: box.max.z + MARGIN };
@@ -666,7 +674,7 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   for (let i = 0; i < eg.length; i += 64) { er += eg[i]; egg += eg[i + 1]; eb += eg[i + 2]; en++; }
   const edge = new THREE.Color(`rgb(${Math.round(er / en)},${Math.round(egg / en)},${Math.round(eb / en)})`);
 
-  const group = new THREE.Group();
+  const group = own.group;
   group.name = "scenery";
   group.add(terrain);
   if (seaLevel != null && seaCells > 200) {
@@ -800,11 +808,11 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   }
   // Night (the session is or runs into the night): the light field of the floodlights, street lights and car parks,
   // the lamps themselves and the aircraft warning lights on tall buildings (shown at night only, see map3d)
-  let night = null;
+  let night = null, lightMs = null;
   if (opts.night) {
     onStep?.("야간 조명 켜는 중");
-    const xz = (pts) => pts.map(gf.xz);
-    night = lightField({ ext, groundAt: terrainAt, track: { samples: world.samples, width: opts.trackW || 14 },
+    const xz = (pts) => pts.map(gf.xz), t0 = performance.now();
+    night = own.night = lightField({ ext, groundAt: terrainAt, track: { samples: world.samples, width: opts.trackW || 14 },
       lines: scene.lines.filter((l) => l.k === "road" || l.k === "path" || l.k === "raceway").map((l) => ({ ...l, pts: xz(l.pts) })),
       paved: scene.areas.filter((a) => a.k === "paved").map((a) => xz(a.pts)),
       buildings: opts.buildings !== false ? scene.buildings.filter((b) => b.kind !== "grandstand" && !(b.min > 3)).map((b) => xz(b.pts)) : [],
@@ -814,6 +822,7 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     if (beacons.length) night.group.add(glowPoints(beacons, "beacons"));
     night.group.visible = false;
     group.add(night.group);
+    lightMs = Math.round(performance.now() - t0);
   }
   return {
     night,
@@ -825,7 +834,7 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     isSea: seaLevel != null ? isSea : null, landAt: seaR ? (x, z) => seaR.landAt(x, z) : null,
     geo: gf,   // the frame's maps (F1 metres / lat-lon ↔ scene), for placing things by their real position
     landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
-    info: { tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
+    info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped } : null,
       trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },

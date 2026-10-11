@@ -16,9 +16,9 @@ class GoogleTiles {
   // (safeStorage can be swapped in tests)
   constructor(dir, { storage = safeStorage } = {}) {
     this.file = path.join(dir, "google-maps-key.bin"); this.session = null; this.tiles = new Map(); this.tileBytes = 0;
-    this.gen = 0; this.pending = null; this.ss = storage; this.mem = null;
+    this.gen = 0; this.pending = null; this.ss = storage; this.mem = null; this.inflight = new Map();
   }
-  forget() { this.gen++; this.session = null; this.pending = null; this.tiles.clear(); this.tileBytes = 0; this.checked = null; }
+  forget() { this.gen++; this.session = null; this.pending = null; this.tiles.clear(); this.tileBytes = 0; this.checked = null; this.inflight.clear(); }
 
   getKey() { return this.mem || loadSecret(this.file, this.ss); }
   // Saves (or with an empty key, removes) the key after checking it works. Returns { ok, message }.
@@ -37,12 +37,20 @@ class GoogleTiles {
   hasKey() { return !!this.getKey(); }
   // Whether Google will serve tiles for the saved key right now: a fresh session, so a key deleted or an API
   // switched off in the Cloud console since it was saved shows up. Kept for a minute. Returns { hasKey, ok, message }.
+  // (a check that finishes after the key changed – saved anew or removed meanwhile – answers with the current key's
+  // state and writes nothing: its session or its failure was the old key's)
   async check() {
     if (!this.hasKey()) return { hasKey: false, ok: false, message: "저장된 Google Maps API 키가 없어요." };
     if (this.checked && Date.now() - this.checked.at < 60e3) return this.checked.r;
-    let r;
+    const gen = this.gen;
+    let r, failed = false;
     try { await this.newSession(); r = { hasKey: true, ok: true, message: "" }; }
-    catch (e) { this.session = null; r = { hasKey: true, ok: false, message: e.message }; }
+    catch (e) { failed = true; r = { hasKey: true, ok: false, message: e.message }; }
+    if (gen !== this.gen) {
+      const ok = !!(this.session && this.session.gen === this.gen);
+      return { hasKey: this.hasKey(), ok, message: ok ? "" : "Google Maps API 키가 바뀌었어요. 다시 확인해 주세요." };
+    }
+    if (failed) this.session = null;
     this.checked = { at: Date.now(), r };
     return r;
   }
@@ -78,17 +86,30 @@ class GoogleTiles {
     return this.pending;
   }
 
-  async tile(z, x, y) {
+  // (one tile asked for again while it's being downloaded shares that download – per key generation, so a download
+  // under a key since changed is never handed to the new key; a failed one is tried again next time. tileBytes is the
+  // sum of the tiles held: a tile stored again replaces its old bytes)
+  tile(z, x, y) {
     const id = `${z}/${x}/${y}`;
-    if (this.tiles.has(id)) { const b = this.tiles.get(id); this.tiles.delete(id); this.tiles.set(id, b); return b; }   // (most recently used last)
-    const s = await this.ready();
-    const res = await fetch(`${API}/v1/2dtiles/${z}/${x}/${y}?session=${encodeURIComponent(s.token)}&key=${encodeURIComponent(s.key)}`, { signal: AbortSignal.timeout(20000) });
-    if (!res.ok) throw new Error(`Google tile HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (s.gen !== this.gen) throw new Error("Google Maps API 키가 바뀌었어요");   // (not kept under a key since removed)
-    this.tiles.set(id, buf); this.tileBytes += buf.length;
-    for (const [k, b] of this.tiles) { if (this.tileBytes <= TILE_BUDGET) break; this.tiles.delete(k); this.tileBytes -= b.length; }
-    return buf;
+    if (this.tiles.has(id)) { const b = this.tiles.get(id); this.tiles.delete(id); this.tiles.set(id, b); return Promise.resolve(b); }   // (most recently used last)
+    const gen = this.gen, k = `${gen}:${id}`;
+    if (this.inflight.has(k)) return this.inflight.get(k);
+    const job = (async () => {
+      const s = await this.ready();
+      if (s.gen !== gen) throw new Error("Google Maps API 키가 바뀌었어요");
+      const res = await fetch(`${API}/v1/2dtiles/${z}/${x}/${y}?session=${encodeURIComponent(s.token)}&key=${encodeURIComponent(s.key)}`, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`Google tile HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (gen !== this.gen) throw new Error("Google Maps API 키가 바뀌었어요");   // (not kept under a key since removed)
+      const old = this.tiles.get(id);
+      if (old) { this.tileBytes -= old.length; this.tiles.delete(id); }
+      this.tiles.set(id, buf); this.tileBytes += buf.length;
+      for (const [key, b] of this.tiles) { if (this.tileBytes <= TILE_BUDGET || key === id) break; this.tiles.delete(key); this.tileBytes -= b.length; }
+      return buf;
+    })();
+    this.inflight.set(k, job);
+    job.then(() => {}, () => {}).finally(() => { if (this.inflight.get(k) === job) this.inflight.delete(k); });
+    return job;
   }
 
   // Copyright text Google requires for the area shown.

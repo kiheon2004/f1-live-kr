@@ -177,14 +177,16 @@ test("combine: landmarks and facilities skip, keep out and light as one group na
   assert.strictEqual(F.combine(lm, null), lm);
 });
 
-test("GLB model cache: past its limit, a model the latest build doesn't use is freed (and one in use isn't)", async () => {
-  const F = await load();
+test("GLB model cache: past its limit, a model no world uses any more is freed (and one in use isn't)", async () => {
+  const F = await load(), { disposeGroup } = await import("../src/renderer/dispose.js");
   const spec = (f) => ({ id: f, loc: ["Testring"], status: "trial", replaces: { names: /^Nope$/ }, model: { file: f, anchor: [52, -1] } });
   const read = async () => boxGlb();
   const first = await F.buildFacilities(base([spec("e0.glb")], { readModel: read }));
   const g0 = first.group.getObjectByProperty("isMesh", true).geometry;
   let freed = false; g0.addEventListener("dispose", () => { freed = true; });
-  for (let i = 1; i <= 7; i++) await F.buildFacilities(base([spec(`e${i}.glb`)], { readModel: read }));
+  // (each world disposed before the next is built, as the app does: then its models can go)
+  disposeGroup(first.group);
+  for (let i = 1; i <= 7; i++) disposeGroup((await F.buildFacilities(base([spec(`e${i}.glb`)], { readModel: read }))).group);
   await new Promise((r) => setTimeout(r, 0));
   assert.strictEqual(freed, true, "the oldest unused model is freed");
   const keep = await F.buildFacilities(base([spec("k.glb")], { readModel: read }));
@@ -354,7 +356,8 @@ test("garages: teams placed from the session's own pit stops – not standings o
 test("garages: standstills only count in front of the garages, and a short one only after entering the pits", async () => {
   const G = await import("../src/renderer/garages.js");
   const car = (pts) => ({ t: pts.map((p) => p[0]), x: pts.map((p) => p[1] * 10), y: pts.map((p) => p[2] * 10), n: pts.length });
-  const still3s = (t0, x, y) => [[t0, x, y], [t0 + 1000, x, y], [t0 + 3000, x, y], [t0 + 3500, x + 20, y]];
+  // (driving in first: a standstill at the very start of the data could have begun before it – not a stop)
+  const still3s = (t0, x, y) => [[t0 - 500, x - 20, y], [t0, x, y], [t0 + 1000, x, y], [t0 + 3000, x, y], [t0 + 3500, x + 20, y]];
   const project = (x, z) => ({ u: x, off: -z - 0 });   // garages along x at z = 0, the pit lane towards −z
   const cars = { 1: car(still3s(10000, 50, 5)), 2: car(still3s(10000, 50, 40)), 3: car(still3s(500000, 60, 5)) };
   const r = G.standstills(cars, ([X, Y]) => [X, -Y], project, [0, 300], { 1: [5000], 3: [100000] });
@@ -405,7 +408,7 @@ test("pit inference: a standstill across a hole in the position data isn't one; 
   const car = (pts) => ({ t: pts.map((p) => p[0]), x: pts.map((p) => p[1] * 10), y: pts.map((p) => p[2] * 10), n: pts.length });
   const project = (x, z) => ({ u: x, off: -z });
   const gap = car([[1000, 50, 5], [1300, 50, 5], [4800, 50, 5], [5000, 70, 5]]);           // 3.5 s without samples
-  const ok = car([[1000, 50, 5], [1500, 50, 5], [2500, 50, 5], [3600, 50, 5], [3800, 70, 5]]);
+  const ok = car([[700, 30, 5], [1000, 50, 5], [1500, 50, 5], [2500, 50, 5], [3600, 50, 5], [3800, 70, 5]]);
   const r = G.standstills({ 1: gap, 2: ok }, ([X, Y]) => [X, -Y], project, [0, 300]);
   assert.strictEqual(r[1], undefined); assert.strictEqual(r[2].stops.length, 1);
   assert.strictEqual(G.standstills({ 2: ok }, ([X, Y]) => [X, -Y], project, [0, 300], null, 2000)[2], undefined, "the stop hasn't happened yet at 2 s");
@@ -415,17 +418,19 @@ test("pit inference: places stay put with small changes, move only on trusted ev
   const G = await import("../src/renderer/garages.js");
   const D = { 1: { TeamName: "A", TeamColour: "ff0000", Tla: "AAA" }, 2: { TeamName: "A", Tla: "BBB" } };
   const inf = new G.PitInference();
-  const S = (us) => ({ 1: { stops: us.map((u, i) => ({ u, dur: 2500, t: i * 1e5 })), long: [] } });
-  inf.observe(S([-76, -76.5]), false); let r = inf.update(D, 8.4);
+  // (live: looks merged as they come – a replay instead shows exactly what's known at the moment, garages.test.js)
+  const S = (us, t0 = 0) => ({ 1: { stops: us.map((u, i) => ({ u, dur: 2500, t: t0 + i * 1e5 })), long: [] } });
+  inf.observe(S([-76, -76.5]), true); let r = inf.update(D, 8.4);
   const slots = Array.from({ length: 40 }, (_, k) => ({ k, uc: -170 + k * 8.4 + 4.2 }));
   const k1 = G.allocationKey(G.allocatePlaces(slots, 8.4, D, r.places));
-  inf.observe(S([-76, -76.5, -75.4]), false); r = inf.update(D, 8.4);
+  inf.observe(S([-75.4], 2e5), true); r = inf.update(D, 8.4);
   assert.strictEqual(G.allocationKey(G.allocatePlaces(slots, 8.4, D, r.places)), k1, "a stop 1 m off: nothing moves");
   assert.ok(Math.abs(r.places[0].u + 76.25) < 0.01, "the place itself stays where first trusted");
-  inf.observe(S([-40, -40.3, -39.8]), false); r = inf.update(D, 8.4);
+  inf.reset(); inf.observe(S([-76, -76.5, -75.4]), true); inf.update(D, 8.4);
+  inf.observe(S([-40, -40.3, -39.8, -40.1], 1e6), true); r = inf.update(D, 8.4);
   assert.ok(Math.abs(r.places[0].u + 40) < 0.5, "three agreeing stops 36 m away: moved");
   const a = G.allocatePlaces(slots, 8.4, D, r.places);
-  assert.strictEqual(a[0].link, "inferred"); assert.strictEqual(a[0].box, r.places[0].u);
+  assert.strictEqual(a[0].link, "inferred"); assert.ok(Math.abs(a[0].box - r.places[0].u) <= 0.25, "the box drawn at the place (to 0.5 m)");
   assert.deepStrictEqual(a[0].drivers.map((d) => d.tla), ["AAA", "BBB"], "the team's drivers from the session's list");
 });
 

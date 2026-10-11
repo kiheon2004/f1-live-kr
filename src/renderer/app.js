@@ -49,7 +49,8 @@
     $("replayBar").hidden = m !== "replay"; $("liveBar").hidden = m !== "live"; $("player").hidden = m !== "replay";
     pause();
     src = m === "live" ? (liveStatus.state === "live" || live.state.DriverList || live.queue.length ? live : null) : replay;
-    rcCount = -1; seenMsgs = src ? src.messages.length : 0; prevPos = {}; outline = []; outlineFor = null;
+    rcCount = -1; seenMsgs = src?.rc ? src.rc.added : 0; prevPos = {}; outline = []; outlineFor = null;
+    radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
     refreshOutline(); refreshTitle(); renderAll(true);
   }
   $("modeReplay").addEventListener("click", () => setMode("replay"));
@@ -113,21 +114,24 @@
       if (job !== loadJob) return;
       showLoad(95, "화면 준비 중 ·");
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));   // paint 95% before the rebuild
-      replay = new ReplayKit.Replay(data);
-      replayInfo = info;
-      // (switched to live while it downloaded: the replay is ready for when replay is picked again, but the screen
-      // stays on live)
-      if (mode === "replay") src = replay;
-      prevPos = {};
-      rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
-      outline = replay.lapShape() || replayFallbackLap(); if (!outline.length) outline = replay.trackOutline(); outlineFor = "replay";
+      if (job !== loadJob) return;
+      const r = new ReplayKit.Replay(data);
+      replay = r; replayInfo = info;
       // The recording starts long before the session (an hour before a race); the bar covers the session itself.
-      tStart = replay.startTime(); replay.seek(tStart);   // (seek first: that reads the session info)
-      t0 = gridFormedAt(replay, tStart); t1 = Math.max(tStart + 1000, replay.endTime());
+      tStart = r.startTime(); r.seek(tStart);   // (seek first: that reads the session info)
+      t0 = gridFormedAt(r, tStart); t1 = Math.max(tStart + 1000, r.endTime());
       $("seek").min = t0; $("seek").max = t1;
       for (const id of ["play", "speed", "toStart", "seek"]) $(id).disabled = false;
-      refreshTitle();
-      seekTo(t0);
+      t = t0; r.seek(t0);
+      // (switched to live while it downloaded: the replay is ready for when replay is picked again – setMode shows it
+      // then – and the live screen's circuit, alerts, lists and title are left as they are)
+      if (mode === "replay") {
+        src = replay; prevPos = {};
+        rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
+        outline = r.lapShape() || replayFallbackLap(); if (!outline.length) outline = r.trackOutline(); outlineFor = "replay";
+        refreshTitle();
+        seekTo(t0);
+      }
       showLoad(100, "준비 완료 ·");
       loadHideTimer = setTimeout(() => { $("loadBar").hidden = true; $("progress").textContent = "준비 완료"; }, 2500);
     } catch (e) { $("loadBar").hidden = true; $("progress").textContent = `불러오지 못했어요 (${e.message})`; }
@@ -140,7 +144,7 @@
   function seekTo(ms) {
     if (!replay) return;   // (nothing loaded yet: a seek before the first load does nothing)
     t = Math.max(t0, Math.min(ms, t1)); replay.seek(t);
-    seenMsgs = replay.messages.length; prevPos = {}; radioKey = "";   // jumping shouldn't fire alerts
+    seenMsgs = replay.rc.added; prevPos = {}; radioKey = "";   // jumping shouldn't fire alerts
     renderAll(true);
   }
   $("play").addEventListener("click", () => (playing ? pause() : play()));
@@ -305,7 +309,7 @@
       if (key !== liveKey || live.epoch !== liveEpoch) {
         const newSession = key !== liveKey;
         liveKey = key; liveEpoch = live.epoch;
-        rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = ""; seenMsgs = live.messages.length; prevPos = {};
+        rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = ""; seenMsgs = live.rc.added; prevPos = {};
         if (newSession) { circuitFor = null; refreshOutline(); }
         refreshTitle(); renderAll(true);
       }
@@ -536,9 +540,10 @@
     const k = e.target.closest("button[data-kind]")?.dataset.kind; if (!k) return;
     rcKind = k; store.set("rcKind", k); rcCount = -1; renderRC();
   });
+  // (redrawn when the list changes – a new message, or one corrected or taken back in place)
   function renderRC() {
     const msgs = src.messages;
-    if (msgs.length === rcCount) return; rcCount = msgs.length;
+    if (src.rc?.rev === rcCount) return; rcCount = src.rc?.rev;
     $("rcFilter").innerHTML = RC_KINDS.map(([k, label, fn]) => {
       const n = k === "all" ? msgs.length : msgs.filter(fn).length;
       return `<button data-kind="${k}" aria-pressed="${k === rcKind}"${n || k === "all" ? "" : " disabled"}>${label} <span>${n}</span></button>`;
@@ -566,15 +571,15 @@
     toast(text, cls);
     if (notifyOn && mode === "live") window.api.notify("라이브 타이밍 KR", text);
   }
+  // (only messages that came in new alert – a correction of one already shown doesn't alert again)
   function checkAlerts() {
-    const msgs = src.messages;
-    for (let i = seenMsgs; i < msgs.length; i++) {
-      const m = msgs[i], ko = KO.translate(m.Message) || m.Message;
+    for (const m of ReplayKit.newMessages(src, seenMsgs)) {
+      const ko = KO.translate(m.Message) || m.Message;
       if (/RED FLAG/.test(m.Message)) alertOut("🟥 " + ko, "red");
       else if (m.Category === "SafetyCar" && /DEPLOYED|ENDING|IN THIS LAP/.test(m.Message)) alertOut("🟧 " + ko, "sc");
       else if (/PENALTY FOR CAR|CHEQUERED FLAG/.test(m.Message) && !/SERVED/.test(m.Message)) alertOut(ko, "");
     }
-    seenMsgs = msgs.length;
+    seenMsgs = src.rc?.added ?? 0;
     // Position changes of the drivers you follow.
     const lines = src.state.TimingData?.Lines || {}, drivers = src.state.DriverList || {};
     for (const n of [focus, compare].filter(Boolean)) {
@@ -1260,7 +1265,7 @@
         const provider = geoOpts.provider === "google" && (await window.api.geo.googleCheck()).ok ? "google" : "eox";
         const g = await mod.buildGround2D(window.api, scene, lap, { provider });
         if (satWant === key) { sat2d = { ...g, provider }; satKey = key; satFail = null; drawMap(); }
-      } catch (e) { satFail = { key, at: Date.now() }; toast(`위성 사진을 못 깔았어요 (${e.message})`, ""); }
+      } catch (e) { satFail = { key, at: Date.now() }; if (satWant === key) toast(`위성 사진을 못 깔았어요 (${e.message})`, ""); }
       finally { satBusy = false; }
     })();
     return shown;
@@ -1320,7 +1325,7 @@
     if (!loc) return [];
     if (fbFor !== loc) {
       fbFor = loc; fbLap = [];
-      window.api.trackOutline(loc).then((l) => { if (fbFor === loc) { fbLap = l || []; outline = outline.length ? outline : fbLap; drawMap(); } }).catch(() => {});
+      window.api.trackOutline(loc).then((l) => { if (fbFor !== loc) return; fbLap = l || []; if (mode === "replay" && src === replay && replayInfo?.location === loc) { outline = outline.length ? outline : fbLap; drawMap(); } }).catch(() => {});
     }
     return fbLap;
   }

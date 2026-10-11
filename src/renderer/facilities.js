@@ -15,6 +15,7 @@
 // combine() joins the two, so buildingsMesh, the trees and the grandstands handle facilities like landmarks.
 import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
+import { disposeGroup } from "./dispose.js";
 
 // ---------- registry ----------
 export const FACILITIES = [
@@ -48,6 +49,13 @@ export const FACILITIES = [
     // in the photos and aerial imagery. The 16.5 m height and the capsule's size are read off photos (estimates), so
     // it stays a trial: the "정밀 시설" setting turns it off and the map's building comes back
     checked: "2026-10-08: trial (estimated height)",
+    // what the model's numbers rest on (registry test): published / confirmed, read off photos, from the map, inferred
+    evidence: {
+      confirmed: ["three floors above ground, 40,687 m², 350 m long; pits on the ground floor, seating on the 2nd and 3rd (Takenaka, 2009)", "the straight's 2.8 % fall"],
+      photo: ["~16.5 m to the roof (estimate)", "the silver capsule at the upstream end: its size (estimate; photo 2, aerial imagery checked only)"],
+      map: ["the footprint (OSM's outline; its 8 m height only guessed)"],
+      inferred: [],
+    },
   },
   {
     id: "imola-box", name: "Autodromo Enzo e Dino Ferrari – corpo box", kind: "pit-building",
@@ -73,6 +81,12 @@ export const FACILITIES = [
       "Photo: 'Paddock Autodromo Imola' (Danysan1, Wikimedia Commons, CC BY-SA 3.0, 2018)",
     ],
     checked: "2026-10-09: trial (height estimated from a photo; a building on the terrace is planned from 2026)",
+    evidence: {
+      confirmed: ["32 modular garages of 100 m², ~250 m (2009, 2019 articles)", "a roof terrace over the garages"],
+      photo: ["~6.2 m to the terrace, the canopies' depth (2018 photo, CC BY-SA 3.0)"],
+      map: ["the footprint: the map's 'Box' record (238 × 18 m)"],
+      inferred: [],
+    },
   },
   {
     id: "red-bull-ring-pits", name: "Red Bull Ring – Boxengebäude", kind: "pit-building",
@@ -97,6 +111,12 @@ export const FACILITIES = [
       "Photo: '2021 4 Hours of Red Bull Ring – Paddock' (United Autosports, Wikimedia Commons, CC BY-SA 2.0)",
     ],
     checked: "2026-10-09: trial (height and the glazing's lean estimated from a photo)",
+    evidence: {
+      confirmed: ["workshop boxes with lift gates, VIP lounges with inclined glazing (nextroom, 2011)", "30 boxes (auto motor und sport, 2025)"],
+      photo: ["~12 m to the roof, the glazing's lean, the roof's overhang (2021 photo, CC BY-SA 2.0)"],
+      map: ["the footprint: the map's two 'Box' records"],
+      inferred: [],
+    },
   },
   {
     id: "yas-marina-pits", name: "Yas Marina Circuit – pit building", kind: "pit-building",
@@ -123,6 +143,12 @@ export const FACILITIES = [
       "Photos (for comparison only): Alexander Yee, Flickr 4531657341 / 4532275554 (CC BY-NC-ND 2.0, 2010); 'Asian Le Mans Series 2021 – Race 4 – Pitlane exit before start' (Wikimedia Commons, CC BY-SA 2.0)",
     ],
     checked: "2026-10-09: trial (height and the roof canopies estimated from photos)",
+    evidence: {
+      confirmed: ["40 air-conditioned garages (formula1.com)"],
+      photo: ["~14 m to the roof; the roof canopies' size and spacing (2010 photos CC BY-NC-ND 2.0, compared only; 2021 photo CC BY-SA 2.0)"],
+      map: ["the footprint: the pit building record at its position (375 × 30 m)"],
+      inferred: [],
+    },
   },
   {
     id: "silverstone-wing", name: "Silverstone Wing", kind: "pit-building",
@@ -146,7 +172,10 @@ export const FACILITIES = [
       // the paddock at the 2026 British GP (photos 3 July 2026): black awnings along the garages' back, two-storey
       // hospitality units across the paddock street. Their sizes and spacing are estimates; which team's is where isn't
       // known, so they're neutral.
-      paddock: { years: [2026, 2026], margin: 6, street: 20, awning: { d: 4, h: 3.6 }, unit: { w: 18, d: 14, h: 8.5, gap: 4 } },
+      paddock: { years: [2026, 2026], margin: 6, street: 20, awning: { d: 4, h: 3.6 }, unit: { w: 18, d: 14, h: 8.5, gap: 4 },
+        basis: { kind: "photo estimate", seen: "2026-07-03", event: "British Grand Prix 2026", licence: "CC BY-SA 4.0",
+          sources: ["Flickr 55383877828", "Flickr 55382810457", "Flickr 55382810427"],
+          uncertain: "the units' size, spacing and count are read off photos (±30 %); which team's unit is where isn't known (drawn neutral); no team's vehicles, motorhomes, equipment or logos are reproduced" } },
     },
     sources: [
       "New Steel Construction, 'Wing heralds new era for famous circuit' (2011): 390 m long; blade 16.5 m at 40°, tip 30 m; 41 garages",
@@ -161,6 +190,12 @@ export const FACILITIES = [
     // stretch, the peak about 40 % along, the long low end) and the facades match photos 1–3 from the same viewpoints;
     // the map's parts drew it as blocks of different heights with office windows and a black wedge
     checked: "2026-10-08: permanent",
+    evidence: {
+      confirmed: ["390 m long, 30 m high; the blade 16.5 m at 40°, its tip 30 m; 41 garages (New Steel Construction 2011, Motor Sport 2011)"],
+      photo: ["the roofline and facades (photos 1–3)", "the pit wall's and walkway's heights (2011 photo)", "the 2026 paddock: awnings and hospitality units – sizes, spacing and count (3 July 2026 photos)"],
+      map: ["the footprint and the parts' heights (the map's 21 'Silverstone Wing' parts)", "the walkway's width (the mapped footway band)"],
+      inferred: ["the pit wall's line, from the track's measured edge in the session's position data"],
+    },
   },
 ];
 
@@ -664,6 +699,7 @@ function pitBuilding(ctx, p) {
   // raised walkway with a railing on the pit lane side (the mapped footway band; photo). Stands for the teams on it are
   // added with the teams (garages.js: wallAt).
   let wallAt = null;
+  const occupancy = [];   // what the wall and the paddock stand on (scene x, z): trees keep off it – it isn't the building replaced
   if (p.pitWall && ctx.trackEdge && G > 0) {
     const pw = p.pitWall, W = [];
     for (let uu = gStart; uu <= gEnd + 1e-6; uu += 3) {
@@ -688,43 +724,84 @@ function pitBuilding(ctx, p) {
         F.poly("pitWall", [ptAt(i, w1, 0), ptAt(i + 1, w1, 0), ptAt(i + 1, w1, pw.deck), ptAt(i, w1, pw.deck)], null, io);
         F.poly("rail", [ptAt(i, w1, pw.deck), ptAt(i + 1, w1, pw.deck), ptAt(i + 1, w1, pw.deck + 1.1), ptAt(i, w1, pw.deck + 1.1)], [[0, 0], [1, 0], [1, 1], [0, 1]], io);
       }
-      // the walkway's centre at u (for the teams' stands): [x, y, z], facing the pit lane
-      wallAt = (uu) => { let i = 0; while (i + 1 < W.length && W[i + 1].u < uu) i++; const [x, y, z] = ptAt(i, pw.thick + pw.walk / 2, pw.deck); return { p: [x, y, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]] }; };
+      // the walkway's centre at u (for the teams' stands): [x, y, z], facing the pit lane – between two samples, between
+      // their points (a team's box is anywhere along the wall, not only every 3 m)
+      wallAt = (uu) => {
+        let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, pw.thick + pw.walk / 2, pw.deck), b = ptAt(i + 1, pw.thick + pw.walk / 2, pw.deck);
+        return { p: a.map((x, k) => x + (b[k] - x) * f), out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]] };
+      };
+      // (what the wall and its walkway stand on)
+      const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, pw.thick + pw.walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]);
+      occupancy.push(strip);
     }
   }
   // The paddock behind the garages (p.paddock, for the years it was seen): awnings along the garages' back and a row
-  // of hospitality units across the paddock street – neutral (which team's unit stands where isn't known).
+  // of hospitality units across the paddock street – neutral (which team's unit stands where isn't known). Each unit
+  // stands level on its own ground (its floor at the highest point under it, a footing down to the lowest – a paddock
+  // is rarely flat), not at the pit building's floor. One that would stand in a building of the map that stays, or
+  // across a mapped road or path, isn't built (and said so in info): the map's neighbour stays, nothing is hidden to make
+  // room for an estimate.
   let paddockInfo = null;
   // (estimated: only with the trial setting on, even on a permanent facility)
   if (p.paddock && ctx.trial !== false && (!p.paddock.years || (ctx.year && ctx.year >= p.paddock.years[0] && ctx.year <= (p.paddock.years[1] ?? 9999)))) {
     const pd = p.paddock, run0 = Math.max(uMin, uRoot) + pd.margin, run1 = uMax - pd.margin;
     const backV = (uu) => { const [a, b, f] = stationAt(uu); return sideV(a, -1) + (sideV(b, -1) - sideV(a, -1)) * f; };
-    const PB = (uu, d, y) => { const [x, z] = P(uu, backV(uu) - vTrack * d); return [x, baseAt(uu) + y, z]; };
+    const XZ = (uu, d) => P(uu, backV(uu) - vTrack * d);
+    const PB = (uu, d, y) => { const [x, z] = XZ(uu, d); return [x, baseAt(uu) + y, z]; };
     const back = [-v[0] * vTrack, 0, -v[1] * vTrack], front = [v[0] * vTrack, 0, v[1] * vTrack];
-    // awnings: a sloping canopy on posts, the length of the garages' back
+    // the map around it that stays: buildings other than the ones this facility replaces, roads and paths
+    const others = (ctx.scene?.buildings || []).filter((b) => !ctx.parts.includes(b)).map((b) => ({ b, pts: ring(b, ctx.gf) })).filter((o) => o.pts.length >= 3);
+    const ways = (ctx.scene?.lines || []).filter((l) => l.k === "road" || l.k === "path" || l.k === "rail").map((l) => ({ l, pts: l.pts.map(ctx.gf.xz) }));
+    const clash = (poly) => {
+      const o = others.find((x) => polysOverlap(poly, x.pts)); if (o) return `building ${o.b.name || o.b.cls || ""}`.trim();
+      const w = ways.find((x) => lineThrough(x.pts, poly)); if (w) return `${w.l.sub || w.l.k} way`;
+      return null;
+    };
+    const inset = (a0, a1, e0, e1, m = 0.3) => [XZ(a0 + m, e0 + m), XZ(a1 - m, e0 + m), XZ(a1 - m, e1 - m), XZ(a0 + m, e1 - m)];
+    const skipped = [], placed = [];
+    // awnings: a sloping canopy on posts, the length of the garages' back, its low edge at least 2.2 m over the ground
     for (let uu = run0; uu < run1 - 1; uu += 6) {
       const u1 = Math.min(run1, uu + 6);
-      F.poly("awning", [PB(uu, 0, pd.awning.h), PB(u1, 0, pd.awning.h), PB(u1, pd.awning.d, pd.awning.h - 0.8), PB(uu, pd.awning.d, pd.awning.h - 0.8)], null, [0, 1, 0]);
-      F.poly("awning", [PB(uu, pd.awning.d, pd.awning.h - 0.8), PB(u1, pd.awning.d, pd.awning.h - 0.8), PB(u1, pd.awning.d, pd.awning.h - 1.4), PB(uu, pd.awning.d, pd.awning.h - 1.4)], null, back);
+      if (clash(inset(uu, u1, 0.1, pd.awning.d))) { skipped.push({ u: +uu.toFixed(1), what: "awning", why: clash(inset(uu, u1, 0.1, pd.awning.d)) }); continue; }
+      const edge = (a) => { const [x, z] = XZ(a, pd.awning.d), y = Math.max(baseAt(a) + pd.awning.h - 0.8, ctx.groundAt(x, z) + 2.2); return [x, y, z]; };
+      const e0 = edge(uu), e1 = edge(u1), lip = (q) => [q[0], q[1] - 0.6, q[2]];
+      F.poly("awning", [PB(uu, 0, pd.awning.h), PB(u1, 0, pd.awning.h), e1, e0], null, [0, 1, 0]);
+      F.poly("awning", [e0, e1, lip(e1), lip(e0)], null, back);
+      occupancy.push([XZ(uu, 0), XZ(u1, 0), XZ(u1, pd.awning.d), XZ(uu, pd.awning.d)]);
     }
     // hospitality units: two storeys, a glass band upstairs, across the street from the garages
-    let n = 0;
+    let n = 0, shifted = 0;
     for (let uu = run0; uu + pd.unit.w <= run1; uu += pd.unit.w + pd.unit.gap) {
-      const d0 = pd.street, d1 = d0 + pd.unit.d, h = pd.unit.h, u1 = uu + pd.unit.w;
-      const box = (key, a0, a1, e0, e1, y0, y1) => {
-        F.poly(key, [PB(a0, e0, y0), PB(a1, e0, y0), PB(a1, e0, y1), PB(a0, e0, y1)], null, front);
-        F.poly(key, [PB(a0, e1, y0), PB(a1, e1, y0), PB(a1, e1, y1), PB(a0, e1, y1)], null, back);
-        F.poly(key, [PB(a0, e0, y0), PB(a0, e1, y0), PB(a0, e1, y1), PB(a0, e0, y1)], null, [-u[0], 0, -u[1]]);
-        F.poly(key, [PB(a1, e0, y0), PB(a1, e1, y0), PB(a1, e1, y1), PB(a1, e0, y1)], null, [u[0], 0, u[1]]);
-        F.poly("unitRoof", [PB(a0, e0, y1), PB(a1, e0, y1), PB(a1, e1, y1), PB(a0, e1, y1)], null, [0, 1, 0]);
+      // (the street's width is an estimate: where the map has the paddock's own lane or a building there, the unit moves
+      // back beyond it – up to 16 m – before it's left out)
+      const h = pd.unit.h, u1 = uu + pd.unit.w;
+      let d0 = pd.street, why = clash(inset(uu, u1, d0, d0 + pd.unit.d));
+      for (let sh = 1; why && sh <= 16; sh++) if (!clash(inset(uu, u1, pd.street + sh, pd.street + sh + pd.unit.d))) { d0 = pd.street + sh; why = null; shifted++; }
+      const d1 = d0 + pd.unit.d;
+      if (why) { skipped.push({ u: +uu.toFixed(1), what: "unit", why }); continue; }
+      const corners = [XZ(uu, d0), XZ(u1, d0), XZ(u1, d1), XZ(uu, d1), XZ((uu + u1) / 2, (d0 + d1) / 2)];
+      const gy = corners.map(([x, z]) => ctx.groundAt(x, z)).filter(Number.isFinite);
+      const floor = Math.max(...gy), low = Math.min(...gy);
+      const PU = (a, d, y) => { const [x, z] = XZ(a, d); return [x, floor + y, z]; };
+      const box = (key, a0, a1, e0, e1, y0, y1, roof = true) => {
+        F.poly(key, [PU(a0, e0, y0), PU(a1, e0, y0), PU(a1, e0, y1), PU(a0, e0, y1)], null, front);
+        F.poly(key, [PU(a0, e1, y0), PU(a1, e1, y0), PU(a1, e1, y1), PU(a0, e1, y1)], null, back);
+        F.poly(key, [PU(a0, e0, y0), PU(a0, e1, y0), PU(a0, e1, y1), PU(a0, e0, y1)], null, [-u[0], 0, -u[1]]);
+        F.poly(key, [PU(a1, e0, y0), PU(a1, e1, y0), PU(a1, e1, y1), PU(a1, e0, y1)], null, [u[0], 0, u[1]]);
+        if (roof) F.poly("unitRoof", [PU(a0, e0, y1), PU(a1, e0, y1), PU(a1, e1, y1), PU(a0, e1, y1)], null, [0, 1, 0]);
       };
       box("unitWall", uu, u1, d0, d1, 0, h);
+      if (floor - low > 0.05) box("unitFooting", uu, u1, d0, d1, low - floor - 0.1, 0, false);
       // (the street side faces the garages)
-      F.poly("unitGlass", [PB(uu + 0.6, d0 - 0.02, h * 0.55), PB(u1 - 0.6, d0 - 0.02, h * 0.55), PB(u1 - 0.6, d0 - 0.02, h - 0.6), PB(uu + 0.6, d0 - 0.02, h - 0.6)], null, front);
-      F.poly("unitGlass", [PB(uu + 2, d0 - 0.02, 0.2), PB(u1 - 2, d0 - 0.02, 0.2), PB(u1 - 2, d0 - 0.02, 3), PB(uu + 2, d0 - 0.02, 3)], null, front);
+      F.poly("unitGlass", [PU(uu + 0.6, d0 - 0.02, h * 0.55), PU(u1 - 0.6, d0 - 0.02, h * 0.55), PU(u1 - 0.6, d0 - 0.02, h - 0.6), PU(uu + 0.6, d0 - 0.02, h - 0.6)], null, front);
+      F.poly("unitGlass", [PU(uu + 2, d0 - 0.02, 0.2), PU(u1 - 2, d0 - 0.02, 0.2), PU(u1 - 2, d0 - 0.02, 3), PU(uu + 2, d0 - 0.02, 3)], null, front);
+      occupancy.push(corners.slice(0, 4));
+      // (x, z of its centre; its floor, the lowest ground under it, and the pit building's floor there – for checking)
+      placed.push([...XZ((uu + u1) / 2, (d0 + d1) / 2), floor, low, baseAt((uu + u1) / 2)].map((x) => +x.toFixed(2)));
       n++;
     }
-    paddockInfo = { units: n, estimated: true };
+    paddockInfo = { units: n, shifted, skipped, placed, estimated: true, basis: pd.basis || null };
   }
   const meshes = F.meshes((key) => facilityMaterial(key, p));
   let interior = null;
@@ -757,7 +834,7 @@ function pitBuilding(ctx, p) {
   // where a point is along the garages (u) and how far out in front of them (off: towards the track)
   const project = (x, z) => { const uu = (x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], vv = (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]; return { u: uu, off: (vv - frontV(Math.max(gStart, Math.min(gEnd, uu)))) * vTrack }; };
   const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt } : null;
-  return { meshes, footprint, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
+  return { meshes, footprint, occupancy, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
       paddock: paddockInfo, pitWall: !!wallAt,
@@ -789,6 +866,7 @@ function facilityMaterial(key, p) {
     case "awning": return std({ color: "#202326", roughness: 0.8, side: THREE.DoubleSide });
     case "unitWall": return std({ color: "#3f4347", roughness: 0.6, metalness: 0.2 });
     case "unitRoof": return std({ color: "#55595d", roughness: 0.8 });
+    case "unitFooting": return std({ color: "#6f7174", roughness: 0.95 });
     case "unitGlass": return lit(std({ color: "#2c3b45", roughness: 0.1, metalness: 0.3, emissive: "#ffd9a0" }), 0, 0.7);
     case "garFrame": return std({ color: "#33383d", roughness: 0.5, metalness: 0.3 });
     case "garShutter": return std({ color: "#5b6168", roughness: 0.45, metalness: 0.4 });
@@ -811,24 +889,113 @@ function facilityMaterial(key, p) {
 const BUILDERS = { pitBuilding };
 
 // ---------- model files ----------
-// A self-contained GLB (no external buffers or images), at most 64 MB. Returns null if fine, else the reason.
-export function checkGlb(buf) {
-  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  if (u8.byteLength < 20 || u8.byteLength > 64 * 1024 * 1024) return "size";
-  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-  if (dv.getUint32(0, true) !== 0x46546c67 || dv.getUint32(4, true) !== 2) return "not a glTF 2 binary";
-  const jlen = dv.getUint32(12, true);
-  if (dv.getUint32(16, true) !== 0x4e4f534a || 20 + jlen > u8.byteLength) return "no JSON chunk";
-  let j; try { j = JSON.parse(new TextDecoder().decode(u8.subarray(20, 20 + jlen))); } catch { return "bad JSON"; }
-  if ((j.buffers || []).some((b) => b.uri)) return "external buffer";
-  if ((j.images || []).some((im) => im.uri && !im.uri.startsWith("data:"))) return "external image";
+// Static building models only: a self-contained GLB (glTF 2.0 binary, buffers and images embedded), checked before
+// anything is decoded – the container (header length, 4-byte aligned chunks inside the file, the JSON chunk first),
+// the JSON (an object, asset.version 2.x, its lists lists, every accessor inside its bufferView inside its buffer),
+// no skins (skinned/animated models aren't supported: a building doesn't move), no extension that needs a decoder
+// the app doesn't include (Draco, Meshopt, Basis – no outside decoders are loaded), and what it would take decoded:
+// the file is at most 64 MB, but its images decoded and its vertex data are budgeted on their own (a 2 MB JPEG can be a
+// 16384² texture: 1 GB). Limits for a detailed building: textures 256 MB decoded (e.g. sixteen 2048² with mipmaps),
+// vertex and index data 160 MB, 3 million triangles. Returns null if fine, else the reason.
+export const MODEL_LIMITS = { file: 64 * 1024 * 1024, textures: 256 * 1024 * 1024, geometry: 160 * 1024 * 1024, triangles: 3e6 };
+const NEEDS_DECODER = ["KHR_draco_mesh_compression", "EXT_meshopt_compression", "KHR_meshopt_compression", "KHR_texture_basisu"];
+const COMP = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 }, TYPE = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
+// width and height from a PNG or JPEG header (null: another format)
+function imageSize(b) {
+  if (b.length > 24 && b[0] === 0x89 && b[1] === 0x50 && b[12] === 0x49 && b[13] === 0x48) { const dv = new DataView(b.buffer, b.byteOffset, b.byteLength); return [dv.getUint32(16), dv.getUint32(20)]; }
+  if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8) {
+    for (let i = 2; i + 9 < b.length;) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const m = b[i + 1], len = (b[i + 2] << 8) | b[i + 3];
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return [(b[i + 7] << 8) | b[i + 8], (b[i + 5] << 8) | b[i + 6]];
+      i += 2 + len;
+    }
+  }
   return null;
 }
-// Parsed models, shared by every placement (resources marked shared; a model not used by the latest build is
-// freed once more than MODEL_CACHE are held).
+export function checkGlb(buf, limits = MODEL_LIMITS) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (u8.byteLength < 20 || u8.byteLength > limits.file) return "size";
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  if (dv.getUint32(0, true) !== 0x46546c67 || dv.getUint32(4, true) !== 2) return "not a glTF 2 binary";
+  if (dv.getUint32(8, true) !== u8.byteLength) return "header length doesn't match the file";
+  let off = 12, J = null, BIN = null;
+  while (off < u8.byteLength) {
+    if (off + 8 > u8.byteLength) return "chunk header past the end";
+    const clen = dv.getUint32(off, true), type = dv.getUint32(off + 4, true);
+    if (clen % 4) return "chunk length not 4-byte aligned";
+    if (off + 8 + clen > u8.byteLength) return "chunk past the end";
+    if (type === 0x4e4f534a) { if (J || off !== 12) return "JSON chunk not first / twice"; J = u8.subarray(off + 8, off + 8 + clen); }
+    else if (type === 0x004e4942) { if (BIN) return "two binary chunks"; BIN = u8.subarray(off + 8, off + 8 + clen); }
+    off += 8 + clen;
+  }
+  if (!J) return "no JSON chunk";
+  let j; try { j = JSON.parse(new TextDecoder().decode(J)); } catch { return "bad JSON"; }
+  if (!j || typeof j !== "object" || Array.isArray(j)) return "JSON isn't a glTF object";
+  if (typeof j.asset?.version !== "string" || !/^2\.\d+$/.test(j.asset.version)) return "asset version isn't glTF 2.x";
+  if (j.asset.minVersion && j.asset.minVersion !== "2.0") return "needs a newer glTF reader";
+  for (const k of ["buffers", "bufferViews", "accessors", "meshes", "nodes", "materials", "textures", "images", "scenes", "skins", "animations", "extensionsRequired"]) if (k in j && !Array.isArray(j[k])) return `JSON ${k} isn't a list`;
+  if ((j.skins || []).length) return "skinned model: static models only";
+  const dec = (j.extensionsRequired || []).filter((x) => NEEDS_DECODER.includes(x));
+  if (dec.length) return `compressed with ${dec.join(", ")}: needs a decoder the app doesn't include`;
+  if ((j.buffers || []).some((b) => b?.uri)) return "external buffer";
+  if ((j.images || []).some((im) => im?.uri && !im.uri.startsWith("data:"))) return "external image";
+  const bufLen = (j.buffers || []).map((b, i) => (i === 0 && BIN ? Math.min(BIN.length, b?.byteLength ?? 0) : 0));
+  if ((j.buffers || []).some((b, i) => !(b?.byteLength >= 0) || (i === 0 && b.byteLength > (BIN?.length ?? 0)))) return "buffer bigger than its binary chunk";
+  for (const v of j.bufferViews || []) if (!v || !(v.buffer < bufLen.length) || (v.byteOffset || 0) + v.byteLength > bufLen[v.buffer]) return "bufferView past its buffer";
+  let geometry = 0;
+  for (const a of j.accessors || []) {
+    const el = (COMP[a?.componentType] || 0) * (TYPE[a?.type] || 0);
+    if (!el || !(a.count >= 0)) return "bad accessor";
+    geometry += el * a.count;
+    if (a.bufferView != null) {
+      const v = j.bufferViews?.[a.bufferView]; if (!v) return "accessor without its bufferView";
+      const stride = v.byteStride || el;
+      if (a.count && (a.byteOffset || 0) + stride * (a.count - 1) + el > v.byteLength) return "accessor reads past its bufferView";
+    }
+  }
+  if (geometry > limits.geometry) return `vertex data too big (${Math.round(geometry / 1048576)} MB)`;
+  let tris = 0;
+  for (const m of j.meshes || []) for (const p of m?.primitives || []) { if ((p.mode ?? 4) !== 4) continue; const a = j.accessors?.[p.indices ?? p.attributes?.POSITION]; tris += (a?.count || 0) / 3; }
+  if (tris > limits.triangles) return `too many triangles (${Math.round(tris)})`;
+  let tex = 0;
+  for (const im of j.images || []) {
+    let bytes = null;
+    if (im?.bufferView != null) { const v = j.bufferViews[im.bufferView]; bytes = v.buffer === 0 && BIN ? BIN.subarray(v.byteOffset || 0, (v.byteOffset || 0) + Math.min(v.byteLength, 65536)) : null; }
+    else if (im?.uri?.startsWith("data:")) { try { bytes = Uint8Array.from(atob(im.uri.slice(im.uri.indexOf(",") + 1, im.uri.indexOf(",") + 1 + 87384)), (c) => c.charCodeAt(0)); } catch { bytes = null; } }
+    const [w, h] = (bytes && imageSize(bytes)) || [4096, 4096];   // (a format whose size isn't read here counts as 4096²)
+    tex += w * h * 4 * (4 / 3);
+  }
+  if (tex > limits.textures) return `textures too big decoded (${Math.round(tex / 1048576)} MB)`;
+  return null;
+}
+// Parsed models, shared by every placement (their resources marked shared). Each one is held (refs) by every build
+// that asked for it – from the moment it asks, while it loads – and then by each placed copy until its world is
+// disposed (the copy's userData.onDispose gives it back). Past MODEL_CACHE parsed models, only ones nobody holds are
+// freed, oldest first: a model in use by the world on screen or by a build under way is never freed under it (with
+// every one in use the cache holds more for a while). A failed load is dropped – only that load – and tried again.
 const MODEL_CACHE = 6;
-const models = new Map();   // file → Promise<THREE.Object3D>
-let modelsInUse = new Set();
+const models = new Map();   // file → { job: Promise<THREE.Object3D>, refs }
+function evictModels() {
+  for (const [f, e] of models) {
+    if (models.size <= MODEL_CACHE) break;
+    if (e.refs > 0) continue;
+    models.delete(f); e.job.then(freeModel, () => {});
+  }
+}
+function holdModel(file, read) {
+  let e = models.get(file);
+  if (!e) {
+    e = { refs: 0, job: null };
+    e.job = parseModel(file, read);
+    models.set(file, e);
+    e.job.catch(() => { if (models.get(file) === e) models.delete(file); });   // (only this load: a newer one stays)
+  } else { models.delete(file); models.set(file, e); }   // most recently used last
+  e.refs++;
+  evictModels();
+  let held = true;
+  return { job: e.job, release() { if (!held) return; held = false; e.refs--; evictModels(); } };
+}
 function markShared(root) {
   root.traverse((o) => {
     if (o.geometry) o.geometry.userData.shared = true;
@@ -839,27 +1006,17 @@ export function texturesOf(m) { return Object.values(m).filter((x) => x && x.isT
 function freeModel(root) {
   root.traverse((o) => { o.geometry?.dispose(); for (const m of [].concat(o.material || [])) { for (const t of texturesOf(m)) t.dispose(); m.dispose(); } });
 }
-async function loadModel(file, read) {
-  if (!models.has(file)) {
-    const job = (async () => {
-      const buf = await read(file);
-      const bad = checkGlb(buf);
-      if (bad) throw new Error(`model ${file}: ${bad}`);
-      const ab = buf.buffer ? buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) : buf;
-      const gltf = await new Promise((res, rej) => new GLTFLoader().parse(ab, "", res, rej));
-      const root = gltf.scene;
-      markShared(root);
-      return root;
-    })();
-    models.set(file, job);
-    job.catch(() => models.delete(file));   // (a failure is tried again next time)
-  } else { const j = models.get(file); models.delete(file); models.set(file, j); }   // most recently used last
-  for (const [f, j] of models) {
-    if (models.size <= MODEL_CACHE) break;
-    if (modelsInUse.has(f) || f === file) continue;
-    models.delete(f); j.then(freeModel, () => {});
-  }
-  return models.get(file);
+async function parseModel(file, read) {
+  const buf = await read(file);
+  const bad = checkGlb(buf);
+  if (bad) throw new Error(`model ${file}: ${bad}`);
+  const ab = buf.buffer ? buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) : buf;
+  const gltf = await new Promise((res, rej) => new GLTFLoader().parse(ab, "", res, rej));
+  const root = gltf.scene;
+  let skinned = false; root.traverse((o) => { if (o.isSkinnedMesh) skinned = true; });
+  if (skinned) { freeModel(root); throw new Error(`model ${file}: skinned model: static models only`); }
+  markShared(root);
+  return root;
 }
 
 // Where a model file goes: position, rotation and scale from the entry (see the conventions above).
@@ -891,9 +1048,13 @@ function placeModel(root, m, gf, groundAt) {
   holder.position.set(...pl.position); holder.rotation.y = pl.rotationY; holder.scale.setScalar(pl.scale);
   holder.updateMatrixWorld(true);
   holder.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  // its footprint on the ground (scene x, z): the transformed bounding box's corners
+  // its footprint on the ground (scene x, z): a footprint given with the entry ([lat, lon] corners, checked against the
+  // real building), else the model's own box turned and scaled with it – a turned building's world box would take in
+  // the empty ground at its corners (and the neighbours standing there)
+  const footprint = m.footprint?.length >= 3 ? m.footprint.map(([la, lo]) => gf.fromLL(la, lo))
+    : [[box.min.x, box.min.z], [box.max.x, box.min.z], [box.max.x, box.max.z], [box.min.x, box.max.z]].map(([x, z]) => { const v = new THREE.Vector3(x, 0, z).applyMatrix4(holder.matrixWorld); return [v.x, v.z]; });
   const wb = new THREE.Box3().setFromObject(holder);
-  return { object: holder, footprint: [[wb.min.x, wb.min.z], [wb.max.x, wb.min.z], [wb.max.x, wb.max.z], [wb.min.x, wb.max.z]], top: wb.max.y };
+  return { object: holder, footprint, top: wb.max.y };
 }
 
 // ---------- the facilities of one circuit ----------
@@ -919,10 +1080,16 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
 // opts: { scene, gf, groundAt, location, year, toTrack, trial (setting on), readModel(file) → bytes,
 // isCurrent() → false once the result would land in a world that's gone }. Returns the contract, plus `info`
 // (one line per facility: built how, or why not), or null when no longer current (everything made is freed).
-export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, trackEdge = null, location, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }) {
-  const group = new THREE.Group(); group.name = "facilities";
-  const skip = new Set(), zones = [], spots = [], info = [], used = new Set();
-  const free = () => { for (const o of group.children) freeOwned(o); };
+export async function buildFacilities(opts) {
+  const own = { group: new THREE.Group(), holds: new Set() };
+  // (whatever happens – not current any more, an error – what was made is freed and the models it holds given back)
+  const free = () => { disposeGroup(own.group); for (const h of own.holds) h.release(); own.holds.clear(); };
+  try { const r = await facilitiesFor(opts, own, free); if (!r) free(); return r; }
+  catch (e) { free(); throw e; }
+}
+async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge = null, location, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }, own) {
+  const group = own.group; group.name = "facilities";
+  const skip = new Set(), zones = [], spots = [], info = [];
   for (const spec of registry) {
     if (!spec.loc.includes(location)) continue;
     if (year && spec.years && (year < spec.years[0] || (spec.years[1] != null && year > spec.years[1]))) { info.push({ id: spec.id, how: "skipped", reason: "year" }); continue; }
@@ -930,11 +1097,15 @@ export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, t
     let made = null, how = null, reason = null;
     // a model file first, the builder as its fallback
     if (spec.model?.file && readModel) {
+      const hold = holdModel(spec.model.file, readModel);
+      own.holds.add(hold);
       try {
-        const root = await loadModel(spec.model.file, readModel);
-        if (!isCurrent()) { free(); return null; }
-        made = placeModel(root, spec.model, gf, groundAt); how = "model"; used.add(spec.model.file);
-      } catch (e) { reason = e.message; }
+        const root = await hold.job;
+        if (!isCurrent()) return null;
+        made = placeModel(root, spec.model, gf, groundAt); how = "model";
+        // the placed copy holds the model from now on: given back when its world is disposed (dispose.js)
+        own.holds.delete(hold); made.object.userData.onDispose = () => hold.release();
+      } catch (e) { reason = e.message; own.holds.delete(hold); hold.release(); }
     }
     if (!made && spec.builder) {
       try {
@@ -943,7 +1114,7 @@ export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, t
         const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, year, trial, toTrack, alongTrack, scene }, spec.params || {});
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
-        made = { object: g, footprint: r.footprint, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
+        made = { object: g, footprint: r.footprint, occupancy: r.occupancy, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
       } catch (e) { reason = (reason ? reason + "; " : "") + e.message; }
     }
     if (!made) { info.push({ id: spec.id, how: "fallback", reason }); continue; }   // the map's buildings stay
@@ -952,12 +1123,11 @@ export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, t
     const anchorXZ = spec.model?.anchor ? gf.fromLL(spec.model.anchor[0], spec.model.anchor[1]) : null;
     const gone = selectReplaced(spec, scene.buildings, gf, made.footprint, anchorXZ);
     for (const b of gone) skip.add(b);
-    zones.push(made.footprint.map(([x, z]) => [x, z]));
+    zones.push(made.footprint.map(([x, z]) => [x, z]), ...(made.occupancy || []));
     const c = centroid(made.footprint); spots.push([c[0], c[1], Math.max(120, Math.sqrt(Math.abs(polyArea(made.footprint))) * 1.4)]);
     info.push({ id: spec.id, how, status: spec.status, replaced: gone.length, ...(made.info || {}), ...(reason ? { modelError: reason } : {}) });
   }
-  if (!isCurrent()) { free(); return null; }
-  modelsInUse = used;
+  if (!isCurrent()) return null;
   // Close-by detail by the distance to the garages themselves (their fronts, not a bounding box: a long building at an
   // angle has a box far bigger than itself): the insides within 400 m (an opening 4.8 m high is ~10 px there in a
   // 1000 px view), the teams' layer (garages.js, added later as "pitTeams") within 300 m.
@@ -978,19 +1148,32 @@ export async function buildFacilities({ scene, gf, groundAt, surfaceAt = null, t
     count: group.children.length, spots, info,
   };
 }
+// two polygons overlap (a corner of one inside the other, or edges crossing)
+function polysOverlap(a, b) {
+  const bb = (p) => p.reduce((r, [x, z]) => [Math.min(r[0], x), Math.min(r[1], z), Math.max(r[2], x), Math.max(r[3], z)], [Infinity, Infinity, -Infinity, -Infinity]);
+  const A = bb(a), B = bb(b);
+  if (A[0] > B[2] || B[0] > A[2] || A[1] > B[3] || B[1] > A[3]) return false;
+  if (a.some(([x, z]) => inPoly(x, z, b)) || b.some(([x, z]) => inPoly(x, z, a))) return true;
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) if (segsCross(a[i], a[(i + 1) % a.length], b[j], b[(j + 1) % b.length])) return true;
+  return false;
+}
+// a line (a road, a path) running through a polygon
+function lineThrough(pts, poly) {
+  if (pts.some(([x, z]) => inPoly(x, z, poly))) return true;
+  for (let i = 0; i + 1 < pts.length; i++) for (let j = 0; j < poly.length; j++) if (segsCross(pts[i], pts[i + 1], poly[j], poly[(j + 1) % poly.length])) return true;
+  return false;
+}
+function segsCross(p, q, r, s) {
+  const d = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const d1 = d(r, s, p), d2 = d(r, s, q), d3 = d(p, q, r), d4 = d(p, q, s);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0;
+}
 function near(x, z, pts, d) {
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const [ax, az] = pts[j], [bx, bz] = pts[i], dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L));
     if (Math.hypot(ax + dx * t - x, az + dz * t - z) < d) return true;
   }
   return false;
-}
-// frees what a facility owns (not the shared textures or a model file's shared resources)
-function freeOwned(o) {
-  o.traverse((n) => {
-    if (n.geometry && !n.geometry.userData.shared) n.geometry.dispose();
-    for (const m of [].concat(n.material || [])) if (!m.userData.shared) m.dispose();
-  });
 }
 
 // Landmarks and facilities as one: what either replaces is skipped, either's ground is kept clear. The facility

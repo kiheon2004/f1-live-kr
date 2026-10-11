@@ -35,7 +35,8 @@ function createWindow() {
   // never navigates away from the app's page.
   mainWin.webContents.setWindowOpenHandler(({ url }) => { if (V.externalUrl(url)) shell.openExternal(url); return { action: "deny" }; });
   mainWin.webContents.on("will-navigate", (e, url) => { if (url !== PAGE_URL) { e.preventDefault(); if (V.externalUrl(url)) shell.openExternal(url); } });
-  if (process.env.F1KR_SNAPSHOT) require("./dev-snapshot")(mainWin, process.env.F1KR_SNAPSHOT);
+  // (development only: the packaged app doesn't ship dev-snapshot.js – package.json build.files – so it's never asked for there)
+  if (process.env.F1KR_SNAPSHOT && !app.isPackaged) require("./dev-snapshot")(mainWin, process.env.F1KR_SNAPSHOT);
 }
 
 const send = (channel, ...args) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, ...args); };

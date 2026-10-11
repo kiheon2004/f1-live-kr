@@ -15,6 +15,8 @@ const TOPICS = [
 ];
 
 const stripBom = (s) => (s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
+// the topics a replay can't do without (what's on the timing board and who is who)
+const CORE = ["TimingData", "DriverList", "SessionInfo"];
 
 // (a compressed message is a few kB; more than 32 MB unpacked is not position data, and is refused)
 const INFLATE_MAX = 32 * 1024 * 1024;
@@ -191,11 +193,23 @@ class Archive {
     if (failed.length || !/"Status":"(?:Finalised|Ends)"/.test(status)) {
       for (const topic of TOPICS) { try { fs.unlinkSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)); } catch {} }
     }
-    const topics = {};
+    // A file with text but not one readable line is damaged (cut short or garbled on the way, or on disk). The core
+    // topics are downloaded once more, then it's an error – never a replay that loads with nothing in it; a damaged
+    // optional topic is left out (and out of the cache, so the next load fetches it again). Missing ones are fine.
+    const topics = {}, damaged = [];
+    const drop = (topic) => { try { fs.unlinkSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)); } catch {} };
     for (const [i, topic] of TOPICS.entries()) {
       onProgress({ phase: "parse", done: i, total: TOPICS.length });
       await new Promise((r) => setImmediate(r));   // let the progress message go out before the heavy parse
-      const lines = parseStream(texts[i], topic.endsWith(".z"));
+      let lines = parseStream(texts[i], topic.endsWith(".z"));
+      if (!lines.length && texts[i].trim()) {
+        drop(topic);
+        if (CORE.includes(topic)) {
+          const again = await this.getText(`${sessionPath}${topic}.jsonStream`).catch(() => "");
+          lines = parseStream(again, false);
+          if (!lines.length) { drop(topic); throw new Error(`이 세션의 기록(${topic})을 읽을 수 없어요. 파일이 손상됐어요. 잠시 뒤 다시 시도해 주세요`); }
+        } else damaged.push(topic);
+      }
       if (topic === "Position.z") topics.Position = flattenPositions(lines);
       else if (topic === "CarData.z") topics.CarData = flattenCarData(lines);
       else topics[topic] = lines;
@@ -203,7 +217,7 @@ class Archive {
     onProgress({ phase: "parse", done: TOPICS.length, total: TOPICS.length });
     let duration = 0;
     for (const [topic, list] of Object.entries(topics)) if (topic !== "CarData" && list.length) duration = Math.max(duration, list[list.length - 1][0]);
-    return { topics, duration };
+    return { topics, duration, damaged };
   }
 
   // Circuit outline for a location (e.g. "Baku"), traced from the most recent race or qualifying held there.

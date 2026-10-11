@@ -67,6 +67,85 @@ function inside(x, y, pts) {
   return r;
 }
 
+const centroidOf = (pts) => { let x = 0, y = 0; for (const p of pts) { x += p[0]; y += p[1]; } return [x / pts.length, y / pts.length]; };
+const bboxOf = (pts) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return [x0, y0, x1, y1]; };
+// a lookup of polygons by 100 m cells of their bounding boxes
+function cellIndex(items, pts = (a) => a.pts) {
+  const cells = new Map();
+  for (const a of items) {
+    const [x0, y0, x1, y1] = (a._bb = bboxOf(pts(a)));
+    for (let i = Math.floor(x0 / 100); i <= Math.floor(x1 / 100); i++) for (let j = Math.floor(y0 / 100); j <= Math.floor(y1 / 100); j++) { const k = i + "," + j; if (!cells.has(k)) cells.set(k, []); cells.get(k).push(a); }
+  }
+  return (bb) => { const out = new Set(); for (let i = Math.floor(bb[0] / 100); i <= Math.floor(bb[2] / 100); i++) for (let j = Math.floor(bb[1] / 100); j <= Math.floor(bb[3] / 100); j++) for (const a of cells.get(i + "," + j) || []) if (a._bb[0] <= bb[2] && a._bb[2] >= bb[0] && a._bb[1] <= bb[3] && a._bb[3] >= bb[1]) out.add(a); return [...out]; };
+}
+const isBuilding = (t) => !!(t.building || (t["building:part"] && t["building:part"] !== "no"));
+const isStand = (t) => t.building === "grandstand" || t.leisure === "grandstand";
+
+// OSM's areas and Overture's buildings as one list. Overture (OSM's buildings plus Microsoft's and Google's footprints,
+// with more heights and roofs) stands for a building where it has one: an OSM building goes only when an Overture one
+// is on the same spot (either's centre inside the other) – so OSM's buildings stay wherever Overture has nothing (a
+// tile that failed or was damaged, a building only OSM has), and none is drawn twice. A grandstand is OSM's: its seats
+// are built from that outline, and an Overture block on it goes instead. OSM's names (Overture often leaves them out;
+// the facilities find their buildings by name) go to the Overture building on the same spot.
+function mergeBuildings(osmAreas, ob) {
+  const named = osmAreas.filter((a) => (isBuilding(a.tags) || /^(stadium|sports_centre)$/.test(a.tags.leisure || "")) && a.tags.name && a.pts.length > 3);
+  for (const b of ob) {
+    if (b.tags.name || !named.length) continue;
+    const [x, y] = centroidOf(b.pts), hit = named.find((a) => inside(x, y, a.pts));
+    if (hit) b.tags.name = hit.tags.name;
+  }
+  const near = cellIndex(ob), gone = new Set(), keep = [];
+  for (const a of osmAreas) {
+    if (!isBuilding(a.tags)) { keep.push(a); continue; }
+    const [cx, cy] = centroidOf(a.pts);
+    const same = near(bboxOf(a.pts)).filter((o) => inside(cx, cy, o.pts) || inside(...centroidOf(o.pts), a.pts));
+    if (isStand(a.tags)) {
+      // (its name, if only the other had one – e.g. from the stadium area around it)
+      if (!a.tags.name) { const n = same.find((o) => o.tags.name)?.tags.name; if (n) a.tags = { ...a.tags, name: n }; }
+      keep.push(a); same.forEach((o) => gone.add(o)); continue;
+    }
+    if (!same.length) keep.push(a);
+  }
+  for (const o of ob) delete o._bb;
+  return keep.concat(ob.filter((o) => !gone.has(o)));
+}
+
+// Outlines drawn in detail as building parts: the parts stand in for the outline where they cover it (half of it or
+// more) – as 3D map renderers do. Where they cover less (one tower part in a long hall, parts lost with a failed tile),
+// the outline stays and its parts are fitted to it so no two walls stand in each other: a part reaching above the
+// outline's roof starts at that roof, one inside its volume isn't drawn. A grandstand's outline always stays (its seats
+// are built from it). Returns { drop: Set of areas left out, minOf: Map of parts → their new min height }.
+function resolveParts(areas) {
+  const parts = areas.filter((a) => a.tags["building:part"] && a.tags["building:part"] !== "no");
+  const drop = new Set(), minOf = new Map();
+  if (!parts.length) return { drop, minOf };
+  const near = cellIndex(parts);
+  const num = (v) => { const m = /^\s*(\d+(?:\.\d+)?)/.exec(String(v ?? "")); return m ? +m[1] : 0; };
+  for (const o of areas) {
+    const t = o.tags;
+    if (!t.building || t["building:part"] || isStand(t)) continue;
+    const bb = bboxOf(o.pts);
+    const mine = near(bb).filter((p) => inside(...centroidOf(p.pts), o.pts));
+    if (!mine.length) continue;
+    // how much of the outline the parts cover: a grid of points over it
+    let n = 0, hit = 0;
+    for (let i = 0; i < 14; i++) for (let j = 0; j < 14; j++) {
+      const x = bb[0] + ((i + 0.5) / 14) * (bb[2] - bb[0]), y = bb[1] + ((j + 0.5) / 14) * (bb[3] - bb[1]);
+      if (!inside(x, y, o.pts)) continue;
+      n++; if (mine.some((p) => inside(x, y, p.pts))) hit++;
+    }
+    if (n && hit / n >= 0.5) { drop.add(o); continue; }
+    const oh = buildingHeight(t);   // (heights are from the ground: the outline's roof)
+    for (const p of mine) {
+      const pmin = num(p.tags.min_height), ph = buildingHeight(p.tags);
+      if (pmin >= oh - 0.3) continue;
+      if (ph > oh + 0.5) minOf.set(p, oh); else drop.add(p);
+    }
+  }
+  for (const p of parts) delete p._bb;
+  return { drop, minOf };
+}
+
 const MEM_SCENES = 4;
 class Scenes {
   constructor(cacheDir) { this.cacheDir = cacheDir; this.mem = new Map(); }
@@ -81,7 +160,9 @@ class Scenes {
     // (a scene is tens of MB: only the last few circuits stay in memory; older ones rebuild from the disk cache)
     while (this.mem.size > MEM_SCENES) this.mem.delete(this.mem.keys().next().value);
     const out = await job;
-    if (!out.ok) this.mem.delete(key);   // try again next time (e.g. after coming back online)
+    // try again next time (e.g. after coming back online) – also when some building tiles failed: the tiles that came
+    // are on disk, the missing ones are asked for again (meanwhile OSM's buildings stand there)
+    if ((!out.ok || out.buildingsPartial) && this.mem.get(key) === job) this.mem.delete(key);
     return out;
   }
 
@@ -144,45 +225,28 @@ class Scenes {
     onStep("건물 정보 받는 중");
     try {
       const ob = await overture.buildings(this.cacheDir, mid, Math.min(reach, 3600), fr, (d, n) => onStep(`건물 정보 받는 중 ${d}/${n}`));
-      if (ob.length) {
-        // OSM's names (Overture often leaves them out) go to the Overture buildings standing on the same spot
-        const named = scenery.areas.filter((a) => (a.tags.building || a.tags["building:part"] || /^(stadium|sports_centre)$/.test(a.tags.leisure || "")) && a.tags.name && a.pts.length > 3);
-        for (const b of ob) {
-          if (b.tags.name || !named.length) continue;
-          let x = 0, y = 0; for (const p of b.pts) { x += p[0]; y += p[1]; } x /= b.pts.length; y /= b.pts.length;
-          const hit = named.find((a) => inside(x, y, a.pts));
-          if (hit) b.tags.name = hit.tags.name;
-        }
-        scenery = { ...scenery, areas: scenery.areas.filter((a) => !(a.tags.building || a.tags["building:part"])).concat(ob) };
-        scenery.buildingsFrom = "overture";
+      if (ob.areas.length || ob.tiles.some((t) => t.status === "ok")) {
+        scenery = { ...scenery, areas: mergeBuildings(scenery.areas, ob.areas) };
+        scenery.buildingsFrom = ob.partial ? "overture+osm" : "overture";
       }
+      if (ob.partial) scenery.buildingsPartial = ob.tiles.filter((t) => t.status === "failed" || t.status === "damaged").length;
     } catch (e) { scenery.overtureError = e.message; }
 
     const inBox = (pts) => pts.some(([x, y]) => x > minX - 1000 && x < maxX + 1000 && y > minY - 1000 && y < maxY + 1000);
     const conv = (pts) => pts.map(([x, y]) => localToF1(x, y).map((v) => Math.round(v * 10) / 10));
     const buildings = [], areas = [], lines = [], trees = [];
-    // Outlines drawn in detail as building:parts: the plain outline around them is left out (it would
-    // overlap the parts), as 3D map renderers do.
-    const partCentres = scenery.areas.filter((a) => a.tags["building:part"] && a.tags["building:part"] !== "no").map((a) => {
-      let x = 0, y = 0; for (const p of a.pts) { x += p[0]; y += p[1]; } return [x / a.pts.length, y / a.pts.length];
-    });
-    const hasParts = (pts) => {
-      if (!partCentres.length) return false;
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      for (const [x, y] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
-      return partCentres.some(([x, y]) => x > minX && x < maxX && y > minY && y < maxY && inside(x, y, pts));
-    };
+    // Outlines drawn in detail as building:parts: the parts stand in for them where they cover them (resolveParts)
+    const parts = resolveParts(scenery.areas);
     for (const a of scenery.areas) {
       if (!inBox(a.pts)) continue;
       const t = a.tags;
       // grandstands mapped only as an area (leisure=grandstand, no building tag) are still grandstands
       if (t.leisure === "grandstand" && !t.building) { buildings.push({ h: 12, min: 0, kind: "grandstand", est: 1, roof: null, colour: null, roofColour: null, name: t.name || null, pts: conv(a.pts) }); continue; }
-      // (grandstands are kept: their seats are built from the outline, not from the parts)
-      if (t.building && !t["building:part"] && t.building !== "grandstand" && hasParts(a.pts)) continue;
+      if (parts.drop.has(a)) continue;
       if (t.building || t["building:part"]) {
         if (t.building === "roof" && !t.height && !t["building:levels"]) continue;   // canopies over fuel stations etc.
         const h = buildingHeight(t);
-        const minH = +(/^\d+(\.\d+)?/.exec(t.min_height || "")?.[0] || 0);
+        const minH = parts.minOf.get(a) ?? +(/^\d+(\.\d+)?/.exec(t.min_height || "")?.[0] || 0);
         const kind = t.building === "grandstand" || t.leisure === "grandstand" ? "grandstand" : /^(house|detached|residential|apartments|terrace|semidetached_house)$/.test(t.building || "") ? "home" : /^(industrial|warehouse|hangar|garage|garages|shed|service)$/.test(t.building || "") ? "shed" : "block";
         const est = !(t.height || t["building:height"] || t["building:levels"]);   // height guessed from the kind
         const num = (v) => { const m = /^\s*(\d+(?:\.\d+)?)/.exec(String(v ?? "")); return m ? +m[1] : null; };
@@ -225,9 +289,9 @@ class Scenes {
       ll: { lat: latRow, lon: lonRow },          // F1 metres → lat/lon
       f1: { x: fxRow, y: fyRow },                // (lat − centre, lon − centre) → F1 metres
       buildings, areas, lines, trees, stands,
-      sceneryError: scenery.error || null, buildingsFrom: scenery.buildingsFrom || "osm",
+      sceneryError: scenery.error || null, buildingsFrom: scenery.buildingsFrom || "osm", buildingsPartial: scenery.buildingsPartial || 0,
     };
   }
 }
 
-module.exports = { Scenes, buildingHeight, areaKind };
+module.exports = { Scenes, buildingHeight, areaKind, mergeBuildings, resolveParts };

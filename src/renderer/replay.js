@@ -2,7 +2,8 @@
 // (optionally held back to match a TV broadcast). Both expose the same surface to the UI:
 //   state, messages, positionsAt(t), laps(num, t), pits(num, t), now(), isLive
 (function (root) {
-  const isIndexObject = (o) => o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).every((k) => /^\d+$/.test(k));
+  // (an array's patch: index keys, and maybe the indices it deletes)
+  const isIndexObject = (o) => o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).every((k) => /^\d+$/.test(k) || k === "_deleted");
 
   // F1 feeds send partial updates. Objects merge recursively; an index-keyed object patches an array.
   // (keys that would reach an object's prototype are never merged: the feed is outside data)
@@ -12,7 +13,11 @@
     if (src === null || typeof src !== "object") return src;
     if (Array.isArray(src)) return src.map((v) => merge(undefined, v));
     if (Array.isArray(target) && isIndexObject(src)) {
-      for (const [k, v] of Object.entries(src)) target[+k] = merge(own(target, +k), v);
+      for (const [k, v] of Object.entries(src)) {
+        // a deleted index leaves a hole: the entries after it keep their indices (later patches name them by index)
+        if (k === "_deleted") { if (Array.isArray(v)) for (const d of v) if (/^\d+$/.test(String(d))) delete target[+d]; continue; }
+        target[+k] = merge(own(target, +k), v);
+      }
       return target;
     }
     const out = target && typeof target === "object" && !Array.isArray(target) ? target : {};
@@ -40,6 +45,16 @@
   };
 
   // Builds each driver's lap list (time, position) and pit-entry laps from TimingData deltas.
+  // Which lap a time belongs to. The lap counter (NumberOfLaps) decides when it's known: a counter past the last
+  // recorded lap is a new lap even with the same time as before (two laps can be timed identically to the thousandth);
+  // the counter on the last recorded lap with a different time is that lap corrected – kept with when it was
+  // corrected, not a lap more. A time without a counter is ambiguous: in practice an in-lap's time comes as the car
+  // reaches the pits and the counter only when it leaves again (seen in every 2025–26 recording: 538 such times, each
+  // a lap after the one before); a correction comes right after the lap it corrects. So a different time without a
+  // counter less than MIN_LAP after the last recorded lap is that lap corrected, later it's the next lap (its number
+  // as the counter will have it). The same time again without a counter is a resend – unless it comes a lap later and
+  // the counter follows within a minute: then it was a lap timed identically.
+  const MIN_LAP = 30000, HOLD = 60000;
   class LapTracker {
     constructor() { this.cur = {}; this.lapList = {}; this.pitList = {}; this.fixed = {}; }
     feed(ms, lines) {
@@ -51,23 +66,26 @@
         if (l.InPit === true && !c.inPit) (this.pitList[num] || (this.pitList[num] = [])).push({ lap: (c.n || 0) + 1, ms });
         if (l.InPit != null) c.inPit = l.InPit;
         const v = l.LastLapTime?.Value;
-        if (!v) continue;
         const list = this.lapList[num] || (this.lapList[num] = []);
         const last = list[list.length - 1], prev = last ? last.lap : 0;
-        // Which lap a time belongs to. The lap counter decides when it's known (F1 sends it with the time; it can
-        // also come a message earlier): a counter past the last recorded lap is a new lap even with the same time as
-        // before (two laps can be timed identically to the thousandth); the counter on the last recorded lap with a
-        // different time is that lap corrected – kept with when it was corrected, not a lap more. Without a
-        // counter, a new time is the next lap.
-        const n = l.NumberOfLaps != null ? l.NumberOfLaps : c.n;
-        if (n != null && n > prev) {
-          list.push({ lap: n, time: v, sec: toSec(v), pos: c.pos, ms, gap: gapSec(c.gap) });
-        } else if (l.NumberOfLaps != null) {
-          // (a counter behind the last recorded lap – an older picture – changes nothing)
-          if (last && n === prev && v !== last.time) { (last.fix || (last.fix = [[last.ms, last.time]])).push([ms, v]); last.time = v; last.sec = toSec(v); this.fixed[num] = true; }
-        } else if (v !== c.last) {
-          list.push({ lap: prev + 1, time: v, sec: toSec(v), pos: c.pos, ms, gap: gapSec(c.gap) });
+        const add = (lap, time) => list.push({ lap, time, sec: toSec(time), pos: c.pos, ms, gap: gapSec(c.gap) });
+        const correct = (time) => { (last.fix || (last.fix = [[last.ms, last.time]])).push([ms, time]); last.time = time; last.sec = toSec(time); this.fixed[num] = true; };
+        if (!v) {
+          // the counter alone: a held time (the same as the last lap's) was a lap timed identically
+          if (l.NumberOfLaps != null && c.held && l.NumberOfLaps === prev + 1 && ms - c.held.ms <= HOLD) add(l.NumberOfLaps, c.held.v);
+          if (l.NumberOfLaps != null) c.held = null;
+          continue;
         }
+        c.held = null;
+        const n = l.NumberOfLaps != null ? l.NumberOfLaps : c.n;
+        if (n != null && n > prev) add(n, v);
+        else if (l.NumberOfLaps != null) {
+          // (a counter behind the last recorded lap – an older picture – changes nothing)
+          if (last && n === prev && v !== last.time) correct(v);
+        } else if (!last) add(prev + 1, v);
+        else if (v === last.time) { if (ms - last.ms >= MIN_LAP) c.held = { v, ms }; }
+        else if (ms - last.ms < MIN_LAP) correct(v);
+        else add(prev + 1, v);
         c.last = v;
       }
     }
@@ -294,13 +312,44 @@
     return tr;
   }
 
+  // Race control messages, kept by F1's index: the first picture is a list, then each message comes under its index
+  // ("Messages": {"12": {…}}). The same index again is that message corrected (merged in place), "_deleted" takes one
+  // out – the others keep their indices. src.messages is the current list in index order; src.rc counts what changed
+  // (rev) and which indices arrived new (fresh, in arrival order) – only those alert.
+  function resetMessages(src) {
+    src.rc = { byIdx: new Map(), fresh: [], added: 0, rev: (src.rc?.rev || 0) + 1 };
+    src.messages = [];
+  }
+  function applyMessages(src, m) {
+    const rc = src.rc || (resetMessages(src), src.rc);
+    const put = (i, v) => {
+      if (!v || typeof v !== "object" || Array.isArray(v)) return;
+      const cur = rc.byIdx.get(i);
+      if (cur) rc.byIdx.set(i, merge({ ...cur }, v));
+      else { rc.byIdx.set(i, merge(undefined, v)); rc.fresh.push(i); rc.added++; }
+    };
+    if (Array.isArray(m)) {
+      const keep = new Set(m.keys());
+      for (const i of [...rc.byIdx.keys()]) if (!keep.has(i)) rc.byIdx.delete(i);
+      m.forEach((v, i) => put(i, v));
+    } else if (m && typeof m === "object") {
+      for (const [k, v] of Object.entries(m)) {
+        if (k === "_deleted") { if (Array.isArray(v)) for (const d of v) if (/^\d+$/.test(String(d))) rc.byIdx.delete(+d); continue; }
+        if (/^\d+$/.test(k)) put(+k, v);
+      }
+    } else return;
+    src.messages = [...rc.byIdx.keys()].sort((a, b) => a - b).map((i) => rc.byIdx.get(i));
+    rc.rev++;
+  }
+  // Messages that arrived new after `since` (a count of src.rc.added) and are still there – for alerts.
+  function newMessages(src, since = 0) {
+    const rc = src.rc; if (!rc) return [];
+    return rc.fresh.slice(Math.max(0, since)).map((i) => rc.byIdx.get(i)).filter(Boolean);
+  }
+
   function applyTo(src, topic, data) {
     if (topic === "TimingAppData") noteStints(src, data);
-    if (topic === "RaceControlMessages") {
-      const m = data.Messages;
-      for (const msg of Array.isArray(m) ? m : Object.values(m || {})) src.messages.push(msg);
-      return;
-    }
+    if (topic === "RaceControlMessages") { applyMessages(src, data?.Messages); return; }
     src.state[topic] = merge(src.state[topic], data);
   }
 
@@ -329,7 +378,7 @@
       this.reset();
     }
 
-    reset() { this.state = {}; this.messages = []; this.stintEnd = {}; this.i = 0; this.t = -1; }
+    reset() { this.state = {}; resetMessages(this); this.stintEnd = {}; this.i = 0; this.t = -1; }
 
     seek(t) {
       if (t < this.t) this.reset();
@@ -601,11 +650,12 @@
   // Live feed with an optional delay so the screen matches a delayed TV broadcast.
   class LiveSource {
     constructor() {
-      this.isLive = true; this.state = {}; this.messages = []; this.stintEnd = {}; this.queue = []; this.delayMs = 0;
+      this.isLive = true; this.state = {}; resetMessages(this); this.stintEnd = {}; this.queue = []; this.delayMs = 0;
       this.skew = 0;        // server clock − this computer's clock (ms), from heartbeats
       this.epoch = 0;       // goes up whenever a full snapshot replaces the state (the UI resets its lists)
       this.held = null;     // when paused: the moment the pause began
       this.shownAt = -Infinity;      // receive time of the newest update applied (the screen never shows a moment before it)
+      this.shown = -Infinity;        // the latest moment the clock has shown (it never goes back; not set until data shows)
       this.maxDelayMs = Infinity;    // the longest delay (and pause) the app supports; set by the app
       this.resetHistory(); this.t = Date.now();
     }
@@ -618,7 +668,9 @@
     // A full picture from the server (on connect and every reconnect). It goes through the delay queue
     // like every update, so reconnecting never shows the screen ahead of the TV.
     snapshot(snap, at = Date.now()) {
-      for (const [topic, data] of Object.entries(snap)) this.noteRaw(topic, data, at);
+      // (the session first: the clock and lap in it belong to that session)
+      if (snap.SessionInfo) this.noteRaw("SessionInfo", snap.SessionInfo, at);
+      for (const [topic, data] of Object.entries(snap)) if (topic !== "SessionInfo") this.noteRaw(topic, data, at);
       this.queue.push({ at, snap });
     }
     push(topic, data, immediate = false) {
@@ -626,8 +678,14 @@
       this.noteRaw(topic, data, item.at);
       if (immediate) this.apply(item); else this.queue.push(item);
     }
-    // Undelayed copies used to line the delay up with a TV broadcast, and the server clock offset.
+    // Undelayed copies used to line the delay up with a TV broadcast, and the server clock offset. They belong to the
+    // session they were received in (rawSession, undelayed too): a new session's info clears the previous one's clock
+    // and lap, so the delay is never lined up with them; the delayed screen reaching that session later clears nothing.
     noteRaw(topic, data, at) {
+      if (topic === "SessionInfo" && data?.Key != null && data.Key !== this.rawSession) {
+        if (this.rawSession != null) { this.rawClock = undefined; this.rawLap = null; }
+        this.rawSession = data.Key;
+      }
       if (topic === "ExtrapolatedClock") this.rawClock = merge(this.rawClock, data);
       if (topic === "LapCount" && data.CurrentLap && data.CurrentLap !== this.rawLap?.lap) this.rawLap = { lap: data.CurrentLap, at };
       if (topic === "Heartbeat" && data.Utc) { const u = parseUtc(data.Utc); if (Number.isFinite(u)) this.skew = u - at; }
@@ -636,7 +694,7 @@
       if (item.snap) {
         const key = item.snap.SessionInfo?.Key;
         if (key && this.state.SessionInfo?.Key && key !== this.state.SessionInfo.Key) this.resetHistory();
-        this.state = {}; this.messages = []; this.stintEnd = {};
+        this.state = {}; resetMessages(this); this.stintEnd = {};
         for (const [topic, data] of Object.entries(item.snap)) this.applyOne(item.at, topic, data);
         this.epoch++;
         return;
@@ -645,7 +703,7 @@
     }
     applyOne(at, topic, data) {
       if (topic === "SessionInfo" && data.Key && this.state.SessionInfo?.Key && data.Key !== this.state.SessionInfo.Key) {
-        this.state = {}; this.messages = []; this.stintEnd = {}; this.resetHistory();
+        this.state = {}; resetMessages(this); this.stintEnd = {}; this.resetHistory();
       }
       if (topic === "Position") {
         const list = data.Position || [];
@@ -690,16 +748,18 @@
     }
     // Apply everything older than the chosen delay. While paused nothing moves.
     // Applied updates can't be taken back (the live state isn't rewound), so when the delay is raised the clock
-    // holds at the moment already shown until the delayed time passes it – like pausing for the extra seconds –
-    // instead of going back with the standings left ahead. A pause longer than the longest supported delay moves
-    // on at that delay (what resuming would give anyway), so the queue never holds more than that.
+    // holds at the moment already shown – the newest update applied, or the clock itself between updates – until the
+    // delayed time passes it (like pausing for the extra seconds) instead of going back with the standings left
+    // ahead. (The moment the source was made isn't one shown: before the first update the clock is the delayed time.)
+    // A pause longer than the longest supported delay moves on at that delay (what resuming would give anyway), so
+    // the queue never holds more than that.
     tick(now = Date.now()) {
       const due = this.held != null ? now - this.maxDelayMs : now - this.delayMs;
       let k = 0;
       while (k < this.queue.length && this.queue[k].at <= due) { const item = this.queue[k++]; this.apply(item); if (item.at > this.shownAt) this.shownAt = item.at; }
       if (k) this.queue.splice(0, k);   // (one splice per tick: shift() per item is slow on a long queue)
-      if (this.held != null) { if (k) this.t = Math.max(this.t, due); return; }
-      this.t = Math.max(due, this.shownAt);
+      if (this.held != null) { if (k) this.t = this.shown = Math.max(this.shown, this.shownAt, due); return; }
+      this.t = this.shown = Math.max(due, this.shownAt, this.shown);
     }
     // Pause / resume (e.g. when the TV stream is paused): resuming adds the paused time to the delay.
     pause(now = Date.now()) { if (this.held == null) this.held = now; }
@@ -717,7 +777,7 @@
     }
     // Session time remaining right now, without the broadcast delay.
     remainingNow(now = Date.now()) {
-      const c = this.rawClock, rem = clockMs(c?.Remaining);
+      const c = this.rawClock, rem = c ? clockMs(c.Remaining) : null;
       if (rem == null) return null;
       return c.Extrapolating ? rem - (now + this.skew - parseUtc(c.Utc)) : rem;
     }
@@ -758,7 +818,7 @@
     }
   }
 
-  const API = { Replay, LiveSource, CarTracks, LapTracker, PitLog, StatusLog, merge, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
+  const API = { Replay, LiveSource, CarTracks, LapTracker, PitLog, StatusLog, merge, newMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
     pitLoss, pitRejoin, gapSec, deletedLaps, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);

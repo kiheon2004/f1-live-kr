@@ -18,20 +18,33 @@ const blank = (type = THREE.UnsignedByteType) => {
     : new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat, type);
   t.needsUpdate = true; t.userData.shared = true; return t;
 };
+const BLANK = { tex: blank(), hgt: blank(THREE.HalfFloatType) };
 export const NL = {
-  tex: { value: blank() },                                 // light falling on the ground (linear RGB)
-  hgt: { value: blank(THREE.HalfFloatType) },              // ground height (m) under the field
+  tex: { value: BLANK.tex },                               // light falling on the ground (linear RGB)
+  hgt: { value: BLANK.hgt },                               // ground height (m) under the field
   ext: { value: new THREE.Vector4(0, 0, 1, 1) },           // x0, z0, width, depth (scene metres)
   gain: { value: 0 },                                      // 0 by day
   time: { value: 0 },                                      // seconds, for blinking lights and TVs
 };
 
+// A light field going away (its world rebuilt or left): its textures freed, and the shared uniforms pointed back at the
+// blank ones if they still showed it – a material drawn with a freed texture in a uniform would upload it again, and
+// that copy would never be freed.
+export function releaseField(f) {
+  if (!f) return;
+  if (NL.tex.value === f.tex) { NL.tex.value = BLANK.tex; NL.gain.value = 0; }
+  if (NL.hgt.value === f.hgt) NL.hgt.value = BLANK.hgt;
+  f.tex?.dispose(); f.hgt?.dispose();
+}
+
 // ---------- materials ----------
-// Adds the light field to a lit material (standard, physical, lambert, phong). Chains an existing
-// onBeforeCompile and keeps its program key apart.
+// Adds the light field to a lit material (standard, physical, lambert, phong; instanced too). Chains an existing
+// onBeforeCompile and keeps its program key apart. Each material once – a shared one (the cars' common parts, the
+// garage equipment) however many objects use it; a copy (material.clone() doesn't carry onBeforeCompile) is a new one.
+const patched = new WeakSet();
 export function nightLit(m) {
-  if (!m || m.userData.nightLit || !(m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return;
-  m.userData.nightLit = true;
+  if (!m || patched.has(m) || !(m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) return;
+  patched.add(m);
   const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey.call(m);
   m.onBeforeCompile = function (sh, r) {
     prev?.call(this, sh, r);
@@ -87,7 +100,7 @@ const ROAD_DEFAULT = { h: 8, gap: 32, both: false, c: "warm" };
 // opts: { ext: {x0,z0,x1,z1}, groundAt(x,z), track: { samples, width }, lines: [{ k, w, sub, pts: [[x,z]…] }] (scene
 // metres), paved: [[x,z]…][] (car parks, plazas), buildings: [[x,z]…][] (footprints), onTrack(x,z): on the
 // circuit's own tarmac (it has its floodlights), urban: footpaths lit too }
-// Returns { tex, hgt, ext: Vector4, lamps: [{ x, y, z, h, dx, dz, c, k }], dispose() }.
+// Returns { tex, hgt, ext: Vector4, lamps: [{ x, y, z, h, dx, dz, c, k }], dispose() } (dispose: releaseField).
 export function lightField(opts) {
   const { ext, groundAt } = opts;
   const W = ext.x1 - ext.x0, D = ext.z1 - ext.z0;
@@ -204,7 +217,8 @@ export function lightField(opts) {
   }
   const hgt = new THREE.DataTexture(hd, HN, HN, THREE.RedFormat, THREE.HalfFloatType);
   hgt.magFilter = hgt.minFilter = THREE.LinearFilter; hgt.wrapS = hgt.wrapT = THREE.ClampToEdgeWrapping; hgt.needsUpdate = true;
-  return { tex, hgt, ext: new THREE.Vector4(ext.x0, ext.z0, cw * mpp, ch * mpp), lamps, dispose() { tex.dispose(); hgt.dispose(); } };
+  const field = { tex, hgt, ext: new THREE.Vector4(ext.x0, ext.z0, cw * mpp, ch * mpp), lamps, dispose: () => releaseField(field) };
+  return field;
 }
 function inPoly(x, y, pts) {
   let inside = false;

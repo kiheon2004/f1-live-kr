@@ -269,9 +269,9 @@ test("M3: the counter and an identical time arriving in separate messages still 
   tr.feed(2000, { 1: { NumberOfLaps: 6 } });
   tr.feed(2100, { 1: { LastLapTime: { Value: "1:30.000" } } });
   assert.deepStrictEqual(tr.laps("1").map((l) => [l.lap, l.time]), [[5, "1:30.000"], [6, "1:30.000"]]);
-  // without counters a new time is the next lap, as before
+  // without counters a new time a lap later is the next lap, as before (one seconds later is a correction: timing.test.js)
   const t2 = new LapTracker();
-  t2.feed(1, { 7: { LastLapTime: { Value: "1:40.000" } } }); t2.feed(2, { 7: { LastLapTime: { Value: "1:39.000" } } });
+  t2.feed(1000, { 7: { LastLapTime: { Value: "1:40.000" } } }); t2.feed(100000, { 7: { LastLapTime: { Value: "1:39.000" } } });
   assert.deepStrictEqual(t2.laps("7").map((l) => l.lap), [1, 2]);
 });
 
