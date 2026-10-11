@@ -198,7 +198,8 @@ npm run share    # 친구에게 보낼 압축 파일 생성: Mac(M 칩·인텔)�
 | `src/main/geo.js` | 서킷 좌표, OSM(Overpass) 받기·해석, F1 좌표 ↔ 실제 좌표 맞추기(거리 래스터 탐색 + ICP), 지형·위성 타일 캐시 |
 | `src/main/scene.js` | 맞춘 결과로 건물·땅·도로·방호벽·나무를 F1 좌표로 바꿔 3D에 넘김 |
 | `src/main/google.js` | (선택) Google Map Tiles API 세션·타일·저작권 문구, API 키 암호화 저장 |
-| `src/renderer/scenery.js` | 실제 지형 메시, 위성 사진 합성 텍스처(야간 조명 맵), 건물·나무·물·노면·방호벽 3D, 2D 위성 배경 |
+| `src/renderer/scenery.js` | 실제 지형 메시, 위성 사진 합성 텍스처, 건물·나무·물·노면·방호벽 3D, 2D 위성 배경 |
+| `src/renderer/nightlights.js` | 야간 조명: 투광 조명·가로등·주차장 빛이 떨어지는 곳(빛 지도), 가로등 기둥과 불빛, 고층 건물 항공 장애등 |
 | `src/main/main.js`, `src/preload.js` | Electron 창과 화면↔메인 통신 |
 | `src/renderer/replay.js` | 변경분(delta) 데이터를 합쳐 임의 시점의 상태를 재구성, 실시간 지연 큐 |
 | `src/renderer/app.js` | 화면 (순위표, 트랙맵, 패널, 알림, 일정, 재생) |

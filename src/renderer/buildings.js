@@ -12,6 +12,7 @@
 // and a set-back crown. Facades and roofs are layers of one texture array (drawn once), so all buildings still
 // render in a handful of draw calls.
 import * as THREE from "./vendor/three.module.js";
+import { NL } from "./nightlights.js";
 
 // ---------- texture layers ----------
 export const LAYER = { GLASS_BLUE: 0, GLASS_GREEN: 1, GLASS_DARK: 2, RIBBON: 3, PUNCHED: 4, BRICK: 5, STUCCO: 6, BALCONY: 7, GULF: 8, CLAD: 9, RETAIL: 10,
@@ -122,7 +123,8 @@ function textures() {
   layer(LAYER.R_SHINGLE, () => { fill("#5a5550"); for (let y = 0, row = 0; y < TS; y += 16, row++) for (let x = (row % 2) * -12; x < TS; x += 24) { const k = 0.75 + r() * 0.4; g.fillStyle = `rgb(${90 * k | 0},${85 * k | 0},${80 * k | 0})`; g.fillRect(x + 1, y + 1, 22, 14); } });
   // multi-storey car park: open slots between slabs, a dark interior
   layer(LAYER.PARKING, () => { fill("#ffffff"); noise(0.05);
-    for (let j = 0; j < 2; j++) { g.fillStyle = "#26292c"; g.fillRect(0, j * C + C * 0.25, TS, C * 0.55); for (let i = 0; i <= 4; i++) { g.fillStyle = "#d4d4d0"; g.fillRect((i * TS) / 4 - 8, j * C + C * 0.25, 16, C * 0.55); } g.fillStyle = "#bdbdb8"; g.fillRect(0, j * C + C * 0.72, TS, 6); } });
+    for (let j = 0; j < 2; j++) { g.fillStyle = "#26292c"; g.fillRect(0, j * C + C * 0.25, TS, C * 0.55); m.fillStyle = "#707070"; m.fillRect(0, j * C + C * 0.25, TS, C * 0.55);
+      for (let i = 0; i <= 4; i++) { g.fillStyle = "#d4d4d0"; g.fillRect((i * TS) / 4 - 8, j * C + C * 0.25, 16, C * 0.55); m.fillStyle = "#000"; m.fillRect((i * TS) / 4 - 8, j * C + C * 0.25, 16, C * 0.55); } g.fillStyle = "#bdbdb8"; g.fillRect(0, j * C + C * 0.72, TS, 6); } });
   const tex = new THREE.DataArrayTexture(data, TS, TS, N_LAYERS);
   tex.format = THREE.RGBAFormat; tex.type = THREE.UnsignedByteType; tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -133,60 +135,164 @@ function textures() {
 function shadeHex(hex, k) { const c = new THREE.Color(hex); c.offsetHSL(0, 0, k * 0.5); return `#${c.getHexString()}`; }
 
 // ---------- material ----------
+// Night windows (both materials): which are lit, in what light, decided per building, floor and window.
+//   offices (glass, ribbon windows) are lit floor by floor in cool white – a lit floor has nearly every window on,
+//     a dark one the odd desk; residential and mixed facades are lit window by window in warm 2700–4000 K, some
+//     with curtains drawn, the odd TV; hotels warm; shopfronts bright; car parks in cool fluorescent light all night.
+//   How busy a building is varies building to building. Lit windows are brighter at the ceiling. When windows
+//   become smaller than a pixel they blend into their floor's and then their building's average, so a far
+//   facade doesn't sparkle.
+// Tall buildings: some have a lit crown (white, warm or a colour), some facades a warm uplight from the street.
+const WINDOWS_GLSL = `
+  uniform float nlTime;
+  float wH(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+  // 0 none, 1 office, 2 residential, 3 hotel, 4 shopfront, 5 car park, 6 mixed (punched windows)
+  int wKind(float layer) {
+    int L = int(layer + 0.5);
+    if (L <= 3) return 1;
+    if (L == 4) return 6;
+    if (L == 13) return 3;
+    if (L == 16) return 4;
+    if (L == 23) return 5;
+    if (L == 5 || L == 6 || L == 7 || L == 8 || L == 11 || L == 12 || L == 14) return 2;
+    return 0;
+  }
+  // f: facade uv (2 bays × 2 storeys per unit), gm: how much of this spot is window, seed: the building's
+  vec3 nightWindows(vec2 f, float layer, float seed, float gm) {
+    int kind = wKind(layer);
+    if (kind == 0 || gm < 0.004) return vec3(0.0);
+    vec2 cells = f * 2.0, cell = floor(cells), c = fract(cells), fw = fwidth(cells);
+    float bayLod = smoothstep(0.3, 0.9, fw.x), flLod = smoothstep(0.7, 2.2, fw.y), near = 1.0 - max(bayLod, flLod);
+    float s1 = fract(seed * 7.13 + 0.17);
+    vec2 bc = cell + vec2(seed * 131.0, seed * 37.0);
+    float fh = wH(vec2(cell.y + 0.5, seed * 977.0)), h1 = wH(bc + 0.37), h2 = wH(bc + 5.1), h3 = wH(bc + 2.2);
+    float lw, lf, lb, I;
+    vec3 col, colMean;
+    if (kind == 1) {
+      float occ = 0.12 + 0.6 * s1, on = step(fh, occ);
+      lw = on > 0.5 ? step(0.1, h1) : step(0.95, h1); lf = on > 0.5 ? 0.9 : 0.05; lb = occ * 0.9 + (1.0 - occ) * 0.05;
+      col = mix(vec3(0.7, 0.84, 1.0), vec3(1.0, 0.86, 0.66), step(0.7, wH(vec2(cell.y, seed * 55.0))));
+      colMean = vec3(0.78, 0.86, 1.0); I = 0.36 * (0.75 + 0.5 * wH(vec2(cell.y, seed * 71.0))) * mix(1.0, 0.6 + 0.8 * h3, near);
+      // blinds on some floors
+      if (wH(vec2(cell.y, seed * 3.3)) < 0.25) I *= mix(1.0, 0.55 + 0.45 * step(0.45, fract(c.y * 13.0)), near);
+    } else if (kind == 5) {
+      lw = lf = lb = 1.0; col = colMean = vec3(0.7, 0.95, 0.82); I = 0.35;
+    } else if (kind == 4) {
+      lw = step(h1, 0.8); lf = lb = 0.8; col = mix(vec3(1.0, 0.84, 0.62), vec3(0.86, 0.93, 1.0), step(0.6, h2)); colMean = vec3(0.97, 0.88, 0.75); I = 1.2;
+    } else {
+      float occ = kind == 3 ? 0.4 + 0.3 * s1 : 0.16 + 0.4 * s1, occF = occ * (0.65 + 0.7 * fh);
+      lw = step(h1, occF); lf = occF; lb = occ;
+      col = h2 < 0.45 ? vec3(1.0, 0.52, 0.2) : h2 < 0.76 ? vec3(1.0, 0.64, 0.3) : h2 < 0.93 ? vec3(1.0, 0.8, 0.56) : vec3(0.74, 0.85, 1.0);
+      if (kind == 3) col = mix(vec3(1.0, 0.66, 0.36), col, 0.3);
+      colMean = vec3(1.0, 0.64, 0.34); I = (kind == 3 ? 0.42 : 0.48) * (0.55 + 0.9 * h3 * h3);
+      // curtains drawn across part of some windows: their light comes through warm and dim
+      if (wH(bc + 4.4) < 0.42) { float open = 0.12 + 0.3 * wH(bc + 6.6); col *= mix(vec3(1.0), vec3(1.0, 0.72, 0.45) * 0.32, step(open, abs(c.x - 0.5)) * near); }
+    }
+    float lit = mix(mix(lw, lf, bayLod), lb, flLod);
+    col = mix(col, colMean, max(bayLod, flLod));
+    // a room lit from its ceiling: brighter at the top of the window, furniture darker at the bottom
+    I *= mix(1.0, mix(0.5, 1.3, smoothstep(0.12, 0.9, c.y)), near);
+    vec3 e = col * I * lit;
+    // unlit rooms aren't black: a little light from further in, and the odd television
+    if (kind != 5) {
+      float tv = step(0.975, wH(bc + 8.8)) * (1.0 - lw) * near;
+      e += (1.0 - lit) * vec3(1.0, 0.75, 0.5) * 0.025;
+      e += tv * vec3(0.45, 0.6, 1.0) * 0.32 * (0.7 + 0.3 * sin(nlTime * 6.0 + seed * 40.0) * sin(nlTime * 2.3 + h2 * 9.0));
+    }
+    return e * gm;
+  }
+  // crown lighting and uplit facades (walls only): y, base/top of the building, wall colour, glass share
+  vec3 nightFacade(float y, vec2 bt, float seed, vec3 wall, float glass, float wallFace) {
+    vec3 e = vec3(0.0);
+    float H = bt.y - bt.x;
+    if (H > 55.0 && fract(seed * 13.7) < 0.4) {
+      float pick = fract(seed * 29.1);
+      vec3 cc = pick < 0.4 ? vec3(0.9, 0.95, 1.0) : pick < 0.7 ? vec3(1.0, 0.72, 0.42) : pick < 0.82 ? vec3(0.3, 0.5, 1.0) : pick < 0.92 ? vec3(0.25, 0.85, 0.8) : vec3(0.85, 0.3, 0.9);
+      e += cc * 0.9 * smoothstep(bt.y - 7.0, bt.y - 5.5, y) * wallFace;
+    }
+    if (H > 14.0 && fract(seed * 41.3) < 0.14) e += wall * vec3(1.0, 0.8, 0.55) * 0.55 * exp(-(y - bt.x) / 16.0) * (1.0 - glass) * wallFace;
+    return e;
+  }`;
 function material(night) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.86, metalness: 0.03,
-    emissive: new THREE.Color(night ? 0xffffff : 0x000000), emissiveIntensity: night ? 0.9 : 0 });
+    emissive: new THREE.Color(night ? 0xffffff : 0x000000), emissiveIntensity: night ? 1 : 0 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.facades = { value: textures() };
+    sh.uniforms.nlTime = NL.time;
     sh.vertexShader = sh.vertexShader.replace("#include <common>", `#include <common>
-      attribute vec3 aTint; attribute float aLayer; attribute float aShade; attribute float aSeed; attribute vec2 aUv;
-      varying vec3 vTint; varying float vLayer; varying float vShade; varying float vSeed; varying vec2 vFUv;`)
+      attribute vec3 aTint; attribute float aLayer; attribute float aShade; attribute float aSeed; attribute vec2 aUv; attribute vec2 aBT;
+      varying vec3 vTint; varying float vLayer; varying float vShade; varying float vSeed; varying vec2 vFUv; varying vec2 vBT; varying float vY;`)
       .replace("#include <begin_vertex>", `#include <begin_vertex>
-      vTint = aTint; vLayer = aLayer; vShade = aShade; vSeed = aSeed; vFUv = aUv;`);
+      vTint = aTint; vLayer = aLayer; vShade = aShade; vSeed = aSeed; vFUv = aUv; vBT = aBT; vY = (modelMatrix * vec4(transformed, 1.0)).y;`);
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", `#include <common>
       precision highp sampler2DArray;
       uniform sampler2DArray facades;
-      varying vec3 vTint; varying float vLayer; varying float vShade; varying float vSeed; varying vec2 vFUv;
+      varying vec3 vTint; varying float vLayer; varying float vShade; varying float vSeed; varying vec2 vFUv; varying vec2 vBT; varying float vY;
+      ${WINDOWS_GLSL}
       float bHash(vec2 p) { return fract(sin(dot(p, vec2(41.31, 289.17))) * 43758.5453); }
-      float glassMask = 0.0; vec2 winCell;`)
+      float glassMask = 0.0, glossMask = 0.0; vec2 winCell;`)
       .replace("#include <map_fragment>", `
       vec4 fx = texture(facades, vec3(vFUv, floor(vLayer + 0.5)));
       glassMask = fx.a;
+      glossMask = vLayer > 22.5 ? 0.0 : glassMask;   // (a car park's open storeys are marked for the night light, not glass)
       winCell = floor(vFUv * 2.0) + vec2(vSeed * 17.0, vSeed * 3.0);
       float wv = bHash(winCell);
       // walls take the building's colour; glass stays glass, a little different window to window
       vec3 wallC = fx.rgb * vTint;
       vec3 glassC = fx.rgb * (0.78 + 0.4 * wv) * mix(vec3(1.0), vTint, 0.15);
-      diffuseColor.rgb *= mix(wallC, glassC, glassMask) * vShade;`)
-      .replace("#include <roughnessmap_fragment>", "float roughnessFactor = mix(roughness, 0.16, glassMask);")
-      .replace("#include <metalnessmap_fragment>", "float metalnessFactor = mix(metalness, 0.3, glassMask);")
+      diffuseColor.rgb *= mix(wallC, glassC, glossMask) * vShade;`)
+      .replace("#include <roughnessmap_fragment>", "float roughnessFactor = mix(roughness, 0.16, glossMask);")
+      .replace("#include <metalnessmap_fragment>", "float metalnessFactor = mix(metalness, 0.3, glossMask);")
       .replace("#include <emissivemap_fragment>", `
-      // at night some windows are lit, warm or cool, decided per window
-      // about a quarter of the windows, dimmer on glass towers (offices empty in the evening)
-      float lit = step(0.74, bHash(winCell + 7.7)) * (0.55 + 0.45 * bHash(winCell + 1.3));
-      vec3 warm = mix(vec3(1.0, 0.82, 0.55), vec3(0.78, 0.88, 1.0), step(0.7, bHash(winCell + 3.1)));
-      totalEmissiveRadiance *= glassMask * lit * warm;`);
+      if (totalEmissiveRadiance.r > 0.0) {
+        float wallFace = 1.0 - smoothstep(0.3, 0.6, abs((vec4(normal, 0.0) * viewMatrix).y));
+        totalEmissiveRadiance *= nightWindows(vFUv, vLayer, vSeed, glassMask * wallFace) + nightFacade(vY, vBT, vSeed, diffuseColor.rgb, glassMask, wallFace);
+      }`);
   };
-  mat.customProgramCacheKey = () => "facadeArray";
+  mat.customProgramCacheKey = () => "facadeArray2";
   return mat;
 }
 
-// The far material: the building's colour (glass a little darker), no facade texture; lit windows at night
-// are a soft glow over the walls of the glass and window layers.
+// The far material: the building's colour (glass a little darker), no facade texture; the windows at night from
+// each facade's usual share of window, lit as close up.
 function farMaterial(night) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.03,
-    emissive: new THREE.Color(night ? 0xffffff : 0x000000), emissiveIntensity: night ? 0.9 : 0 });
+    emissive: new THREE.Color(night ? 0xffffff : 0x000000), emissiveIntensity: night ? 1 : 0 });
   mat.onBeforeCompile = (sh) => {
+    sh.uniforms.nlTime = NL.time;
     sh.vertexShader = sh.vertexShader.replace("#include <common>", `#include <common>
-      attribute vec3 aTint; attribute float aLayer; attribute float aShade; varying vec3 vTint; varying float vGlassy; varying float vShade;`)
+      attribute vec3 aTint; attribute float aLayer; attribute float aShade; attribute float aSeed; attribute vec2 aUv; attribute vec2 aBT;
+      varying vec3 vTint; varying float vGlassy; varying float vShade; varying float vLayer; varying float vSeed; varying vec2 vFUv; varying vec2 vBT; varying float vY;`)
       .replace("#include <begin_vertex>", `#include <begin_vertex>
-      vTint = aTint; vShade = aShade; vGlassy = aLayer < 2.5 ? 1.0 : (aLayer < 16.5 && aLayer != 9.0 && aLayer != 10.0 && aLayer != 15.0 ? 0.35 : 0.0);`);
+      vTint = aTint; vShade = aShade; vLayer = aLayer; vSeed = aSeed; vFUv = aUv; vBT = aBT; vY = (modelMatrix * vec4(transformed, 1.0)).y;
+      vGlassy = aLayer < 2.5 ? 1.0 : (aLayer < 16.5 && aLayer != 9.0 && aLayer != 10.0 && aLayer != 15.0 ? 0.35 : 0.0);`);
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", `#include <common>
-      varying vec3 vTint; varying float vGlassy; varying float vShade;`)
+      varying vec3 vTint; varying float vGlassy; varying float vShade; varying float vLayer; varying float vSeed; varying vec2 vFUv; varying vec2 vBT; varying float vY;
+      ${WINDOWS_GLSL}
+      // each facade's share of window and the window's size in its bay × storey cell
+      vec3 winShape(float layer) {
+        int L = int(layer + 0.5);
+        if (L <= 2) return vec3(0.82, 0.95, 0.84);
+        if (L == 3) return vec3(0.42, 1.0, 0.42);
+        if (L == 7) return vec3(0.47, 0.76, 0.62);
+        if (L == 13) return vec3(0.6, 0.84, 0.72);
+        if (L == 16) return vec3(0.68, 0.9, 0.68);
+        if (L == 23) return vec3(0.45, 0.85, 0.55);
+        return vec3(0.22, 0.5, 0.48);
+      }`)
       .replace("#include <map_fragment>", "diffuseColor.rgb *= mix(vTint, vec3(0.32, 0.4, 0.48), vGlassy * 0.8) * vShade;")
-      .replace("#include <emissivemap_fragment>", "totalEmissiveRadiance *= vec3(1.0, 0.85, 0.6) * vGlassy * 0.18;");
+      .replace("#include <emissivemap_fragment>", `
+      if (totalEmissiveRadiance.r > 0.0) {
+        vec3 ws = winShape(vLayer);
+        vec2 cells = vFUv * 2.0, c = abs(fract(cells) - 0.5), fw = fwidth(cells);
+        // the window drawn as a rectangle while it covers a few pixels, its average share beyond
+        vec2 inside = smoothstep(ws.yz * 0.5 + fw * 0.5, ws.yz * 0.5 - fw * 0.5, c);
+        float gm = mix(inside.x * inside.y, ws.x, smoothstep(0.25, 0.7, max(fw.x, fw.y)));
+        float wallFace = 1.0 - smoothstep(0.3, 0.6, abs((vec4(normal, 0.0) * viewMatrix).y));
+        totalEmissiveRadiance *= nightWindows(vFUv, vLayer, vSeed, gm * wallFace) + nightFacade(vY, vBT, vSeed, diffuseColor.rgb, vGlassy, wallFace);
+      }`);
   };
-  mat.customProgramCacheKey = () => "facadeFar";
+  mat.customProgramCacheKey = () => "facadeFar2";
   return mat;
 }
 
@@ -432,11 +538,11 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
   let A = null;
   const useChunk = (x, z) => {
     const key = `${Math.floor(x / 350)},${Math.floor(z / 350)}`;
-    if (!chunks.has(key)) chunks.set(key, { pos: [], nor: [], tint: [], layer: [], shade: [], seed: [], uv: [] });
+    if (!chunks.has(key)) chunks.set(key, { pos: [], nor: [], tint: [], layer: [], shade: [], seed: [], uv: [], bt: [] });
     A = chunks.get(key);
   };
   const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), nn = new THREE.Vector3(), tc = new THREE.Color();
-  let seed = 0;
+  let seed = 0, bt = [0, 0];   // (the building's own random seed, its base and top heights – for the night lighting)
   // one flat face (fan): vs [x, y, z][], out: side to face, uvs per vertex, layer, tint, shade per vertex (or one)
   function face(vs, out, uvs, layer, tint, shade = 1) {
     e1.set(vs[1][0] - vs[0][0], vs[1][1] - vs[0][1], vs[1][2] - vs[0][2]);
@@ -449,7 +555,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     tc.set(tint);
     for (let i = 1; i < order.length - 1; i++) for (const k of [order[0], order[i], order[i + 1]]) {
       A.pos.push(...vs[k]); A.nor.push(nn.x, nn.y, nn.z); A.tint.push(tc.r, tc.g, tc.b); A.layer.push(layer);
-      A.shade.push(Array.isArray(shade) ? shade[k] : shade); A.seed.push(seed); A.uv.push(...(uvs ? uvs[k] : [0.5, 0.5]));
+      A.shade.push(Array.isArray(shade) ? shade[k] : shade); A.seed.push(seed); A.bt.push(bt[0], bt[1]); A.uv.push(...(uvs ? uvs[k] : [0.5, 0.5]));
     }
   }
   // a roof face: uv in 4 m tiles laid along `dir` (the slope's horizontal direction)
@@ -637,6 +743,8 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
   const compass = (deg) => { const r = (deg * Math.PI) / 180, E = [-north[1], north[0]]; return [north[0] * Math.cos(r) + E[0] * Math.sin(r), north[1] * Math.cos(r) + E[1] * Math.sin(r)]; };
 
   let dropped = 0, moved = 0, count = 0;
+  // red aircraft warning lights on the roofs of tall buildings (medium intensity: flashing, a building's in step)
+  const beacons = [];
   for (const b0 of scene.buildings) {
     if (b0.kind === "grandstand") continue;   // stands.js builds these, with their seats
     if (opts.landmarks?.skip(b0)) continue;   // modelled as the real building (landmarks.js, facilities.js)
@@ -681,6 +789,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     st.roof = roof;
     const roofH = roof === "flat" ? 0 : roof === "dome" || roof === "onion" ? 0 : st.rh || (roof === "pyramidal" ? Math.min(10, Math.sqrt(area) * st.pitch * 0.5) : Math.min(14, st.pitch * lenV / 2));
     const y0 = base + (b.min || 0);
+    bt = [base, base + H];
     let y1 = base + Math.max(H - (b.est ? 0 : Math.min(roofH, H * 0.45)), (b.min || 0) + 2.5);
     // massing for tall buildings: a podium under the tower, a set-back crown at the top
     if (st.podium && rect > 0.7) {
@@ -707,6 +816,12 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     // church tower
     if (st.kind === "church" && area > 150) { const [x, z] = at(o, o.u0 + 2.5, (o.v0 + o.v1) / 2); box(x, z, base, 4.5, 4.5, H + 9, Math.atan2(o.u[1], o.u[0]), LAYER.PLAIN, st.tint); }
     if (st.kind === "mosque" && area > 200) { const [x, z] = at(o, o.u1 - 2, o.v0 + 2); cyl(x, z, base, 1.4, H + 18, 10, LAYER.PLAIN, st.tint, st.roofTint); }
+    if (H > 45) {
+      const ob = obb(pts), big = area > 1200, phase = r();
+      const corners = big ? [[ob.u0, ob.v0], [ob.u1, ob.v0], [ob.u1, ob.v1], [ob.u0, ob.v1]] : [[ob.u0, ob.v0], [ob.u1, ob.v1]];
+      for (const [a, bb] of corners) { const [x, z] = at(ob, a * 0.92, bb * 0.92); beacons.push({ x, y: top + 0.6, z, c: [255, 34, 20], i: 5, s: 2.4, blink: 0.5, phase }); }
+      if (H > 150) for (const [a, bb] of corners) { const [x, z] = at(ob, a * 1.01, bb * 1.01); beacons.push({ x, y: base + H * 0.5, z, c: [255, 34, 20], i: 3, s: 1.8 }); }
+    }
     count++;
   }
   if (!count) return null;
@@ -725,12 +840,13 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     geom.setAttribute("aShade", new THREE.Float32BufferAttribute(ch.shade, 1));
     geom.setAttribute("aSeed", new THREE.Float32BufferAttribute(ch.seed, 1));
     geom.setAttribute("aUv", new THREE.Float32BufferAttribute(ch.uv, 2));
+    geom.setAttribute("aBT", new THREE.Float32BufferAttribute(ch.bt, 2));
     geom.computeBoundingSphere(); geom.computeBoundingBox();
     const mesh = new THREE.Mesh(geom, mat);
     mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
   }
-  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, region,
+  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, region, beacons,
     update(cam) {
       for (const m of group.children) {
         const c = m.geometry.boundingSphere, d = Math.hypot(c.center.x - cam.x, c.center.y - cam.y, c.center.z - cam.z) - c.radius;

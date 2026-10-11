@@ -10,6 +10,7 @@ import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine } from "./smooth.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer } from "./garages.js";
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
+import { NL, GLOW, nightLit, lightField, glowPoints } from "./nightlights.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -26,7 +27,7 @@ let renderer, scene, camera, controls, host, canvas, hemi, sun, daySky, nightSky
 let world = null;             // built circuit: { key, samples, grid, center, size, … }
 let cars = new Map();         // racing number → car record
 let camMode = "heli", visible = false, lastT = 0, lastBuildCheck = 0;
-const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0), tmpV2 = new THREE.Vector2();
 
 // ---------- setup ----------
 function init() {
@@ -205,11 +206,32 @@ function skyTexture(night = false) {
   const c = document.createElement("canvas");
   c.width = 4; c.height = 256;
   const g = c.getContext("2d").createLinearGradient(0, 0, 0, 256);
-  if (night) { g.addColorStop(0, "#05070d"); g.addColorStop(0.6, "#0f1a2c"); g.addColorStop(1, "#2a3448"); }
+  // a city's night sky: near black overhead, the glow of its lights low down (warm, from sodium and LED haze)
+  if (night) { g.addColorStop(0, "#03050a"); g.addColorStop(0.45, "#0a0f1a"); g.addColorStop(0.75, "#171a26"); g.addColorStop(0.92, "#2b2730"); g.addColorStop(1, "#3a3034"); }
   else { g.addColorStop(0, "#3d6fae"); g.addColorStop(0.55, "#8fb3d6"); g.addColorStop(1, "#d6e3ee"); }
   const ctx = c.getContext("2d"); ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+// Night reflections: a dim sky with the city's glow along the horizon and lights below it, for glass and water
+// (an environment map; by day there is none – the hemisphere light does it).
+let nightEnv = null;
+function nightEnvironment() {
+  if (nightEnv) return nightEnv;
+  const w = 512, h = 256, c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  const gr = g.createLinearGradient(0, 0, 0, h);
+  for (const [t, col] of [[0, "#020308"], [0.32, "#080c16"], [0.44, "#1a1b26"], [0.5, "#3a2f30"], [0.53, "#1a1714"], [1, "#050505"]]) gr.addColorStop(t, col);
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  // lit windows and street lights all around below the horizon
+  let a = 12345; const r = () => ((a = (a * 16807) % 2147483647) / 2147483647);
+  for (let k = 0; k < 1400; k++) { const y = h * (0.5 + Math.pow(r(), 2.2) * 0.12); g.fillStyle = r() < 0.7 ? `rgba(255,${190 + r() * 50 | 0},${120 + r() * 80 | 0},${0.4 + r() * 0.6})` : `rgba(210,230,255,${0.4 + r() * 0.5})`; g.fillRect(r() * w, y, 1 + r() * 1.5, 1); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping;
+  const pm = new THREE.PMREMGenerator(renderer);
+  nightEnv = pm.fromEquirectangular(t).texture;
+  pm.dispose(); t.dispose();
+  return nightEnv;
 }
 
 // ---------- circuit ----------
@@ -1196,7 +1218,7 @@ async function loadGeo(w) {
     const evening = isNight() || (app().sessionHour?.() ?? 0) >= 15.5;
     const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width,
       facilities: opts.facilities, year: A.sessionYear?.() || null, isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
-    if (job !== geoJob || world !== w) { disposeGroup(built.group); return; }
+    if (job !== geoJob || world !== w) { disposeGroup(built.group); built.night?.dispose(); return; }
     // swap the generic surroundings for the real ones
     w.group.remove(w.syn.terrain, w.syn.trees);
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
@@ -1292,61 +1314,101 @@ function updateSun(now) {
 }
 let shadowKey = "";
 function refreshShadows() { shadowKey = ""; }
-// Floodlit cars: at night the bodywork gets some light of its own (the track's floodlights are only
-// drawn, not computed as lights), so a dark livery still reads.
+// Floodlit cars: the light field (nightlights.js) lights them where the track is lit; a touch of light of their
+// own on top keeps a dark livery readable from the helicopter.
 function lightCar(model, night) {
   model.traverse((o) => {
     const m = o.material;
     if (!o.isMesh || !m || !m.isMeshStandardMaterial) return;
+    nightLit(m);
     if (m.map && !m.emissiveMap) m.emissiveMap = m.map;
     m.emissive.set(night ? (m.map ? 0xffffff : m.color) : 0x000000);
-    m.emissiveIntensity = night ? (m.map ? 0.32 : 0.22) : 0;
+    m.emissiveIntensity = night ? (m.map ? 0.1 : 0.07) : 0;
     m.needsUpdate = true;
+  });
+}
+// The light field in use: the real map's (street lights, car parks, floodlit track) once it's there, else one of
+// the floodlit track alone over the generic surroundings.
+function nightField() {
+  if (world.real?.night) return world.real.night;
+  if (!world.trackField) {
+    const b = world.box, pad = 300;
+    const groundAt = (x, z) => { const [s] = world.grid.nearest(x, z, 3); return s ? s.p.y - 0.3 : world0Level; };
+    world.trackField = lightField({ ext: { x0: b.min.x - pad, z0: b.min.z - pad, x1: b.max.x + pad, z1: b.max.z + pad }, groundAt,
+      track: { samples: world.samples, width: world.width }, lines: [] });
+  }
+  return world.trackField;
+}
+// Every lit material of the world takes the light field (once each; the buildings' near and far materials too).
+function nightLitWorld() {
+  world.group.traverse((o) => {
+    for (const m of [].concat(o.material || [], Array.isArray(o.userData?.materials) ? o.userData.materials : [])) nightLit(m);
   });
 }
 function applyLighting() {
   const night = isNight();
   nightNow = night;
   scene.background = night ? nightSky : daySky;
-  scene.fog.color.set(night ? 0x0b1220 : 0xc9d9e8);
-  hemi.intensity = night ? 0.85 : 1.15; hemi.color.set(night ? 0x9fb4d8 : 0xe3efff); hemi.groundColor.set(night ? 0x1a1f28 : 0x4a5a3a);
-  if (night) { sun.intensity = 0.5; sun.color.set(0xbfd2ff); } else if (!sunNow()) { sun.intensity = 2.4; sun.color.set(0xfff3e0); }
+  // Night: little light from the sky (the city's glow, a moon), the rest from the light field – floodlights, street
+  // lights – and from lit windows; reflections of the glowing horizon on glass and water.
+  scene.fog.color.set(night ? 0x141620 : 0xc9d9e8);
+  hemi.intensity = night ? 0.32 : 1.15; hemi.color.set(night ? 0x7d8db0 : 0xe3efff); hemi.groundColor.set(night ? 0x2a2420 : 0x4a5a3a);
+  if (night) { sun.intensity = 0.16; sun.color.set(0xa9bce0); } else if (!sunNow()) { sun.intensity = 2.4; sun.color.set(0xfff3e0); }
   sun.castShadow = !night && geoSettings().shadows !== false;
-  renderer.toneMappingExposure = night ? 1.25 : 1.05;
+  scene.environment = night ? nightEnvironment() : null;
+  scene.environmentIntensity = 0.45;
+  renderer.toneMappingExposure = night ? 1.0 : 1.05;
   lastSun = 0; refreshShadows();
+  NL.gain.value = 0;
   if (!world) return;
-  // floodlit tarmac
-  for (const m of [world.road, world.kerb, world.lines]) m.traverse((o) => { if (o.material) { o.material.emissive = new THREE.Color(night ? 0x5a5a5a : 0); o.material.emissiveIntensity = night ? 0.55 : 0; } });
+  nightLitWorld();
+  if (night) {
+    const f = nightField();
+    NL.tex.value = f.tex; NL.hgt.value = f.hgt; NL.ext.value.copy(f.ext); NL.gain.value = NIGHT_GAIN;
+  }
+  if (world.real?.night?.group) world.real.night.group.visible = night;
+  for (const m of [world.road, world.kerb, world.lines]) m.traverse((o) => { if (o.material) { o.material.emissive = new THREE.Color(0); o.material.emissiveIntensity = 0; } });
   for (const c of cars.values()) lightCar(c.model, night);
   if (lit) { world.group.remove(lit); disposeGroup(lit); lit = null; }
   if (night) { lit = floodlights(world.samples); world.group.add(lit); }
-  // darker ground at night; the real terrain's light map (floodlights, street lights) and lit windows switch on
+  // the ground keeps its colour (the light falling on it changes, not the ground); lit windows switch on
   const real = world.real?.group.getObjectByName("terrain");
-  if (real) { real.material.color.set(night ? 0x5c6270 : 0xffffff); if (real.material.emissiveMap) real.material.emissiveIntensity = night ? 1.1 : 0; }
-  for (const bm of world.real?.group.getObjectByName("buildings")?.userData.materials || []) { bm.emissive.set(night ? 0xffffff : 0); bm.emissiveIntensity = night ? 0.9 : 0; }
+  if (real) real.material.color.set(0xffffff);
+  for (const bm of world.real?.group.getObjectByName("buildings")?.userData.materials || []) { bm.emissive.set(night ? 0xffffff : 0); bm.emissiveIntensity = night ? 1 : 0; }
   // landmarks with lights of their own (the Sphere's LEDs, the Flame Towers, W hotel's gridshell, lit glass)
   world.real?.group.getObjectByName("landmarks")?.traverse((o) => { const m = o.material; if (m?.userData?.nightE) m.emissiveIntensity = m.userData.nightE[night ? 1 : 0]; });
-  world.syn.terrain.material?.color.set(night ? 0x3a3f4a : 0xffffff);
   const sea = world.real?.group.getObjectByName("sea"), water = world.real?.group.getObjectByName("water");
-  for (const w of [sea, water]) if (w) { w.material.emissive = new THREE.Color(night ? 0x0c1a2a : 0); }
-  world.far.material.color.copy(world.farBase).multiplyScalar(night ? 0.3 : 1);
+  for (const w of [sea, water]) if (w) { w.material.emissive = new THREE.Color(night ? 0x02060a : 0); }
+  world.far.material.color.copy(world.farBase).multiplyScalar(night ? 0.5 : 1);
 }
-// Light towers along the track, lamps glowing (instanced).
+const NIGHT_GAIN = 5.5;   // light field → irradiance
+// Light towers along the track (instanced): a mast, a bank of projectors aimed at the track, their lit faces and
+// glare. Alternating sides, ~36 m apart (the field lights the track itself).
 function floodlights(samples) {
-  const g = new THREE.Group(), n = samples.length, every = 30;   // ~60 m apart (samples are ~2 m)
+  const g = new THREE.Group(), n = samples.length, every = 18;
   const count = Math.floor(n / every);
-  const poleG = new THREE.CylinderGeometry(0.18, 0.25, 14, 6); poleG.translate(0, 7, 0);
-  const headG = new THREE.BoxGeometry(2.2, 0.5, 0.6); headG.translate(0, 14.2, 0);
-  const poles = new THREE.InstancedMesh(poleG, new THREE.MeshStandardMaterial({ color: 0x6b7178, roughness: 0.6 }), count);
-  const heads = new THREE.InstancedMesh(headG, new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff3d6, emissiveIntensity: 2.5 }), count);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+  const poleG = new THREE.CylinderGeometry(0.16, 0.26, 14, 6); poleG.translate(0, 7, 0);
+  const headG = new THREE.BoxGeometry(2.4, 0.9, 0.45);
+  const faceG = new THREE.PlaneGeometry(2.2, 0.75); faceG.translate(0, 0, 0.24);
+  const metal = new THREE.MeshStandardMaterial({ color: 0x6b7178, roughness: 0.6, metalness: 0.4 });
+  const poles = new THREE.InstancedMesh(poleG, metal, count), heads = new THREE.InstancedMesh(headG, metal, count);
+  const faces = new THREE.InstancedMesh(faceG, new THREE.MeshBasicMaterial({ color: 0xf4f6ff }), count);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), tilt = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+  const glow = [];
   for (let k = 0; k < count; k++) {
-    const s = samples[k * every], side = k % 2 ? 1 : -1, off = Math.abs(edgeOf(s, side)) + 9;
+    const s = samples[k * every], side = k % 2 ? 1 : -1, off = Math.abs(edgeOf(s, side)) + 7;
     p.set(s.p.x + s.nor.x * side * off, s.p.y - 0.3, s.p.z + s.nor.z * side * off);
-    q.setFromAxisAngle(UP, Math.atan2(s.tan.x, s.tan.z));
-    m.compose(p, q, one); poles.setMatrixAt(k, m); heads.setMatrixAt(k, m);
+    // facing the track (local +z towards it), tipped down a little
+    q.setFromAxisAngle(UP, Math.atan2(-s.nor.x * side, -s.nor.z * side));
+    m.compose(p, q, one); poles.setMatrixAt(k, m);
+    tilt.setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.35); const qh = q.clone().multiply(tilt);
+    m.compose(tmp.copy(p).setY(p.y + 14.2), qh, one); heads.setMatrixAt(k, m); faces.setMatrixAt(k, m);
+    for (const u of [-0.75, 0, 0.75]) {
+      const ax = s.tan.x * u, az = s.tan.z * u, toward = 0.6;
+      glow.push({ x: p.x + ax - s.nor.x * side * toward, y: p.y + 14.1, z: p.z + az - s.nor.z * side * toward, c: [240, 244, 255], i: 4, s: 2.6 });
+    }
   }
-  g.add(poles, heads);
+  g.add(poles, heads, faces, glowPoints(glow, "floodGlow"));
   return g;
 }
 
@@ -1394,6 +1456,7 @@ function disposeGroup(g) {
 function disposeWorld() {
   if (world) {
     scene.remove(world.group); disposeGroup(world.group);
+    world.real?.night?.dispose(); world.trackField?.dispose();
     for (const o of Object.values(world.syn || {})) if (o && !o.parent) disposeGroup(o);
     world = null;
   }
@@ -1509,6 +1572,10 @@ function frame(now) {
   world?.real?.group.getObjectByName("facilities")?.userData.update?.(camera.position);
   updatePitTeams();
   if (!devNoHud) paintHud();
+  // glare points: pixels per metre at 1 m away, fading into the haze as the fog does; time for blinking lights
+  NL.time.value = now / 1000;
+  GLOW.scale.value = renderer.getDrawingBufferSize(tmpV2).y / (2 * Math.tan((camera.fov * Math.PI) / 360));
+  GLOW.fade.value.set(scene.fog.near, scene.fog.far);
   renderer.render(scene, camera);
   adaptResolution(now, dt);
   requestAnimationFrame(frame);

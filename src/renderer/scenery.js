@@ -13,6 +13,7 @@ import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
 import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine } from "./facilities.js";
+import { lightField, lampMeshes, glowPoints } from "./nightlights.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
 const DEM_ZOOM = 14;
@@ -176,32 +177,7 @@ async function groundCanvas(api, scene, gf, ext, provider, onStep, track) {
     g.strokeStyle = "#8a867f"; g.lineWidth = (track.width + 4) / mpp; line(); g.stroke();
     g.globalAlpha = 1;
   }
-  // Night: a light map – floodlights along the circuit, street lights along roads, glow from built-up areas.
-  let light = null;
-  if (track?.night) {
-    light = document.createElement("canvas"); light.width = cw; light.height = ch;
-    const l = light.getContext("2d");
-    l.fillStyle = "#000"; l.fillRect(0, 0, cw, ch);
-    l.lineCap = l.lineJoin = "round";
-    l.globalCompositeOperation = "lighter";
-    // built-up glow
-    l.fillStyle = "rgba(255,190,120,0.10)";
-    for (const a of scene.areas) if (a.k === "urban" || a.k === "residential" || a.k === "paved" || a.k === "stadium") { l.beginPath(); a.pts.forEach((p, i) => { const [x, y] = P(p); i ? l.lineTo(x, y) : l.moveTo(x, y); }); l.closePath(); l.fill(); }
-    // street lights (sodium orange for ordinary roads, whiter on big ones)
-    for (const r of scene.lines) {
-      if (r.k !== "road") continue;
-      l.strokeStyle = r.w >= 9 ? "rgba(255,220,170,0.55)" : "rgba(255,170,90,0.45)";
-      l.lineWidth = Math.max(1, (r.w + 10) / mpp);
-      l.beginPath(); r.pts.forEach((p, i) => { const [x, y] = P(p); i ? l.lineTo(x, y) : l.moveTo(x, y); }); l.stroke();
-    }
-    // floodlit circuit: a wide soft band and a bright core
-    const pts = track.samples.map((s) => S(s.p.x, s.p.z));
-    const loop = () => { l.beginPath(); pts.forEach(([x, y], i) => (i ? l.lineTo(x, y) : l.moveTo(x, y))); l.closePath(); };
-    for (const [w, a] of [[90, 0.12], [50, 0.2], [26, 0.45]]) { l.strokeStyle = `rgba(255,246,225,${a})`; l.lineWidth = w / mpp; loop(); l.stroke(); }
-    l.filter = "blur(6px)"; l.globalCompositeOperation = "source-over"; l.drawImage(light, 0, 0); l.filter = "none";
-  }
-  return {
-    light, canvas: cv, mpp, zoom: z, failed, tiles: tiles.length };
+  return { canvas: cv, mpp, zoom: z, failed, tiles: tiles.length };
 }
 
 // Close up, satellite pixels (10 m) look smeared: a fine grain texture, tiled every 6 m in world space and
@@ -674,17 +650,13 @@ export async function buildScenery(api, scene, world, opts, onStep) {
   // Free imagery (10 m pixels) is only the colour reference for the class-painted ground (ground.js), which is
   // finished below once the grandstands stand; Google's sharp imagery is the ground itself.
   const classed = opts.provider !== "google";
-  const ground = await groundCanvas(api, scene, gf, ext, opts.provider, onStep, { street: opts.street, width: opts.trackW || 14, samples: world.samples, night: opts.night, paint: !classed });
+  const ground = await groundCanvas(api, scene, gf, ext, opts.provider, onStep, { street: opts.street, width: opts.trackW || 14, samples: world.samples, paint: !classed });
   let tmat;
   if (classed) tmat = new THREE.MeshStandardMaterial({ color: 0x7d8a5c, roughness: 0.97, metalness: 0 });
   else {
     const tex = new THREE.CanvasTexture(ground.canvas);
     tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter;
     tmat = withDetail(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.97, metalness: 0 }));
-  }
-  if (ground.light) {
-    const lt = new THREE.CanvasTexture(ground.light); lt.colorSpace = THREE.SRGBColorSpace;
-    tmat.emissiveMap = lt; tmat.emissive = new THREE.Color(0xffffff); tmat.emissiveIntensity = 0;   // switched on at night
   }
   const terrain = new THREE.Mesh(tg, tmat);
   terrain.name = "terrain"; terrain.receiveShadow = true;
@@ -755,7 +727,6 @@ export async function buildScenery(api, scene, world, opts, onStep) {
       }
     }
     const gm = groundMaterial({ R, W: ground.canvas.width, H: ground.canvas.height, ext, mpp: ground.mpp, tintCanvas: ground.canvas, fine });
-    if (tmat.emissiveMap) { gm.material.emissiveMap = tmat.emissiveMap; gm.material.emissive = tmat.emissive; gm.material.emissiveIntensity = 0; }
     tmat.dispose();
     terrain.material = gm.material;
   }
@@ -827,7 +798,25 @@ export async function buildScenery(api, scene, world, opts, onStep) {
     for (const l of near) for (const p of l.pts) { const [x, z] = gf.xz(p); cells.add(`${Math.floor(x / 30)},${Math.floor(z / 30)}`); }
     for (const s of world.samples) if (cells.has(`${Math.floor(s.p.x / 30)},${Math.floor(s.p.z / 30)}`)) covered++;
   }
+  // Night (the session is or runs into the night): the light field of the floodlights, street lights and car parks,
+  // the lamps themselves and the aircraft warning lights on tall buildings (shown at night only, see map3d)
+  let night = null;
+  if (opts.night) {
+    onStep?.("야간 조명 켜는 중");
+    const xz = (pts) => pts.map(gf.xz);
+    night = lightField({ ext, groundAt: terrainAt, track: { samples: world.samples, width: opts.trackW || 14 },
+      lines: scene.lines.filter((l) => l.k === "road" || l.k === "path" || l.k === "raceway").map((l) => ({ ...l, pts: xz(l.pts) })),
+      paved: scene.areas.filter((a) => a.k === "paved").map((a) => xz(a.pts)),
+      buildings: opts.buildings !== false ? scene.buildings.filter((b) => b.kind !== "grandstand" && !(b.min > 3)).map((b) => xz(b.pts)) : [],
+      onTrack: (x, z) => corridor.on(x, z, 4), urban: !!opts.street });
+    night.group = lampMeshes(night.lamps);
+    const beacons = bld?.userData.beacons || [];
+    if (beacons.length) night.group.add(glowPoints(beacons, "beacons"));
+    night.group.visible = false;
+    group.add(night.group);
+  }
   return {
+    night,
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
     // (the camera's line-of-sight test isn't recursive: the facilities' meshes themselves)

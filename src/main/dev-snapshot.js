@@ -23,6 +23,8 @@ const fs = require("node:fs");
 const { app } = require("electron");
 
 module.exports = function snapshot(win, outFile) {
+  // (a snapshot window behind other windows would get no animation frames: loading waits for one)
+  win.webContents.setBackgroundThrottling(false);
   const run = (js) => win.webContents.executeJavaScript(js);
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   win.webContents.on("console-message", (...a) => { const e = a[0]?.message !== undefined ? a[0] : { level: a[1], message: a[2] }; if (e.level === "error" || e.level >= 2) console.log("RENDERER", e.message); });
@@ -79,7 +81,7 @@ module.exports = function snapshot(win, outFile) {
       await run(`(() => { const s = document.getElementById("session");
         const o = [...s.options].find((x) => x.text.includes(${JSON.stringify(process.env.F1KR_PICK || "결승")})); if (o) s.value = o.value;
         document.getElementById("load").click(); })()`);
-      for (let i = 0; i < 240 && (await run(`document.getElementById("seek").disabled`)); i++) await wait(500);
+      for (let i = 0; i < 720 && (await run(`document.getElementById("seek").disabled`)); i++) await wait(500);
       await run(`(() => { const k = document.getElementById("seek"); k.value = +k.value + (+(${JSON.stringify(process.env.F1KR_AT || "30")}) * 60e3); k.dispatchEvent(new Event("input")); })()`);
       await wait(800);
       if (process.env.F1KR_FOCUS) {
