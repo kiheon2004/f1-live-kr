@@ -138,6 +138,7 @@
   function play() { if (!replay || mode !== "replay") return; playing = true; $("play").textContent = "❚❚ 일시정지"; lastFrame = performance.now(); }
   function pause() { playing = false; $("play").textContent = "▶ 재생"; }
   function seekTo(ms) {
+    if (!replay) return;   // (nothing loaded yet: a seek before the first load does nothing)
     t = Math.max(t0, Math.min(ms, t1)); replay.seek(t);
     seenMsgs = replay.messages.length; prevPos = {}; radioKey = "";   // jumping shouldn't fire alerts
     renderAll(true);
@@ -496,11 +497,12 @@
         <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
           <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span><span class="tla">${esc(d.Tla)}</span><span class="team">${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span></div></td>
         <td class="time c">${esc(gap)}</td>
-        <td class="time c ${close ? "close" : ""}">${esc(interval)}${trendTag(trend[num])}</td>
+        <td class="time c ${close ? "close" : ""}">${esc(interval)}${interval ? trendTag(trend[num]) : ""}</td>
         <td class="c">${lapMode === "best"
           ? pill(best, ReplayKit.toSec(best) === fastest ? "purple" : "green")
           : pill(l.LastLapTime?.Value, l.LastLapTime?.OverallFastest ? "purple" : l.LastLapTime?.PersonalFastest ? "green" : slowLap(l.LastLapTime?.Value, fastest) ? "slow" : "")}</td>
         ${[0, 1, 2].map((i) => `<td class="time c sec ${sectorCls(sectors[i])}"><span>${esc(sectors[i]?.Value || "")}</span>${miniSectors(sectors[i])}</td>`).join("")}
+        <td class="time c sec ${sectorCls(l.Speeds?.ST)}"><span>${esc(l.Speeds?.ST?.Value || "")}</span></td>
         <td class="c">${ty ? `<span class="tyre" title="${esc(ty.ko)}${stint.New === "true" ? " (새 타이어)" : " (중고 타이어)"} · 이 타이어로 ${esc(stint.TotalLaps ?? 0)}랩"><i style="border-color:${ty.color};color:${ty.color}">${ty.short}</i><span style="color:${ty.color}">${esc(stint.TotalLaps ?? "")}</span></span>` : ""}</td>
         <td class="c">${esc(l.NumberOfPitStops ?? (type === "Race" && l.Position ? 0 : ""))}</td>
         <td class="state">${state}${delTag}</td></tr>`;
@@ -684,10 +686,20 @@
   });
 
   // ---------- race trace: gap to the leader, lap by lap, for every driver ----------
-  let traceKey = "", traceRange = store.get("traceRange", 45);
-  const paintRange = () => document.querySelectorAll("#trace .seg button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.range === traceRange)));
-  document.querySelectorAll("#trace .seg button").forEach((b) => b.addEventListener("click", () => {
+  // (two views: the gap to the leader, or the lap chart – every driver's position at the end of each lap)
+  let traceKey = "", traceRange = store.get("traceRange", 45), traceMode = store.get("traceMode", "gap");
+  const NOTES = { gap: "위로 갈수록 선두에 가까워요. 선이 올라가면 따라잡는 중, 내려가면 뒤처지는 중이에요. 색칠된 구간은 세이프티카·VSC·적색기 랩이라 간격이 줄어들어요. 이름을 누르면 그 드라이버를 집중해서 봐요.",
+    pos: "각 랩을 마쳤을 때의 순위예요. 선이 위로 가면 순위가 오른 거예요. 피트 스톱 랩에서 잠시 내려갔다 돌아오는 것도 보여요. 이름을 누르면 그 드라이버를 집중해서 봐요." };
+  const paintRange = () => {
+    document.querySelectorAll("#traceRanges button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.range === traceRange)));
+    document.querySelectorAll("#traceMode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === traceMode)));
+    $("traceRanges").hidden = traceMode !== "gap"; $("traceNote").textContent = NOTES[traceMode];
+  };
+  document.querySelectorAll("#traceRanges button").forEach((b) => b.addEventListener("click", () => {
     traceRange = +b.dataset.range; store.set("traceRange", traceRange); paintRange(); traceKey = ""; renderTrace();
+  }));
+  document.querySelectorAll("#traceMode button").forEach((b) => b.addEventListener("click", () => {
+    traceMode = b.dataset.mode; store.set("traceMode", traceMode); paintRange(); traceKey = ""; renderTrace();
   }));
   paintRange();
   // Gap per lap from cumulative race time (sum of lap times): steady through pit stops, unlike the
@@ -709,8 +721,9 @@
     const W = Math.max(280, box.clientWidth), H = Math.max(220, $("trace").clientHeight - 90);
     // Redraw only when something visible changed (new laps, focus, range, size).
     const lapTotal = nums.reduce((a, n) => a + src.laps(n).length, 0);
-    const key = [lapTotal, src.neutralPeriods().map((p) => `${p.from}-${p.to}`).join(","), focus, compare, traceRange, W, H].join("|");
+    const key = [lapTotal, src.neutralPeriods().map((p) => `${p.from}-${p.to}`).join(","), focus, compare, traceRange, traceMode, W, H].join("|");
     if (key === traceKey) return; traceKey = key;
+    if (traceMode === "pos") { box.innerHTML = positionChart(nums, drivers, W, H); return; }
     const series = traceSeries(nums).map((s) => ({ ...s, d: drivers[s.n] }));
     const all = series.flatMap((s) => s.pts);
     if (all.length < 4) { box.innerHTML = `<p class="empty">랩이 쌓이면 선두와의 차이를 그려요.</p>`; return; }
@@ -749,6 +762,39 @@
     for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 11) labels[i].y = labels[i - 1].y + 11;
     for (const lb of labels) out += `<text class="lbl${lb.hl ? " hl" : ""}" data-num="${esc(lb.n)}" x="${lb.x}" y="${lb.y}" fill="${lb.color}" fill-opacity="${lb.dim ? 0.5 : 1}">${esc(lb.tla)}</text>`;
     box.innerHTML = out + "</svg>";
+  }
+  // The lap chart: positions 1..N down the side, laps along; each driver's line in the team's colour (team-mates
+  // dashed apart: the second driver of a team by number gets a dashed line), the neutral laps shaded as above.
+  function positionChart(nums, drivers, W, H) {
+    const series = nums.map((n) => ({ n, d: drivers[n], pts: src.laps(n).filter((x) => x.pos).map((x) => ({ lap: x.lap, pos: x.pos })) })).filter((s) => s.d && s.pts.length);
+    const all = series.flatMap((s) => s.pts);
+    if (all.length < 4) return `<p class="empty">랩이 쌓이면 랩별 순위를 그려요.</p>`;
+    const L = 26, R = 40, T = 8, B = 20, N = Math.max(...all.map((x) => x.pos), nums.length);
+    const minLap = Math.min(...all.map((x) => x.lap)), maxLap = Math.max(...all.map((x) => x.lap));
+    const X = (lap) => L + ((lap - minLap) / Math.max(1, maxLap - minLap)) * (W - L - R), Y = (p) => T + ((p - 1) / Math.max(1, N - 1)) * (H - T - B);
+    let out = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="랩별 순위 차트">`;
+    const SHADE = { SC: ["#f29a30", 0.13, "SC"], VSC: ["#f2c230", 0.09, "VSC"], RED: ["#e8392f", 0.14, "적색기"] };
+    for (const p of src.neutralPeriods()) {
+      const [c, op, label] = SHADE[p.kind], x1 = X(Math.max(minLap, p.from)), x2 = X(Math.min(maxLap, Math.max(p.to, p.from + 1)));
+      if (x2 > x1) out += `<rect x="${x1}" y="${T}" width="${x2 - x1}" height="${H - T - B}" fill="${c}" fill-opacity="${op}"/><text x="${x1 + 3}" y="${H - B - 4}" style="fill:${c}">${label}</text>`;
+    }
+    for (let p = 1; p <= N; p++) if (p === 1 || p % 5 === 0) out += `<line x1="${L}" x2="${W - R}" y1="${Y(p)}" y2="${Y(p)}" stroke="#2a3038"/><text x="4" y="${Y(p) + 3}">${p}</text>`;
+    out += `<text x="${L}" y="${H - 5}">${minLap}랩</text><text x="${W - R}" y="${H - 5}" text-anchor="end">${maxLap}랩</text>`;
+    const rank = (s) => (s.n === focus ? 2 : s.n === compare ? 1 : 0);
+    const mates = {}; for (const s of series) (mates[s.d.TeamName] || (mates[s.d.TeamName] = [])).push(+s.n);
+    const labels = [];
+    for (const s of series.sort((a, b) => rank(a) - rank(b))) {
+      const hl = rank(s) > 0, dim = (focus || compare) && !hl, color = "#" + esc(hexColour(s.d?.TeamColour, "888"));
+      const dashed = (mates[s.d.TeamName] || []).sort((a, b) => a - b)[1] === +s.n;
+      const pts = s.pts.sort((a, b) => a.lap - b.lap);
+      if (pts.length > 1) out += `<polyline fill="none" stroke="${color}" stroke-width="${hl ? 2.6 : 1.5}" stroke-opacity="${dim ? 0.3 : 0.9}" ${dashed ? 'stroke-dasharray="5 3"' : ""} stroke-linejoin="round" points="${pts.map((x) => `${X(x.lap).toFixed(1)},${Y(x.pos).toFixed(1)}`).join(" ")}"/>`;
+      const last = pts[pts.length - 1];
+      labels.push({ n: s.n, tla: s.d.Tla, color, hl, dim, x: X(last.lap) + 4, y: Y(last.pos) + 3 });
+    }
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 10) labels[i].y = labels[i - 1].y + 10;
+    for (const lb of labels) out += `<text class="lbl${lb.hl ? " hl" : ""}" data-num="${esc(lb.n)}" x="${lb.x}" y="${lb.y}" fill="${lb.color}" fill-opacity="${lb.dim ? 0.5 : 1}">${esc(lb.tla)}</text>`;
+    return out + "</svg>";
   }
   $("traceChart").addEventListener("click", (e) => {
     const n = e.target.closest("[data-num]")?.dataset.num; if (!n) return;
@@ -1490,6 +1536,23 @@
 
   // ---------- glossary ----------
   $("glossaryList").innerHTML = KO.GLOSSARY.map(([term, text]) => `<dt>${esc(term)}</dt><dd>${esc(text)}</dd>`).join("");
+  // ---------- timing board columns (which to show; remembered) ----------
+  // Fans asked the official app for a screen they can arrange themselves; here: each column on or off.
+  const COLS = [["chg", "순위 변동"], ["gap", "리더와 차이"], ["int", "앞 차와 간격"], ["lap", "랩타임"], ["s1", "S1"], ["s2", "S2"], ["s3", "S3"], ["st", "속도 트랩 (ST)"], ["tyre", "타이어"], ["pits", "피트"], ["state", "상태"]];
+  const COLS_DEFAULT_OFF = ["st"];
+  let hiddenCols = new Set(store.get("hiddenCols", COLS_DEFAULT_OFF));
+  const colStyle = document.createElement("style"); document.head.appendChild(colStyle);
+  function applyCols() {
+    const ths = [...$("board").tHead.rows[0].cells];
+    colStyle.textContent = ths.map((th, i) => (hiddenCols.has(th.dataset.col) ? `#board tr > :nth-child(${i + 1}){display:none}` : "")).join("\n");
+    $("colsList").innerHTML = COLS.map(([k, label]) => `<label><input type="checkbox" data-col="${k}" ${hiddenCols.has(k) ? "" : "checked"}> ${esc(label)}</label>`).join("");
+  }
+  $("colsList").addEventListener("change", (e) => { const k = e.target.dataset.col; if (!k) return; if (e.target.checked) hiddenCols.delete(k); else hiddenCols.add(k); store.set("hiddenCols", [...hiddenCols]); applyCols(); });
+  $("colsReset").addEventListener("click", () => { hiddenCols = new Set(COLS_DEFAULT_OFF); store.set("hiddenCols", [...hiddenCols]); applyCols(); });
+  $("colsBtn").addEventListener("click", (e) => { e.stopPropagation(); const open = $("colsPop").hidden; $("colsPop").hidden = !open; $("colsBtn").setAttribute("aria-expanded", String(open)); });
+  document.addEventListener("click", (e) => { if (!$("colsPop").hidden && !e.target.closest(".cols-wrap")) { $("colsPop").hidden = true; $("colsBtn").setAttribute("aria-expanded", "false"); } });
+  applyCols();
+
   $("glossaryBtn").addEventListener("click", () => { $("schedule").hidden = true; $("glossary").hidden = !$("glossary").hidden; });
   $("glossaryClose").addEventListener("click", () => { $("glossary").hidden = true; });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("schedule").hidden = true; $("glossary").hidden = true; $("syncPop").hidden = true; } });

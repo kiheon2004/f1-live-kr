@@ -161,6 +161,16 @@ function updatePitTeams(force = false) {
   pitTeams.group = teamLayer(G, teams, drivers);
   fac.add(pitTeams.group);
 }
+// the pit lane's direction at (x, z) if that's in front of a facility's garages (0–16 m out), else null
+function pitLaneDir(x, z) {
+  let out = null;
+  world?.real?.group.getObjectByName("facilities")?.traverse((o) => {
+    const G = o.userData?.garages; if (out || !G) return;
+    const p = G.project(x, z);
+    if (p.off > -1 && p.off < 16 && p.u > G.gStart - 10 && p.u < G.gEnd + 10) out = G.slots[0].along;
+  });
+  return out;
+}
 // a small note in the 3D view saying the team garages are an inference, and from what
 function pitTeamNote(text) {
   let el = document.getElementById("pitTeamNote");
@@ -822,9 +832,15 @@ function updateCars(dt) {
       const vel = velBuf[num];                                               // dm/ms → m/s is ×100
       const mx = vel ? vel[0] * 100 : 0, mz = vel ? -vel[1] * 100 : 0;
       speed = Math.hypot(mx, mz);
+      // (crawling, the velocity of 4 Hz positions points anywhere: below 6 m/s the heading is kept – in front of the
+      // garages it lies along the pit lane, the way the car was already facing; first seen, the lap line's direction)
       let yaw = c.yaw;
-      if (speed > 2) yaw = Math.atan2(mx, mz);
-      else if (c.sample) yaw = Math.atan2(c.sample.tan.x, c.sample.tan.z);
+      if (speed > 6) yaw = Math.atan2(mx, mz);
+      else {
+        const pl = pitLaneDir(v.x, v.z);
+        if (pl) { const a = Math.atan2(pl[0], pl[1]); yaw = Math.abs(wrap(a - c.yaw)) <= Math.PI / 2 ? a : wrap(a + Math.PI); }
+        else if (!c.has && c.sample) yaw = Math.atan2(c.sample.tan.x, c.sample.tan.z);
+      }
       const dy = wrap(yaw - c.yaw);
       if (!c.has || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * k;   // a big swing is a jump (seek): snap
       const yawRate = c.has && dt > 0 ? wrap(c.yaw - (c.prevYaw ?? c.yaw)) / dt : 0;

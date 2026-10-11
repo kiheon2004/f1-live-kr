@@ -410,8 +410,8 @@ body.compact .top { padding: 6px 8px; gap: 6px; }
 body.compact .status-bar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
 body.compact .title { font-size: 13px; }
 body.compact #board th:nth-child(2), body.compact #board td:nth-child(2),
-body.compact #board th:nth-child(n+6):nth-child(-n+9), body.compact #board td:nth-child(n+6):nth-child(-n+9),
-body.compact #board th:nth-child(11), body.compact #board td:nth-child(11) { display: none; }
+body.compact #board th:nth-child(n+6):nth-child(-n+10), body.compact #board td:nth-child(n+6):nth-child(-n+10),
+body.compact #board th:nth-child(12), body.compact #board td:nth-child(12) { display: none; }   /* lap, S1–S3, ST; pits */
 body.compact .drv .team, body.compact .drv .tla { display: none; }
 body.compact .drv .name { font-size: 13.5px; }
 body.compact #board td { padding-top: 5px; padding-bottom: 5px; }
@@ -423,3 +423,10 @@ table.stint-pace td { padding: 3px 6px; border-bottom: 1px solid var(--line-2); 
 .deg-high { color: #e87b72; } .deg-neg { color: var(--green); }
 @media (max-width: 1640px) { .compact-text { display: none; } }
 @media (max-width: 1560px) { body:has(#liveBar:not([hidden])) .pin-text { display: none; } }
+
+/* timing board column picker */
+.cols-wrap { position: relative; }
+.cols-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; background: var(--panel, #171a1f); border: 1px solid var(--line, #2a2f36); border-radius: 10px; padding: 10px 12px; min-width: 180px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.cols-pop p { margin: 0 0 6px; font-size: 12px; }
+.cols-pop label { display: flex; gap: 8px; align-items: center; padding: 3px 0; font-size: 13px; white-space: nowrap; }
+.cols-pop button { margin-top: 8px; }
