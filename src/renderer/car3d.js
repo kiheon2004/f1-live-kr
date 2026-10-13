@@ -229,41 +229,21 @@ const sharedTex = (key, make) => {
   if (!TEX[key]) { const t = make(); t.userData.shared = true; TEX[key] = t; }
   return TEX[key];
 };
-// 2×2 twill carbon: tows 5 mm wide (a 4 cm repeat holds 8), as a normal map (the weave's ridges) and a roughness map
-// (the tows' sheen) – data, not colour: no sRGB. The colour stays the material's (near black).
+// 2×2 twill carbon: tows 5 mm wide (a 4 cm repeat holds 8), drawn as colour – the tows a touch lighter one way
+// than the other, as the weave catches the light (sRGB).
 function carbonMaps() {
   return {
-    normal: sharedTex("carbonN", () => {
-      const N = 128, c = canvas(N, N), g = c.getContext("2d"), img = g.createImageData(N, N), tow = N / 8;
-      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-        const i = Math.floor(x / tow), j = Math.floor(y / tow), warp = ((i + j) >> 1) % 2 === 0;   // 2×2 twill
-        const fx = (x % tow) / tow - 0.5, fy = (y % tow) / tow - 0.5;
-        // each tow a shallow cylinder across its width
-        const nx = warp ? fx * 0.9 : 0, ny = warp ? 0 : fy * 0.9;
-        const o = (y * N + x) * 4; img.data[o] = 128 + nx * 127; img.data[o + 1] = 128 + ny * 127; img.data[o + 2] = 235; img.data[o + 3] = 255;
+    colour: sharedTex("carbonC", () => {
+      const N = 64, c = canvas(N, N), g = c.getContext("2d"), tow = N / 8;
+      for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) {
+        const warp = ((i + j) >> 1) % 2 === 0, gr = warp ? g.createLinearGradient(i * tow, 0, (i + 1) * tow, 0) : g.createLinearGradient(0, j * tow, 0, (j + 1) * tow);
+        const v = warp ? 34 : 24; gr.addColorStop(0, `rgb(${v - 6},${v - 5},${v - 3})`); gr.addColorStop(0.5, `rgb(${v + 6},${v + 7},${v + 9})`); gr.addColorStop(1, `rgb(${v - 6},${v - 5},${v - 3})`);
+        g.fillStyle = gr; g.fillRect(i * tow, j * tow, tow, tow);
       }
-      g.putImageData(img, 0, 0);
-      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.colorSpace = THREE.NoColorSpace;
-      return t;
-    }),
-    rough: sharedTex("carbonR", () => {
-      const N = 128, c = canvas(N, N), g = c.getContext("2d"), tow = N / 8;
-      for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { const warp = ((i + j) >> 1) % 2 === 0; const v = warp ? 92 : 120; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * tow, j * tow, tow, tow); }
-      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.colorSpace = THREE.NoColorSpace;
+      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.colorSpace = THREE.SRGBColorSpace;
       return t;
     }),
   };
-}
-// Tyre: fine grain on the rubber (roughness), the sidewall's moulded rings – no brand lettering.
-function tyreRough() {
-  return sharedTex("tyreR", () => {
-    const N = 256, c = canvas(N, N), g = c.getContext("2d");
-    g.fillStyle = "rgb(225,225,225)"; g.fillRect(0, 0, N, N);
-    let a = 4242; const r = () => ((a = (a * 16807) % 2147483647) / 2147483647);
-    for (let k = 0; k < 2600; k++) { const v = 190 + r() * 60 | 0; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(r() * N, r() * N, 1 + r() * 2, 1); }
-    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; t.anisotropy = 4;
-    return t;
-  });
 }
 // The steering wheel's display: gear, speed bar, shift lights (a stylised screen – no real team UI)
 function wheelScreen() {
@@ -561,10 +541,12 @@ export function makeCar({ teamName, teamColour, number, season = null }) {
   const matte = l.finish === "matte";
   const paint = new THREE.MeshStandardMaterial({ map: liveryTexture(l, number, prof), color: hasDom ? 0xffffff : l.base, roughness: matte ? 0.5 : 0.28, metalness: 0.05 });
   const cm = carbonMaps();
-  const carbon = mat("carbon", () => new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 1, roughnessMap: cm.rough, normalMap: cm.normal, normalScale: new THREE.Vector2(0.35, 0.35), metalness: 0.15 }));
+  // (the weave as colour only: a normal and roughness map over a car that fills the cockpit cameras' screen, with the
+  // reflections, dropped frames on the GPU – measured; the colour map costs next to nothing)
+  const carbon = mat("carbon", () => new THREE.MeshStandardMaterial({ color: 0xffffff, map: cm.colour, roughness: 0.42, metalness: 0.15 }));
   const wingPaint = new THREE.MeshStandardMaterial({ color: l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top, roughness: matte ? 0.5 : 0.3, metalness: 0.05 });
   const carbonThin = mat("carbonThin", () => new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.45, metalness: 0.15, side: THREE.DoubleSide }));
-  const tyreMat = mat("tyre", () => new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 1, roughnessMap: tyreRough(), metalness: 0 }));
+  const tyreMat = mat("tyre", () => new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.9, metalness: 0 }));
   const coverMat = mat("cover", () => new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.35, metalness: 0.6 }));
   const lipMat = mat("lip", () => new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.3, metalness: 0.9 }));
   const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));

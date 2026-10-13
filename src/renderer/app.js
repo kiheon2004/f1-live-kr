@@ -303,7 +303,7 @@
       t += (now - lastFrame) * speed; lastFrame = now;
       if (t >= t1) { t = t1; pause(); }
       replay.seek(t);
-      renderAll(now - lastHeavy > 250);
+      renderAll(false); paceUi(now);
     } else if (mode === "live" && src === live) {
       live.tick();
       // A new session, or a fresh snapshot after a reconnect: lists start over and old messages don't alert again.
@@ -315,13 +315,31 @@
         if (newSession) { circuitFor = null; refreshOutline(); }
         refreshTitle(); renderAll(true);
       }
-      renderAll(now - lastHeavy > 250);
+      renderAll(false); paceUi(now);
     }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
   const uiCost = {};   // development: time spent per panel (window.F1KR.uiCost)
+  // While playing (or live), the panels are brought up to date every 250 ms – spread over the next frames, a few ms
+  // of them a frame, instead of all in one frame (the board alone takes 5–16 ms: with the rest, every fourth of a
+  // second a frame came late and the 3D cockpit cameras juddered). Panels the expanded map covers aren't redrawn
+  // (they are when it's closed: within 250 ms); the expanded map's own small board is.
+  let uiQueue = [];
+  function paceUi(now) {
+    if (window.F1KR_NOUI) return;
+    if (!uiQueue.length && now - lastHeavy > 250) {
+      lastHeavy = now; paintIdle();
+      if (!src) { renderAll(true); return; }
+      const covered = $("mapCard").classList.contains("expanded");
+      uiQueue = [["status", renderStatus], ...(covered ? [["mini", renderMiniBoard]] : [["board", renderBoard], ["rc", renderRC], ["driver", renderDriver], ["radio", renderRadio], ["strat", renderStrat], ["trace", renderTrace], ["champ", renderChamp]]), ["alerts", checkAlerts]];
+    }
+    // (at least one a frame, then more while under 3 ms)
+    const a = performance.now();
+    while (uiQueue.length) { const [name, fn] = uiQueue.shift(); timed(name, fn); if (performance.now() - a > 3) break; }
+  }
+  const timed = (name, fn) => { const a = performance.now(); fn(); const d = performance.now() - a; const s = uiCost[name] || (uiCost[name] = { n: 0, total: 0, max: 0 }); s.n++; s.total += d; s.max = Math.max(s.max, d); };
   function renderAll(heavy) {
     if (window.F1KR_NOUI && heavy) heavy = false;
     if (mode === "replay") { $("seek").value = t; $("elapsed").textContent = `${t < tStart ? `출발 전 ${hms(tStart - t + 999).slice(3)}` : hms(t - tStart)} / ${hms(t1 - tStart)}`; }
@@ -330,7 +348,8 @@
     lastHeavy = performance.now();
     paintIdle();
     if (!src) { setHTML($("board").tBodies[0], ""); $("rc").innerHTML = ""; renderDriver(); return; }
-    const T = (name, fn) => { const a = performance.now(); fn(); const d = performance.now() - a; const s = uiCost[name] || (uiCost[name] = { n: 0, total: 0, max: 0 }); s.n++; s.total += d; s.max = Math.max(s.max, d); };
+    uiQueue = [];   // (all drawn now)
+    const T = timed;
     T("status", renderStatus); T("board", renderBoard); T("rc", renderRC); T("driver", renderDriver); T("radio", renderRadio); T("strat", renderStrat); T("trace", renderTrace); T("champ", renderChamp); T("mini", renderMiniBoard); T("alerts", checkAlerts);
   }
 

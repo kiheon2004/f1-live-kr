@@ -790,7 +790,7 @@ function carFor(num, d) {
   if (c) { scene.remove(c.obj); disposeGroup(c.obj); }
   const obj = new THREE.Group();
   const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season });
-  setCarEnvironment(model, carEnvironment(nightNow), nightNow ? 0.6 : 1);
+  if (nightNow) setCarEnvironment(model, carEnvironment(true), 0.6);
   { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false }));
     sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; model.add(sh); }
   if (nightNow) lightCar(model, true);
@@ -894,7 +894,7 @@ function smoothFor(src) {
   if (smooth.tr && src.isLive) smooth.tr.update(performance.now());
   return smooth.tr;
 }
-let devRawTracks = false, devNoShake = false, devMotion = false;
+let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null;
 function updateCars(dt) {
   const A = app(), src = A.src;
   // position and velocity of every car from its smooth track (arrays reused frame to frame)
@@ -1020,12 +1020,26 @@ function updateCars(dt) {
     }
     c.pos.copy(v); c.has = true;
     c.obj.position.copy(v);
-    c.model.rotation.set(c.pitch, c.yaw, c.roll + c.bump * 0.003, "YXZ");
+    // The car the cockpit cameras ride in is steadied: its pitch and roll follow slowly (~0.4 s) and its height over
+    // the road too, kerb bumps left out – the camera is fixed to it, and the halo, helmet and nose in the frame with it,
+    // so what moves on screen is the world going by, not a shaking car (4 Hz positions and kerb ridges shook it).
+    const ride = (camMode === "onboard" || camMode === "eye") && num === focusNum;
+    if (ride) {
+      const k = c.stab ? 1 - Math.exp(-dt * 2.5) : 1, ky = c.stab ? 1 - Math.exp(-dt * 5) : 1, S = c.stab || (c.stab = { p: 0, r: 0, y: v.y });
+      S.p += (c.pitch - S.p) * k; S.r += (c.roll - S.r) * k; S.y += (v.y - (c.bump ? 0.008 + 0.01 * c.bump : 0) - S.y) * ky;
+      c.obj.position.y = S.y;
+      c.model.rotation.set(S.p, c.yaw, S.r, "YXZ");
+    } else {
+      c.stab = null;
+      c.model.rotation.set(c.pitch, c.yaw, c.roll + c.bump * 0.003, "YXZ");
+    }
     // wheels roll with the speed; front wheels steer with the turning rate (Ackermann-ish: δ ≈ L·ω / v)
     c.spin = (c.spin + (c.speed * dt) / 0.354) % (Math.PI * 2);
     // (and a touch of opposite lock when the rear steps out)
     const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) - (c.slide || 0) * 2)) : 0;
-    c.steer = steer; setWheels(c.model, c.spin, steer);
+    // (the wheels' and steering wheel's angle eased: the turning rate from 4 Hz positions twitched them frame to frame)
+    c.steer = c.steer == null ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
+    setWheels(c.model, c.spin, c.steer);
     // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
     // (straight mode at speed on straights, corner mode otherwise: the feed has no channel for it)
     let wantOpen;
@@ -1146,22 +1160,17 @@ function updateCamera(dt) {
   if (!c || !c.has) { controls.enabled = true; controls.update(); return; }
   if (camMode === "onboard" || camMode === "eye") {
     // Fixed to the car (its mounts, per model): the broadcast T-cam on top of the airbox, looking down the car over
-    // the driver's helmet – or the driver's own eyes in the helmet. Either pitches and rolls with the car under braking
-    // and in corners and has a fine buzz that grows with speed and a hard rattle over kerbs – made from the session's
-    // own time (the same moment shakes the same way: paused it holds still, replayed it repeats; not measured, a look).
+    // the driver's helmet – or the driver's own eyes (first person). The car under it is steadied (updateCars), and no
+    // vibration is added: a steady picture to watch the race by.
     c.model.updateMatrixWorld(true);
     const u = c.model.userData, eye = camMode === "eye";
     camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
     c.model.getWorldQuaternion(qTmp);
-    const now = (A.t || 0) / 1000, sp = Math.min(1, c.speed / 90);
-    const amp = devNoShake ? 0 : 0.0002 + 0.0006 * sp + (c.onKerb ? 0.0015 : 0);
-    const n1 = Math.sin(now * 61.3) * 0.6 + Math.sin(now * 97.1 + 1.3) * 0.4, n2 = Math.sin(now * 53.7 + 2.1) * 0.6 + Math.sin(now * 83.9) * 0.4;
     // (the T-cam looks down ~11° to take in the helmet and the cockpit; the eyes ahead, a touch down)
-    shakeE.set((eye ? -0.05 : -0.2) + n1 * amp, Math.PI + n2 * amp * 0.5, n2 * amp * 0.6, "YXZ");
+    shakeE.set(eye ? -0.06 : -0.2, Math.PI, 0, "YXZ");
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
-    camera.position.y += n1 * amp * 0.25;
     setNear(eye ? 0.03 : 0.05);
     const fov = cockpitFov(eye);
     if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
@@ -1264,7 +1273,7 @@ function setCam(mode) {
     camera.fov = 50; camera.updateProjectionMatrix();
     if ((camMode === "onboard" || camMode === "eye") && c?.has) camera.position.copy(c.pos).add(new THREE.Vector3(0, 120, 160));
   }
-  camMode = mode; camInit = false;
+  camMode = mode; camInit = false; resetPace();
   try { localStorage.setItem("f1kr:cam3d", JSON.stringify(mode)); } catch {}
   paintCamButtons();
 }
@@ -1522,7 +1531,9 @@ function applyLighting() {
   }
   if (world.real?.night?.group) world.real.night.group.visible = night;
   for (const m of [world.road, world.kerb, world.lines]) m.traverse((o) => { if (o.material) { o.material.emissive = new THREE.Color(0); o.material.emissiveIntensity = 0; } });
-  for (const c of cars.values()) { lightCar(c.model, night); setCarEnvironment(c.model, carEnvironment(night), night ? 0.6 : 1); }
+  // (reflections on the cars by night only, as the rest of the world has: by day an environment map over a car that
+  // fills the cockpit cameras' screen dropped frames on the GPU – measured: frames over 30 ms 26 → 10 in 4 s)
+  for (const c of cars.values()) { lightCar(c.model, night); setCarEnvironment(c.model, night ? carEnvironment(true) : null, 0.6); }
   if (lit) { world.group.remove(lit); disposeGroup(lit); lit = null; }
   if (night) { lit = floodlights(world.samples); world.group.add(lit); }
   // the ground keeps its colour (the light falling on it changes, not the ground); lit windows switch on
@@ -1726,11 +1737,14 @@ function addCorners() {
 
 function frame(now) {
   if (!visible) return;
+  // (held to 60 a second: every other refresh of a 120 Hz screen is left out, evenly)
+  if (perf.cap && now - lastT < 1000 / 60 - 4) { requestAnimationFrame(frame); return; }
   const dt = Math.min(0.1, (now - lastT) / 1000 || 0.016); lastT = now;
   ensureWorld(now);
   const A = app();
   if (world && A?.src) updateCars(dt);
   if (world) updateCamera(dt);
+  if (devRec) devRec(now, dt);
   updateSun(now);
   thinFarTrees();
   world?.real?.stands?.update(camera.position);
@@ -1778,22 +1792,34 @@ function adaptResolution(now, dt) {
   const max = Math.min(devicePixelRatio || 1, 2);
   if (!perf.ratio) perf.ratio = max;
   perf.acc += dt; perf.n++; perf.frames++;
-  if (dt > 0.03) perf.spikes++;                 // a frame longer than ~2 at 60 Hz: a visible hitch
+  if (dt > 0.03) { perf.spikes++; perf.spikesNow = (perf.spikesNow || 0) + 1; }   // a frame longer than ~2 at 60 Hz: a visible hitch
   perf.worst = Math.max(perf.worst, dt);
+  // the screen's refresh interval: the shortest frame-to-frame gaps seen (120 Hz → 8.3 ms, 60 Hz → 16.7 ms)
+  perf.minDt = Math.min(perf.minDt ?? 1, dt);
+  // a late frame: one that missed its refresh (longer than 1.5 intervals of the pace it's drawn at)
+  const pace = perf.cap ? 1 / 60 : perf.vsync || 1 / 60;
+  if (dt > pace * 1.5) perf.lateNow = (perf.lateNow || 0) + 1;
   if (now - perf.since < 2000) return;
-  const avg = perf.acc / perf.n;
-  perf.fps = Math.round(1 / avg); perf.acc = 0; perf.n = 0; perf.since = now;
-  // (a change of resolution reallocates the drawing buffers – a ~100 ms stall: down at once when frames are slow (4 s
-  // apart at most), up only after two fast 2 s windows in a row and 10 s after the last change – no stepping back and
-  // forth between two sizes)
-  const want = avg > 0.025 ? -1 : avg < 0.012 ? 1 : 0;
-  perf.trend = want > 0 && perf.lastWant > 0 ? (perf.trend || 0) + 1 : want > 0 ? 1 : 0; perf.lastWant = want;
+  const avg = perf.acc / perf.n, late = (perf.lateNow || 0) / Math.max(1, perf.n);
+  perf.vsync = perf.minDt < 0.0105 ? 1 / 120 : perf.minDt < 0.0185 ? 1 / 60 : perf.minDt; perf.minDt = 1;
+  perf.fps = Math.round(1 / avg); perf.acc = 0; perf.n = 0; perf.since = now; perf.windowSpikes = perf.spikesNow || 0; perf.spikesNow = 0; perf.lateNow = 0; perf.late = +late.toFixed(3);
+  if (perf.lockRatio) return;
+  // Steady pacing first: frames that come at uneven intervals (8 ms, 17 ms, 8 ms… on a 120 Hz screen when the GPU
+  // can't keep up) look like the picture shaking, worst in the cockpit cameras. So when more than 1 frame in 12 is
+  // late at 120 Hz, the view is drawn at an even 60 a second (every other refresh) – no change of size, no stall –,
+  // and only if even that can't be held is the resolution lowered (each change of size stalls ~100 ms: down at most
+  // every 4 s, up only after 30 s of calm windows well inside the pace – no stepping back and forth).
   const since = now - (perf.changedAt || 0);
   let r = perf.ratio;
-  if (want < 0 && r > 1 && since > 4000) r = Math.max(1, r - 0.25);
-  else if (want > 0 && perf.trend >= 2 && since > 10000 && r < max) r = Math.min(max, r + 0.25);
-  if (r !== perf.ratio) { perf.ratio = r; perf.changedAt = now; perf.trend = 0; renderer.setPixelRatio(r); resize(); }
+  if (late > 0.08) {
+    if (!perf.cap && perf.vsync < 0.0105) { perf.cap = true; perf.calm = 0; return; }
+    if (r > 1 && since > 4000) r = Math.max(1, r - 0.25);
+  } else if (late === 0 && !perf.windowSpikes) perf.calm = (perf.calm || 0) + 1; else perf.calm = 0;
+  if (r === perf.ratio && !perf.cap && perf.calm >= 15 && avg < pace * 0.8 && since > 30000 && r < max) r = Math.min(max, r + 0.25);
+  if (r !== perf.ratio) { perf.ratio = r; perf.changedAt = now; perf.calm = 0; renderer.setPixelRatio(r); resize(); }
 }
+// The pace is set again when the view or the camera changes (what's on screen and its cost change with them).
+function resetPace() { perf.cap = false; perf.calm = 0; perf.lateNow = 0; }
 
 // Self-check used in development on every circuit: walks the lap every ~20 m and reports
 //  overhead – places where a building stands over the tarmac (a ray from above hits a building first)
@@ -1861,6 +1887,48 @@ window.Map3D = {
     return JSON.stringify({ buildMs: build, lag: tr.lag, raw: steadiness(src.tracks, src, world, t0, t1, tr.lag), steady: steadiness(tr, src, world, t0, t1, tr.lag) });
   },
   rawTracks(on) { devRawTracks = !!on; return "ok"; },
+  // development: who flags geometry for upload, over `secs` – by the line that set needsUpdate, with counts and bytes
+  traceUploads(secs = 3) {
+    const seen = new Map(), tally = (kind, bytes) => { const at = kind + " @ " + (new Error().stack || "").split("\n").slice(3, 7).map((l) => l.trim().replace(/^at /, "").replace(/\(?file:.*\/(\w+\.js):(\d+):\d+\)?/, "$1:$2")).join(" < "); const e = seen.get(at) || [0, 0]; e[0]++; e[1] += bytes; seen.set(at, e); };
+    const BA = THREE.BufferAttribute.prototype, d = Object.getOwnPropertyDescriptor(BA, "needsUpdate"), sa = THREE.BufferGeometry.prototype.setAttribute;
+    Object.defineProperty(BA, "needsUpdate", { configurable: true, set(v) { if (v === true) tally("needsUpdate", this.array?.byteLength || 0); d.set.call(this, v); } });
+    THREE.BufferGeometry.prototype.setAttribute = function (n, a) { tally("setAttribute " + n, a?.array?.byteLength || 0); return sa.call(this, n, a); };
+    const gl = renderer.getContext(), bd = gl.bufferData, bs = gl.bufferSubData; let nbd = 0, bbd = 0, nbs = 0, bbs = 0;
+    gl.bufferData = function (t, x, u) { nbd++; bbd += x?.byteLength || 0; return bd.apply(this, arguments); };
+    gl.bufferSubData = function (t, o, x) { nbs++; bbs += x?.byteLength || 0; return bs.apply(this, arguments); };
+    return new Promise((done) => setTimeout(() => {
+      Object.defineProperty(BA, "needsUpdate", d); THREE.BufferGeometry.prototype.setAttribute = sa; gl.bufferData = bd; gl.bufferSubData = bs;
+      done(JSON.stringify({ bufferData: [nbd, Math.round(bbd / 1048576) + " MB"], bufferSubData: [nbs, Math.round(bbs / 1048576) + " MB"], who: [...seen].sort((a, b) => b[1][1] - a[1][1]).slice(0, 12).map(([k, [n, b]]) => [k, n, Math.round(b / 1024) + " KB"]) }));
+    }, secs * 1000));
+  },
+  // development: what the viewer sees move during real playback, frame by frame for `secs` – the camera's turn and
+  // height, the focused car's steer and steering wheel – each split into its slow part and the rest (jitter: the
+  // residual from a ±0.25 s fit, RMS, and the largest frame-to-frame jump), and the frame times.
+  recordLive(secs = 8) {
+    return new Promise((done) => {
+      const r = { t: [], dt: [], yaw: [], pitch: [], roll: [], y: [], side: [], steer: [], wheel: [], st: [] }, e = new THREE.Euler(), t0 = performance.now();
+      devRec = (now, dt) => {
+        const c = cars.get(app().focus || leader()); if (!c) return;
+        e.setFromQuaternion(camera.quaternion, "YXZ");
+        r.t.push(now); r.dt.push(dt * 1000); r.yaw.push(e.y); r.pitch.push(e.x); r.roll.push(e.z); r.y.push(camera.position.y);
+        r.side.push(camera.position.x * Math.cos(c.yaw) - camera.position.z * Math.sin(c.yaw));
+        r.steer.push(c.steer || 0); r.wheel.push(c.model.userData.wheel?.rotation.z || 0); r.st.push(app().t);
+        if (now - t0 > secs * 1000) {
+          devRec = null;
+          const un = (a) => { const o = a.slice(); for (let i = 1; i < o.length; i++) o[i] = o[i - 1] + wrap(a[i] - a[i - 1]); return o; };
+          // (fit over ±0.25 s of frames by time)
+          const resid = (a) => a.map((v, i) => { let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (let j = 0; j < a.length; j++) { const x = (r.t[j] - r.t[i]) / 1000; if (Math.abs(x) > 0.25) continue; n++; sx += x; sy += a[j]; sxx += x * x; sxy += x * a[j]; } const b = (n * sxy - sx * sy) / Math.max(1e-12, n * sxx - sx * sx); return v - (sy - b * sx) / n; });
+          const stat = (a, k) => { const q = resid(a).slice(20, -20); let jump = 0; for (let i = 21; i < a.length - 20; i++) jump = Math.max(jump, Math.abs(a[i] - a[i - 1])); return { rms: +(Math.sqrt(q.reduce((x, y) => x + y * y, 0) / Math.max(1, q.length)) * k).toFixed(3), jump: +(jump * k).toFixed(3) }; };
+          const D = 57.2958, dts = r.dt.slice().sort((a, b) => a - b), q = (p) => +dts[Math.floor(p * (dts.length - 1))].toFixed(1);
+          let back = 0; for (let i = 1; i < r.st.length; i++) if (r.st[i] - r.st[i - 1] <= 0) back++;
+          const slow = []; for (let i = 0; i < r.dt.length; i++) if (r.dt[i] > 30) slow.push([Math.round(r.t[i] - t0), Math.round(r.dt[i])]);
+          done(JSON.stringify({ frames: r.t.length, dtMs: [q(0.5), q(0.95), q(0.99)], streamStill: back, slow: slow.slice(0, 60),
+            camYawDeg: stat(un(r.yaw), D), camPitchDeg: stat(r.pitch, D), camRollDeg: stat(r.roll, D), camHeightCm: stat(r.y, 100), camSideCm: stat(r.side, 100),
+            steerDeg: stat(r.steer, D), wheelDeg: stat(r.wheel, D) }));
+        }
+      };
+    });
+  },
   // development: drives the onboard camera of car `num` frame by frame (60 fps) over `secs` from stream time t0
   // and measures what the viewer sees shake – the part of each motion faster than ~1 Hz (the residual from a
   // 0.25 s Gaussian): camera height and sideways position (cm), camera yaw / pitch / roll (deg); car body too.
@@ -2113,7 +2181,7 @@ window.Map3D = {
       try { const m = JSON.parse(localStorage.getItem("f1kr:cam3d")); if (["heli", "chase", "onboard", "eye"].includes(m)) { camMode = m; paintCamButtons(); } } catch {}
     }
     if (visible) return;
-    visible = true; resize(); lastT = performance.now(); requestAnimationFrame(frame);
+    visible = true; resize(); resetPace(); lastT = performance.now(); requestAnimationFrame(frame);
   },
   hide() { visible = false; },
   dev(o) { if ("shadows" in o) { sun.castShadow = o.shadows; } if ("hud" in o) devNoHud = !o.hud; if ("labels" in o) devNoLabels = !o.labels; return "ok"; },
@@ -2122,6 +2190,9 @@ window.Map3D = {
     if ("roadGrain" in o && world?.road) { const m = world.road.material, g = roadGrainMaps(); m.normalMap = o.roadGrain ? g.normal : null; m.needsUpdate = true; }
     if ("carEnv" in o) for (const c of cars.values()) setCarEnvironment(c.model, o.carEnv ? carEnvironment(nightNow) : null, 1);
     if ("carNear" in o) for (const c of cars.values()) c.model.userData.near.visible = o.carNear;
+    if ("carMaps" in o) for (const c of cars.values()) c.model.traverse((m) => { const x = m.material; if (!x?.isMeshStandardMaterial) return; if (!o.carMaps) { x.userData.devMaps ??= [x.normalMap, x.roughnessMap]; x.normalMap = null; x.roughnessMap = null; } else if (x.userData.devMaps) { [x.normalMap, x.roughnessMap] = x.userData.devMaps; } x.needsUpdate = true; });
+    if ("ratio" in o) { perf.lockRatio = o.ratio; renderer.setPixelRatio(o.ratio); resize(); }
+    if ("cap" in o) perf.cap = o.cap;
     return "ok";
   },
   resetHitches() { perf.spikes = 0; perf.worst = 0; perf.frames = 0; },
@@ -2169,6 +2240,6 @@ window.Map3D = {
   debug: () => JSON.stringify({ cam: camera?.position.toArray().map(Math.round), target: controls?.target.toArray().map(Math.round), fov: camera?.fov, aspect: camera?.aspect,
     size: world && [world.size.x, world.size.y, world.size.z].map(Math.round), host: host && [host.clientWidth, host.clientHeight], cars: cars.size, mode: camMode,
     paint: (() => { const c = cars.get(app()?.focus || leader()); const m = c?.model.children[1]?.material; return m && { color: m.color.getHexString(), emissive: m.emissive.getHexString(), ei: m.emissiveIntensity }; })(),
-    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], visible: c.obj.visible, inScene: !!c.obj.parent }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
+    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], visible: c.obj.visible, inScene: !!c.obj.parent }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, cap60: !!perf.cap, late: perf.late, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
 };
 window.dispatchEvent(new Event("map3d-ready"));
