@@ -1004,7 +1004,9 @@ function markShared(root) {
 }
 export function texturesOf(m) { return Object.values(m).filter((x) => x && x.isTexture); }
 function freeModel(root) {
-  root.traverse((o) => { o.geometry?.dispose(); for (const m of [].concat(o.material || [])) { for (const t of texturesOf(m)) t.dispose(); m.dispose(); } });
+  // (a model's parts share geometry, materials and textures: each freed once)
+  const done = new Set(), once = (x) => { if (x && !done.has(x)) { done.add(x); x.dispose(); } };
+  root.traverse((o) => { once(o.geometry); for (const m of [].concat(o.material || [])) { for (const t of texturesOf(m)) once(t); once(m); } });
 }
 async function parseModel(file, read) {
   const buf = await read(file);

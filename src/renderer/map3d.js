@@ -12,7 +12,7 @@ import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, ov
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
-import { firstHit } from "./los.js";
+import { chasePlace, firstHit } from "./los.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -1036,7 +1036,7 @@ let camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), camInit = false
 // (kerbs don't shake it). If a building or the ground would come between the car and the camera, the
 // camera moves in. Onboard: the camera sits at the driver's eye on the car itself – same transform as
 // the car, so the halo, mirrors, nose and front wheels stay put in the frame.
-const chase = { yaw: 0, yawVel: 0, y: 0, init: false };
+const chase = { yaw: 0, yawVel: 0, y: 0, init: false, lift: 0 };
 const ray = new THREE.Raycaster(), qTmp = new THREE.Quaternion(), qShake = new THREE.Quaternion(), shakeE = new THREE.Euler(), qLook = new THREE.Quaternion(), lookE = new THREE.Euler();
 function updateCamera(dt) {
   const A = app();
@@ -1067,7 +1067,7 @@ function updateCamera(dt) {
   }
   setNear(0.3);
   const w = 3.2;   // spring rate (rad/s): lower = lazier swing
-  if (!camInit || !chase.init || Math.abs(wrap(c.yaw - chase.yaw)) > 1.6) { chase.yaw = c.yaw; chase.yawVel = 0; chase.y = c.pos.y; chase.init = true; }
+  if (!camInit || !chase.init || Math.abs(wrap(c.yaw - chase.yaw)) > 1.6) { chase.yaw = c.yaw; chase.yawVel = 0; chase.y = c.pos.y; chase.lift = 0; chase.init = true; }
   const steps = Math.max(1, Math.ceil(dt / 0.008)), h = dt / steps;
   for (let i = 0; i < steps; i++) {
     const acc = w * w * wrap(c.yaw - chase.yaw) - 2 * w * chase.yawVel;
@@ -1077,15 +1077,12 @@ function updateCamera(dt) {
   // the camera on a sphere round the car: behind it and a little above by default, turned by free look
   const head = new THREE.Vector3(c.pos.x, chase.y + 1.1, c.pos.z);
   const az = chase.yaw + Math.PI + look.yaw, el = Math.atan2(2.4, 10.5) + look.pitch, r = Math.hypot(2.4, 10.5) * (look.dist / 10.5);
-  const want = head.clone().add(new THREE.Vector3(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r));
-  // keep a clear line of sight to the car
-  const dir = want.clone().sub(head), len = dir.length(); dir.normalize();
-  // (los.js: only the triangles near the segment – the same answer as a raycast, at a fraction of the cost)
-  const hitD = world.occluders?.length ? firstHit(world.occluders, head, dir, len) : null;
-  if (hitD != null) want.copy(head).addScaledVector(dir, Math.max(3, hitD - 0.6));
-  const g = world.real?.groundAt ? world.real.groundAt(want.x, want.z) : null;
-  if (g != null && want.y < g + 1.4) want.y = g + 1.4;
-  camera.position.copy(want);
+  // keep a clear line of sight to the car: the camera stops short of a building in between (never behind it), rises
+  // over one that would bring it too close (eased, not jumping), stays over the ground (los.js: chasePlace)
+  const real = world.real, groundAt = real?.groundAt ? (x, z) => real.groundAt(x, z) : null;
+  const placed = chasePlace(world.occluders || [], head, az, el, r, { lift: chase.lift, groundAt });
+  chase.lift += (placed.lift - chase.lift) * (1 - Math.exp(-dt * 3));
+  camera.position.copy(placed.pos);
   const fwd = new THREE.Vector3(Math.sin(c.yaw), 0, Math.cos(c.yaw));
   camLook.copy(c.pos).addScaledVector(fwd, 7).setY(chase.y + 1.0);
   // turned away from straight behind, the camera looks at the car itself
@@ -1891,6 +1888,47 @@ window.Map3D = {
     if (!G) return "no garages";
     const s = G.slots[Math.max(0, Math.min(G.slots.length - 1, k))], [ix, iz] = s.inward;
     return this.look(s.front[0] + ix * (s.depth + out), s.floor + h, s.front[1] + iz * (s.depth + out), s.front[0] + ix * (s.depth + 18), s.floor + 3, s.front[1] + iz * (s.depth + 18), fov);
+  },
+  // development: the chase camera's line of sight (los.js) against three.js' raycaster on this world's own occluders –
+  // n segments from points round the track, any direction, 2–40 m – with how long the first grids took, what the
+  // occluders are (meshes the grid answers for; the rest go to three.js), and the cost of placing the chase camera
+  losCheck(n = 3000) {
+    if (!world?.occluders?.length) return JSON.stringify({ occluders: 0 });
+    const occ = world.occluders, kinds = { grid: 0, materialArray: 0, drawRange: 0, instanced: 0, other: 0 };
+    let tris = 0;
+    for (const m of occ) {
+      const g = m.geometry; tris += g?.attributes?.position ? Math.round((g.index ? g.index.count : g.attributes.position.count) / 3) : 0;
+      if (Array.isArray(m.material)) kinds.materialArray++; else if (m.isInstancedMesh) kinds.instanced++;
+      else if (g.drawRange.start !== 0 || g.drawRange.count !== Infinity) kinds.drawRange++; else if (m.isSkinnedMesh || !g.attributes.position) kinds.other++; else kinds.grid++;
+    }
+    let seed = 5; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const o = new THREE.Vector3(), d = new THREE.Vector3(), rc = new THREE.Raycaster();
+    // the first segment through each occluder builds its grid
+    const g0 = performance.now();
+    for (const m of occ) { if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere(); const c = m.geometry.boundingSphere.center.clone().applyMatrix4(m.matrixWorld); firstHit([m], o.copy(c).add(d.set(0, 1, 0)), d.set(0, -1, 0), 2); }
+    const gridMs = performance.now() - g0;
+    const segs = [];
+    for (let k = 0; k < n; k++) {
+      const s = world.samples[Math.floor(r() * world.n)];
+      o.set(s.p.x + (r() - 0.5) * 80, s.p.y + 0.5 + r() * 15, s.p.z + (r() - 0.5) * 80); d.set(r() - 0.5, (r() - 0.5) * 0.6, r() - 0.5).normalize();
+      segs.push([o.clone(), d.clone(), 2 + r() * 38]);
+    }
+    let hits = 0, diff = 0, worst = 0, tl = 0, tr = 0;
+    for (const [a, b, far] of segs) {
+      let t = performance.now(); const got = firstHit(occ, a, b, far); tl += performance.now() - t;
+      t = performance.now(); rc.set(a, b); rc.far = far; const ref = rc.intersectObjects(occ, false)[0]?.distance ?? null; tr += performance.now() - t;
+      if (ref != null) hits++;
+      if ((got == null) !== (ref == null) || (ref != null && Math.abs(got - ref) > 1e-3)) { diff++; worst = Math.max(worst, ref == null || got == null ? Infinity : Math.abs(got - ref)); }
+    }
+    // the chase camera at each sample of the track (as updateCamera places it, heading along the track)
+    let tc = 0, blocked = 0; const el = Math.atan2(2.4, 10.5), rr = Math.hypot(2.4, 10.5), groundAt = world.real?.groundAt ? (x, z) => world.real.groundAt(x, z) : null;
+    for (let i = 0; i < world.n; i += 3) {
+      const s = world.samples[i], head = new THREE.Vector3(s.p.x, s.p.y + 1.1, s.p.z), az = Math.atan2(s.tan.x, s.tan.z) + Math.PI;
+      const t = performance.now(); const p = chasePlace(occ, head, az, el, rr, { groundAt }); tc += performance.now() - t;
+      if (p.lift > 0 || p.pos.distanceTo(head) < rr - 0.01) blocked++;
+    }
+    return JSON.stringify({ occluders: occ.length, tris, kinds, gridMs: Math.round(gridMs), rays: n, hits, diff, worst, losUs: +(tl / n * 1000).toFixed(1), raycastUs: +(tr / n * 1000).toFixed(1),
+      chase: { spots: Math.ceil(world.n / 3), closer: blocked, us: +(tc / Math.ceil(world.n / 3) * 1000).toFixed(1) } });
   },
   // development: what the scene holds, by part – objects, meshes drawn (visible, in view or not), triangles
   sceneStats() {

@@ -115,3 +115,67 @@ test("scene cache: a result with failed building tiles isn't kept as if it were 
   await s.build("Imola", lap); await s.build("Imola", lap);
   assert.strictEqual(made, 3, "a complete result is reused");
 });
+
+// v0.14 optimisation review: an Overture building on the spot replaces OSM's only when it covers most of it (measured
+// on 28 circuits: ~99.6 % of the replaced are covered 80 %+); a small one inside a big hall doesn't take the hall – or
+// its name; a stand mapped only as an area keeps Overture's block out too; a roof part on top of a body of known height
+// doesn't replace the body.
+test("merge: a small Overture building inside a big OSM one doesn't replace it – by how much of it Overture covers", () => {
+  const main = () => B(sq(0, 0, 100, 100), { name: "Main", height: "8" });
+  // 1 % (a 10 × 10 m shed in the middle): the hall stays, the shed (no taller, inside it) adds nothing and goes
+  let out = mergeBuildings([main()], [B(sq(45, 45, 55, 55), { height: "6" })]);
+  assert.deepStrictEqual(out.map((a) => [a.tags.name ?? null, a.pts[2][0]]), [["Main", 100]]);
+  // the same but taller (a tower Overture has): both stay – and it doesn't take the hall's name
+  out = mergeBuildings([main()], [B(sq(45, 45, 55, 55), { height: "30" })]);
+  assert.strictEqual(out.length, 2); assert.strictEqual(out.find((a) => a.pts[2][0] === 55).tags.name, undefined);
+  // 30 %: still OSM's hall
+  out = mergeBuildings([main()], [B(sq(20, 20, 75, 75), { height: "8" })]);
+  assert.ok(out.some((a) => a.tags.name === "Main" && a.pts[2][0] === 100));
+  // 90 %: Overture's (the same building traced a little differently), with OSM's name
+  out = mergeBuildings([main()], [B(sq(2, 2, 97, 97), { height: "9" })]);
+  assert.deepStrictEqual(out.map((a) => [a.tags.name, a.pts[2][0]]), [["Main", 97]]);
+  // cut in two by a tile edge, both pieces there: together they're the building, both named
+  out = mergeBuildings([main()], [B(sq(0, 0, 50, 100), {}), B(sq(50, 0, 100, 100), {})]);
+  assert.deepStrictEqual(out.map((a) => a.tags.name), ["Main", "Main"]); assert.ok(out.every((a) => a.pts[2][0] !== 100 || a.pts[0][0] === 50));
+  // only one piece came (the other tile failed): the hall stays whole, the piece inside it isn't drawn twice
+  out = mergeBuildings([main()], [B(sq(0, 0, 50, 100), {})]);
+  assert.deepStrictEqual(out.map((a) => [a.tags.name, a.pts[2][0]]), [["Main", 100]]);
+  // an annex beside the hall, its centre outside: nothing to do with it
+  out = mergeBuildings([main()], [B(sq(100, 40, 110, 60), {})]);
+  assert.strictEqual(out.length, 2); assert.strictEqual(out[1].tags.name, undefined);
+  // a stadium's area (not a building) names the buildings in it, as before
+  out = mergeBuildings([{ pts: sq(-50, -50, 150, 150), tags: { leisure: "stadium", name: "Stadio" } }], [B(sq(10, 10, 20, 20), {})]);
+  assert.strictEqual(out[1].tags.name, "Stadio");
+});
+
+test("merge: a stand mapped only as an area (leisure=grandstand) keeps Overture's block off it, as a building stand does", () => {
+  const out = mergeBuildings([{ pts: sq(0, 0, 50, 20), tags: { leisure: "grandstand" } }], [B(sq(2, 2, 48, 18), { name: "Stand A" })]);
+  assert.strictEqual(out.length, 1, "no block drawn in the stand");
+  assert.deepStrictEqual(out[0].tags, { leisure: "grandstand", name: "Stand A" }, "the stand's, with the block's name");
+});
+
+test("parts: a roof or canopy part on top of a body of known height doesn't replace the body under it", () => {
+  const body = B(sq(0, 0, 20, 20), { height: "10" });
+  const roof = { pts: sq(0, 0, 20, 20), tags: { "building:part": "roof", min_height: "10", height: "12" } };
+  let r = resolveParts([body, roof]);
+  assert.ok(!r.drop.has(body) && !r.drop.has(roof), "the body stays, the roof sits on it");
+  // a canopy high over part of a 4 m building, and a link at 6–8 m over a 6 m one: the same
+  const shed = B(sq(0, 0, 20, 20), { height: "4" }), canopy = { pts: sq(0, 0, 20, 15), tags: { "building:part": "yes", min_height: "8", height: "9" } };
+  r = resolveParts([shed, canopy]); assert.ok(!r.drop.has(shed) && !r.drop.has(canopy));
+  // a podium (30 m) with towers from its roof up covering 40 % of it: the podium stays, the towers on it
+  const podium = B(sq(0, 0, 100, 50), { height: "30" });
+  const towers = [sq(0, 0, 20, 50), sq(60, 0, 80, 50)].map((p) => ({ pts: p, tags: { "building:part": "yes", min_height: "30", height: "180" } }));
+  r = resolveParts([podium, ...towers]); assert.ok(!r.drop.has(podium) && towers.every((t) => !r.drop.has(t) && !r.minOf.has(t)));
+  // parts from the ground up covering it still stand in for it – also with a roof part on top
+  const lower = { pts: sq(0, 0, 20, 20), tags: { "building:part": "yes", height: "10" } };
+  r = resolveParts([body, lower, roof]); assert.ok(r.drop.has(body) && !r.drop.has(lower) && !r.drop.has(roof));
+  // the body's height a guess (no tag): what's on top can't be told from the body – the parts stand in, as before
+  const guess = B(sq(0, 0, 20, 20), {});
+  r = resolveParts([guess, { pts: sq(0, 0, 20, 20), tags: { "building:part": "yes", min_height: "10", height: "12" } }]);
+  assert.ok(r.drop.has(guess));
+  // 45 / 55 % covered by parts from the ground: kept / replaced (half is the line; measured on a 14 × 14 grid)
+  for (const [x, drop] of [[9, false], [11, true]]) {
+    r = resolveParts([body, { pts: sq(0, 0, x, 20), tags: { "building:part": "yes", height: "10" } }]);
+    assert.strictEqual(r.drop.has(body), drop, `${x * 5} %`);
+  }
+});

@@ -81,14 +81,19 @@ export function eventsUpTo(all, cars, t) {
 // (a replay's whole-recording events, per positions object)
 const wholeEvents = new WeakMap();
 
+// How long an event was seen standing: its whole length – or, for one joined from looks with time unseen in between
+// (obs: the stretches seen), the longest stretch seen (the time between isn't known to be standing).
+export const seenOf = (e) => (e.obs ? Math.max(...e.obs.map(([a, b]) => b - a)) : e.t1 - e.t0);
 // What an event counts as: "stop" (a pit stop: 1.5–8 s, finished, its start and end seen, within 60 s of entering the
-// pit lane when that's known), "long" (20 s or more: a garage stay – also while still going on), "uncertain" (it
-// could be a stop but the data doesn't say how long), else "other".
+// pit lane when that's known), "long" (20 s or more seen standing: a garage stay – also while still going on),
+// "uncertain" (it could be a stop but the data doesn't say how long; also one joined across time unseen, unless one
+// stretch seen is a long stay by itself), else "other".
 export function kindOf(e) {
   if (!e.inLane) return "other";
-  const dur = e.t1 - e.t0;
+  const dur = seenOf(e);
   if (e.hole) return "uncertain";
   if (dur >= LONG) return "long";
+  if (e.obs) return "uncertain";
   if (e.open || !e.startKnown || e.holeAfter) return dur <= STOP_MAX ? "uncertain" : "other";
   if (dur <= STOP_MAX) return e.afterEntry ? "stop" : "other";
   return "other";
@@ -112,7 +117,7 @@ function byCar(events) {
     const k = kindOf(e);
     const o = out[e.num] || (out[e.num] = { stops: [], long: [], events: [] });
     o.events.push(e);
-    if (k === "stop" || k === "long") o[k === "stop" ? "stops" : "long"].push({ u: e.u, t: e.t0, dur: e.t1 - e.t0, off: e.off, id: e.id });
+    if (k === "stop" || k === "long") o[k === "stop" ? "stops" : "long"].push({ u: e.u, t: e.t0, dur: seenOf(e), off: e.off, id: e.id });
   }
   for (const [num, o] of Object.entries(out)) if (!o.stops.length && !o.long.length) delete out[num];
   return out;
@@ -149,18 +154,27 @@ function mode(vals, tol, min) {
 // again): the same car within 2 m, at times that meet (within 2 s). It's merged into one – its whole length, the end
 // as last seen – and classified anew: one first seen 3 s in and later found to have lasted 40 s is a long stay, not
 // a pit stop. A car leaving and coming back later is another one.
-// (also when the looks didn't meet – the 3D view was closed in between – but one ended still standing there and the
-// later one began with the car already standing there: nothing says it left)
+// (also when the looks didn't meet – the 3D view was closed in between, the feed dropped – but one ended still standing
+// there and the later one began with the car already standing there: nothing says it left – nor that it stayed, so
+// the time between isn't counted as standing: the event keeps the stretches seen, obs, and is classified by those)
 function sameEvent(a, b) {
   if (a.num !== b.num || Math.abs(a.X - b.X) > 20 || Math.abs(a.Y - b.Y) > 20) return false;
   if (a.t0 <= b.t1 + HOLE && b.t0 <= a.t1 + HOLE) return true;
   const [p, n] = a.t0 <= b.t0 ? [a, b] : [b, a];
   return p.open && !n.startKnown;
 }
+// (the stretches seen of both, those that meet – within 2 s – as one)
+function seenStretches(a, b) {
+  const all = [...(a.obs || [[a.t0, a.t1]]), ...(b.obs || [[b.t0, b.t1]])].sort((x, y) => x[0] - y[0]), out = [];
+  for (const [s, e] of all) { const p = out[out.length - 1]; if (p && s <= p[1] + HOLE) p[1] = Math.max(p[1], e); else out.push([s, e]); }
+  return out;
+}
 function joinEvent(a, b) {
-  const first = a.t0 <= b.t0 ? a : b, last = a.t1 >= b.t1 ? a : b;
-  return { ...a, t0: first.t0, startKnown: first.startKnown, afterEntry: first.afterEntry, id: first.id, X: first.X, Y: first.Y, u: first.u, off: first.off, inLane: first.inLane,
+  const first = a.t0 <= b.t0 ? a : b, last = a.t1 >= b.t1 ? a : b, obs = seenStretches(a, b);
+  const j = { ...a, t0: first.t0, startKnown: first.startKnown, afterEntry: first.afterEntry, id: first.id, X: first.X, Y: first.Y, u: first.u, off: first.off, inLane: first.inLane,
     t1: last.t1, open: last.open, holeAfter: last.holeAfter, hole: a.hole || b.hole };
+  if (obs.length > 1) j.obs = obs; else delete j.obs;
+  return j;
 }
 export function mergeEvents(into, add) {
   for (const e of add) {
@@ -232,13 +246,15 @@ export function allocate(slots, pitch, drivers, positions) {
 // says why: { team, u, from, n, spread, ok, reason }.
 const spreadOf = (a) => { const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); };
 function cluster(vals, tol) { let best = []; for (const v of vals) { const g = vals.filter((w) => Math.abs(w.u - v.u) <= tol); if (g.length > best.length) best = g; } return best; }
+// (a working stop: 1.8–6 s – what a box is found from)
+const working = (x) => x.dur == null || (x.dur >= 1800 && x.dur <= 6000);
 export function teamEvidence(still, drivers, pitch = 8) {
   const teams = new Map(), team = (num) => drivers?.[num]?.TeamName;
   for (const [num, s] of Object.entries(still)) {
     const t = team(num); if (!t) continue;
     if (!teams.has(t)) teams.set(t, { team: t, stops: [], long: {} });
     const e = teams.get(t);
-    e.stops.push(...s.stops.filter((x) => x.dur == null || (x.dur >= 1800 && x.dur <= 6000)).map((x) => ({ ...x, num })));
+    e.stops.push(...s.stops.filter(working).map((x) => ({ ...x, num })));
     e.long[num] = s.long;
   }
   const out = [];
@@ -273,8 +289,10 @@ export function teamEvidence(still, drivers, pitch = 8) {
 //   through small changes – it moves only when new trusted evidence puts it more than a garage away with at least
 //   three observations – and it stays while there's simply no information (the driver list missing for a moment). It
 //   is withdrawn when the evidence turns against it: two teams' places within 5 m (a conflict), the standstills it
-//   stood on no longer counting as such (seen again, a "stop" was a long stay), its drivers in another team now (the
-//   list corrected), the team no longer in the session; a new session starts over (reset).
+//   stood on no longer counting as such (seen again, a "stop" was a long stay: a box stands on working stops, a garage
+//   on long stays), its drivers in another team now (the list corrected), the team no longer in the session – unless
+//   what's left still puts the team's place there (trusted, within a garage of it: kept, standing on that now); a new
+//   session starts over (reset).
 //   frame (update's third argument: { rev, toScene, project, span } of the pit building): the events are placed in it
 //   each time, so a rebuilt or moved building re-projects what was seen; places kept from another frame are dropped
 //   and found again in the new one.
@@ -298,13 +316,16 @@ export class PitInference {
     }
     const list = Object.entries(drivers || {}), noInfo = !list.length;
     if (!noInfo) {
-      const valid = new Set(Object.values(this.still).flatMap((s) => [...s.stops, ...s.long].map((x) => x.id)));
+      // (what each kind of place stands on: a box on working stops, a garage on long stays)
+      const valid = { box: new Set(), garage: new Set() };
+      for (const s of Object.values(this.still)) { for (const x of s.stops) if (working(x)) valid.box.add(x.id); for (const x of s.long) valid.garage.add(x.id); }
       const byTeam = new Map(ev.map((e) => [e.team, e]));
       for (const [team, cur] of [...this.places]) {
-        const e = byTeam.get(team);
+        const e = byTeam.get(team), ok = valid[cur.from] || valid.box;
         const gone = !list.some(([, d]) => d?.TeamName === team);
-        const corrected = (cur.support || []).some((id) => !valid.has(id)) || (cur.drivers || []).some((num) => drivers[num]?.TeamName !== team);
-        if (gone || e?.conflict || corrected) this.places.delete(team);
+        const corrected = (cur.support || []).some((id) => !ok.has(id)) || (cur.drivers || []).some((num) => drivers[num]?.TeamName !== team);
+        const holds = e?.ok && e.from === cur.from && Math.abs(e.u - cur.u) <= pitch;
+        if (gone || e?.conflict || (corrected && !holds)) this.places.delete(team);
       }
       for (const e of ev) {
         if (!e.ok) continue;

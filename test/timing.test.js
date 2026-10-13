@@ -199,3 +199,40 @@ test("archive: a damaged optional topic is dropped from the cache and the sessio
     assert.ok(fs.existsSync(a.cachePath(`${P}TimingData.jsonStream`)), "good files stay cached");
   } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// v0.14 optimisation review: the deleted laps kept between board redraws are worked out again when a driver's code is
+// corrected (same number of drivers) – they match codes in the messages to car numbers; the 2D map's canvas buffer is
+// sized in whole device pixels, so a fractional size doesn't set (and clear) it again every frame.
+test("deleted laps: a driver's code corrected (or two swapped) is seen at once; colours and names changing don't recount", () => {
+  const { deletedLapsMemo, deletedLaps } = require("../src/renderer/replay.js");
+  const memo = deletedLapsMemo(), src = {};
+  const msgs = [{ Message: "CAR AAA TIME 1:30.000 DELETED - TRACK LIMITS AT TURN 4 LAP 7 15:04:05" }];
+  const keys = (d) => Object.keys(memo(src, "1|0", msgs, d)).sort();
+  assert.deepStrictEqual(keys({ 1: { Tla: "AAA" }, 2: { Tla: "CCC" } }), ["1"]);
+  // the list corrected: car 1 is BBB – the deletion named AAA no longer goes to car 1
+  assert.deepStrictEqual(keys({ 1: { Tla: "BBB" }, 2: { Tla: "CCC" } }), ["AAA"]);
+  assert.deepStrictEqual(keys({ 1: { Tla: "CCC" }, 2: { Tla: "AAA" } }), ["2"], "codes swapped");
+  // same as working it out directly, every time
+  for (const d of [{ 1: { Tla: "AAA" } }, { 1: { Tla: "BBB" } }, { 3: { Tla: "AAA" } }]) assert.deepStrictEqual(memo(src, "1|0", msgs, d), deletedLaps(msgs, d));
+  // a colour or name changing: the kept result, not worked out again
+  const d0 = { 1: { Tla: "AAA", TeamColour: "ff0000" } }, v0 = memo(src, "2|0", msgs, d0);
+  assert.strictEqual(memo(src, "2|0", msgs, { 1: { Tla: "AAA", TeamColour: "00ff00", LastName: "X" } }), v0);
+  // new messages (revision), another source: worked out again
+  const more = [...msgs, { Message: "CAR 5 (EEE) LAP DELETED - TRACK LIMITS AT TURN 9 LAP 8 15:06:00" }];
+  assert.deepStrictEqual(Object.keys(memo(src, "3|0", more, d0)).sort(), ["1", "5"]);
+  assert.deepStrictEqual(Object.keys(memo({}, "3|0", msgs, d0)), ["1"]);
+});
+
+test("2D map canvas: whole device pixels – a fractional size sets the buffer once, not every frame", () => {
+  const { canvasPixels } = require("../src/renderer/replay.js");
+  for (const dpr of [1, 1.25, 1.5, 2]) for (const [w, h] of [[400.5, 300.25], [399.75, 301.6], [640, 360]]) {
+    let sets = 0, cw = 0, ch = 0;
+    const canvas = { get width() { return cw; }, set width(v) { sets++; cw = Math.trunc(v); }, get height() { return ch; }, set height(v) { sets++; ch = Math.trunc(v); } };
+    for (let f = 0; f < 5; f++) { const [pw, ph] = canvasPixels(w, h, dpr); if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; } }
+    assert.strictEqual(sets, 2, `${w}×${h} at ${dpr}: set once (${sets / 2} times)`);
+    const [pw, ph, sx, sy] = canvasPixels(w, h, dpr);
+    assert.ok(Math.abs(pw - w * dpr) <= 0.5 && Math.abs(ph - h * dpr) <= 0.5 && Math.abs(sx * w - pw) < 1e-9 && Math.abs(sy * h - ph) < 1e-9);
+  }
+  // hidden (no size): a 1 × 1 buffer and a finite scale
+  assert.deepStrictEqual(canvasPixels(0, 0, 2), [1, 1, 2, 2]);
+});

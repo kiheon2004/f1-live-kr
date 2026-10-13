@@ -514,12 +514,11 @@
         <td class="state">${state}${delTag}</td></tr>`;
     }).join(""));
   }
-  // deleted laps from the race control messages: worked out again only when the messages or the drivers change
-  let delKey = null, delVal = {};
+  // deleted laps from the race control messages: worked out again only when the messages or the drivers' codes change
+  let deletedMemo = null;
   function deletedNow(drivers) {
-    const k = `${src.rc?.rev}|${src.epoch ?? ""}|${Object.keys(drivers).length}`;
-    if (k !== delKey || delVal.src !== src) { delKey = k; delVal = { src, v: ReplayKit.deletedLaps(src.messages, drivers) }; }
-    return delVal.v;
+    deletedMemo ||= ReplayKit.deletedLapsMemo();
+    return deletedMemo(src, `${src.rc?.rev}|${src.epoch ?? ""}`, src.messages, drivers);
   }
   // Click: focus a driver. Shift+click: add a second driver to compare.
   $("board").tBodies[0].addEventListener("click", (e) => {
@@ -1148,8 +1147,11 @@
   function drawMap() {
     if (mapView === "3d") { if (src) { ensureCircuit(); paintMapNote(true); } return; }
     const w = mapW, h = mapH, dpr = devicePixelRatio || 1;
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    // (the buffer in whole device pixels: the observed size is fractional – compared unrounded, the buffer was set
+    // again, and cleared, every frame)
+    const [pw, ph, sx, sy] = ReplayKit.canvasPixels(w, h, dpr);
+    if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
+    ctx.setTransform(sx, 0, 0, sy, 0, 0); ctx.clearRect(0, 0, w, h);
     if (!src) { paintMapNote(true); return; }
     ensureCircuit();
     const shape = mode === "live" ? liveShape() : outline.length ? outline : circuit?.outline || [];

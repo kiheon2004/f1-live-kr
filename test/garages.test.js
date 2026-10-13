@@ -53,7 +53,9 @@ test("standstill (live): the same standstill seen again – longer, or with the 
   const s = inf.still[1];
   assert.strictEqual(s.stops.length, 0, "the early look's 3 s isn't left behind as a pit stop");
   assert.strictEqual(s.long.length, 1, "one long stay");
-  assert.ok(s.long[0].dur >= 39000, `whole length kept (${s.long[0].dur})`);
+  // (the looks didn't meet – 103 s to 112 s unseen: the stretch seen standing is its length, the span is kept)
+  assert.ok(s.long[0].dur >= 27000 && s.long[0].dur <= 28000, `the longest stretch seen (${s.long[0].dur})`);
+  assert.deepStrictEqual([s.events[0].t0, s.events[0].t1], [100000, 140000]);
   // a real departure and a later visit to the same spot are two
   const two = run([...visit(100000, 102600, 50, 5), ...visit(190000, 192700, 50, 5)]);
   const r = G.standstills({ 1: two }, toScene, project, SPAN, { 1: [95000, 185000] });
@@ -186,4 +188,77 @@ test("replay: the events at a moment from the whole recording's (cut there) are 
     compared += want.length;
   }
   assert.ok(compared > 1000, `enough events compared (${compared})`);
+});
+
+// v0.14 optimisation review: a place stands on the right kind of evidence (a box on working stops, a garage on long
+// stays) – the same standstills seen again as long stays withdraw a box; time not seen between two looks isn't counted
+// as standing.
+test("live: a box whose stops turn out to be long stays (the same standstills seen again) is withdrawn", async () => {
+  const G = await load();
+  const inf = new G.PitInference();
+  const D2 = { 1: D[1], 2: D[2] };
+  const look = (d) => G.standstills({ 1: run(visit(100000, 100000 + d, 10, 5)), 2: run(visit(200000, 200000 + d, 10, 5)) }, toScene, project, SPAN, { 1: [90000], 2: [190000] });
+  inf.observe(look(2600), true);
+  assert.deepStrictEqual(inf.update(D2, 8.4).places.map((p) => [p.team, p.from]), [["A", "box"]]);
+  // the same two standstills (same ids), seen again: they lasted 40 s
+  inf.observe(look(40000), true);
+  const r = inf.update(D2, 8.4);
+  assert.strictEqual(r.evidence.find((e) => e.team === "A").ok, false);
+  assert.deepStrictEqual(r.places, [], "no box left standing on what are now long stays");
+  // the driver list missing for a moment still takes nothing away (no information isn't a correction)
+  const inf2 = new G.PitInference(); inf2.observe(look(2600), true); inf2.update(D2, 8.4);
+  assert.strictEqual(inf2.update({}, 8.4).places.length, 1);
+});
+
+test("live: one of a box's stops turning out otherwise keeps the box where the rest still put it – no jump, no flicker", async () => {
+  const G = await load();
+  const inf = new G.PitInference();
+  const { cars, pitIn } = raceCars({ 1: [600, 1800], 2: [1200], 3: [700], 4: [1300] });
+  inf.observe(G.standstills(cars, toScene, project, SPAN, pitIn), true);
+  const a0 = inf.update(D, 8.4).places.find((p) => p.team === "A");
+  assert.strictEqual(a0.support.length, 3);
+  // car 1's stop at 1800 s seen again: it was a 30 s stay (a hold in the garage), the other two stops stand
+  const later = { 1: run([...visit(600e3, 602600, -76, 5), ...visit(1800e3, 1830e3, -76, 5)]) };
+  inf.observe(G.standstills(later, toScene, project, SPAN, { 1: pitIn[1] }), true);
+  const a1 = inf.update(D, 8.4).places.find((p) => p.team === "A");
+  assert.ok(a1, "still there"); assert.strictEqual(a1.u, a0.u, "where it was");
+  assert.ok(!a1.support.includes("1@1800000") && a1.support.length === 2, "standing on what's left");
+});
+
+test("live: a garage found from long stays stays put on them (it doesn't need pit stops)", async () => {
+  const G = await load();
+  const inf = new G.PitInference();
+  // practice: each of team A's drivers stands three times at their own garage (60 s each)
+  const stays = (x, ts) => run(ts.flatMap((t) => visit(t * 1000, t * 1000 + 60000, x, 3)));
+  inf.observe(G.standstills({ 1: stays(10, [100, 900, 1700]), 2: stays(18, [300, 1100, 1900]) }, toScene, project, SPAN), true);
+  let r = inf.update({ 1: D[1], 2: D[2] }, 8.4);
+  assert.deepStrictEqual(r.places.map((p) => [p.team, p.from]), [["A", "garage"]]);
+  r = inf.update({ 1: D[1], 2: D[2] }, 8.4);
+  assert.deepStrictEqual(r.places.map((p) => [p.team, p.from]), [["A", "garage"]], "kept on its long stays");
+});
+
+test("standstill (live): looks an hour apart aren't one hour standing – only what was seen counts", async () => {
+  const G = await load();
+  const ev = (t0, t1, o) => ({ num: "1", t0, t1, X: 100, Y: 50, open: false, startKnown: true, hole: false, holeAfter: false, inLane: true, afterEntry: true, u: 10, off: 5, id: `1@${t0}`, ...o });
+  // still standing when one look ended (2 s seen), standing already when the next began, an hour later (40 s seen)
+  let m = G.mergeEvents([ev(1000, 3000, { open: true })], [ev(3600000, 3640000, { startKnown: false })]);
+  assert.strictEqual(m.length, 1, "one event (nothing says it left – it isn't counted twice)");
+  assert.deepStrictEqual(m[0].obs, [[1000, 3000], [3600000, 3640000]]);
+  assert.strictEqual(G.seenOf(m[0]), 40000);
+  assert.strictEqual(G.kindOf(m[0]), "long", "a long stay by the 40 s seen, not by the hour between");
+  // two short looks an hour apart: nothing seen for long – uncertain, not a long stay
+  m = G.mergeEvents([ev(1000, 3000, { open: true })], [ev(3600000, 3605000, { startKnown: false })]);
+  assert.strictEqual(G.kindOf(m[0]), "uncertain");
+  // 2 s / 10 min unseen in between – the same: what's seen
+  for (const gap of [10 * 60e3, 3000]) {
+    m = G.mergeEvents([ev(1000, 9000, { open: true })], [ev(9000 + gap, 9000 + gap + 9000, { startKnown: false })]);
+    assert.strictEqual(G.kindOf(m[0]), "uncertain", `${gap} ms unseen`);
+  }
+  // looks that meet (within 2 s) are one stretch seen: 1 s apart, 8 + 13 s → 22 s standing
+  m = G.mergeEvents([ev(1000, 9000, { open: true })], [ev(10000, 23000, { startKnown: false })]);
+  assert.strictEqual(m[0].obs, undefined); assert.strictEqual(G.kindOf(m[0]), "long");
+  // a later look covering the time unseen joins the stretches into one
+  m = G.mergeEvents([ev(1000, 3000, { open: true })], [ev(60000, 65000, { startKnown: false })]);
+  m = G.mergeEvents(m, [ev(2500, 61000, { open: false })]);
+  assert.strictEqual(m.length, 1); assert.strictEqual(m[0].obs, undefined); assert.strictEqual(G.seenOf(m[0]), 64000);
 });

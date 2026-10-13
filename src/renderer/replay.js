@@ -192,6 +192,24 @@
     }
     return out;
   }
+  // deletedLaps worked out again only when something it reads changes: the source, its messages (key: their revision)
+  // or a driver's code – a code corrected in the driver list (same number of drivers) moves a deletion named by code.
+  // (a colour or a name changing doesn't)
+  function deletedLapsMemo() {
+    let key = null, owner = null, val = {};
+    return (src, rev, messages, drivers = {}) => {
+      const k = `${rev}|${Object.entries(drivers || {}).map(([n, d]) => `${n}=${d?.Tla ?? ""}`).join(",")}`;
+      if (k !== key || src !== owner) { key = k; owner = src; val = deletedLaps(messages, drivers); }
+      return val;
+    };
+  }
+
+  // A canvas's buffer for a CSS size (fractional, as a resize observer gives it) at a device pixel ratio: whole device
+  // pixels, at least one each way – and the scale from CSS pixels to them (the device ratio while it has no size).
+  function canvasPixels(w, h, dpr = 1) {
+    const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
+    return [pw, ph, w > 0 ? pw / w : dpr, h > 0 ? ph / h : dpr];
+  }
 
   // Race lap (the leader's lap shown on TV) in progress at stream time ms, from LapCount changes [[ms, lap], …].
   function lapAtMs(marks, ms) {
@@ -838,6 +856,6 @@
   }
 
   const API = { Replay, LiveSource, CarTracks, LapTracker, PitLog, StatusLog, merge, newMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
-    pitLoss, pitRejoin, gapSec, deletedLaps, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
+    pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);

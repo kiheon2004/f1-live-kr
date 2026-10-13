@@ -81,40 +81,81 @@ function cellIndex(items, pts = (a) => a.pts) {
 const isBuilding = (t) => !!(t.building || (t["building:part"] && t["building:part"] !== "no"));
 const isStand = (t) => t.building === "grandstand" || t.leisure === "grandstand";
 
+// How much of polygon `pts` the polygons `by` cover (0–1): a grid of points over it (n × n over its bounding box),
+// stopping as soon as the answer against `at` is known.
+function coverage(pts, by, at = 0.5, n = 10) {
+  if (!by.length) return 0;
+  const bb = bboxOf(pts), inPts = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const x = bb[0] + ((i + 0.5) / n) * (bb[2] - bb[0]), y = bb[1] + ((j + 0.5) / n) * (bb[3] - bb[1]);
+    if (inside(x, y, pts)) inPts.push([x, y]);
+  }
+  if (!inPts.length) return 0;
+  let hit = 0;
+  for (let k = 0; k < inPts.length; k++) {
+    if (by.some((p) => inside(inPts[k][0], inPts[k][1], p))) hit++;
+    if (hit >= at * inPts.length || hit + inPts.length - k - 1 < at * inPts.length) break;   // (decided)
+  }
+  return hit / inPts.length;
+}
+// (an OSM building goes when Overture's buildings on its spot cover this much of it; measured over 28 circuits'
+// cached data: ~99.6 % of the OSM buildings with an Overture one on the spot are covered 80 % or more – the same
+// building – and the rest mostly a few %: a shed inside a big hall, an annex, one tile's piece of a building)
+const SAME = 0.6;
+
 // OSM's areas and Overture's buildings as one list. Overture (OSM's buildings plus Microsoft's and Google's footprints,
-// with more heights and roofs) stands for a building where it has one: an OSM building goes only when an Overture one
-// is on the same spot (either's centre inside the other) – so OSM's buildings stay wherever Overture has nothing (a
-// tile that failed or was damaged, a building only OSM has), and none is drawn twice. A grandstand is OSM's: its seats
-// are built from that outline, and an Overture block on it goes instead. OSM's names (Overture often leaves them out;
-// the facilities find their buildings by name) go to the Overture building on the same spot.
+// with more heights and roofs) stands for a building where it has one: an OSM building goes only when Overture's
+// buildings on the same spot (either's centre inside the other: candidates) cover most of it – so OSM's buildings stay
+// wherever Overture has nothing or only something smaller (a tile that failed or was damaged, a building only OSM has,
+// a shed or annex inside a big hall Overture lacks), and none is drawn twice: an Overture building standing inside one
+// kept that way, no taller, isn't drawn (it adds nothing). A grandstand is OSM's – also one mapped only as an area
+// (leisure=grandstand): its seats are built from that outline, and an Overture block on it goes instead. OSM's names
+// (Overture often leaves them out; the facilities find their buildings by name) go to the Overture buildings that stand
+// for that OSM building – not to a smaller one inside a building OSM keeps; a stadium's or sports centre's area names
+// the buildings in it.
 function mergeBuildings(osmAreas, ob) {
-  const named = osmAreas.filter((a) => (isBuilding(a.tags) || /^(stadium|sports_centre)$/.test(a.tags.leisure || "")) && a.tags.name && a.pts.length > 3);
-  for (const b of ob) {
-    if (b.tags.name || !named.length) continue;
-    const [x, y] = centroidOf(b.pts), hit = named.find((a) => inside(x, y, a.pts));
-    if (hit) b.tags.name = hit.tags.name;
-  }
-  const near = cellIndex(ob), gone = new Set(), keep = [];
+  const near = cellIndex(ob), gone = new Set(), kept = new Set(), heir = new Map(), stands = [];
+  for (const o of ob) o._c = centroidOf(o.pts);
+  const sameAs = (a) => { const [cx, cy] = centroidOf(a.pts); return near(bboxOf(a.pts)).filter((o) => inside(cx, cy, o.pts) || inside(...o._c, a.pts)); };
   for (const a of osmAreas) {
-    if (!isBuilding(a.tags)) { keep.push(a); continue; }
-    const [cx, cy] = centroidOf(a.pts);
-    const same = near(bboxOf(a.pts)).filter((o) => inside(cx, cy, o.pts) || inside(...centroidOf(o.pts), a.pts));
-    if (isStand(a.tags)) {
-      // (its name, if only the other had one – e.g. from the stadium area around it)
-      if (!a.tags.name) { const n = same.find((o) => o.tags.name)?.tags.name; if (n) a.tags = { ...a.tags, name: n }; }
-      keep.push(a); same.forEach((o) => gone.add(o)); continue;
+    if (isStand(a.tags)) { stands.push(a); kept.add(a); continue; }
+    if (!isBuilding(a.tags)) { kept.add(a); continue; }
+    const same = sameAs(a);
+    if (same.length && coverage(a.pts, same.map((o) => o.pts), SAME) >= SAME) {
+      // Overture's stand for it: those whose centre is in it take its name
+      if (a.tags.name && a.pts.length > 3) for (const o of same) if (!heir.has(o) && inside(...o._c, a.pts)) heir.set(o, a.tags.name);
+      continue;
     }
-    if (!same.length) keep.push(a);
+    kept.add(a);
+    // Overture's buildings inside it (most of their footprint), no taller: nothing they'd add
+    if (same.length) {
+      const h = buildingHeight(a.tags);
+      for (const o of same) if (buildingHeight(o.tags) <= h + 0.5 && coverage(o.pts, [a.pts], 0.8) >= 0.8) gone.add(o);
+    }
   }
-  for (const o of ob) delete o._bb;
-  return keep.concat(ob.filter((o) => !gone.has(o)));
+  const areas = osmAreas.filter((a) => /^(stadium|sports_centre)$/.test(a.tags.leisure || "") && a.tags.name && a.pts.length > 3);
+  for (const o of ob) {
+    if (o.tags.name) continue;
+    const n = heir.get(o) ?? (areas.length ? areas.find((a) => inside(...o._c, a.pts))?.tags.name : null);
+    if (n) o.tags.name = n;
+  }
+  for (const a of stands) {
+    const same = sameAs(a);
+    // (its name, if only the other had one – e.g. from the stadium area around it)
+    if (!a.tags.name) { const n = same.find((o) => o.tags.name)?.tags.name; if (n) a.tags = { ...a.tags, name: n }; }
+    same.forEach((o) => gone.add(o));
+  }
+  for (const o of ob) { delete o._bb; delete o._c; }
+  return osmAreas.filter((a) => kept.has(a)).concat(ob.filter((o) => !gone.has(o)));
 }
 
 // Outlines drawn in detail as building parts: the parts stand in for the outline where they cover it (half of it or
-// more) – as 3D map renderers do. Where they cover less (one tower part in a long hall, parts lost with a failed tile),
-// the outline stays and its parts are fitted to it so no two walls stand in each other: a part reaching above the
-// outline's roof starts at that roof, one inside its volume isn't drawn. A grandstand's outline always stays (its seats
-// are built from it). Returns { drop: Set of areas left out, minOf: Map of parts → their new min height }.
+// more) – as 3D map renderers do. A part starting at or above the outline's roof doesn't count when the outline's
+// height is known (tagged): a roof, canopy or link on top covers the plan, not the building under it. Where they cover
+// less (one tower part in a long hall, parts lost with a failed tile, only the roof mapped as a part), the outline stays
+// and its parts are fitted to it so no two walls stand in each other: a part reaching above the outline's roof starts
+// at that roof, one inside its volume isn't drawn. A grandstand's outline always stays (its seats are built from it).
+// Returns { drop: Set of areas left out, minOf: Map of parts → their new min height }.
 function resolveParts(areas) {
   const parts = areas.filter((a) => a.tags["building:part"] && a.tags["building:part"] !== "no");
   const drop = new Set(), minOf = new Map();
@@ -127,15 +168,18 @@ function resolveParts(areas) {
     const bb = bboxOf(o.pts);
     const mine = near(bb).filter((p) => inside(...centroidOf(p.pts), o.pts));
     if (!mine.length) continue;
-    // how much of the outline the parts cover: a grid of points over it
+    const oh = buildingHeight(t);   // (heights are from the ground: the outline's roof)
+    // how much of the outline the parts cover: a grid of points over it (with its height a guess, any part may be
+    // the building itself)
+    const known = !!(t.height || t["building:height"] || t["building:levels"]);
+    const low = known ? mine.filter((p) => num(p.tags.min_height) < oh - 0.3) : mine;
     let n = 0, hit = 0;
     for (let i = 0; i < 14; i++) for (let j = 0; j < 14; j++) {
       const x = bb[0] + ((i + 0.5) / 14) * (bb[2] - bb[0]), y = bb[1] + ((j + 0.5) / 14) * (bb[3] - bb[1]);
       if (!inside(x, y, o.pts)) continue;
-      n++; if (mine.some((p) => inside(x, y, p.pts))) hit++;
+      n++; if (low.some((p) => inside(x, y, p.pts))) hit++;
     }
     if (n && hit / n >= 0.5) { drop.add(o); continue; }
-    const oh = buildingHeight(t);   // (heights are from the ground: the outline's roof)
     for (const p of mine) {
       const pmin = num(p.tags.min_height), ph = buildingHeight(p.tags);
       if (pmin >= oh - 0.3) continue;
