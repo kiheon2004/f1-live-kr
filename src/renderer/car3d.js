@@ -451,7 +451,7 @@ function cockpit(p) {
   const forearm = (k) => { const g = new THREE.CapsuleGeometry(0.033, 0.26, 4, 12); const A = new THREE.Vector3(0.15 * k, wy - 0.02, wz - 0.03), B = new THREE.Vector3(0.22 * k, 0.5, wz - 0.32); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize())); g.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2); return g; };
   return {
     rim, headrest: merge([headrest, tub]), helmet, visor,
-    wheel: { body: merge([wheelBody, column, paddles]), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), arms: merge([forearm(1), forearm(-1)]), at: [0, wy, wz], tilt },
+    wheel: { body: metricUV(merge([wheelBody, column, paddles]), 0.04), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), arms: merge([forearm(1), forearm(-1)]), at: [0, wy, wz], tilt },
   };
 }
 
