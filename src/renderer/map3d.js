@@ -9,7 +9,7 @@ import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine } from "./smooth.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
-import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
@@ -91,6 +91,7 @@ function initGeoSettings() {
     document.getElementById("geoTrees").checked = o.trees !== false;
     document.getElementById("geoShadows").checked = o.shadows !== false;
     document.getElementById("geoFacilities").checked = o.facilities !== false;
+    document.getElementById("geoBigCars").checked = o.bigCars === true;
     document.getElementById("geoNight").value = o.night || "auto";
   };
   btn.addEventListener("click", async () => {
@@ -115,6 +116,7 @@ function initGeoSettings() {
   document.getElementById("geoTrees").addEventListener("change", (e) => change({ trees: e.target.checked }));
   document.getElementById("geoShadows").addEventListener("change", (e) => change({ shadows: e.target.checked }, false));
   document.getElementById("geoFacilities").addEventListener("change", (e) => change({ facilities: e.target.checked }));
+  document.getElementById("geoBigCars").addEventListener("change", (e) => change({ bigCars: e.target.checked }, false));
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
@@ -221,16 +223,66 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+// The sky: by night a gradient behind everything; by day a sky all round (equirectangular, so it turns with the view
+// and the horizon stays level): deeper blue overhead, paler to a hazy horizon in the fog's colour, with soft fair-weather
+// clouds – a look, not the session's weather (the feed has none for clouds). The cars reflect the same sky.
+function dayPixels(W, H, ground) {
+  const img = new ImageData(W, H), d = img.data;
+  // value noise, a few octaves (fixed seed: the same sky every time)
+  const P = new Uint8Array(512); { let a = 1337; for (let i = 0; i < 256; i++) P[i] = i; for (let i = 255; i > 0; i--) { a = (a * 16807) % 2147483647; const j = a % (i + 1); [P[i], P[j]] = [P[j], P[i]]; } for (let i = 0; i < 256; i++) P[256 + i] = P[i]; }
+  const hash = (x, y) => P[(P[x & 255] + y) & 255] / 255, fade = (t) => t * t * (3 - 2 * t);
+  const noise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = fade(x - xi), yf = fade(y - yi); const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), e = hash(xi + 1, yi + 1); return a + (b - a) * xf + (c - a) * yf + (a - b - c + e) * xf * yf; };
+  const top = [61, 111, 174], mid = [143, 179, 214], hor = [201, 217, 232], grd = [74, 82, 70];
+  for (let y = 0; y < H; y++) {
+    const el = (0.5 - (y + 0.5) / H) * Math.PI;   // elevation
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 4;
+      let r, g, b;
+      if (el < 0) { const k = Math.min(1, -el / 0.15); [r, g, b] = ground ? hor.map((v, i) => v + (grd[i] - v) * k) : hor; }
+      else {
+        const t = Math.pow(el / (Math.PI / 2), 0.55);
+        [r, g, b] = t < 0.45 ? hor.map((v, i) => v + (mid[i] - v) * (t / 0.45)) : mid.map((v, i) => v + (top[i] - v) * ((t - 0.45) / 0.55));
+        // clouds on a layer overhead: the azimuth and elevation onto a plane (squashed towards the horizon)
+        if (el > 0.02) {
+          const az = (x / W) * Math.PI * 2, dd = 1 / Math.tan(el), px = Math.cos(az) * dd * 3, py = Math.sin(az) * dd * 3;
+          let n = 0, amp = 0.5, f = 1; for (let k = 0; k < 5; k++) { n += noise(px * f + 11, py * f + 7) * amp; amp *= 0.5; f *= 2.03; }
+          const cover = Math.max(0, Math.min(1, (n - 0.52) * 3.2)) * Math.min(1, el / 0.12) * Math.max(0, 1 - dd / 40);
+          const lit = 238 - (1 - n) * 40;
+          r += (lit - r) * cover; g += (lit + 2 - g) * cover; b += (lit + 6 - b) * cover;
+        }
+      }
+      d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+  }
+  return img;
+}
 function skyTexture(night = false) {
   const c = document.createElement("canvas");
+  if (!night) {
+    c.width = 2048; c.height = 1024; c.getContext("2d").putImageData(dayPixels(2048, 1024, false), 0, 0);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping;
+    return t;
+  }
   c.width = 4; c.height = 256;
   const g = c.getContext("2d").createLinearGradient(0, 0, 0, 256);
   // a city's night sky: near black overhead, the glow of its lights low down (warm, from sodium and LED haze)
-  if (night) { g.addColorStop(0, "#03050a"); g.addColorStop(0.45, "#0a0f1a"); g.addColorStop(0.75, "#171a26"); g.addColorStop(0.92, "#2b2730"); g.addColorStop(1, "#3a3034"); }
-  else { g.addColorStop(0, "#3d6fae"); g.addColorStop(0.55, "#8fb3d6"); g.addColorStop(1, "#d6e3ee"); }
+  g.addColorStop(0, "#03050a"); g.addColorStop(0.45, "#0a0f1a"); g.addColorStop(0.75, "#171a26"); g.addColorStop(0.92, "#2b2730"); g.addColorStop(1, "#3a3034");
   const ctx = c.getContext("2d"); ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+// What the cars reflect: by day that sky over ground below the horizon, by night the night reflections (shared by every
+// car: never freed with one).
+let dayCarEnv = null;
+function carEnvironment(night) {
+  if (night) return nightEnvironment();
+  if (dayCarEnv) return dayCarEnv;
+  const c = document.createElement("canvas"); c.width = 512; c.height = 256; c.getContext("2d").putImageData(dayPixels(512, 256, true), 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping;
+  const pm = new THREE.PMREMGenerator(renderer);
+  dayCarEnv = pm.fromEquirectangular(t).texture; dayCarEnv.userData.shared = true;
+  pm.dispose(); t.dispose();
+  return dayCarEnv;
 }
 
 // Night reflections: a dim sky with the city's glow along the horizon and lights below it, for glass and water
@@ -248,7 +300,7 @@ function nightEnvironment() {
   for (let k = 0; k < 1400; k++) { const y = h * (0.5 + Math.pow(r(), 2.2) * 0.12); g.fillStyle = r() < 0.7 ? `rgba(255,${190 + r() * 50 | 0},${120 + r() * 80 | 0},${0.4 + r() * 0.6})` : `rgba(210,230,255,${0.4 + r() * 0.5})`; g.fillRect(r() * w, y, 1 + r() * 1.5, 1); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping;
   const pm = new THREE.PMREMGenerator(renderer);
-  nightEnv = pm.fromEquirectangular(t).texture;
+  nightEnv = pm.fromEquirectangular(t).texture; nightEnv.userData.shared = true;
   pm.dispose(); t.dispose();
   return nightEnv;
 }
@@ -446,13 +498,41 @@ function asphaltTexture() {
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+// Close up, the tarmac's own grain: stones a few mm across, as a normal map 0.5 m to a tile on a second uv set (the
+// colour's 6 m tile and this one don't line up, so neither repeat shows). A data map: no sRGB. (Measured: a 512² normal
+// and roughness pair at anisotropy 8 over the road doubled the onboard camera's 95th-percentile frame time.)
+let roadGrain = null;
+function roadGrainMaps() {
+  if (roadGrain) return roadGrain;
+  const n = 256, h = new Float32Array(n * n), r = (() => { let a = 99; return () => ((a = (a * 16807) % 2147483647) / 2147483647); })();
+  // stones: little domes of 3–9 mm (0.5 m over 256 px: 2 mm a pixel), wrapping round the tile
+  for (let k = 0; k < 4200; k++) {
+    const cx = r() * n, cy = r() * n, rad = 0.8 + r() * 2.2, ht = 0.5 + r() * 0.5;
+    for (let y = Math.floor(cy - rad); y <= cy + rad; y++) for (let x = Math.floor(cx - rad); x <= cx + rad; x++) {
+      const d = Math.hypot(x - cx, y - cy) / rad; if (d >= 1) continue;
+      const i = ((y + n) % n) * n + ((x + n) % n); h[i] = Math.max(h[i], ht * Math.sqrt(1 - d * d));
+    }
+  }
+  const cn = document.createElement("canvas"); cn.width = cn.height = n;
+  const gn = cn.getContext("2d"), dn = gn.createImageData(n, n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const i = y * n + x, dx = h[y * n + (x + 1) % n] - h[y * n + (x - 1 + n) % n], dy = h[((y + 1) % n) * n + x] - h[((y - 1 + n) % n) * n + x];
+    const len = Math.hypot(dx, dy, 1), o = i * 4;
+    dn.data[o] = 128 - (dx / len) * 127; dn.data[o + 1] = 128 - (dy / len) * 127; dn.data[o + 2] = 128 + (1 / len) * 127; dn.data[o + 3] = 255;
+  }
+  gn.putImageData(dn, 0, 0);
+  const t = new THREE.CanvasTexture(cn); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.colorSpace = THREE.NoColorSpace; t.channel = 1; t.userData.shared = true;
+  roadGrain = { normal: t };   // (kept for every circuit: never freed with one)
+  return roadGrain;
+}
 function roadMesh(samples) {
   const lanes = [0, 0.08, 0.22, 0.38, 0.5, 0.62, 0.78, 0.92, 1], K = lanes.length;
-  const pos = [], col = [], uv = [], idx = [], c = new THREE.Color();
+  const pos = [], col = [], uv = [], uv1 = [], idx = [], c = new THREE.Color();
   let dist = 0;
   samples.forEach((s, i) => {
     if (i) dist += s.p.distanceTo(samples[i - 1].p);
     const L = edgeOf(s, 1), R = edgeOf(s, -1), M = s.M ?? 0;
+    uv1.push(...lanes.flatMap((f) => [(L + (R - L) * f) / 0.5, dist / 0.5]));
     for (const f of lanes) {
       const off = L + (R - L) * f;
       pos.push(s.p.x + s.nor.x * off, s.p.y + 0.06, s.p.z + s.nor.z * off);
@@ -471,8 +551,10 @@ function roadMesh(samples) {
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute("uv1", new THREE.Float32BufferAttribute(uv1, 2));
   g.setIndex(idx); g.computeVertexNormals();
-  const m = new THREE.MeshStandardMaterial({ vertexColors: true, map: asphaltTexture(), roughness: 0.9, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide });
+  const gm = roadGrainMaps();
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, map: asphaltTexture(), roughness: 0.92, normalMap: gm.normal, normalScale: new THREE.Vector2(0.5, 0.5), metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide });
   return new THREE.Mesh(g, m);
 }
 
@@ -518,7 +600,7 @@ function cornerKerbs(samples) {
 function kerbs(samples) {
   const n = samples.length, mark = cornerKerbs(samples);
   samples.kerbMark = mark;
-  const pos = [], col = [], idx = [];
+  const pos = [], col = [], idx = [], uv = [];
   const red = new THREE.Color(0xd8262b), white = new THREE.Color(0xf4f4f4), green = new THREE.Color(0x2f7d4f);
   // one band beside the edge on side sd, from offset o0 to o1 beyond the edge, lifted lip0 → lip1
   const band = (on, o0, o1, lip0, lip1, colourOf) => {
@@ -526,9 +608,10 @@ function kerbs(samples) {
       const j = (i + 1) % n, sd = on[i];
       if (!sd || on[j] !== sd) continue;
       const v = pos.length / 3, c = colourOf(i);
-      for (const s of [samples[i], samples[j]]) for (const [o, lift] of [[o0, lip0], [o1, lip1]]) {
+      for (const [k, s] of [[0, samples[i]], [1, samples[j]]]) for (const [o, lift] of [[o0, lip0], [o1, lip1]]) {
         const off = edgeOf(s, sd) + sd * o;
         pos.push(s.p.x + s.nor.x * off, s.p.y + 0.07 + lift, s.p.z + s.nor.z * off); col.push(c.r, c.g, c.b);
+        uv.push((i + k) / 0.25, o / 1.4);   // (ridges every 25 cm across the kerb – samples are ~1 m apart)
       }
       // wound to face up (a face seen from behind gets its normal flipped: kerbs on one side came out black)
       const P = (k) => pos.slice((v + k) * 3, (v + k) * 3 + 3), a = P(0), b = P(1), q = P(2);
@@ -543,9 +626,18 @@ function kerbs(samples) {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));   // lit as flat ground
   g.setIndex(idx);
-  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, polygonOffset: true, polygonOffsetFactor: -3, side: THREE.DoubleSide }));
+  // the kerb's ridges across it (a normal map: one rounded ridge per tile) and its paint a little worn
+  const rc = document.createElement("canvas"); rc.width = 64; rc.height = 4; const rg = rc.getContext("2d"), rd = rg.createImageData(64, 4);
+  for (let x = 0; x < 64; x++) { const a = Math.sin((x / 64) * Math.PI * 2) * 0.55; for (let y = 0; y < 4; y++) { const o = (y * 64 + x) * 4; rd.data[o] = 128 + a * 127; rd.data[o + 1] = 128; rd.data[o + 2] = 128 + Math.sqrt(1 - a * a) * 127; rd.data[o + 3] = 255; } }
+  rg.putImageData(rd, 0, 0);
+  const ridge = new THREE.CanvasTexture(rc); ridge.wrapS = ridge.wrapT = THREE.RepeatWrapping; ridge.colorSpace = THREE.NoColorSpace; ridge.anisotropy = 8;
+  const km = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, normalMap: ridge, normalScale: new THREE.Vector2(0.8, 0.8), polygonOffset: true, polygonOffsetFactor: -3, side: THREE.DoubleSide });
+  km.userData.ownedTextures = [ridge];
+  // (normal maps need tangents along the uvs: three.js derives them in the shader from the uv's screen derivatives)
+  const m = new THREE.Mesh(g, km);
   const grp = new THREE.Group(); grp.add(m);
   return grp;
 }
@@ -692,11 +784,13 @@ function paintLabel(l, text, color, strong) {
 
 function carFor(num, d) {
   let c = cars.get(num);
-  const color = "#" + (d.TeamColour || "888888");
-  if (c && c.color === color) return c;
+  // (the model is chosen by season and team – the car of that year –, its paint by the team's colours)
+  const season = app().sessionYear?.() || null, color = "#" + (d.TeamColour || "888888"), key = `${color}|${d.TeamName || ""}|${season}`;
+  if (c && c.key === key) return c;
   if (c) { scene.remove(c.obj); disposeGroup(c.obj); }
   const obj = new THREE.Group();
-  const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num });
+  const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season });
+  setCarEnvironment(model, carEnvironment(nightNow), nightNow ? 0.6 : 1);
   { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false }));
     sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; model.add(sh); }
   if (nightNow) lightCar(model, true);
@@ -704,7 +798,7 @@ function carFor(num, d) {
   obj.add(model);
   const label = labelSprite(); obj.add(label.sp);
   scene.add(obj);
-  c = { num, obj, model, label, color, yaw: 0, pitch: 0, roll: 0, speed: 0, spin: 0, aero: 0, pos: new THREE.Vector3(), has: false, sample: null };
+  c = { num, obj, model, label, color, key, yaw: 0, pitch: 0, roll: 0, speed: 0, spin: 0, aero: 0, pos: new THREE.Vector3(), has: false, sample: null };
   cars.set(num, c);
   return c;
 }
@@ -931,17 +1025,21 @@ function updateCars(dt) {
     c.spin = (c.spin + (c.speed * dt) / 0.354) % (Math.PI * 2);
     // (and a touch of opposite lock when the rear steps out)
     const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) - (c.slide || 0) * 2)) : 0;
-    c.model.userData.wheels.forEach((w, i) => w.rotation.set(c.spin, i < 2 ? steer : 0, 0));
-    // active aero: straight mode (flaps open) at speed on straights, corner mode otherwise
-    const wantOpen = c.speed > 68 && Math.abs(yawRate) < 0.04 ? 1 : 0;
+    c.steer = steer; setWheels(c.model, c.spin, steer);
+    // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
+    // (straight mode at speed on straights, corner mode otherwise: the feed has no channel for it)
+    let wantOpen;
+    if (c.model.userData.profile.era === "2022") { const cd = src.carAt?.(num, A.t); wantOpen = cd ? (cd.drs >= 10 ? 1 : 0) : 0; }
+    else wantOpen = c.speed > 68 && Math.abs(yawRate) < 0.04 ? 1 : 0;
     c.aero += (wantOpen - c.aero) * (1 - Math.exp(-dt * 6));
     setAero(c.model, c.aero);
     if (!c.compoundAt || performance.now() - c.compoundAt > 1500) { c.compoundAt = performance.now(); const st = src.stints?.(num); setCompound(c.model, st?.[st.length - 1]?.Compound); }
     const l = lines[num] || {};
     const out = l.Retired || l.Stopped;
-    const inCockpit = camMode === "onboard" && num === focusNum;
+    const inCockpit = (camMode === "onboard" || camMode === "eye") && num === focusNum;
     c.obj.visible = true;
-    (c.helmet || (c.helmet = c.model.getObjectByName("helmet"))).visible = !inCockpit;   // out of the T-cam's way, as in broadcast onboards
+    // the T-cam sees the driver's helmet in front of it, as on TV; from the driver's own eyes it is round the camera
+    c.model.userData.helmet.visible = !(camMode === "eye" && num === focusNum);
     c.label.sp.userData.own = inCockpit;
     paintLabel(c.label, `${l.Position || ""} ${d.Tla}`.trim(), "#" + (d.TeamColour || "888"), num === A.focus);
     c.label.sp.material.opacity = out ? 0.45 : 1;
@@ -991,25 +1089,22 @@ function leader() {
   return Object.keys(lines).find((n) => lines[n].Position === "1") || null;
 }
 
-// From high up the cars would be specks: grow them with distance, and keep name tags readable.
-// (the small parts of a car: its four wheel covers and its lights)
-function fineParts(c) {
-  if (c.fineList) return c.fineList;
-  const lm = c.model.userData, list = [];
-  for (const w of lm.wheels || []) if (w.children[2]) list.push(w.children[2]);
-  c.model.traverse((o) => { if (o.isMesh && o.material?.isMeshBasicMaterial && o.material !== lm.bandMat) list.push(o); });
-  return (c.fineList = list);
-}
+// Name tags readable at any distance; cars at their real size (or larger from high up, by choice).
+// Cars are drawn at their real size; from the helicopter they can be drawn larger to be told apart (the map
+// settings' "차량 크게" – a readability option, off by default: the names over them say who is where).
+// Level of detail by the car's size on screen (pixels along its length), with a margin each way so it doesn't flick:
+// close up (over ~260 px, or the car the cockpit cameras are in) the cockpit interior, hands and steering wheel;
+// under ~26 px no wheel covers, deflectors or lights either.
 function scaleForView() {
-  const H = hostH || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H;
+  const H = hostH || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H, big = geoSettings().bigCars === true, focusNum = app().focus || leader();
   for (const c of cars.values()) {
     const dist = camera.position.distanceTo(c.obj.position);
-    const s = camMode === "heli" ? Math.min(7, Math.max(1, dist / 115)) : 1;
+    const s = camMode === "heli" && big ? Math.min(7, Math.max(1, dist / 115)) : 1;
     c.model.scale.setScalar(s);
-    // far off (the helicopter view), the parts no one can make out at that size aren't drawn: the wheel covers and the
-    // lights – 5 of a car's 20 draw calls (the tyre bands stay: their colour is the compound)
-    const fine = dist < 250;
-    if (c.fine !== fine) { c.fine = fine; for (const o of fineParts(c)) o.visible = fine; }
+    const u = c.model.userData, px = (u.bounds.length * s) / Math.max(1e-3, dist * f);
+    const cockpit = (camMode === "onboard" || camMode === "eye") && c.num === focusNum;
+    const lod = cockpit ? "near" : u.lod === "near" ? (px > 200 ? "near" : px > 26 ? "mid" : "far") : u.lod === "far" ? (px > 34 ? (px > 260 ? "near" : "mid") : "far") : (px > 260 ? "near" : px < 26 ? "far" : "mid");
+    setDetail(c.model, lod);
     c.label.sp.position.set(0, 1.5 * s + 0.4, 0);
     c.label.sp.scale.set(26 * f * (128 / 40), 26 * f, 1);   // ~26 px tall on screen
     c.label.sp.visible = !c.label.sp.userData.own && dist < 6000 && c.obj.visible;
@@ -1049,23 +1144,27 @@ function updateCamera(dt) {
   controls.enabled = false;
   const num = A.focus || leader(), c = cars.get(num);
   if (!c || !c.has) { controls.enabled = true; controls.update(); return; }
-  if (camMode === "onboard") {
-    // The broadcast T-cam on top of the airbox, fixed to the car: it pitches and rolls with the car under
-    // braking and in corners, and shakes – a fine buzz that grows with speed, a hard rattle over kerbs.
+  if (camMode === "onboard" || camMode === "eye") {
+    // Fixed to the car (its mounts, per model): the broadcast T-cam on top of the airbox, looking down the car over
+    // the driver's helmet – or the driver's own eyes in the helmet. Either pitches and rolls with the car under braking
+    // and in corners and has a fine buzz that grows with speed and a hard rattle over kerbs – made from the session's
+    // own time (the same moment shakes the same way: paused it holds still, replayed it repeats; not measured, a look).
     c.model.updateMatrixWorld(true);
-    camera.position.copy(TCAM).applyMatrix4(c.model.matrixWorld);
+    const u = c.model.userData, eye = camMode === "eye";
+    camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
     c.model.getWorldQuaternion(qTmp);
-    const now = performance.now() / 1000, sp = Math.min(1, c.speed / 90);
-    // (a fine buzz only: the car's own motion – kerbs included – now comes through the body it's fixed to)
+    const now = (A.t || 0) / 1000, sp = Math.min(1, c.speed / 90);
     const amp = devNoShake ? 0 : 0.0002 + 0.0006 * sp + (c.onKerb ? 0.0015 : 0);
     const n1 = Math.sin(now * 61.3) * 0.6 + Math.sin(now * 97.1 + 1.3) * 0.4, n2 = Math.sin(now * 53.7 + 2.1) * 0.6 + Math.sin(now * 83.9) * 0.4;
-    shakeE.set(-0.06 + n1 * amp, Math.PI + n2 * amp * 0.5, n2 * amp * 0.6, "YXZ");
+    // (the T-cam looks down ~11° to take in the helmet and the cockpit; the eyes ahead, a touch down)
+    shakeE.set((eye ? -0.05 : -0.2) + n1 * amp, Math.PI + n2 * amp * 0.5, n2 * amp * 0.6, "YXZ");
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
     camera.position.y += n1 * amp * 0.25;
-    setNear(0.05);
-    if (camera.fov !== look.fov) { camera.fov = look.fov; camera.updateProjectionMatrix(); }
+    setNear(eye ? 0.03 : 0.05);
+    const fov = cockpitFov(eye);
+    if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
     camLook.copy(c.pos); camInit = true;
     return;
   }
@@ -1121,10 +1220,13 @@ function setNear(n) { if (camera.near !== n) { camera.near = n; camera.updatePro
 // the way round, up and down; scroll / pinch to move the chase camera nearer or further (onboard: zoom).
 // Double-click returns to the straight-ahead view. The angles are kept relative to the car, so the view
 // turns with it through the corners.
-const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 74, dragged: false, down: null };
-function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 74; }
+// (fov 0: the cockpit cameras' own – a horizontal angle like a broadcast T-cam's lens, ~88°, the eyes' ~95°, as tall
+// as the window's shape makes it; zooming sets a vertical angle of its own)
+const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 0, dragged: false, down: null };
+function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 0; }
+const cockpitFov = (eye) => look.fov || Math.max(35, Math.min(100, (2 * Math.atan(Math.tan(((eye ? 95 : 88) * Math.PI) / 360) / (camera.aspect || 1.6)) * 180) / Math.PI));
 function initLook() {
-  const active = () => camMode === "chase" || camMode === "onboard";
+  const active = () => camMode === "chase" || camMode === "onboard" || camMode === "eye";
   canvas.addEventListener("pointerdown", (e) => {
     if (!active() || e.button !== 0) return;
     look.down = { x: e.clientX, y: e.clientY, yaw: look.yaw, pitch: look.pitch, moved: 0 };
@@ -1134,9 +1236,9 @@ function initLook() {
     if (!look.down || !active()) return;
     const dx = e.clientX - look.down.x, dy = e.clientY - look.down.y;
     look.down.moved = Math.max(look.down.moved, Math.hypot(dx, dy));
-    const k = camMode === "onboard" ? 0.0055 : 0.007;
+    const inCar = camMode === "onboard" || camMode === "eye", k = inCar ? 0.0055 : 0.007;
     look.yaw = wrap(look.down.yaw - dx * k);
-    look.pitch = Math.max(camMode === "onboard" ? -0.9 : -0.35, Math.min(camMode === "onboard" ? 0.7 : 1.25, look.down.pitch + dy * k * (camMode === "onboard" ? -1 : 1)));
+    look.pitch = Math.max(inCar ? -0.9 : -0.35, Math.min(inCar ? 0.7 : 1.25, look.down.pitch + dy * k * (inCar ? -1 : 1)));
   });
   const up = (e) => { if (!look.down) return; if (look.down.moved > 4) look.dragged = true; look.down = null; try { canvas.releasePointerCapture(e.pointerId); } catch {} };
   canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
@@ -1147,7 +1249,7 @@ function initLook() {
     if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) { look.yaw = wrap(look.yaw - e.deltaX * 0.006); return; }
     const d = e.deltaY * (e.ctrlKey ? 0.02 : 0.004);
     if (camMode === "chase") look.dist = Math.max(4.5, Math.min(60, look.dist * Math.exp(d)));
-    else look.fov = Math.max(35, Math.min(100, look.fov * Math.exp(d)));
+    else look.fov = Math.max(35, Math.min(100, (look.fov || camera.fov) * Math.exp(d)));
   }, { passive: false });
 }
 
@@ -1160,7 +1262,7 @@ function setCam(mode) {
     const c = cars.get(app().focus || leader());
     controls.target.copy(c?.has ? c.pos : new THREE.Vector3());
     camera.fov = 50; camera.updateProjectionMatrix();
-    if (camMode === "onboard" && c?.has) camera.position.copy(c.pos).add(new THREE.Vector3(0, 120, 160));
+    if ((camMode === "onboard" || camMode === "eye") && c?.has) camera.position.copy(c.pos).add(new THREE.Vector3(0, 120, 160));
   }
   camMode = mode; camInit = false;
   try { localStorage.setItem("f1kr:cam3d", JSON.stringify(mode)); } catch {}
@@ -1227,7 +1329,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -1420,7 +1522,7 @@ function applyLighting() {
   }
   if (world.real?.night?.group) world.real.night.group.visible = night;
   for (const m of [world.road, world.kerb, world.lines]) m.traverse((o) => { if (o.material) { o.material.emissive = new THREE.Color(0); o.material.emissiveIntensity = 0; } });
-  for (const c of cars.values()) lightCar(c.model, night);
+  for (const c of cars.values()) { lightCar(c.model, night); setCarEnvironment(c.model, carEnvironment(night), night ? 0.6 : 1); }
   if (lit) { world.group.remove(lit); disposeGroup(lit); lit = null; }
   if (night) { lit = floodlights(world.samples); world.group.add(lit); }
   // the ground keeps its colour (the light falling on it changes, not the ground); lit windows switch on
@@ -2008,13 +2110,20 @@ window.Map3D = {
   show() {
     if (!renderer) {
       init();
-      try { const m = JSON.parse(localStorage.getItem("f1kr:cam3d")); if (["heli", "chase", "onboard"].includes(m)) { camMode = m; paintCamButtons(); } } catch {}
+      try { const m = JSON.parse(localStorage.getItem("f1kr:cam3d")); if (["heli", "chase", "onboard", "eye"].includes(m)) { camMode = m; paintCamButtons(); } } catch {}
     }
     if (visible) return;
     visible = true; resize(); lastT = performance.now(); requestAnimationFrame(frame);
   },
   hide() { visible = false; },
   dev(o) { if ("shadows" in o) { sun.castShadow = o.shadows; } if ("hud" in o) devNoHud = !o.hud; if ("labels" in o) devNoLabels = !o.labels; return "ok"; },
+  // development: switch costly looks off to measure them – { roadGrain, carEnv, carNear, kerbRidge } (true = on)
+  tune(o) {
+    if ("roadGrain" in o && world?.road) { const m = world.road.material, g = roadGrainMaps(); m.normalMap = o.roadGrain ? g.normal : null; m.needsUpdate = true; }
+    if ("carEnv" in o) for (const c of cars.values()) setCarEnvironment(c.model, o.carEnv ? carEnvironment(nightNow) : null, 1);
+    if ("carNear" in o) for (const c of cars.values()) c.model.userData.near.visible = o.carNear;
+    return "ok";
+  },
   resetHitches() { perf.spikes = 0; perf.worst = 0; perf.frames = 0; },
   occlusionTest,
   // development: look at the focused car from a given offset (metres, car frame)
@@ -2060,6 +2169,6 @@ window.Map3D = {
   debug: () => JSON.stringify({ cam: camera?.position.toArray().map(Math.round), target: controls?.target.toArray().map(Math.round), fov: camera?.fov, aspect: camera?.aspect,
     size: world && [world.size.x, world.size.y, world.size.z].map(Math.round), host: host && [host.clientWidth, host.clientHeight], cars: cars.size, mode: camMode,
     paint: (() => { const c = cars.get(app()?.focus || leader()); const m = c?.model.children[1]?.material; return m && { color: m.color.getHexString(), emissive: m.emissive.getHexString(), ei: m.emissiveIntensity }; })(),
-    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], visible: c.obj.visible, inScene: !!c.obj.parent }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
+    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], visible: c.obj.visible, inScene: !!c.obj.parent }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
 };
 window.dispatchEvent(new Event("map3d-ready"));

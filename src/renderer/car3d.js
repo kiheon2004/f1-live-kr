@@ -1,28 +1,62 @@
-// A 2026-regulation Formula 1 car for the 3D view (nose towards +Z, ground at y = 0, metres).
-// Dimensions from the 2026 technical rules: 3.4 m wheelbase, 1.9 m overall width, front wing 100 mm
-// narrower with three elements on twin pylons, no front wheel arches, wake-control boards ahead of the
-// sidepods, rear wing with three elements on twin pylons, no beam wing, endplate lights, smaller tyres
-// (18-inch, ~705 mm front / ~710 mm rear). Active aero: the upper flaps of both wings open on straights.
+// Formula 1 cars for the 3D view (nose towards +Z, +X the car's left, ground at y = 0, metres), one model per
+// season era – the car of that year, not today's on every race –, with a cockpit and driver that hold up close (the
+// broadcast T-cam looks down on them) and fewer parts far away.
 //
-// The bodywork is lofted from rounded cross-sections (smooth surfaces rather than boxes) and carries a
-// livery texture per car: the team's 2026 colours and the car number. Shared geometry is built once.
+// Model contract (every profile): metres, +Y up, nose +Z, origin on the ground between the axles' midpoint; wheel
+// pivots at the axles (steer about Y, roll about X); front-wing flap pivot at its leading edge, rear-wing flap (DRS /
+// active aero) at its leading edge; mounts in car coordinates: TCAM (the broadcast camera on the airbox), EYE (the
+// driver's eyes); bounds (length, width, height); LOD: "near" (cockpit interior, hands, steering wheel, wheel
+// deflectors and other small parts), "mid" (the car), "far" (wheel covers and lights off). See PROFILES for each era's
+// numbers and where they come from (rules' limits vs. published or estimated figures).
+//
+// Eras:
+//   2026      – 2026 rules: 3.4 m wheelbase max, 1.9 m wide, narrower front wing on twin pylons, no wheel arches,
+//               active aero (both wings' flaps open on straights), no beam wing, smaller tyres.
+//   2022      – 2022–2025 ground-effect cars: 3.6 m wheelbase (the rules' maximum; teams ran at or near it), 2.0 m
+//               wide, four-element front wing rising outboard, wheel deflectors over the front tyres, 18-inch wheels
+//               with covers, beam wing, DRS on the rear wing.
+// Team variants (only where the shape was checked against photos of that car; the rest of the field gets the era's
+// neutral shape in their colours): "rb21" – Red Bull RB21 (2025): letterbox sidepod inlet high and narrow, steep
+// downwash ramp, deep undercut, matte navy paint. Proportions are estimates from photos and the rules' limits, not team
+// measurements.
+//
+// No sponsor or team logos are drawn (none are licensed for this app): liveries are the team's colour zones and the
+// car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
 
-export const WHEELBASE = 3.4;
-const FZ = 1.75, RZ = FZ - WHEELBASE;          // front / rear axle positions along the car
-const FR = 0.353, RR = 0.355;                  // tyre radii
-const FW = 0.30, RW = 0.37;                    // tyre widths
-const FX = 0.95 - FW / 2, RX = 0.95 - RW / 2;  // wheel centres: outer tyre faces at the 1.9 m limit
+// ---------- profiles ----------
+// FZ/RZ: axle positions along the car, FR/RR tyre radii, FW/RW tyre widths, W: overall width (outer tyre faces),
+// H: height of the airbox top. src: where the numbers come from.
+export const PROFILES = {
+  2026: {
+    era: "2026", FZ: 1.7, RZ: -1.7, FR: 0.353, RR: 0.355, FW: 0.30, RW: 0.37, W: 1.9, H: 0.95,
+    tcam: [0, 1.05, -0.5], eye: [0, 0.79, -0.06], helmet: [0, 0.735, -0.08],
+    src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre sizes from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm diameter) – the rest estimated",
+  },
+  2022: {
+    era: "2022", FZ: 1.8, RZ: -1.8, FR: 0.36, RR: 0.36, FW: 0.305, RW: 0.405, W: 2.0, H: 0.95,
+    tcam: [0, 1.05, -0.52], eye: [0, 0.79, -0.06], helmet: [0, 0.735, -0.08],
+    src: "2022–2025 F1 technical regulations: 3.6 m wheelbase max, 2.0 m width, 0.95 m height; 18-inch wheels, ~720 mm tyres (front ~305 mm, rear ~405 mm wide) – estimates; the rest from photos",
+  },
+};
+// Which model for a car: by season (the car of that year) and team (a checked variant where there is one).
+export function profileFor(season, teamName) {
+  const y = +season || new Date().getFullYear();
+  const era = y >= 2026 ? "2026" : "2022";
+  const variant = era === "2022" && y === 2025 && /red bull racing/i.test(teamName || "") ? "rb21" : null;
+  return { key: variant ? `${era}:${variant}` : era, era, variant, season: y, ...PROFILES[era] };
+}
+// (kept for callers of the old single model: the current era's numbers)
+export const WHEELBASE = PROFILES[2026].FZ - PROFILES[2026].RZ;
+const P26 = PROFILES[2026];
+export const EYE = new THREE.Vector3(...P26.eye);
+export const TCAM = new THREE.Vector3(...P26.tcam);
 
-// Driver's eye and the broadcast "T-cam" (on top of the airbox) in car coordinates.
-export const EYE = new THREE.Vector3(0, 0.84, -0.02);
-export const TCAM = new THREE.Vector3(0, 1.08, -0.3);
-
-// ---------- lofting ----------
+// ---------- geometry helpers ----------
 // A section is [z, cy, halfWidth, halfHeight, cx = 0, power = 2.6] – a superellipse ring.
 // Returns a smooth BufferGeometry with UVs: u along the car (0 = rear, 1 = front), v round the ring
 // (0 at the bottom, 0.25 on the left, 0.5 on top, 0.75 on the right).
-function loft(sections, ring = 24, uRange = [-2.6, 2.6], capEnds = true) {
+function loft(sections, ring = 24, uRange = [-2.9, 2.9], capEnds = true) {
   const pos = [], uv = [], idx = [];
   const n = sections.length;
   for (const [z, cy, hw, hh, cx = 0, pw = 2.6] of sections) {
@@ -52,16 +86,31 @@ function loft(sections, ring = 24, uRange = [-2.6, 2.6], capEnds = true) {
   g.computeVertexNormals();
   return g;
 }
+// Sections given nose first, smoothed: each pair of neighbours gets `k` sections between them on a Catmull-Rom
+// curve through all four numbers (no kinks between the hand-set sections).
+function smoothSections(list, k = 2) {
+  const out = [], n = list.length, at = (i) => list[Math.max(0, Math.min(n - 1, i))];
+  for (let i = 0; i < n - 1; i++) for (let s = 0; s < (i === n - 2 ? k + 2 : k + 1); s++) {
+    const t = s / (k + 1), p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    out.push(p1.map((_, j) => {
+      if (j >= 4 && (p1[j] === undefined)) return undefined;
+      const a = p0[j] ?? p1[j], b = p1[j], c = p2[j] ?? b, d = p3[j] ?? c;
+      return 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (-a + 3 * b - 3 * c + d) * t * t * t);
+    }));
+  }
+  return out;
+}
 // A thin wing element: an airfoil-ish slab (rounded leading edge, thin trailing edge) spanning ±span/2
 // at height y, leading edge at z, chord c, angle `aoa` (rad, leading edge up), dipping `dip` at the centre.
-function wingElement(span, chord, thick, y, z, aoa = 0.12, dip = 0, segs = 16) {
+function wingElement(span, chord, thick, y, z, aoa = 0.12, dip = 0, segs = 16, rise = 0) {
   const prof = [[0, 0], [0.04, 0.55], [0.18, 0.9], [0.45, 1], [0.8, 0.55], [1, 0.08]];   // upper surface (fraction of chord, of thickness)
   const lower = [[1, -0.02], [0.6, -0.25], [0.25, -0.35], [0.06, -0.3], [0, 0]];
   const ring = [...prof, ...lower];
   const pos = [], idx = [];
   for (let i = 0; i <= segs; i++) {
-    const x = -span / 2 + (span * i) / segs, f = 1 - Math.pow(Math.abs(x) / (span / 2), 2);
-    const yc = y - dip * Math.max(0, f);
+    const x = -span / 2 + (span * i) / segs, e = Math.abs(x) / (span / 2), f = 1 - e * e;
+    // (rise: the outer ends turning up – the 2022 cars' wing tips sweeping up into the endplates)
+    const yc = y - dip * Math.max(0, f) + rise * Math.pow(e, 6);
     for (const [cf, tf] of ring) {
       const lz = -cf * chord, ly = tf * thick;
       pos.push(x, yc + ly * Math.cos(aoa) - lz * Math.sin(aoa), z + lz * Math.cos(aoa) + ly * Math.sin(aoa));
@@ -78,15 +127,70 @@ function wingElement(span, chord, thick, y, z, aoa = 0.12, dip = 0, segs = 16) {
   return g;
 }
 const boxAt = (w, h, l, x, y, z, rx = 0, ry = 0, rz = 0) => { const g = new THREE.BoxGeometry(w, h, l); g.rotateX(rx); g.rotateY(ry); g.rotateZ(rz); g.translate(x, y, z); return g; };
-const rod = (a, b, r = 0.012) => {   // a thin cylinder between two points
+// a rounded box (soft edges catch the light: cockpit pads, mirror housings, camera pods)
+function softBox(w, h, l, x, y, z, r = 0.25) {
+  const g = new THREE.BoxGeometry(w, h, l, 8, 8, 8), p = g.attributes.position, v = new THREE.Vector3(), hx = w / 2, hy = h / 2, hz = l / 2, rr = Math.min(hx, hy, hz) * r * 4;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const c = new THREE.Vector3(Math.max(-hx + rr, Math.min(hx - rr, v.x)), Math.max(-hy + rr, Math.min(hy - rr, v.y)), Math.max(-hz + rr, Math.min(hz - rr, v.z)));
+    const d = v.clone().sub(c); if (d.lengthSq() > 1e-12) v.copy(c).addScaledVector(d.normalize(), rr);
+    p.setXYZ(i, v.x + x, v.y + y, v.z + z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const rod = (a, b, r = 0.012, seg = 6) => {   // a thin cylinder between two points
   const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), len = A.distanceTo(B);
-  const g = new THREE.CylinderGeometry(r, r, len, 6); g.translate(0, len / 2, 0);
+  const g = new THREE.CylinderGeometry(r, r, len, seg); g.translate(0, len / 2, 0);
   const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
   g.applyQuaternion(q); g.translate(A.x, A.y, A.z); return g;
 };
+// A faired strut (wishbone, track rod): a flat aerofoil-like blade from a to b, `w` wide (lying flat), `t` thick.
+function strut(a, b, w = 0.05, t = 0.016) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), d = B.clone().sub(A), len = d.length(); d.normalize();
+  const g = new THREE.CylinderGeometry(1, 1, len, 10); g.translate(0, len / 2, 0); g.scale(w / 2, 1, t / 2);
+  // local y → along, local x → flat across (horizontal), local z → up
+  let side = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0)); if (side.lengthSq() < 1e-6) side.set(1, 0, 0); side.normalize();
+  const up = new THREE.Vector3().crossVectors(side, d).normalize();
+  g.applyMatrix4(new THREE.Matrix4().makeBasis(side, d, up)); g.translate(A.x, A.y, A.z);
+  return g;
+}
+// A tube swept along points with an elliptical section `a` × `b` (a across, in the curve's plane sideways; b up),
+// smooth – the halo's hoop with its fairing.
+function sweep(points, a, b, segs = 64, ring = 16) {
+  const curve = new THREE.CatmullRomCurve3(points.map((q) => new THREE.Vector3(...q)), false, "centripetal");
+  const pos = [], idx = [], uv = [];
+  const T = new THREE.Vector3(), N = new THREE.Vector3(), Bn = new THREE.Vector3(), P = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs; curve.getPointAt(t, P); curve.getTangentAt(t, T);
+    // the section's "up" kept as near world up as the curve allows (no twisting as Frenet frames would)
+    N.crossVectors(T, UPV); if (N.lengthSq() < 1e-6) N.set(1, 0, 0); N.normalize(); Bn.crossVectors(N, T).normalize();
+    for (let k = 0; k <= ring; k++) {
+      const th = (k / ring) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+      pos.push(P.x + N.x * a * c + Bn.x * b * s, P.y + N.y * a * c + Bn.y * b * s, P.z + N.z * a * c + Bn.z * b * s);
+      uv.push(t, k / ring);
+    }
+  }
+  for (let i = 0; i < segs; i++) for (let k = 0; k < ring; k++) { const p = i * (ring + 1) + k, q = p + ring + 1; idx.push(p, q, p + 1, p + 1, q, q + 1); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  // (the winding faces out whichever way the curve runs)
+  const n0 = new THREE.Vector3().fromBufferAttribute(g.attributes.normal, 0), p0 = new THREE.Vector3().fromBufferAttribute(g.attributes.position, 0);
+  curve.getPointAt(0, P);
+  if (n0.dot(p0.sub(P)) < 0) { const a2 = g.index.array; for (let i = 0; i < a2.length; i += 3) [a2[i + 1], a2[i + 2]] = [a2[i + 2], a2[i + 1]]; g.computeVertexNormals(); }
+  return g;
+}
+// A flat plate from a 2D outline (in the plane x = `at`; outline points [z, y]), `t` thick: endplates.
+function plate(outline, at, t = 0.012) {
+  const s = new THREE.Shape(); outline.forEach(([z, y], i) => (i ? s.lineTo(z, y) : s.moveTo(z, y)));
+  const g = new THREE.ExtrudeGeometry(s, { depth: t, bevelEnabled: false, curveSegments: 6 });
+  g.rotateY(-Math.PI / 2); g.translate(at + t / 2, 0, 0);
+  return g;
+}
 // Merge geometries (all converted to non-indexed, keeping uv when every part has one).
 function merge(list) {
-  const parts = list.map((g) => (g.index ? g.toNonIndexed() : g));
+  const parts = list.filter(Boolean).map((g) => (g.index ? g.toNonIndexed() : g));
   const withUv = parts.every((g) => g.attributes.uv);
   const out = new THREE.BufferGeometry();
   for (const name of ["position", "normal", ...(withUv ? ["uv"] : [])]) {
@@ -99,25 +203,179 @@ function merge(list) {
   return out;
 }
 const mirrorX = (g) => { const m = g.clone(); m.scale(-1, 1, 1); const idx = m.index; if (idx) { const a = idx.array; for (let i = 0; i < a.length; i += 3) [a[i + 1], a[i + 2]] = [a[i + 2], a[i + 1]]; } else { const p = m.attributes.position.array; for (let i = 0; i < p.length; i += 9) for (let k = 0; k < 3; k++) [p[i + 3 + k], p[i + 6 + k]] = [p[i + 6 + k], p[i + 3 + k]]; } m.computeVertexNormals(); return m; };
+const both = (g) => merge([g, mirrorX(g)]);
+// UVs in metres by box projection (each triangle on the plane its normal faces most): carbon weave and tyre grain
+// keep their real size whatever the part's shape. `tile`: metres per texture repeat.
+function metricUV(g, tile) {
+  const p = g.attributes.position, n = g.attributes.normal, uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i += 3) {
+    let nx = 0, ny = 0, nz = 0; for (let k = 0; k < 3; k++) { nx += Math.abs(n.getX(i + k)); ny += Math.abs(n.getY(i + k)); nz += Math.abs(n.getZ(i + k)); }
+    for (let k = 0; k < 3; k++) {
+      const x = p.getX(i + k), y = p.getY(i + k), z = p.getZ(i + k);
+      const [u, v] = nx >= ny && nx >= nz ? [z, y] : ny >= nz ? [x, z] : [x, y];
+      uv[(i + k) * 2] = u / tile; uv[(i + k) * 2 + 1] = v / tile;
+    }
+  }
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  return g;
+}
 
-// ---------- the shared template ----------
-let T = null;
-function template() {
-  if (T) return T;
-  // body: nose → survival cell → cockpit → airbox/engine cover → tail (sections listed nose first)
-  const body = loft([
+// ---------- textures (shared, drawn once) ----------
+const hasDom = typeof document !== "undefined";
+const canvas = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
+const TEX = {};
+const sharedTex = (key, make) => {
+  if (!hasDom) return null;
+  if (!TEX[key]) { const t = make(); t.userData.shared = true; TEX[key] = t; }
+  return TEX[key];
+};
+// 2×2 twill carbon: tows 5 mm wide (a 4 cm repeat holds 8), as a normal map (the weave's ridges) and a roughness map
+// (the tows' sheen) – data, not colour: no sRGB. The colour stays the material's (near black).
+function carbonMaps() {
+  return {
+    normal: sharedTex("carbonN", () => {
+      const N = 128, c = canvas(N, N), g = c.getContext("2d"), img = g.createImageData(N, N), tow = N / 8;
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const i = Math.floor(x / tow), j = Math.floor(y / tow), warp = ((i + j) >> 1) % 2 === 0;   // 2×2 twill
+        const fx = (x % tow) / tow - 0.5, fy = (y % tow) / tow - 0.5;
+        // each tow a shallow cylinder across its width
+        const nx = warp ? fx * 0.9 : 0, ny = warp ? 0 : fy * 0.9;
+        const o = (y * N + x) * 4; img.data[o] = 128 + nx * 127; img.data[o + 1] = 128 + ny * 127; img.data[o + 2] = 235; img.data[o + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.colorSpace = THREE.NoColorSpace;
+      return t;
+    }),
+    rough: sharedTex("carbonR", () => {
+      const N = 128, c = canvas(N, N), g = c.getContext("2d"), tow = N / 8;
+      for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { const warp = ((i + j) >> 1) % 2 === 0; const v = warp ? 92 : 120; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(i * tow, j * tow, tow, tow); }
+      const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.colorSpace = THREE.NoColorSpace;
+      return t;
+    }),
+  };
+}
+// Tyre: fine grain on the rubber (roughness), the sidewall's moulded rings – no brand lettering.
+function tyreRough() {
+  return sharedTex("tyreR", () => {
+    const N = 256, c = canvas(N, N), g = c.getContext("2d");
+    g.fillStyle = "rgb(225,225,225)"; g.fillRect(0, 0, N, N);
+    let a = 4242; const r = () => ((a = (a * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 2600; k++) { const v = 190 + r() * 60 | 0; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(r() * N, r() * N, 1 + r() * 2, 1); }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; t.anisotropy = 4;
+    return t;
+  });
+}
+// The steering wheel's display: gear, speed bar, shift lights (a stylised screen – no real team UI)
+function wheelScreen() {
+  return sharedTex("screen", () => {
+    const c = canvas(256, 128), g = c.getContext("2d");
+    g.fillStyle = "#050607"; g.fillRect(0, 0, 256, 128);
+    const cols = ["#23d160", "#23d160", "#23d160", "#23d160", "#ff3b30", "#ff3b30", "#ff3b30", "#4aa3ff", "#4aa3ff", "#4aa3ff"];
+    cols.forEach((col, i) => { g.fillStyle = col; g.beginPath(); g.arc(28 + i * 22, 14, 7, 0, Math.PI * 2); g.fill(); });
+    g.fillStyle = "#e9edf2"; g.font = "700 64px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("7", 128, 74);
+    g.fillStyle = "#1d2f45"; g.fillRect(14, 40, 70, 70); g.fillRect(172, 40, 70, 70);
+    g.fillStyle = "#9fb3c8"; g.font = "600 18px Arial, sans-serif"; g.fillText("DELTA", 49, 60); g.fillText("-0.12", 49, 88); g.fillText("LAP", 207, 60); g.fillText("23", 207, 88);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return t;
+  });
+}
+
+// ---------- the template per profile (shared by every car of that profile) ----------
+const TEMPLATES = new Map();
+function template(prof) {
+  if (TEMPLATES.has(prof.key)) return TEMPLATES.get(prof.key);
+  const T = prof.era === "2026" ? body2026(prof) : body2022(prof);
+  Object.assign(T, cockpit(prof), wheels(prof));
+  // parts fixed to the car that share a material, merged: fewer objects to draw per car
+  T.painted = merge([T.body, T.pods]); T.wing = merge([T.wing, T.halo]);
+  T.lights = merge(T.lights);
+  // (shared by every car: marked so freeing one car's model leaves them alone)
+  const mark = (o) => { if (o?.isBufferGeometry) o.userData.shared = true; else if (o && typeof o === "object") Object.values(o).forEach(mark); };
+  mark(T);
+  T.box = new THREE.Box3().setFromBufferAttribute(T.painted.attributes.position);
+  TEMPLATES.set(prof.key, T);
+  return T;
+}
+
+// The halo (both eras: the hoop from rear mounts on the chassis up round the driver's head, the centre pillar down to
+// the chassis ahead of the cockpit), its fairing thicker than the titanium tube under it.
+function halo(p) {
+  const hoop = sweep([[-0.335, 0.6, -0.3], [-0.34, 0.74, -0.16], [-0.31, 0.86, 0.04], [-0.22, 0.915, 0.22], [0, 0.935, 0.33], [0.22, 0.915, 0.22], [0.31, 0.86, 0.04], [0.34, 0.74, -0.16], [0.335, 0.6, -0.3]], 0.046, 0.034, 72, 18);
+  // the pillar: a blade, wide across (the fairing), from the hoop's front down to the chassis
+  const pillar = loft(smoothSections([[0.355, 0.925, 0.028, 0.03], [0.45, 0.86, 0.034, 0.03], [0.55, 0.76, 0.04, 0.028], [0.64, 0.64, 0.05, 0.03]].reverse(), 2), 14);
+  return merge([hoop, pillar]);
+}
+
+function body2022(p) {
+  const rb = p.variant === "rb21";
+  // body, nose first: nose (narrow, RB's nose tip sits on the wing's main plane) → survival cell → cockpit (low, open:
+  // the driver sits in it) → airbox / roll hoop → engine cover → tail
+  const sec = [
+    [2.78, 0.19, 0.045, 0.035], [2.55, 0.22, rb ? 0.075 : 0.085, 0.06], [2.15, 0.29, 0.12, 0.095], [1.75, 0.36, 0.17, 0.14],
+    [1.3, 0.425, 0.23, 0.18], [0.85, 0.455, 0.28, 0.19], [0.5, 0.45, 0.305, 0.175], [0.3, 0.42, 0.31, 0.135],
+    [0.0, 0.41, 0.315, 0.13], [-0.22, 0.43, 0.32, 0.15], [-0.42, 0.53, 0.3, 0.29], [-0.75, 0.58, 0.25, 0.37],
+    [-1.15, 0.52, 0.19, 0.28], [-1.6, 0.44, 0.13, 0.19], [-2.05, 0.37, 0.085, 0.12], [-2.45, 0.33, 0.05, 0.07],
+  ];
+  const body = loft(smoothSections(sec, 2).reverse(), 32);
+  // sidepods (left; the right is a mirror). RB21: a high, narrow letterbox inlet, a steep downwash ramp and a deep
+  // undercut; the neutral shape a fuller pod.
+  const podSec = rb
+    ? [[0.62, 0.52, 0.11, 0.05, 0.47, 3.4], [0.5, 0.5, 0.16, 0.08, 0.5, 3.2], [0.2, 0.46, 0.2, 0.11, 0.53, 3], [-0.25, 0.4, 0.2, 0.12, 0.51, 2.8],
+      [-0.75, 0.31, 0.16, 0.11, 0.45, 2.6], [-1.2, 0.24, 0.11, 0.08, 0.34], [-1.6, 0.19, 0.06, 0.05, 0.24], [-1.85, 0.17, 0.03, 0.03, 0.18]]
+    : [[0.65, 0.42, 0.12, 0.11, 0.5, 3], [0.48, 0.42, 0.18, 0.15, 0.53, 3], [0.0, 0.4, 0.2, 0.16, 0.52, 2.8], [-0.5, 0.35, 0.18, 0.15, 0.48, 2.6],
+      [-1.0, 0.28, 0.13, 0.12, 0.39], [-1.45, 0.22, 0.08, 0.08, 0.28], [-1.8, 0.18, 0.04, 0.05, 0.2]];
+  const podL = loft(smoothSections(podSec, 2).reverse(), 22);
+  const pods = both(podL);
+  // floor: the 2022 floor, wide to the front tyres' wake, edge wing, the diffuser's big tunnels rising at the back
+  const fl = new THREE.Shape();
+  [[0.2, 1.25], [0.5, 1.02], [0.8, 0.72], [0.86, 0.35], [0.86, -0.9], [0.8, -1.3], [0.62, -1.55], [0.55, -2.35], [-0.55, -2.35], [-0.62, -1.55], [-0.8, -1.3], [-0.86, -0.9], [-0.86, 0.35], [-0.8, 0.72], [-0.5, 1.02], [-0.2, 1.25]]
+    .forEach(([x, z], i) => (i ? fl.lineTo(x, -z) : fl.moveTo(x, -z)));
+  const floor = new THREE.ExtrudeGeometry(fl, { depth: 0.04, bevelEnabled: false }); floor.rotateX(Math.PI / 2); floor.translate(0, 0.075, 0);
+  const edge = both(wingElementSide(0.86, 0.075, 0.95, -0.85));
+  const diffuser = merge([boxAt(1.0, 0.02, 0.62, 0, 0.19, -2.06, 0.38), boxAt(0.012, 0.22, 0.6, 0.5, 0.17, -2.05), boxAt(0.012, 0.22, 0.6, -0.5, 0.17, -2.05), boxAt(0.012, 0.18, 0.55, 0.2, 0.16, -2.05), boxAt(0.012, 0.18, 0.55, -0.2, 0.16, -2.05)]);
+  // front wing: four elements sweeping up outboard into rounded endplates; the nose on the main plane
+  const fwSpan = 1.95;
+  const fw = [wingElement(fwSpan, 0.32, 0.03, 0.075, 2.92, 0.05, 0.02, 24, 0.05), wingElement(fwSpan - 0.06, 0.2, 0.026, 0.13, 2.68, 0.2, 0.025, 24, 0.09),
+    wingElement(fwSpan - 0.1, 0.15, 0.022, 0.18, 2.52, 0.34, 0.03, 24, 0.12), wingElement(fwSpan - 0.14, 0.12, 0.02, 0.225, 2.4, 0.5, 0.03, 24, 0.14)];
+  const epFront = [[3.0, 0.05], [3.0, 0.2], [2.85, 0.33], [2.5, 0.36], [2.3, 0.28], [2.3, 0.05]];
+  const fwPlates = merge([plate(epFront, fwSpan / 2), plate(epFront, -fwSpan / 2 - 0.012)]);
+  // rear wing: a spoon main plane, the DRS flap over it, rounded endplates, the beam wing under
+  const rwSpan = 1.02;
+  const rwMain = wingElement(rwSpan, 0.3, 0.04, 0.8, -2.12, 0.1, 0.035, 20);
+  const rwFlap = wingElement(rwSpan - 0.02, 0.2, 0.026, 0.92, -2.3, 0.45, 0.02, 20);
+  const ep = [[-2.0, 0.56], [-2.03, 0.8], [-2.13, 0.97], [-2.42, 1.0], [-2.5, 0.92], [-2.5, 0.62], [-2.36, 0.55]];
+  const rwPlates = merge([plate(ep, rwSpan / 2 + 0.002), plate(ep, -rwSpan / 2 - 0.014)]);
+  const beam = merge([wingElement(0.86, 0.14, 0.02, 0.36, -2.3, 0.15, 0, 12), wingElement(0.82, 0.12, 0.018, 0.43, -2.42, 0.4, 0, 12)]);
+  const rwPylon = merge([boxAt(0.014, 0.42, 0.12, 0, 0.6, -2.3), boxAt(0.12, 0.12, 0.36, 0, 0.3, -2.45)]);
+  const susp = suspension(p, true);
+  // mirrors on the cockpit sides, a T-cam pod on the airbox, a small fin
+  const mirrors = [], heads = [];
+  for (const k of [1, -1]) { mirrors.push(strut([0.29 * k, 0.6, 0.5], [0.45 * k, 0.665, 0.52], 0.03, 0.012)); heads.push(softBox(0.16, 0.065, 0.06, 0.5 * k, 0.68, 0.52, 0.2)); }
+  const tcamPod = softBox(0.1, 0.055, 0.13, 0, 0.995, -0.6, 0.3);   // (the lens at its front: the TCAM mount)
+  const fin = boxAt(0.008, 0.12, 0.6, 0, 0.88, -1.15, 0.12);
+  return {
+    body, pods,
+    carbon: metricUV(merge([floor, edge, diffuser, fw[0], fwPlates, rwPlates, rwPylon, beam, ...susp, ...mirrors, fin, tcamPod]), 0.04),
+    wing: merge([rwMain, ...heads]), fwFlaps: merge([fw[1], fw[2], fw[3]]), rwFlaps: rwFlap,
+    fwPivot: [0.13, 2.68], rwPivot: [0.92, -2.3], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
+    lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: halo(p),
+  };
+}
+// (the floor's edge wing: a short element along the floor edge)
+function wingElementSide(x, y, z0, z1) { const g = wingElement(z0 - z1, 0.1, 0.012, 0, 0, 0.05, 0, 8); g.rotateY(Math.PI / 2); g.translate(x, y + 0.02, (z0 + z1) / 2); return g; }
+
+function body2026(p) {
+  const sec = [
     [2.42, 0.2, 0.05, 0.035], [2.3, 0.22, 0.085, 0.06], [2.0, 0.265, 0.12, 0.09], [1.6, 0.33, 0.175, 0.14],
-    [1.2, 0.4, 0.235, 0.19], [0.75, 0.44, 0.285, 0.2], [0.35, 0.43, 0.31, 0.19], [-0.1, 0.45, 0.33, 0.21],
-    [-0.4, 0.55, 0.33, 0.31], [-0.75, 0.57, 0.29, 0.33], [-1.2, 0.5, 0.22, 0.26], [-1.65, 0.43, 0.15, 0.19],
-    [-2.1, 0.36, 0.085, 0.11], [-2.42, 0.32, 0.05, 0.06],
-  ].reverse(), 28);
-  // sidepods (left; the right is a mirror): inlet, a deep undercut and the coke-bottle taper to the floor
-  const podL = loft([
+    [1.2, 0.4, 0.235, 0.19], [0.8, 0.44, 0.285, 0.19], [0.5, 0.445, 0.3, 0.17], [0.3, 0.42, 0.31, 0.135],
+    [0.0, 0.41, 0.315, 0.13], [-0.22, 0.43, 0.32, 0.15], [-0.42, 0.54, 0.31, 0.29], [-0.75, 0.57, 0.27, 0.36],
+    [-1.2, 0.5, 0.22, 0.26], [-1.65, 0.43, 0.15, 0.19], [-2.1, 0.36, 0.085, 0.11], [-2.42, 0.32, 0.05, 0.06],
+  ];
+  const body = loft(smoothSections(sec, 2).reverse(), 32);
+  const podL = loft(smoothSections([
     [0.62, 0.38, 0.13, 0.12, 0.5, 3], [0.45, 0.39, 0.17, 0.15, 0.52, 3], [0.0, 0.37, 0.18, 0.16, 0.5, 2.8], [-0.5, 0.33, 0.17, 0.15, 0.46, 2.6],
     [-1.0, 0.28, 0.13, 0.12, 0.38], [-1.45, 0.23, 0.08, 0.08, 0.27], [-1.7, 0.2, 0.04, 0.05, 0.2],
-  ].reverse(), 20);
-  const podR = mirrorX(podL);
-  // floor: a plate with the outline of the 2026 floor (narrower, shorter) and a raised edge
+  ], 2).reverse(), 22);
   const fl = new THREE.Shape();
   [[0.22, 1.25], [0.6, 0.75], [0.74, 0.45], [0.74, -0.9], [0.66, -1.35], [0.5, -1.62], [0.5, -2.25], [-0.5, -2.25], [-0.5, -1.62], [-0.66, -1.35], [-0.74, -0.9], [-0.74, 0.45], [-0.6, 0.75], [-0.22, 1.25]]
     .forEach(([x, z], i) => (i ? fl.lineTo(x, -z) : fl.moveTo(x, -z)));
@@ -126,64 +384,110 @@ function template() {
   // front wing: three elements on twin pylons, endplates, no wheel arches
   const fwSpan = 1.72;
   const fw = [wingElement(fwSpan, 0.3, 0.035, 0.08, 2.72, 0.06, 0.025), wingElement(fwSpan - 0.06, 0.17, 0.028, 0.14, 2.5, 0.22, 0.02), wingElement(fwSpan - 0.12, 0.12, 0.024, 0.19, 2.36, 0.38, 0.015)];
-  const fwFixed = merge([fw[0], boxAt(0.012, 0.16, 0.32, 0.07, 0.16, 2.48), boxAt(0.012, 0.16, 0.32, -0.07, 0.16, 2.48)]);
+  const pylons = merge([boxAt(0.012, 0.16, 0.32, 0.07, 0.16, 2.48), boxAt(0.012, 0.16, 0.32, -0.07, 0.16, 2.48)]);
   const fwPlates = merge([boxAt(0.012, 0.27, 0.62, fwSpan / 2, 0.16, 2.48), boxAt(0.012, 0.27, 0.62, -fwSpan / 2, 0.16, 2.48)]);
-  // wake-control boards ahead of the sidepods, and the front brake ducts
   const boards = merge([boxAt(0.01, 0.22, 0.35, 0.56, 0.24, 0.92, 0, 0.12), boxAt(0.01, 0.22, 0.35, -0.56, 0.24, 0.92, 0, -0.12)]);
-  // rear wing: main plane + two active flaps on twin pylons, endplates with lights; crash structure; no beam wing
   const rwSpan = 0.98;
-  const rwMain = wingElement(rwSpan, 0.27, 0.04, 0.82, -2.08, 0.12, 0);
-  const rwFlap1 = wingElement(rwSpan - 0.02, 0.17, 0.028, 0.94, -2.2, 0.42, 0), rwFlap2 = wingElement(rwSpan - 0.04, 0.12, 0.024, 1.01, -2.3, 0.62, 0);
-  const rwPlates = merge([boxAt(0.012, 0.66, 0.7, rwSpan / 2 + 0.006, 0.72, -2.24), boxAt(0.012, 0.66, 0.7, -rwSpan / 2 - 0.006, 0.72, -2.24)]);
-  const rwPylons = merge([boxAt(0.012, 0.5, 0.12, 0.05, 0.6, -2.28), boxAt(0.012, 0.5, 0.12, -0.05, 0.6, -2.28), boxAt(0.12, 0.12, 0.36, 0, 0.33, -2.42), boxAt(0.6, 0.012, 0.06, 0, 0.5, -2.32)]);
-  // suspension (wishbones and push/pull rods), mirrors, halo, steering wheel, T-cam pod
-  const susp = [];
-  for (const [z, wx] of [[FZ, FX], [RZ, RX]]) for (const k of [1, -1]) {
-    susp.push(rod([0.2 * k, 0.46, z + 0.18], [(wx - 0.13) * k, 0.44, z]), rod([0.2 * k, 0.46, z - 0.18], [(wx - 0.13) * k, 0.44, z]));
-    susp.push(rod([0.2 * k, 0.24, z + 0.2], [(wx - 0.12) * k, 0.22, z]), rod([0.2 * k, 0.24, z - 0.2], [(wx - 0.12) * k, 0.22, z]));
-    susp.push(rod([0.22 * k, 0.5, z - 0.02], [(wx - 0.14) * k, 0.24, z], 0.014));
-  }
-  const halo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([[-0.33, 0.56, -0.28], [-0.32, 0.8, -0.06], [-0.2, 0.9, 0.22], [0, 0.92, 0.33], [0.2, 0.9, 0.22], [0.32, 0.8, -0.06], [0.33, 0.56, -0.28]].map((q) => new THREE.Vector3(...q))), 40, 0.034, 8, false);
-  const pillar = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([[0, 0.92, 0.33], [0, 0.8, 0.5], [0, 0.62, 0.62]].map((q) => new THREE.Vector3(...q))), 12, 0.036, 8, false);
-  const mirrors = [];
-  for (const k of [1, -1]) { mirrors.push(rod([0.27 * k, 0.6, 0.48], [0.44 * k, 0.66, 0.5], 0.01), boxAt(0.15, 0.06, 0.05, 0.48 * k, 0.67, 0.5)); }
-  const darkParts = merge([fwPlates, boards, rwPlates, rwPylons, ...susp, halo, pillar, ...mirrors.map((g, i) => (i % 2 ? null : g)).filter(Boolean),
-    boxAt(0.22, 0.09, 0.03, 0, 0.62, 0.32), boxAt(0.08, 0.05, 0.09, 0, 0.98, -0.45), loft([[0.5, 0.62, 0.21, 0.02], [0.05, 0.63, 0.25, 0.02], [-0.22, 0.63, 0.24, 0.02]], 16, [-2.6, 2.6], true)]);
-  const mirrorHeads = merge(mirrors.filter((_, i) => i % 2));
-  const carbon = merge([floor, diffuser, fwFixed]);
-  // wheels: tyre (lathe of a rounded profile), a coloured sidewall band, a wheel cover with a marker
-  const tyre = (r, w) => {
-    const pts = []; const rr = 0.06;
-    for (let i = 0; i <= 8; i++) { const a = (i / 8) * Math.PI / 2; pts.push(new THREE.Vector2(r - rr + Math.sin(a) * rr, -w / 2 + rr - Math.cos(a) * rr)); }
-    for (let i = 0; i <= 8; i++) { const a = (i / 8) * Math.PI / 2; pts.push(new THREE.Vector2(r - rr + Math.cos(a) * rr, w / 2 - rr + Math.sin(a) * rr)); }
-    pts.unshift(new THREE.Vector2(r * 0.66, -w / 2)); pts.push(new THREE.Vector2(r * 0.66, w / 2));
-    const g = new THREE.LatheGeometry(pts, 32); g.rotateZ(Math.PI / 2); return g;    // axle along X
+  const rwMain = wingElement(rwSpan, 0.27, 0.04, 0.74, -2.08, 0.12, 0);
+  const rwFlaps = merge([wingElement(rwSpan - 0.02, 0.17, 0.028, 0.84, -2.2, 0.42, 0), wingElement(rwSpan - 0.04, 0.12, 0.024, 0.9, -2.3, 0.62, 0)]);   // (top under the 0.95 m limit)
+  const rwPlates = merge([boxAt(0.012, 0.56, 0.62, rwSpan / 2 + 0.006, 0.66, -2.24), boxAt(0.012, 0.56, 0.62, -rwSpan / 2 - 0.006, 0.66, -2.24)]);
+  const rwPylons = merge([boxAt(0.012, 0.42, 0.12, 0.05, 0.56, -2.28), boxAt(0.012, 0.42, 0.12, -0.05, 0.56, -2.28), boxAt(0.12, 0.12, 0.36, 0, 0.33, -2.42), boxAt(0.6, 0.012, 0.06, 0, 0.5, -2.32)]);
+  const susp = suspension(p, false);
+  const mirrors = [], heads = [];
+  for (const k of [1, -1]) { mirrors.push(strut([0.27 * k, 0.6, 0.48], [0.44 * k, 0.66, 0.5], 0.03, 0.012)); heads.push(softBox(0.15, 0.06, 0.05, 0.48 * k, 0.67, 0.5, 0.2)); }
+  const tcamPod = softBox(0.1, 0.055, 0.13, 0, 0.995, -0.58, 0.3);
+  return {
+    body, pods: both(podL),
+    carbon: metricUV(merge([floor, diffuser, fw[0], pylons, fwPlates, boards, rwPlates, rwPylons, ...susp, ...mirrors, tcamPod]), 0.04),
+    wing: merge([rwMain, ...heads]), fwFlaps: merge([fw[1], fw[2]]), rwFlaps,
+    fwPivot: [0.16, 2.5], rwPivot: [0.86, -2.2], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
+    lights: [boxAt(0.012, 0.05, 0.36, rwSpan / 2 + 0.014, 0.78, -2.24), boxAt(0.012, 0.05, 0.36, -rwSpan / 2 - 0.014, 0.78, -2.24), boxAt(0.06, 0.05, 0.02, 0, 0.36, -2.6)],
+    halo: halo(p),
   };
-  const band = (r, w) => { const g = new THREE.RingGeometry(r * 0.78, r * 0.86, 32); g.rotateY(Math.PI / 2); g.translate(w / 2 + 0.002, 0, 0); return merge([g, mirrorX(g)]); };
-  const cover = (r, w) => { const g = new THREE.CircleGeometry(r * 0.66, 24); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.01, 0, 0); const mark = boxAt(0.004, r * 0.55, 0.05, w / 2 - 0.005, r * 0.3, 0); return merge([g, mirrorX(g), mark]); };
-  T = {
-    body, pods: merge([podL, podR]), carbon, dark: darkParts, mirrorHeads,
-    fwFlaps: merge([fw[1], fw[2]]), rwMain, rwFlaps: merge([rwFlap1, rwFlap2]),
-    front: { tyre: tyre(FR, FW), band: band(FR, FW), cover: cover(FR, FW) }, rear: { tyre: tyre(RR, RW), band: band(RR, RW), cover: cover(RR, RW) },
-    light: boxAt(0.012, 0.05, 0.36, 0, 0, 0), rain: boxAt(0.06, 0.05, 0.02, 0, 0.36, -2.6),
-    helmet: new THREE.SphereGeometry(0.15, 16, 12),
-  };
-  // parts fixed to the car that share a material, merged: fewer objects to draw per car (24 → 20; 80 fewer for a
-  // field of 20) – the livery's uv kept (body and pods both have it), the lights placed where they sit
-  const lightAt = (x) => { const g = T.light.clone(); g.translate(x, 0.86, -2.24); return g; };
-  T.painted = merge([T.body, T.pods]); T.wing = merge([T.mirrorHeads, T.rwMain]); T.lights = merge([lightAt(0.5), lightAt(-0.5), T.rain]);
-  // (shared by every car: marked so freeing one car's model leaves them alone)
-  const mark = (o) => { if (o?.isBufferGeometry) o.userData.shared = true; else if (o && typeof o === "object") Object.values(o).forEach(mark); };
-  mark(T);
-  return T;
 }
 
-// ---------- liveries (2026) ----------
+// Wishbones and push/pull rods (faired blades), each corner from the chassis to the upright.
+function suspension(p, pullFront) {
+  const out = [];
+  for (const [z, wx, front] of [[p.FZ, p.W / 2 - p.FW / 2, true], [p.RZ, p.W / 2 - p.RW / 2, false]]) for (const k of [1, -1]) {
+    const ox = (wx - 0.14) * k, cx = (front ? 0.2 : 0.22) * k;
+    out.push(strut([cx, 0.46, z + 0.24], [ox, 0.47, z]), strut([cx, 0.46, z - 0.2], [ox, 0.47, z]));
+    out.push(strut([cx, 0.22, z + 0.26], [ox, 0.2, z]), strut([cx, 0.22, z - 0.22], [ox, 0.2, z]));
+    // (pull rod: from high on the upright down to the chassis; push rod: low on the upright up to the chassis)
+    out.push(front && pullFront ? strut([ox * 0.95, 0.45, z - 0.04], [cx * 0.9, 0.2, z - 0.32], 0.028, 0.014) : strut([ox * 0.95, 0.22, z + 0.02], [cx * 1.1, 0.5, z - 0.12], 0.028, 0.014));
+    // track rod (steering) in front
+    if (front) out.push(strut([cx, 0.34, z + 0.1], [ox, 0.34, z + 0.08], 0.03, 0.012));
+  }
+  return out;
+}
+
+// The cockpit: its rim pads and headrest, the seat's dark interior, the steering wheel (with its screen, grips and
+// paddles), the driver's helmet with visor, gloves and forearms.
+function cockpit(p) {
+  const [hx, hy, hz] = p.helmet;
+  // the opening's rim (padded edge round it) and the headrest round the helmet's back and sides
+  const rim = sweep([[0.26, 0.565, -0.32], [0.285, 0.575, -0.05], [0.27, 0.58, 0.25], [0.18, 0.585, 0.45], [0, 0.59, 0.5], [-0.18, 0.585, 0.45], [-0.27, 0.58, 0.25], [-0.285, 0.575, -0.05], [-0.26, 0.565, -0.32]], 0.03, 0.022, 48, 10);
+  const headrest = merge([softBox(0.09, 0.15, 0.36, 0.2, 0.62, -0.12, 0.25), softBox(0.09, 0.15, 0.36, -0.2, 0.62, -0.12, 0.25), softBox(0.42, 0.2, 0.1, 0, 0.64, -0.33, 0.25)]);
+  // the tub inside (dark), visible through the opening round the driver: seat back and shoulders
+  const tub = merge([loft([[0.45, 0.53, 0.25, 0.02], [-0.3, 0.53, 0.26, 0.02]], 16), softBox(0.38, 0.12, 0.22, 0, 0.6, -0.2, 0.3)]);
+  // helmet: an egg a little longer than wide, its chin bar lower in front; the visor a band over its eyes
+  const helmet = new THREE.SphereGeometry(1, 32, 24); helmet.scale(0.13, 0.14, 0.155);
+  { const q = helmet.attributes.position; for (let i = 0; i < q.count; i++) { const y = q.getY(i), z = q.getZ(i); if (y < -0.04 && z > 0) q.setY(i, y - 0.02 * (z / 0.155)); } helmet.computeVertexNormals(); }
+  helmet.translate(hx, hy, hz);
+  const visor = new THREE.SphereGeometry(1.01, 32, 8, Math.PI / 2 - 0.95, 1.9, 1.2, 0.42); visor.scale(0.13, 0.14, 0.155); visor.translate(hx, hy, hz);
+  // the steering wheel: a rounded rectangle, its face (screen, buttons: −z, towards the driver) tilted up to the
+  // driver's eyes, grips and paddles behind
+  const wz = 0.36, wy = 0.61, tilt = 0.42;
+  const wheelBody = softBox(0.25, 0.14, 0.035, 0, 0, 0, 0.25);
+  const grips = merge([softBox(0.055, 0.13, 0.055, 0.14, -0.005, 0.0, 0.45), softBox(0.055, 0.13, 0.055, -0.14, -0.005, 0.0, 0.45)]);
+  const paddles = merge([boxAt(0.07, 0.07, 0.006, 0.08, 0.0, 0.03), boxAt(0.07, 0.07, 0.006, -0.08, 0.0, 0.03)]);
+  const screen = new THREE.PlaneGeometry(0.11, 0.055); screen.rotateY(Math.PI); screen.translate(0, 0.02, -0.0185);
+  const buttons = []; for (const [bx, by] of [[-0.1, 0.04], [0.1, 0.04], [-0.1, -0.03], [0.1, -0.03], [-0.07, -0.055], [0.07, -0.055], [-0.03, -0.055], [0.03, -0.055]]) { const b = new THREE.CylinderGeometry(0.008, 0.008, 0.01, 10); b.rotateX(Math.PI / 2); b.translate(bx, by, -0.02); buttons.push(b); }
+  const column = rod([0, -0.02, 0.02], [0, -0.02, 0.2], 0.018, 10);
+  // gloves on the grips; forearms back to the elbows, hidden lower in the cockpit; shoulders under the headrest
+  // a fist round the grip: the fingers wrapped over its front, the thumb on the wheel's face
+  const glove = (k) => { const g = new THREE.CapsuleGeometry(0.03, 0.05, 6, 12); g.scale(1.15, 1, 1); g.translate(0.145 * k, -0.005, 0.004); const th = new THREE.CapsuleGeometry(0.012, 0.03, 4, 8); th.rotateZ(0.9 * k); th.translate(0.112 * k, 0.03, -0.024); return merge([g, th]); };
+  // (forearms in the car's frame: from the grips down and back to the elbows, inside the cockpit under its rim)
+  const forearm = (k) => { const g = new THREE.CapsuleGeometry(0.033, 0.26, 4, 12); const A = new THREE.Vector3(0.15 * k, wy - 0.02, wz - 0.03), B = new THREE.Vector3(0.22 * k, 0.5, wz - 0.32); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize())); g.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2); return g; };
+  return {
+    rim, headrest: merge([headrest, tub]), helmet, visor,
+    wheel: { body: merge([wheelBody, column, paddles]), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), arms: merge([forearm(1), forearm(-1)]), at: [0, wy, wz], tilt },
+  };
+}
+
+// Wheels: the tyre (rounded profile, sidewall bulge), the rim's lip, the wheel cover (with the compound's coloured
+// band on the sidewall), and on 2022–25 cars the deflector arching over the front tyre (it steers, doesn't spin).
+function wheels(p) {
+  const tyre = (r, w) => {
+    const pts = [], rr = 0.07, rim = 0.247;   // (18-inch rim: ~0.247 m to its lip)
+    pts.push(new THREE.Vector2(rim, -w / 2 + 0.01));
+    for (let i = 0; i <= 10; i++) { const a = (i / 10) * Math.PI / 2; pts.push(new THREE.Vector2(r - rr + Math.sin(a) * rr, -w / 2 + rr - Math.cos(a) * rr - 0.004 * Math.sin(a * 2))); }
+    for (let i = 0; i <= 10; i++) { const a = (i / 10) * Math.PI / 2; pts.push(new THREE.Vector2(r - rr + Math.cos(a) * rr, w / 2 - rr + Math.sin(a) * rr + 0.004 * Math.sin(a * 2))); }
+    pts.push(new THREE.Vector2(rim, w / 2 - 0.01));
+    const g = new THREE.LatheGeometry(pts, 48); g.rotateZ(Math.PI / 2);    // axle along X
+    return metricUV(g.toNonIndexed(), 0.25);
+  };
+  const band = (r, w) => { const g = new THREE.RingGeometry(r * 0.8, r * 0.86, 48); g.rotateY(Math.PI / 2); g.translate(w / 2 + 0.004, 0, 0); return both(g); };
+  const lip = (w) => { const g = new THREE.TorusGeometry(0.247, 0.012, 6, 40); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.012, 0, 0); return both(g); };
+  const cover = (r, w) => { const g = new THREE.CircleGeometry(0.245, 32); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.016, 0, 0); const mark = boxAt(0.004, 0.2, 0.04, w / 2 - 0.012, 0.1, 0); const hub = new THREE.CylinderGeometry(0.05, 0.05, 0.02, 16); hub.rotateZ(Math.PI / 2); hub.translate(w / 2 - 0.006, 0, 0); return both(merge([g, mark, hub])); };
+  const out = { front: { tyre: tyre(p.FR, p.FW), band: band(p.FR, p.FW), lip: lip(p.FW), cover: cover(p.FR, p.FW) }, rear: { tyre: tyre(p.RR, p.RW), band: band(p.RR, p.RW), lip: lip(p.RW), cover: cover(p.RR, p.RW) } };
+  if (p.era === "2022") {
+    // the deflector over the front tyre: an arc plate a few cm above the tread, from the top towards the front
+    // (cylinder angle θ: after turning its axis along x, y = r·sin θ, z = r·cos θ – from over the top to the front)
+    const arc = new THREE.CylinderGeometry(p.FR + 0.035, p.FR + 0.035, p.FW * 0.75, 24, 1, true, 0.55, 1.25);
+    arc.rotateZ(Math.PI / 2);
+    out.front.deflector = arc;
+  }
+  return out;
+}
+
+// ---------- liveries ----------
 // base, top (spine/engine cover), side (sidepod band), accent (stripes, wing tips), nose tip, and whether the
-// two sides differ (Cadillac's half-black, half-white). Matched on the feed's team name.
+// two sides differ (Cadillac's half-black, half-white); finish: matte paint (rougher). Matched on the feed's team name;
+// by era where a team's colours changed.
 const LIVERIES = [
-  [/red bull racing/i, { base: "#1d2a5e", top: "#1d2a5e", side: "#e21b4d", accent: "#ffcc1f", nose: "#ffcc1f", num: "#ffffff" }],
-  [/racing bulls|\bvcarb|alphatauri/i, { base: "#f3f5f8", top: "#1c3faf", side: "#1c3faf", accent: "#e21b4d", nose: "#1c3faf", num: "#1c3faf" }],
+  [/red bull racing/i, { base: "#1b2752", top: "#1b2752", side: "#d9123f", accent: "#ffcc1f", nose: "#ffcc1f", num: "#ffffff", finish: "matte" }],
+  [/racing bulls|\bvcarb|alphatauri|rb f1/i, { base: "#f3f5f8", top: "#1c3faf", side: "#1c3faf", accent: "#e21b4d", nose: "#1c3faf", num: "#1c3faf" }],
   [/mercedes/i, { base: "#121315", top: "#c8cdd2", side: "#121315", accent: "#00d7b6", nose: "#c8cdd2", num: "#00d7b6" }],
   [/ferrari/i, { base: "#e8002d", top: "#ffffff", side: "#e8002d", accent: "#ffcd00", nose: "#e8002d", num: "#ffffff" }],
   [/mclaren/i, { base: "#ff8000", top: "#151515", side: "#151515", accent: "#47c7fc", nose: "#ff8000", num: "#151515" }],
@@ -191,7 +495,8 @@ const LIVERIES = [
   [/alpine/i, { base: "#0a3a8c", top: "#ff87bc", side: "#ff87bc", accent: "#ffffff", nose: "#0a3a8c", num: "#ffffff" }],
   [/williams/i, { base: "#0b3fa6", top: "#ffffff", side: "#41b6e6", accent: "#ffffff", nose: "#0b3fa6", num: "#ffffff" }],
   [/haas/i, { base: "#f2f2f2", top: "#151515", side: "#151515", accent: "#da291c", nose: "#151515", num: "#da291c" }],
-  [/audi|sauber/i, { base: "#a9adb2", top: "#151515", side: "#e10600", accent: "#e10600", nose: "#151515", num: "#ffffff" }],
+  [/audi/i, { base: "#a9adb2", top: "#151515", side: "#e10600", accent: "#e10600", nose: "#151515", num: "#ffffff" }],
+  [/kick sauber|sauber|stake/i, { base: "#151515", top: "#52e252", side: "#151515", accent: "#52e252", nose: "#52e252", num: "#52e252" }],
   [/cadillac/i, { base: "#111111", top: "#f2f2f2", side: "#111111", accent: "#c8a24a", nose: "#111111", num: "#f2f2f2", split: "#f2f2f2" }],
 ];
 export function liveryFor(teamName, teamColour) {
@@ -200,32 +505,46 @@ export function liveryFor(teamName, teamColour) {
   return { base: c, top: c, side: "#151515", accent: "#ffffff", nose: c, num: "#ffffff" };
 }
 // The livery texture: x = along the car (0 rear → 1 front, matching the loft u), y = round the ring
-// (canvas top = v 1 = right side bottom … see loft). Painted in bands; the car number on both sides.
-function liveryTexture(l, number) {
-  const W = 1024, H = 256, c = document.createElement("canvas"); c.width = W; c.height = H;
+// (canvas top = v 1 = right side bottom … see loft). Painted in bands; the car number on both sides and the nose.
+const U0 = -2.9, U1 = 2.9;
+function liveryTexture(l, number, prof) {
+  if (!hasDom) return null;
+  const W = 2048, H = 512, c = canvas(W, H);
   const g = c.getContext("2d");
   const V = (v) => (1 - v) * H;            // ring position → canvas y
-  const U = (z) => ((z + 2.6) / 5.2) * W;  // car z → canvas x
+  const U = (z) => ((z - U0) / (U1 - U0)) * W;  // car z → canvas x
   g.fillStyle = l.base; g.fillRect(0, 0, W, H);
   if (l.split) { g.fillStyle = l.split; g.fillRect(0, V(1), W, V(0.5) - V(1)); }               // one side another colour
   // top: spine and engine cover (around v = 0.5)
-  g.fillStyle = l.top; g.fillRect(U(-2.6), V(0.58), U(0.1) - U(-2.6), V(0.42) - V(0.58));
-  // side band along both flanks, sweeping up towards the rear
+  g.fillStyle = l.top; g.fillRect(U(-2.9), V(0.58), U(0.1) - U(-2.9), V(0.42) - V(0.58));
+  // side band along both flanks, sweeping up towards the rear (soft-edged: no hard pixel steps up close)
   g.fillStyle = l.side;
-  for (const v of [0.28, 0.72]) { g.beginPath(); g.moveTo(U(1.3), V(v - 0.03)); g.lineTo(U(-1.9), V(v - 0.09)); g.lineTo(U(-1.9), V(v + 0.07)); g.lineTo(U(1.3), V(v + 0.03)); g.fill(); }
+  for (const v of [0.28, 0.72]) { g.beginPath(); g.moveTo(U(1.3), V(v - 0.03)); g.quadraticCurveTo(U(-0.3), V(v - 0.07), U(-1.9), V(v - 0.09)); g.lineTo(U(-1.9), V(v + 0.07)); g.quadraticCurveTo(U(-0.3), V(v + 0.06), U(1.3), V(v + 0.03)); g.fill(); }
   // pinstripes in the accent colour
-  g.strokeStyle = l.accent; g.lineWidth = 6;
-  for (const v of [0.34, 0.66]) { g.beginPath(); g.moveTo(U(2.3), V(v)); g.lineTo(U(-0.4), V(v + (v < 0.5 ? 0.04 : -0.04))); g.stroke(); }
+  g.strokeStyle = l.accent; g.lineWidth = 9; g.lineCap = "round";
+  for (const v of [0.34, 0.66]) { g.beginPath(); g.moveTo(U(2.3), V(v)); g.quadraticCurveTo(U(1.0), V(v + (v < 0.5 ? 0.015 : -0.015)), U(-0.4), V(v + (v < 0.5 ? 0.04 : -0.04))); g.stroke(); }
   // nose tip and the dark underside
-  g.fillStyle = l.nose; g.fillRect(U(1.9), 0, W - U(1.9), H);
+  g.fillStyle = l.nose; g.fillRect(U(prof.era === "2022" ? 2.35 : 1.9), 0, W, H);
   g.fillStyle = "#16171a"; g.fillRect(0, V(0.08), W, V(0) - V(0.08)); g.fillRect(0, V(1), W, V(0.92) - V(1));
   // car number on each side of the engine cover, and on the nose top
   g.fillStyle = l.num; g.textAlign = "center"; g.textBaseline = "middle";
-  g.font = "italic 900 54px Arial, sans-serif";
+  g.font = "italic 900 104px Arial, sans-serif";
   // Orientation, from the loft's mapping (left flank = +x = v 0.75, canvas top = v 1, canvas x = rear → front):
   // on the right flank the canvas already reads front-wards and upright; on the left flank both are reversed.
-  for (const v of [0.36, 0.64]) { g.save(); g.translate(U(-0.85), V(v)); g.scale(v < 0.5 ? 1 : -1, v < 0.5 ? 1 : -1); g.fillText(String(number), 0, 0); g.restore(); }
-  g.font = "italic 900 40px Arial, sans-serif"; g.save(); g.translate(U(1.75), V(0.5)); g.rotate(Math.PI / 2); g.fillText(String(number), 0, 0); g.restore();
+  for (const v of [0.36, 0.64]) { g.save(); g.translate(U(-0.95), V(v)); g.scale(v < 0.5 ? 1 : -1, v < 0.5 ? 1 : -1); g.fillText(String(number), 0, 0); g.restore(); }
+  g.font = "italic 900 76px Arial, sans-serif"; g.save(); g.translate(U(prof.era === "2022" ? 1.95 : 1.75), V(0.5)); g.rotate(Math.PI / 2); g.fillText(String(number), 0, 0); g.restore();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+// A helmet in team colours (not the driver's own design): a top colour, a band, the accent stripe.
+function helmetTexture(l) {
+  if (!hasDom) return null;
+  const c = canvas(512, 256), g = c.getContext("2d");
+  // sphere uv: x round (0 at −x, 0.25 at +z front), y from top (canvas top = sphere top)
+  g.fillStyle = l.top === l.base ? "#f2f2f2" : l.top; g.fillRect(0, 0, 512, 256);
+  g.fillStyle = l.base; g.fillRect(0, 150, 512, 106);
+  g.fillStyle = l.accent; g.fillRect(0, 138, 512, 12);
+  g.fillStyle = l.side; g.beginPath(); g.moveTo(0, 60); g.bezierCurveTo(128, 30, 384, 90, 512, 60); g.lineTo(512, 80); g.bezierCurveTo(384, 110, 128, 50, 0, 80); g.fill();
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
 }
@@ -234,32 +553,55 @@ function liveryTexture(l, number) {
 const MAT = {};
 const mat = (key, make) => MAT[key] || (MAT[key] = Object.assign(make(), { userData: { shared: true } }));
 export const TYRE_COLOURS = { SOFT: "#e8392f", MEDIUM: "#f2c230", HARD: "#eef0f2", INTERMEDIATE: "#3cb54a", WET: "#2f7fe0" };
-export function makeCar({ teamName, teamColour, number }) {
-  const t = template(), l = liveryFor(teamName, teamColour), tex = liveryTexture(l, number);
-  const paint = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.38, metalness: 0.08 });
-  const dark = mat("dark", () => new THREE.MeshStandardMaterial({ color: 0x17181b, roughness: 0.55, metalness: 0.1 }));
-  const carbon = mat("carbon", () => new THREE.MeshStandardMaterial({ color: 0x1f2125, roughness: 0.45, metalness: 0.2 }));
-  const wingPaint = new THREE.MeshStandardMaterial({ color: l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top, roughness: 0.4, metalness: 0.08 });
-  const tyreMat = mat("tyre", () => new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.92 }));
-  const coverMat = mat("cover", () => new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.4, metalness: 0.5 }));
+// opts: { teamName, teamColour, number, season } → a THREE.Group; userData: { profile, mounts: { tcam, eye },
+// wheels (steer groups), spins (roll groups), fwPivot, rwPivot, bandMat, near (the close-up parts), fine (wheel covers,
+// lights), helmet, wheel (steering wheel group), lod, compound, aero }.
+export function makeCar({ teamName, teamColour, number, season = null }) {
+  const prof = profileFor(season, teamName), t = template(prof), l = liveryFor(teamName, teamColour);
+  const matte = l.finish === "matte";
+  const paint = new THREE.MeshStandardMaterial({ map: liveryTexture(l, number, prof), color: hasDom ? 0xffffff : l.base, roughness: matte ? 0.5 : 0.28, metalness: 0.05 });
+  const cm = carbonMaps();
+  const carbon = mat("carbon", () => new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 1, roughnessMap: cm.rough, normalMap: cm.normal, normalScale: new THREE.Vector2(0.35, 0.35), metalness: 0.15 }));
+  const wingPaint = new THREE.MeshStandardMaterial({ color: l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top, roughness: matte ? 0.5 : 0.3, metalness: 0.05 });
+  const carbonThin = mat("carbonThin", () => new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.45, metalness: 0.15, side: THREE.DoubleSide }));
+  const tyreMat = mat("tyre", () => new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 1, roughnessMap: tyreRough(), metalness: 0 }));
+  const coverMat = mat("cover", () => new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.35, metalness: 0.6 }));
+  const lipMat = mat("lip", () => new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.3, metalness: 0.9 }));
+  const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));
+  const visorMat = mat("visor", () => new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 }));
+  const screenMat = mat("screen", () => new THREE.MeshBasicMaterial({ map: wheelScreen(), toneMapped: false }));
+  const buttonMat = mat("buttons", () => new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.4, metalness: 0.5 }));
   const bandMat = new THREE.MeshBasicMaterial({ color: 0xf2c230 });
-  const lightMat = new THREE.MeshBasicMaterial({ color: 0xff2a1a });
+  const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
+  const helmetMat = new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 });
+  const gloveMat = new THREE.MeshStandardMaterial({ color: l.base, roughness: 0.8, metalness: 0 });
   const g = new THREE.Group();
-  const add = (geo, m, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; g.add(mesh); return mesh; };
-  add(t.painted, paint); add(t.carbon, carbon); add(t.dark, dark); add(t.wing, wingPaint);
-  // active aero: the flap pairs pivot about their leading edges (closed = corner mode, open = straight mode)
-  const fwPivot = new THREE.Group(); fwPivot.position.set(0, 0.16, 2.5); const fwF = new THREE.Mesh(t.fwFlaps, wingPaint); fwF.position.set(0, -0.16, -2.5); fwPivot.add(fwF); g.add(fwPivot);
-  const rwPivot = new THREE.Group(); rwPivot.position.set(0, 0.96, -2.2); const rwF = new THREE.Mesh(t.rwFlaps, wingPaint); rwF.position.set(0, -0.96, 2.2); rwPivot.add(rwF); g.add(rwPivot);
-  add(t.lights, lightMat);
-  const wheels = [];
-  for (const [x, z, kind] of [[FX, FZ, "front"], [-FX, FZ, "front"], [RX, RZ, "rear"], [-RX, RZ, "rear"]]) {
-    const w = new THREE.Group(); w.position.set(x, kind === "front" ? FR : RR, z); w.rotation.order = "YXZ";
-    w.add(new THREE.Mesh(t[kind].tyre, tyreMat), new THREE.Mesh(t[kind].band, bandMat), new THREE.Mesh(t[kind].cover, coverMat));
-    g.add(w); wheels.push(w);
+  const add = (geo, m, parent = g, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; parent.add(mesh); return mesh; };
+  add(t.painted, paint); add(t.carbon, carbon); add(t.wing, wingPaint); add(t.rim, pad);
+  // active aero / DRS: the flaps pivot about their leading edges (closed = corner mode, open = straight mode / DRS)
+  const pivot = ([y, z], geo) => { const pv = new THREE.Group(); pv.position.set(0, y, z); const m = new THREE.Mesh(geo, wingPaint); m.position.set(0, -y, -z); pv.add(m); g.add(pv); return pv; };
+  const fwPivot = pivot(t.fwPivot, t.fwFlaps), rwPivot = pivot(t.rwPivot, t.rwFlaps);
+  const fine = [add(t.lights, lightMat)];
+  // driver: helmet and visor always (a T-cam sees them); the rest close up only
+  const helmet = add(t.helmet, helmetMat, g, "helmet"); const visor = add(t.visor, visorMat, helmet);
+  const near = new THREE.Group(); near.name = "near"; g.add(near);
+  add(t.headrest, pad, near);
+  const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
+  add(t.wheel.body, carbon, wheel); add(t.wheel.grips, pad, wheel); add(t.wheel.screen, screenMat, wheel); add(t.wheel.buttons, buttonMat, wheel); add(t.wheel.gloves, gloveMat, wheel);
+  add(t.wheel.arms, gloveMat, near);
+  const wheels = [], spins = [];
+  const FX = prof.W / 2 - prof.FW / 2, RX = prof.W / 2 - prof.RW / 2;
+  for (const [x, z, kind] of [[FX, prof.FZ, "front"], [-FX, prof.FZ, "front"], [RX, prof.RZ, "rear"], [-RX, prof.RZ, "rear"]]) {
+    const w = new THREE.Group(); w.position.set(x, kind === "front" ? prof.FR : prof.RR, z);
+    const s = new THREE.Group(); w.add(s);
+    s.add(new THREE.Mesh(t[kind].tyre, tyreMat), new THREE.Mesh(t[kind].band, bandMat), new THREE.Mesh(t[kind].lip, lipMat));
+    const cv = new THREE.Mesh(t[kind].cover, coverMat); s.add(cv); fine.push(cv);
+    if (t[kind].deflector) { const d = new THREE.Mesh(t[kind].deflector, carbonThin); w.add(d); fine.push(d); }
+    g.add(w); wheels.push(w); spins.push(s);
   }
-  const helmet = add(t.helmet, new THREE.MeshStandardMaterial({ color: new THREE.Color(l.top).lerp(new THREE.Color("#ffffff"), 0.4), roughness: 0.25 }), "helmet");
-  helmet.position.set(0, 0.76, -0.04);
-  g.userData = { wheels, fwPivot, rwPivot, bandMat, compound: null, aero: 0 };
+  const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
+  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
+    paintMats: [paint, wingPaint, helmetMat, gloveMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   return g;
 }
 // Tyre sidewall colour for the compound on the car now.
@@ -268,9 +610,36 @@ export function setCompound(car, compound) {
   car.userData.compound = compound;
   car.userData.bandMat.color.set(TYRE_COLOURS[compound] || "#9aa0a6");
 }
-// Active aero: 0 = corner mode (flaps closed), 1 = straight mode (open). Eased by the caller.
+// Wing flaps: 0 = closed (corner mode / DRS shut), 1 = open (straight mode / DRS open). Eased by the caller.
 export function setAero(car, open) {
   const u = car.userData; u.aero = open;
-  u.fwPivot.rotation.x = -0.28 * open; u.rwPivot.rotation.x = -0.55 * open;
+  u.fwPivot.rotation.x = u.aeroOpen.fw * open; u.rwPivot.rotation.x = u.aeroOpen.rw * open;
 }
-export const DIMENSIONS = { FZ, RZ, FR, RR, FX, RX };
+// Wheels: roll angle (rad) and the front wheels' steer angle (rad, + = left); the steering wheel turns with them at
+// a fixed ratio (an estimate: ~5:1 – about ±90° of the wheel to lock), no more than ±90°. The steer angle is the
+// caller's estimate from the path (the feed has no steering channel): the hands' movement is a depiction.
+export function setWheels(car, spin, steer) {
+  const u = car.userData;
+  u.wheels.forEach((w, i) => { w.rotation.y = i < 2 ? steer : 0; });
+  u.spins.forEach((s) => { s.rotation.x = spin; });
+  if (u.wheel) u.wheel.rotation.z = Math.max(-1.6, Math.min(1.6, -steer * 5));
+}
+// Level of detail: "near" (everything), "mid" (no cockpit interior, hands, steering wheel), "far" (also no wheel covers,
+// deflectors, lights). The same model at every level: only small parts come and go.
+export function setDetail(car, lod) {
+  const u = car.userData;
+  if (u.lod === lod) return;
+  u.lod = lod;
+  u.near.visible = lod === "near";
+  for (const o of u.fine) o.visible = lod !== "far";
+}
+// Reflections for the car's paint, carbon and visor: an environment map (the sky the scene shows) – the shared one is
+// never freed with a car.
+export function setCarEnvironment(car, env, intensity = 1) {
+  car.traverse((o) => {
+    const m = o.material; if (!m || !m.isMeshStandardMaterial) return;
+    if (m.envMap !== env) { m.envMap = env; m.needsUpdate = true; }
+    m.envMapIntensity = intensity;
+  });
+}
+export const DIMENSIONS = (season, teamName) => { const p = profileFor(season, teamName); return { FZ: p.FZ, RZ: p.RZ, FR: p.FR, RR: p.RR, FX: p.W / 2 - p.FW / 2, RX: p.W / 2 - p.RW / 2 }; };

@@ -529,32 +529,68 @@ function tarmacMesh(lines, gf, heightAt, width = 9) {
   return m;
 }
 
-// Mapped barriers next to the track: concrete walls, tyre/guard rails and tall debris fences.
+// Mapped barriers next to the track: concrete walls, tyre/guard rails and tall debris fences – each with its surface
+// in metres along it: concrete in 4 m precast panels, guard rail's two corrugated rails on posts, the fence a wire mesh
+// (diamonds ~7 cm) on posts every 3 m with a top cable – see-through, mipmapped so from afar it greys as a real one does.
+function barrierTexture(kind) {
+  const c = document.createElement("canvas"), g = c.getContext("2d");
+  let a = kind.length * 977; const r = () => ((a = (a * 16807) % 2147483647) / 2147483647);
+  if (kind === "fence") {
+    // one tile: 3 m along (a post at its end) × 1.2 m up (a third of the fence), 512 × 256
+    c.width = 512; c.height = 256; g.clearRect(0, 0, 512, 256);
+    g.strokeStyle = "rgba(170,178,186,0.95)"; g.lineWidth = 1.4;
+    const step = 512 / 42;   // 42 diamonds per 3 m: ~7 cm
+    for (let k = -24; k < 66; k++) { g.beginPath(); g.moveTo(k * step, 0); g.lineTo(k * step + 256, 256); g.stroke(); g.beginPath(); g.moveTo(k * step, 256); g.lineTo(k * step + 256, 0); g.stroke(); }
+    g.fillStyle = "rgba(120,128,136,1)"; g.fillRect(500, 0, 12, 256);   // the post
+  } else {
+    c.width = 256; c.height = 64;
+    const base = kind === "guard_rail" ? 168 : 205;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 256; x++) { const v = base + (r() - 0.5) * 22; g.fillStyle = `rgb(${v | 0},${v | 0},${(v + 3) | 0})`; g.fillRect(x, y, 1, 1); }
+    if (kind === "guard_rail") {
+      // two rails (light, with the corrugation's dark lines) on a dark gap; posts at each end of the 4 m tile
+      g.fillStyle = "rgba(40,44,48,0.85)"; g.fillRect(0, 0, 256, 10); g.fillRect(0, 30, 256, 6); g.fillRect(0, 58, 256, 6);
+      g.fillStyle = "rgba(255,255,255,0.18)"; g.fillRect(0, 14, 256, 4); g.fillRect(0, 42, 256, 4);
+      g.fillStyle = "rgb(70,74,78)"; g.fillRect(0, 0, 6, 64); g.fillRect(128, 0, 6, 64);
+    } else {
+      // a joint at the panel's end, darker weathering towards the foot
+      g.fillStyle = "rgba(60,62,64,0.8)"; g.fillRect(254, 0, 2, 64);
+      const gr = g.createLinearGradient(0, 40, 0, 64); gr.addColorStop(0, "rgba(70,70,60,0)"); gr.addColorStop(1, "rgba(70,70,60,0.35)"); g.fillStyle = gr; g.fillRect(0, 40, 256, 24);
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
 function barriersMesh(lines, gf, heightAt) {
   const kinds = {
-    wall: { h: 1.1, color: 0xd9dcdf }, retaining_wall: { h: 1.4, color: 0xc9cbcd }, jersey_barrier: { h: 0.9, color: 0xdfe1e3 },
-    guard_rail: { h: 0.9, color: 0xa9b0b7 }, fence: { h: 3.6, color: 0x9aa3ab, fence: true },
+    wall: { h: 1.1, color: 0xd9dcdf, tile: [4, 1.1] }, retaining_wall: { h: 1.4, color: 0xc9cbcd, tile: [4, 1.4] }, jersey_barrier: { h: 0.9, color: 0xdfe1e3, tile: [4, 0.9] },
+    guard_rail: { h: 0.9, color: 0xa9b0b7, tile: [4, 0.9] }, fence: { h: 3.6, color: 0x9aa3ab, fence: true, tile: [3, 1.2] },
   };
   const groups = new THREE.Group();
   for (const [kind, spec] of Object.entries(kinds)) {
-    const pos = [], idx = [];
+    const pos = [], idx = [], uv = [];
     for (const l of lines) {
       if (l.sub !== kind) continue;
       const pts = l.pts.map(gf.xz);
+      let run = 0;
       for (let i = 1; i < pts.length; i++) {
         const [ax, az] = pts[i - 1], [bx, bz] = pts[i];
-        const ya = heightAt(ax, az), yb = heightAt(bx, bz), v = pos.length / 3;
+        const ya = heightAt(ax, az), yb = heightAt(bx, bz), v = pos.length / 3, len = Math.hypot(bx - ax, bz - az);
         pos.push(ax, ya, az, bx, yb, bz, bx, yb + spec.h, bz, ax, ya + spec.h, az);
+        const u0 = run / spec.tile[0], u1 = (run + len) / spec.tile[0], vh = spec.h / spec.tile[1];
+        uv.push(u0, 0, u1, 0, u1, vh, u0, vh);
+        run += len;
         idx.push(v, v + 1, v + 2, v, v + 2, v + 3);
       }
     }
     if (!idx.length) continue;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
     g.setIndex(idx); g.computeVertexNormals();
+    const map = barrierTexture(kind);
     const mat = spec.fence
-      ? new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.6, metalness: 0.4, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false })
-      : new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.75, side: THREE.DoubleSide });
+      ? new THREE.MeshStandardMaterial({ map, roughness: 0.55, metalness: 0.5, transparent: true, side: THREE.DoubleSide, depthWrite: false })
+      : new THREE.MeshStandardMaterial({ map, color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(g, mat);
     mesh.castShadow = !spec.fence; mesh.receiveShadow = true;
     groups.add(mesh);

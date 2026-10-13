@@ -1,0 +1,68 @@
+// The 3D car model's contract (car3d.js): one model per season era (the car of that year, not today's on every race),
+// a checked team variant only where there is one, real-size bounds within the era's rules, mounts for the cockpit
+// cameras, levels of detail that only hide small parts, and shared parts never freed with one car.
+const test = require("node:test");
+const assert = require("node:assert");
+
+test("car model: the season picks the era's car; a team variant only where its shape was checked", async () => {
+  const C = await import("../src/renderer/car3d.js");
+  const p = (y, t) => C.profileFor(y, t);
+  assert.deepStrictEqual([p(2023, "Red Bull Racing").key, p(2024, "McLaren").key, p(2025, "Red Bull Racing").key, p(2025, "Ferrari").key, p(2026, "Red Bull Racing").key, p(2027, "Audi").key],
+    ["2022", "2022", "2022:rb21", "2022", "2026", "2026"]);
+  // what tells the models apart is season and team, not colour
+  const a = C.makeCar({ teamName: "Red Bull Racing", teamColour: "3671C6", number: 1, season: 2025 });
+  const b = C.makeCar({ teamName: "Red Bull Racing", teamColour: "3671C6", number: 1, season: 2026 });
+  assert.notStrictEqual(a.userData.profile.key, b.userData.profile.key);
+});
+
+test("car model: real size within the era's rules, wheels where the profile puts them, mounts in the cockpit", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js");
+  for (const [season, team, W, WB] of [[2025, "Red Bull Racing", 2.0, 3.6], [2024, "Williams", 2.0, 3.6], [2026, "Ferrari", 1.9, 3.4]]) {
+    const car = C.makeCar({ teamName: team, teamColour: "888888", number: 7, season }), u = car.userData, P = u.profile;
+    car.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(car);
+    assert.ok(box.max.x - box.min.x <= W + 0.01 && box.max.x - box.min.x > W - 0.08, `${season} width ${(box.max.x - box.min.x).toFixed(3)}`);
+    assert.ok(box.max.y <= 1.06 && box.min.y >= -0.001, `${season} height ${box.max.y.toFixed(3)}`);
+    assert.ok(Math.abs(P.FZ - P.RZ - WB) < 1e-9, `${season} wheelbase`);
+    const len = box.max.z - box.min.z; assert.ok(len > 5.0 && len < 5.75, `${season} length ${len.toFixed(2)}`);
+    // the wheels: at the axles, standing on the ground
+    for (const [i, w] of u.wheels.entries()) {
+      const r = i < 2 ? P.FR : P.RR, z = i < 2 ? P.FZ : P.RZ;
+      assert.ok(Math.abs(w.position.y - r) < 1e-9 && Math.abs(w.position.z - z) < 1e-9);
+      const wb = new THREE.Box3().setFromObject(u.spins[i]); assert.ok(Math.abs(wb.min.y) < 0.01, `wheel ${i} on the ground (${wb.min.y.toFixed(3)})`);
+    }
+    // the T-cam over the helmet and behind it; the eyes inside the helmet
+    const hb = new THREE.Box3().setFromObject(u.helmet);
+    assert.ok(u.mounts.tcam.y > hb.max.y + 0.1 && u.mounts.tcam.z < hb.min.z, "T-cam above and behind the helmet");
+    assert.ok(hb.containsPoint(u.mounts.eye), "eyes in the helmet");
+    // the eye isn't inside anything else the car draws at the near level but the helmet (its own room: 3 cm)
+  }
+});
+
+test("car model: levels of detail hide only small parts; wheels steer and roll; flaps open; shared parts survive a dispose", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js"), { disposeGroup } = await import("../src/renderer/dispose.js");
+  const car = C.makeCar({ teamName: "McLaren", teamColour: "FF8000", number: 4, season: 2025 });
+  const count = () => { let n = 0; car.traverseVisible((o) => { if (o.isMesh) n++; }); return n; };
+  const box = () => { car.updateMatrixWorld(true); const b = new THREE.Box3(); car.traverseVisible((o) => { if (o.isMesh) b.expandByObject(o); }); return b; };
+  const near = count(), bn = box();
+  C.setDetail(car, "mid"); const mid = count();
+  C.setDetail(car, "far"); const far = count(), bf = box();
+  assert.ok(near > mid && mid > far && far >= 15, `${near} > ${mid} > ${far}`);
+  // the silhouette is the same: the far car's bounds are the near car's
+  assert.ok(bn.min.distanceTo(bf.min) < 0.02 && bn.max.distanceTo(bf.max) < 0.02, "same outline at every level");
+  C.setDetail(car, "near");
+  C.setWheels(car, 1.2, 0.2);
+  assert.strictEqual(car.userData.wheels[0].rotation.y, 0.2); assert.strictEqual(car.userData.wheels[2].rotation.y, 0);
+  assert.strictEqual(car.userData.spins[3].rotation.x, 1.2);
+  assert.ok(car.userData.wheel.rotation.z < 0 && car.userData.wheel.rotation.z >= -Math.PI / 2, "the steering wheel turns with them, within ±90°");
+  C.setAero(car, 1); assert.ok(car.userData.rwPivot.rotation.x < 0, "DRS open"); assert.strictEqual(car.userData.fwPivot.rotation.x, 0, "2022–25: front flap fixed");
+  const c26 = C.makeCar({ teamName: "McLaren", teamColour: "FF8000", number: 4, season: 2026 }); C.setAero(c26, 1); assert.ok(c26.userData.fwPivot.rotation.x < 0, "2026: both wings");
+  // freeing one car leaves the shared geometry of its era's template and the shared materials for the others
+  const other = C.makeCar({ teamName: "McLaren", teamColour: "FF8000", number: 81, season: 2025 });
+  const shared = []; other.traverse((o) => { if (o.isMesh && o.geometry.userData.shared) shared.push(o.geometry); });
+  let disposed = 0; for (const g of shared) g.addEventListener("dispose", () => disposed++);
+  disposeGroup(car);
+  assert.ok(shared.length > 10 && disposed === 0, `${shared.length} shared geometries, ${disposed} freed`);
+  const env = new THREE.Texture(); env.userData.shared = true; let envGone = 0; env.addEventListener("dispose", () => envGone++);
+  C.setCarEnvironment(other, env, 1); disposeGroup(other); assert.strictEqual(envGone, 0, "the shared reflections stay");
+});

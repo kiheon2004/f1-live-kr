@@ -103,7 +103,8 @@
         <div class="cam3d" role="group" aria-label="카메라">
           <button data-cam="heli" title="헬리콥터 시점 · 끌어서 돌리기 · 스크롤·핀치로 확대 · 오른쪽 끌기로 이동">헬기</button>
           <button data-cam="chase" title="중계 카메라처럼 선택한 차 뒤에서 따라가요">추적</button>
-          <button data-cam="onboard" title="선택한 드라이버의 운전석 시점">온보드</button>
+          <button data-cam="onboard" title="중계의 온보드 카메라(T-cam): 에어박스 위에서 헬멧과 차 앞쪽을 내려다봐요">온보드</button>
+          <button data-cam="eye" title="드라이버 눈높이 시점 (헬멧 안)">눈높이</button>
         </div>
         <div class="hud3d-wrap">
           <button id="cam3dPrev" class="ghost small" title="앞 순위 드라이버">◀</button>
@@ -134,6 +135,7 @@
             <label><input type="checkbox" id="geoTrees"> 나무</label>
             <label title="해의 실제 위치(세션 시각·서킷 좌표)로 그림자를 그려요"><input type="checkbox" id="geoShadows"> 그림자</label>
             <label title="피트 빌딩 같은 서킷 시설을 실제 모습(공개 자료·사진 기준)으로 그려요. 끄면 지도 데이터의 건물로 돌아가요(시험 중인 시설만)."><input type="checkbox" id="geoFacilities"> 정밀 시설</label>
+            <label title="헬기 시점에서 멀리 있는 차를 실제보다 크게 그려 알아보기 쉽게 해요. 끄면 실제 크기예요."><input type="checkbox" id="geoBigCars"> 차량 크게</label>
             <label>밤 경기 <select id="geoNight"><option value="auto">자동</option><option value="on">밤</option><option value="off">낮</option></select></label>
           </fieldset>
           <p class="muted tiny">지도 출처: <span id="geo3dCredits">© OpenStreetMap 기여자 · Sentinel-2 cloudless – EOX (Copernicus 2023) · 지형 Mapzen/AWS</span></p>
