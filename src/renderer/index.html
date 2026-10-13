@@ -136,8 +136,10 @@
             <label title="해의 실제 위치(세션 시각·서킷 좌표)로 그림자를 그려요"><input type="checkbox" id="geoShadows"> 그림자</label>
             <label title="피트 빌딩 같은 서킷 시설을 실제 모습(공개 자료·사진 기준)으로 그려요. 끄면 지도 데이터의 건물로 돌아가요(시험 중인 시설만)."><input type="checkbox" id="geoFacilities"> 정밀 시설</label>
             <label title="헬기 시점에서 멀리 있는 차를 실제보다 크게 그려 알아보기 쉽게 해요. 끄면 실제 크기예요."><input type="checkbox" id="geoBigCars"> 차량 크게</label>
+            <label title="선명: 레티나 해상도 그대로(느려도 낮추지 않고 초당 60프레임으로 고르게). 균형: 1.5배로 시작해 필요할 때만 낮춰요. 부드러움: 해상도를 낮게 두어 프레임을 우선해요.">화질 <select id="geoQuality"><option value="sharp">선명</option><option value="balanced">균형</option><option value="smooth">부드러움</option></select></label>
             <label>밤 경기 <select id="geoNight"><option value="auto">자동</option><option value="on">밤</option><option value="off">낮</option></select></label>
           </fieldset>
+          <p id="geoQualityNow" class="muted tiny" aria-live="polite"></p>
           <p class="muted tiny">지도 출처: <span id="geo3dCredits">© OpenStreetMap 기여자 · Sentinel-2 cloudless – EOX (Copernicus 2023) · 지형 Mapzen/AWS</span></p>
         </div>
       </div>

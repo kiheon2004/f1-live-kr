@@ -38,7 +38,7 @@ function init() {
   canvas.className = "map3d-canvas";
   host.prepend(canvas);
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(qualityRange().max);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -82,6 +82,11 @@ function init() {
 }
 
 // Settings popover for the real map.
+// what the 3D view draws at right now (shown under the quality choice while the settings are open)
+function paintQualityNow() {
+  const el = document.getElementById("geoQualityNow"); if (!el) return;
+  el.textContent = perf.ratio ? `지금 ${perf.ratio}배 해상도 · ${perf.cap ? "초당 60프레임" : perf.vsync && perf.vsync < 0.0105 ? "초당 120프레임" : "화면 주사율대로"}` : "";
+}
 function initGeoSettings() {
   const pop = document.getElementById("geo3dPop"), btn = document.getElementById("geo3dBtn");
   const paint = () => {
@@ -92,6 +97,8 @@ function initGeoSettings() {
     document.getElementById("geoShadows").checked = o.shadows !== false;
     document.getElementById("geoFacilities").checked = o.facilities !== false;
     document.getElementById("geoBigCars").checked = o.bigCars === true;
+    document.getElementById("geoQuality").value = QUALITY[o.quality] ? o.quality : "balanced";
+    paintQualityNow();
     document.getElementById("geoNight").value = o.night || "auto";
   };
   btn.addEventListener("click", async () => {
@@ -117,6 +124,7 @@ function initGeoSettings() {
   document.getElementById("geoShadows").addEventListener("change", (e) => change({ shadows: e.target.checked }, false));
   document.getElementById("geoFacilities").addEventListener("change", (e) => change({ facilities: e.target.checked }));
   document.getElementById("geoBigCars").addEventListener("change", (e) => change({ bigCars: e.target.checked }, false));
+  document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); applyQuality(); paintQualityNow(); });
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
@@ -894,7 +902,7 @@ function smoothFor(src) {
   if (smooth.tr && src.isLive) smooth.tr.update(performance.now());
   return smooth.tr;
 }
-let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null;
+let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 function updateCars(dt) {
   const A = app(), src = A.src;
   // position and velocity of every car from its smooth track (arrays reused frame to frame)
@@ -1338,7 +1346,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced" };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -1756,7 +1764,10 @@ function frame(now) {
   NL.time.value = now / 1000;
   GLOW.scale.value = renderer.getDrawingBufferSize(tmpV2).y / (2 * Math.tan((camera.fov * Math.PI) / 360));
   GLOW.fade.value.set(scene.fog.near, scene.fog.far);
+  if (devGpu) devGpu.begin();
+  devShadowDrawn = renderer.shadowMap.needsUpdate;
   renderer.render(scene, camera);
+  if (devGpu) devGpu.end();
   adaptResolution(now, dt);
   requestAnimationFrame(frame);
 }
@@ -1788,9 +1799,28 @@ function thinFarTrees() {
 // Keeps the frame rate up on slower machines: render at a lower pixel ratio while frames are slow (over
 // ~25 ms on average for 2 s), and step back up when there's room again.
 const perf = { acc: 0, n: 0, since: 0, ratio: 0, fps: 0, spikes: 0, worst: 0, frames: 0 };
+// The 3D view's quality setting (🛰 map settings): how sharp vs. how smooth. Resolution is the GPU's biggest cost
+// (measured on an M3, Retina: ~48 ms a frame at 2×, ~33 at 1.5×, ~16 at 1×), so each choice is a range of drawing
+// scales and an order of what gives way first when frames come late:
+//   선명 (sharp)   – the screen's full scale (up to 2×), never lowered: when the GPU can't keep up, an even 60 a second
+//   균형 (balanced, default) – starts at 1.5× (on a Retina screen hard to tell from 2×); late → an even 60 a second,
+//                    still late → lower, down to 1×; back up to 1.5× after a calm while
+//   부드러움 (smooth) – starts at 1.25×; late → lower first (to 1×) to keep the screen's full rate, an even 60 last
+// The choice is the user's: no level drops below its range or rises above it.
+const QUALITY = { sharp: [2, 2, "cap"], balanced: [1, 1.5, "cap"], smooth: [1, 1.25, "lower"] };
+function qualityRange() {
+  const q = QUALITY[geoSettings().quality] ? geoSettings().quality : "balanced", [lo, hi, first] = QUALITY[q], dpr = devicePixelRatio || 1;
+  return { q, min: Math.min(lo, dpr), max: Math.min(hi, dpr), first };
+}
+// (a new choice: its top scale at once, the pace measured afresh)
+function applyQuality() {
+  const { max } = qualityRange();
+  perf.ratio = max; perf.changedAt = performance.now(); resetPace();
+  renderer.setPixelRatio(max); resize();
+}
 function adaptResolution(now, dt) {
-  const max = Math.min(devicePixelRatio || 1, 2);
-  if (!perf.ratio) perf.ratio = max;
+  const Q = qualityRange();
+  if (!perf.ratio) perf.ratio = Q.max;
   perf.acc += dt; perf.n++; perf.frames++;
   if (dt > 0.03) { perf.spikes++; perf.spikesNow = (perf.spikesNow || 0) + 1; }   // a frame longer than ~2 at 60 Hz: a visible hitch
   perf.worst = Math.max(perf.worst, dt);
@@ -1803,19 +1833,22 @@ function adaptResolution(now, dt) {
   const avg = perf.acc / perf.n, late = (perf.lateNow || 0) / Math.max(1, perf.n);
   perf.vsync = perf.minDt < 0.0105 ? 1 / 120 : perf.minDt < 0.0185 ? 1 / 60 : perf.minDt; perf.minDt = 1;
   perf.fps = Math.round(1 / avg); perf.acc = 0; perf.n = 0; perf.since = now; perf.windowSpikes = perf.spikesNow || 0; perf.spikesNow = 0; perf.lateNow = 0; perf.late = +late.toFixed(3);
+  if (!document.getElementById("geo3dPop")?.hidden) paintQualityNow();
   if (perf.lockRatio) return;
   // Steady pacing first: frames that come at uneven intervals (8 ms, 17 ms, 8 ms… on a 120 Hz screen when the GPU
-  // can't keep up) look like the picture shaking, worst in the cockpit cameras. So when more than 1 frame in 12 is
-  // late at 120 Hz, the view is drawn at an even 60 a second (every other refresh) – no change of size, no stall –,
-  // and only if even that can't be held is the resolution lowered (each change of size stalls ~100 ms: down at most
-  // every 4 s, up only after 30 s of calm windows well inside the pace – no stepping back and forth).
-  const since = now - (perf.changedAt || 0);
-  let r = perf.ratio;
+  // can't keep up) look like the picture shaking, worst in the cockpit cameras. When more than 1 frame in 12 is late,
+  // the quality's first remedy: an even 60 a second (every other refresh of a 120 Hz screen – no change of size, no
+  // stall) or a lower scale; then the other. Each change of size stalls ~100 ms: down at most every 4 s, up only after
+  // 30 s of calm windows well inside the pace.
+  const since = now - (perf.changedAt || 0), canCap = !perf.cap && perf.vsync < 0.0105;
+  let r = Math.max(Q.min, Math.min(Q.max, perf.ratio));
   if (late > 0.08) {
-    if (!perf.cap && perf.vsync < 0.0105) { perf.cap = true; perf.calm = 0; return; }
-    if (r > 1 && since > 4000) r = Math.max(1, r - 0.25);
+    perf.calm = 0;
+    const lower = r > Q.min && since > 4000;
+    if (canCap && (Q.first === "cap" || r <= Q.min)) { perf.cap = true; return; }
+    if (lower) r = Math.max(Q.min, r - 0.25);
   } else if (late === 0 && !perf.windowSpikes) perf.calm = (perf.calm || 0) + 1; else perf.calm = 0;
-  if (r === perf.ratio && !perf.cap && perf.calm >= 15 && avg < pace * 0.8 && since > 30000 && r < max) r = Math.min(max, r + 0.25);
+  if (r === perf.ratio && !perf.cap && perf.calm >= 15 && avg < pace * 0.8 && since > 30000 && r < Q.max) r = Math.min(Q.max, r + 0.25);
   if (r !== perf.ratio) { perf.ratio = r; perf.changedAt = now; perf.calm = 0; renderer.setPixelRatio(r); resize(); }
 }
 // The pace is set again when the view or the camera changes (what's on screen and its cost change with them).
@@ -1887,6 +1920,23 @@ window.Map3D = {
     return JSON.stringify({ buildMs: build, lag: tr.lag, raw: steadiness(src.tracks, src, world, t0, t1, tr.lag), steady: steadiness(tr, src, world, t0, t1, tr.lag) });
   },
   rawTracks(on) { devRawTracks = !!on; return "ok"; },
+  // development: the GPU's own time for drawing the 3D view (EXT_disjoint_timer_query_webgl2), median and 90th
+  // percentile over `n` frames, ms
+  gpuTime(n = 60) {
+    const gl = renderer.getContext(), ext = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+    if (!ext) return Promise.resolve("no timer");
+    return new Promise((done) => {
+      const pending = [], got = [];
+      devGpu = {
+        begin() { const q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); pending.push(q); },
+        end() {
+          gl.endQuery(ext.TIME_ELAPSED_EXT);
+          while (pending.length && gl.getQueryParameter(pending[0], gl.QUERY_RESULT_AVAILABLE)) { const q = pending.shift(); if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) got.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6); gl.deleteQuery(q); }
+          if (got.length >= n) { devGpu = null; pending.forEach((q) => gl.deleteQuery(q)); const s = got.sort((a, b) => a - b); done(JSON.stringify([+s[Math.floor(s.length / 2)].toFixed(2), +s[Math.floor(s.length * 0.9)].toFixed(2)])); }
+        },
+      };
+    });
+  },
   // development: who flags geometry for upload, over `secs` – by the line that set needsUpdate, with counts and bytes
   traceUploads(secs = 3) {
     const seen = new Map(), tally = (kind, bytes) => { const at = kind + " @ " + (new Error().stack || "").split("\n").slice(3, 7).map((l) => l.trim().replace(/^at /, "").replace(/\(?file:.*\/(\w+\.js):(\d+):\d+\)?/, "$1:$2")).join(" < "); const e = seen.get(at) || [0, 0]; e[0]++; e[1] += bytes; seen.set(at, e); };
@@ -1912,7 +1962,7 @@ window.Map3D = {
         e.setFromQuaternion(camera.quaternion, "YXZ");
         r.t.push(now); r.dt.push(dt * 1000); r.yaw.push(e.y); r.pitch.push(e.x); r.roll.push(e.z); r.y.push(camera.position.y);
         r.side.push(camera.position.x * Math.cos(c.yaw) - camera.position.z * Math.sin(c.yaw));
-        r.steer.push(c.steer || 0); r.wheel.push(c.model.userData.wheel?.rotation.z || 0); r.st.push(app().t);
+        r.steer.push(c.steer || 0); r.wheel.push(c.model.userData.wheel?.rotation.z || 0); r.st.push(app().t); (r.sh || (r.sh = [])).push(devShadowDrawn ? 1 : 0);
         if (now - t0 > secs * 1000) {
           devRec = null;
           const un = (a) => { const o = a.slice(); for (let i = 1; i < o.length; i++) o[i] = o[i - 1] + wrap(a[i] - a[i - 1]); return o; };
@@ -1921,8 +1971,9 @@ window.Map3D = {
           const stat = (a, k) => { const q = resid(a).slice(20, -20); let jump = 0; for (let i = 21; i < a.length - 20; i++) jump = Math.max(jump, Math.abs(a[i] - a[i - 1])); return { rms: +(Math.sqrt(q.reduce((x, y) => x + y * y, 0) / Math.max(1, q.length)) * k).toFixed(3), jump: +(jump * k).toFixed(3) }; };
           const D = 57.2958, dts = r.dt.slice().sort((a, b) => a - b), q = (p) => +dts[Math.floor(p * (dts.length - 1))].toFixed(1);
           let back = 0; for (let i = 1; i < r.st.length; i++) if (r.st[i] - r.st[i - 1] <= 0) back++;
-          const slow = []; for (let i = 0; i < r.dt.length; i++) if (r.dt[i] > 30) slow.push([Math.round(r.t[i] - t0), Math.round(r.dt[i])]);
-          done(JSON.stringify({ frames: r.t.length, dtMs: [q(0.5), q(0.95), q(0.99)], streamStill: back, slow: slow.slice(0, 60),
+          const slow = []; for (let i = 0; i < r.dt.length; i++) if (r.dt[i] > 25) slow.push([Math.round(r.t[i] - t0), Math.round(r.dt[i]), r.sh[i - 1] ? "shadow" : r.sh[i] ? "shadow+" : ""]);
+          const shadows = r.sh.reduce((a, b) => a + b, 0);
+          done(JSON.stringify({ frames: r.t.length, dtMs: [q(0.5), q(0.95), q(0.99)], streamStill: back, shadowRedraws: shadows, slow: slow.slice(0, 60),
             camYawDeg: stat(un(r.yaw), D), camPitchDeg: stat(r.pitch, D), camRollDeg: stat(r.roll, D), camHeightCm: stat(r.y, 100), camSideCm: stat(r.side, 100),
             steerDeg: stat(r.steer, D), wheelDeg: stat(r.wheel, D) }));
         }
@@ -2193,6 +2244,10 @@ window.Map3D = {
     if ("carMaps" in o) for (const c of cars.values()) c.model.traverse((m) => { const x = m.material; if (!x?.isMeshStandardMaterial) return; if (!o.carMaps) { x.userData.devMaps ??= [x.normalMap, x.roughnessMap]; x.normalMap = null; x.roughnessMap = null; } else if (x.userData.devMaps) { [x.normalMap, x.roughnessMap] = x.userData.devMaps; } x.needsUpdate = true; });
     if ("ratio" in o) { perf.lockRatio = o.ratio; renderer.setPixelRatio(o.ratio); resize(); }
     if ("cap" in o) perf.cap = o.cap;
+    if (o.hide) for (const [n, v] of Object.entries(o.hide)) { if (n === "cars") { for (const c of cars.values()) c.model.visible = !v; continue; } if (n === "road") { for (const m of [world.road, world.kerb, world.lines]) m.visible = !v; continue; } world.group.traverse((x) => { if (x.name === n) x.visible = !v; }); }
+    if ("fog" in o) scene.fog.far = o.fog ? 5000 : 1e9;
+    if (o.shadowSize) { sun.shadow.mapSize.set(o.shadowSize, o.shadowSize); sun.shadow.map?.dispose(); sun.shadow.map = null; refreshShadows(); }
+    if (o.shadowType) { renderer.shadowMap.type = THREE[o.shadowType]; scene.traverse((x) => { if (x.material) [].concat(x.material).forEach((m) => { m.needsUpdate = true; }); }); refreshShadows(); }
     return "ok";
   },
   resetHitches() { perf.spikes = 0; perf.worst = 0; perf.frames = 0; },
