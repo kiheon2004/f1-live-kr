@@ -168,6 +168,10 @@ function template() {
     light: boxAt(0.012, 0.05, 0.36, 0, 0, 0), rain: boxAt(0.06, 0.05, 0.02, 0, 0.36, -2.6),
     helmet: new THREE.SphereGeometry(0.15, 16, 12),
   };
+  // parts fixed to the car that share a material, merged: fewer objects to draw per car (24 → 20; 80 fewer for a
+  // field of 20) – the livery's uv kept (body and pods both have it), the lights placed where they sit
+  const lightAt = (x) => { const g = T.light.clone(); g.translate(x, 0.86, -2.24); return g; };
+  T.painted = merge([T.body, T.pods]); T.wing = merge([T.mirrorHeads, T.rwMain]); T.lights = merge([lightAt(0.5), lightAt(-0.5), T.rain]);
   // (shared by every car: marked so freeing one car's model leaves them alone)
   const mark = (o) => { if (o?.isBufferGeometry) o.userData.shared = true; else if (o && typeof o === "object") Object.values(o).forEach(mark); };
   mark(T);
@@ -242,12 +246,11 @@ export function makeCar({ teamName, teamColour, number }) {
   const lightMat = new THREE.MeshBasicMaterial({ color: 0xff2a1a });
   const g = new THREE.Group();
   const add = (geo, m, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; g.add(mesh); return mesh; };
-  add(t.body, paint); add(t.pods, paint); add(t.carbon, carbon); add(t.dark, dark); add(t.mirrorHeads, wingPaint); add(t.rwMain, wingPaint);
+  add(t.painted, paint); add(t.carbon, carbon); add(t.dark, dark); add(t.wing, wingPaint);
   // active aero: the flap pairs pivot about their leading edges (closed = corner mode, open = straight mode)
   const fwPivot = new THREE.Group(); fwPivot.position.set(0, 0.16, 2.5); const fwF = new THREE.Mesh(t.fwFlaps, wingPaint); fwF.position.set(0, -0.16, -2.5); fwPivot.add(fwF); g.add(fwPivot);
   const rwPivot = new THREE.Group(); rwPivot.position.set(0, 0.96, -2.2); const rwF = new THREE.Mesh(t.rwFlaps, wingPaint); rwF.position.set(0, -0.96, 2.2); rwPivot.add(rwF); g.add(rwPivot);
-  for (const k of [1, -1]) { const lm = new THREE.Mesh(t.light, lightMat); lm.position.set(0.5 * k, 0.86, -2.24); g.add(lm); }
-  add(t.rain, lightMat);
+  add(t.lights, lightMat);
   const wheels = [];
   for (const [x, z, kind] of [[FX, FZ, "front"], [-FX, FZ, "front"], [RX, RZ, "rear"], [-RX, RZ, "rear"]]) {
     const w = new THREE.Group(); w.position.set(x, kind === "front" ? FR : RR, z); w.rotation.order = "YXZ";

@@ -113,6 +113,23 @@ module.exports = function snapshot(win, outFile) {
       }
       if (process.env.F1KR_SCHEDULE) { await run(`document.getElementById("scheduleBtn").click()`); await wait(3000); }
     }
+    // F1KR_PROFILE=secs: plays the replay (F1KR_SPEED, default 1) and records the page's JavaScript CPU profile for
+    // that long into <out>.cpuprofile (Chrome DevTools format); F1KR_PROFILE_JS runs first (e.g. a camera)
+    if (process.env.F1KR_PROFILE) {
+      if (process.env.F1KR_PROFILE_JS) await run(process.env.F1KR_PROFILE_JS).catch(() => {});
+      await run(`(() => { const s = document.getElementById("speed"); s.value = ${JSON.stringify(process.env.F1KR_SPEED || "1")}; s.dispatchEvent(new Event("change")); if (document.getElementById("play").textContent.includes("재생")) document.getElementById("play").click(); })()`);
+      await wait(3000);
+      const dbg = win.webContents.debugger;
+      dbg.attach("1.3");
+      await dbg.sendCommand("Profiler.enable");
+      await dbg.sendCommand("Profiler.setSamplingInterval", { interval: 200 });
+      await dbg.sendCommand("Profiler.start");
+      await wait(+process.env.F1KR_PROFILE * 1000);
+      const { profile } = await dbg.sendCommand("Profiler.stop");
+      dbg.detach();
+      fs.writeFileSync(outFile.replace(/\.png$/, "") + ".cpuprofile", JSON.stringify(profile));
+      console.log("PROFILE", await run(`JSON.stringify({ ui: window.F1KR.uiCost(), map3d: window.Map3D?.debug ? JSON.parse(window.Map3D.debug()).mem : null })`));
+    }
     if (process.env.F1KR_JS) { const r = await run(process.env.F1KR_JS).catch((e) => "error " + e.message); console.log("JSRESULT", typeof r === "string" ? r : JSON.stringify(r)); await wait(+process.env.F1KR_JS_WAIT || 3000); }
     // F1KR_SHOTS="js1;;js2;;…" – runs each, waits, and saves out_1.png, out_2.png, …
     if (process.env.F1KR_SHOTS) {

@@ -357,12 +357,13 @@
     constructor({ topics, duration }) {
       this.isLive = false;
       this.duration = duration;
-      this.positions = topics.Position || [];
-      this.tracks = CarTracks.fromSamples(this.positions);
+      // (positions per car as typed arrays from the archive – PositionTracks; a list of samples is taken too)
+      if (topics.PositionTracks) { this.tracks = CarTracks.fromTracks(topics.PositionTracks); this.positions = null; }
+      else { this.positions = topics.Position || []; this.tracks = CarTracks.fromSamples(this.positions); }
       this.events = [];
       this.car = topics.CarData || {};
       for (const [topic, list] of Object.entries(topics)) {
-        if (topic === "Position" || topic === "CarData") continue;
+        if (topic === "Position" || topic === "PositionTracks" || topic === "CarData") continue;
         for (const [ms, data] of list) this.events.push({ ms, topic, data });
       }
       this.events.sort((a, b) => a.ms - b.ms);
@@ -430,20 +431,32 @@
       return this.duration;
     }
 
-    trackOutline() { return outlineFrom(this.positions); }
+    trackOutline() { return this.carPath(this.furthest()[0]); }
+    // Cars by the distance they drove (furthest first), from their own tracks
+    furthest() {
+      if (this._far) return this._far;
+      const dist = [];
+      for (const [n, c] of Object.entries(this.tracks.cars)) {
+        let d = 0;
+        for (let i = 1; i < c.n; i++) { const s = Math.hypot(c.x[i] - c.x[i - 1], c.y[i] - c.y[i - 1]); if (s > 5 && s < 5000) d += s; }
+        if (d > 0) dist.push([n, d]);
+      }
+      return (this._far = dist.sort((a, b) => b[1] - a[1]).map(([n]) => n));
+    }
+    // A car's positions in time order, [x, y, z] decimetres
+    carPath(n) { const c = this.tracks.cars[n]; if (!c) return []; const out = new Array(c.n); for (let i = 0; i < c.n; i++) out[i] = [c.x[i], c.y[i], c.z[i]]; return out; }
+    // Every car's positions thinned to about `max` points (the 3D view measures the track's width from them)
+    carPoints(max = 150000) {
+      const all = Object.values(this.tracks.cars), total = all.reduce((a, c) => a + c.n, 0), step = Math.max(1, Math.ceil(total / max)), out = [];
+      for (const c of all) for (let i = 0; i < c.n; i += step) out.push([c.x[i], c.y[i], c.z[i]]);
+      return out;
+    }
     // One clean lap for drawing the circuit: tries the cars that drove furthest until one gives a closed lap.
     lapShape() {
       if (this._lap !== undefined) return this._lap;
-      const dist = {}, last = {};
-      for (const [, cars] of this.positions) for (const [n, p] of Object.entries(cars)) {
-        const q = last[n];
-        if (q) { const d = Math.hypot(p[0] - q[0], p[1] - q[1]); if (d > 5 && d < 5000) dist[n] = (dist[n] || 0) + d; }
-        last[n] = p;
-      }
       this._lap = null;
-      for (const [n] of Object.entries(dist).sort((a, b) => b[1] - a[1]).slice(0, 8)) {
-        const pts = []; for (const [, cars] of this.positions) if (cars[n]) pts.push(cars[n]);
-        const lap = findLap(pts);
+      for (const n of this.furthest().slice(0, 8)) {
+        const lap = findLap(this.carPath(n));
         if (lap) { this._lap = lap; break; }
       }
       return this._lap;
@@ -456,6 +469,12 @@
   // holding still when a sample leaves a car out. Gaps over 4 s (garage, data holes) are not bridged.
   class CarTracks {
     constructor() { this.cars = {}; }
+    // (from per-car typed arrays as the archive makes them: used as they are)
+    static fromTracks({ cars }) {
+      const tr = new CarTracks();
+      for (const [n, c] of Object.entries(cars || {})) tr.cars[n] = { t: c.t, x: c.x, y: c.y, z: c.z, n: c.n ?? c.t.length };
+      return tr;
+    }
     static fromSamples(samples) {
       const tr = new CarTracks(), count = {};
       for (const [, cars] of samples) for (const n of Object.keys(cars)) count[n] = (count[n] || 0) + 1;

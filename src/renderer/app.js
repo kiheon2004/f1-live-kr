@@ -8,6 +8,8 @@
   const kstTime = KST({ hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return [s / 3600, (s % 3600) / 60, s % 60].map((v) => String(Math.floor(v)).padStart(2, "0")).join(":"); };
   const at = (arrOrObj, i) => (Array.isArray(arrOrObj) ? arrOrObj[i] : arrOrObj?.[i]);
+  // (an element's HTML replaced only when it's different: writing the same again still makes the page lay out again)
+  const setHTML = (el, html) => { if (el.__html !== html) { el.innerHTML = html; el.__html = html; } };
   const lastOf = (arrOrObj) => { const a = Array.isArray(arrOrObj) ? arrOrObj : Object.values(arrOrObj || {}); return a[a.length - 1]; };
   const store = {
     get(k, d) { try { const v = localStorage.getItem("f1kr:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -327,7 +329,7 @@
     if (!heavy) return;
     lastHeavy = performance.now();
     paintIdle();
-    if (!src) { $("board").tBodies[0].innerHTML = ""; $("rc").innerHTML = ""; renderDriver(); return; }
+    if (!src) { setHTML($("board").tBodies[0], ""); $("rc").innerHTML = ""; renderDriver(); return; }
     const T = (name, fn) => { const a = performance.now(); fn(); const d = performance.now() - a; const s = uiCost[name] || (uiCost[name] = { n: 0, total: 0, max: 0 }); s.n++; s.total += d; s.max = Math.max(s.max, d); };
     T("status", renderStatus); T("board", renderBoard); T("rc", renderRC); T("driver", renderDriver); T("radio", renderRadio); T("strat", renderStrat); T("trace", renderTrace); T("champ", renderChamp); T("mini", renderMiniBoard); T("alerts", checkAlerts);
   }
@@ -351,11 +353,11 @@
     $("part").hidden = !(sessionType() === "Qualifying" && part);
     $("part").textContent = `${isSprint() ? "SQ" : "Q"}${part}`;
     const lc = s.LapCount;
-    $("lap").innerHTML = lc?.CurrentLap ? `랩 <b>${esc(lc.CurrentLap)}</b> / ${esc(lc.TotalLaps || "?")}` : "";
+    setHTML($("lap"), lc?.CurrentLap ? `랩 <b>${esc(lc.CurrentLap)}</b> / ${esc(lc.TotalLaps || "?")}` : "");
     const clk = s.ExtrapolatedClock;
     let rem = parseClock(clk?.Remaining);
     if (rem != null && clk.Extrapolating) { const nowUtc = src.utcAt(src.now()); if (nowUtc) rem -= nowUtc - ReplayKit.parseUtc(clk.Utc); }
-    $("clock").innerHTML = rem != null ? `남은 시간 <b>${hms(Math.max(0, rem))}</b>` : "";
+    setHTML($("clock"), rem != null ? `남은 시간 <b>${hms(Math.max(0, rem))}</b>` : "");
     // In qualifying "Finished"/"Inactive" also happen between Q1, Q2 and Q3, so name the part.
     const st = s.SessionStatus?.Status, qp = sessionType() === "Qualifying" ? s.TimingData?.SessionPart : null, qn = `${isSprint() ? "SQ" : "Q"}${qp}`;
     const ss = qp && st === "Finished" && qp < 3 ? `${qn} 종료` : qp && st === "Inactive" && qp > 1 ? `${qn} 시작 전` : qp && st === "Started" ? `${qn} 진행 중`
@@ -363,7 +365,7 @@
     $("sessStatus").hidden = !ss; $("sessStatus").textContent = ss || "";
     $("sessStatus").className = "chip " + (s.SessionStatus?.Status === "Started" ? "ok" : "");
     const w = s.WeatherData;
-    $("weather").innerHTML = w ? `기온 <b>${esc(w.AirTemp)}°</b> 노면 <b>${esc(w.TrackTemp)}°</b> 습도 ${esc(w.Humidity)}% 풍속 ${esc(w.WindSpeed)}m/s${w.Rainfall === "1" ? " · <b>비</b>" : ""}` : "";
+    setHTML($("weather"), w ? `기온 <b>${esc(w.AirTemp)}°</b> 노면 <b>${esc(w.TrackTemp)}°</b> 습도 ${esc(w.Humidity)}% 풍속 ${esc(w.WindSpeed)}m/s${w.Rainfall === "1" ? " · <b>비</b>" : ""}` : "");
   }
 
   // ---------- leaderboard ----------
@@ -459,7 +461,7 @@
     const rows = rowsNow();
     const trend = type === "Race" ? intervalTrends(rows) : {};
     const focusGap = rel ? ReplayKit.gapSec(lines0()[focus].GapToLeader) : null;
-    const deleted = ReplayKit.deletedLaps(src.messages, drivers);
+    const deleted = deletedNow(drivers);
     // Qualifying elimination line: drawn once, under the last place that goes through to the next part.
     // (F1's own per-driver "Cutoff" flag marks everyone without a time early in Q1, so it can't be used.)
     const cutAfter = type === "Qualifying" ? qualiCutoff(Object.keys(drivers).length, part + 1) : null;
@@ -467,7 +469,7 @@
     const bestOf = (l) => (type === "Qualifying" ? at(l.BestLapTimes, part)?.Value : "") || l.BestLapTime?.Value || "";
     let fastest = Infinity;
     for (const [, l] of rows) { const v = ReplayKit.toSec(bestOf(l)); if (v) fastest = Math.min(fastest, v); }
-    $("board").tBodies[0].innerHTML = rows.map(([num, l]) => {
+    setHTML($("board").tBodies[0], rows.map(([num, l]) => {
       const d = drivers[num], a = app[num] || {};
       const stint = lastOf(src.stints(num)), ty = KO.TYRES[stint?.Compound];
       const sectors = Array.isArray(l.Sectors) ? l.Sectors : Object.values(l.Sectors || {});
@@ -510,7 +512,14 @@
         <td class="c">${ty ? `<span class="tyre" title="${esc(ty.ko)}${stint.New === "true" ? " (새 타이어)" : " (중고 타이어)"} · 이 타이어로 ${esc(stint.TotalLaps ?? 0)}랩"><i style="border-color:${ty.color};color:${ty.color}">${ty.short}</i><span style="color:${ty.color}">${esc(stint.TotalLaps ?? "")}</span></span>` : ""}</td>
         <td class="c">${esc(l.NumberOfPitStops ?? (type === "Race" && l.Position ? 0 : ""))}</td>
         <td class="state">${state}${delTag}</td></tr>`;
-    }).join("");
+    }).join(""));
+  }
+  // deleted laps from the race control messages: worked out again only when the messages or the drivers change
+  let delKey = null, delVal = {};
+  function deletedNow(drivers) {
+    const k = `${src.rc?.rev}|${src.epoch ?? ""}|${Object.keys(drivers).length}`;
+    if (k !== delKey || delVal.src !== src) { delKey = k; delVal = { src, v: ReplayKit.deletedLaps(src.messages, drivers) }; }
+    return delVal.v;
   }
   // Click: focus a driver. Shift+click: add a second driver to compare.
   $("board").tBodies[0].addEventListener("click", (e) => {
@@ -1113,6 +1122,10 @@
   // ---------- track map ----------
   const canvas = $("map"), ctx = canvas.getContext("2d");
   let lastMapPts = {};
+  // (the canvas's size, from the resize observer: read every frame after the board's HTML changed it forced a layout)
+  let mapW = canvas.clientWidth, mapH = canvas.clientHeight;
+  // (the track line and the fit of the shape, made again only when the shape, the canvas or the view changes)
+  let trackCache = null;
   // Corner numbers (and a fallback shape for circuits we have no previous data for), per circuit key.
   let circuit = null, circuitFor = null;
   // Map view: zoom and pan last for the session; rotation is remembered per circuit.
@@ -1134,7 +1147,7 @@
 
   function drawMap() {
     if (mapView === "3d") { if (src) { ensureCircuit(); paintMapNote(true); } return; }
-    const w = canvas.clientWidth, h = canvas.clientHeight, dpr = devicePixelRatio || 1;
+    const w = mapW, h = mapH, dpr = devicePixelRatio || 1;
     if (canvas.width !== w * dpr || canvas.height !== h * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
     if (!src) { paintMapNote(true); return; }
@@ -1147,8 +1160,18 @@
     // Rotate (clockwise on screen), fit to the canvas, then apply zoom around the centre plus pan.
     const th = view.rot * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
     const R = ([x, y]) => [x * cs + y * sn, -x * sn + y * cs];
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const pt of shape) { const [x, y] = R(pt); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+    const ckey = `${w}|${h}|${view.rot}|${view.zoom}|${view.panX}|${view.panY}|${k}`;
+    const fresh = !trackCache || trackCache.shape !== shape || trackCache.n !== shape.length;
+    if (fresh) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const pt of shape) { const [x, y] = R(pt); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+      trackCache = { shape, n: shape.length, rot: view.rot, box: [minX, maxX, minY, maxY], key: null, path: null };
+    } else if (trackCache.rot !== view.rot) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const pt of shape) { const [x, y] = R(pt); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+      trackCache.rot = view.rot; trackCache.box = [minX, maxX, minY, maxY]; trackCache.key = null;
+    }
+    const [minX, maxX, minY, maxY] = trackCache.box;
     // Margins keep the track clear of the buttons: 2D/3D switch on top, map tools on the left.
     const padT = 56, padL = 64, pad = 30 * k;
     const sc = Math.min((w - padL - pad) / (maxX - minX || 1), (h - padT - pad) / (maxY - minY || 1));
@@ -1169,14 +1192,18 @@
       ctx.restore();
       ctx.fillStyle = "rgba(14,16,19,0.32)"; ctx.fillRect(0, 0, w, h);   // keeps cars and labels readable
     }
-    ctx.lineWidth = 7 * Math.sqrt(k) * Math.min(2, Math.sqrt(z)); ctx.lineJoin = ctx.lineCap = "round"; ctx.strokeStyle = sat ? "rgba(20,22,26,0.85)" : "#2a3038"; ctx.beginPath();
-    let prev = null;
-    for (const pt of shape) {
-      const [x, y] = P(pt);
-      if (!prev || Math.hypot(x - prev[0], y - prev[1]) > 40 * k * z) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      prev = [x, y];
+    ctx.lineWidth = 7 * Math.sqrt(k) * Math.min(2, Math.sqrt(z)); ctx.lineJoin = ctx.lineCap = "round"; ctx.strokeStyle = sat ? "rgba(20,22,26,0.85)" : "#2a3038";
+    if (trackCache.key !== ckey) {
+      const path = new Path2D();
+      let prev = null;
+      for (const pt of shape) {
+        const [x, y] = P(pt);
+        if (!prev || Math.hypot(x - prev[0], y - prev[1]) > 40 * k * z) path.moveTo(x, y); else path.lineTo(x, y);
+        prev = [x, y];
+      }
+      trackCache.path = path; trackCache.key = ckey;
     }
-    ctx.stroke();
+    ctx.stroke(trackCache.path);
 
     // Corner numbers sit just off the track, on the outside of the bend.
     if (circuit?.corners.length) {
@@ -1308,7 +1335,7 @@
   splitter($("splitH"), "h", "mapH", () => canvas.parentElement.clientHeight);
   addEventListener("resize", applySizes);
   applySizes();
-  new ResizeObserver(() => drawMap()).observe(canvas);
+  new ResizeObserver((es) => { const r = es[es.length - 1]?.contentRect; if (r) { mapW = r.width; mapH = r.height; } drawMap(); }).observe(canvas);
   // A real grid: at least 10 cars, pole among them, and cars standing in their own slots (a wet or
   // safety-car start has them queued nose to tail, and the position feed can stack cars on one spot).
   function gridOk(spots) {
@@ -1343,9 +1370,7 @@
       const out = [];
       if (!src) return out;
       if (src.isLive) { for (const tr of Object.values(live.trail)) for (let i = 0; i < tr.length; i += 2) out.push(tr[i]); return out; }
-      const P = replay.positions, step = Math.max(1, Math.ceil((P.length * 20) / 150000));
-      for (let i = 0; i < P.length; i += step) for (const p of Object.values(P[i][1])) out.push(p);
-      return out;
+      return replay.carPoints(150000);
     },
     // Grid slots: where each car stood just before a race start (race replays), remembered per circuit so
     // practice, qualifying and live sessions there can show them too. [{ grid, p: [x, y, z] }] or null.

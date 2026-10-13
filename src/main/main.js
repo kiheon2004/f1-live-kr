@@ -14,7 +14,10 @@ const { pathToFileURL } = require("node:url");
 
 // Same data folder in development and in the packaged app; the bundle uses an ASCII name
 // (Electron can't start from a Korean bundle name) but menus show the Korean one.
-app.setPath("userData", path.join(app.getPath("appData"), "f1-live-kr"));
+// (development only: F1KR_USERDATA gives an automated run – dev-snapshot clears the page's storage – a folder of its
+// own, so the everyday app's settings and sign-ins aren't touched; F1KR_CACHE can point it at an existing data cache)
+const DEV_DATA = !app.isPackaged && process.env.F1KR_USERDATA;
+app.setPath("userData", DEV_DATA || path.join(app.getPath("appData"), "f1-live-kr"));
 app.setName("라이브 타이밍 KR");
 
 let archive, auth, live, mainWin, scenes, google;
@@ -42,12 +45,12 @@ function createWindow() {
 const send = (channel, ...args) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, ...args); };
 
 app.whenReady().then(() => {
-  const data = app.getPath("userData");
-  archive = new Archive(path.join(data, "cache"));
+  const data = app.getPath("userData"), cacheDir = (DEV_DATA && process.env.F1KR_CACHE) || path.join(data, "cache");
+  archive = new Archive(cacheDir);
   setTimeout(() => archive.prune(), 5000);   // (old session recordings, past 3 GB)
   auth = new Auth(data);
   live = new LiveClient({ getToken: () => auth.getToken() });
-  scenes = new Scenes(path.join(data, "cache"));
+  scenes = new Scenes(cacheDir);
   google = new GoogleTiles(data);
   // After sleep the socket is usually dead without noticing; reconnect straight away.
   powerMonitor.on("resume", () => { if (!live.stopped) { live.retry = 0; live.connect(); } });
@@ -67,7 +70,7 @@ app.whenReady().then(() => {
     archive.loadSession(V.sessionPath(sessionPath), (p) => { if (!e.sender.isDestroyed()) e.sender.send("session:progress", p); }));
   handle("schedule:get", (_e, year) => getSchedule(V.year(year)));
   handle("track:outline", (_e, location) => { const y = new Date().getFullYear(); return archive.findOutline(V.text(location, 80), [y, y - 1, y - 2]); });
-  handle("track:circuit", (_e, key, year) => getCircuit(path.join(data, "cache"), key, year));
+  handle("track:circuit", (_e, key, year) => getCircuit(cacheDir, key, year));
   // Real-world 3D surroundings: fitted scene, map tiles (terrain heights, imagery), optional Google imagery.
   handle("geo:scene", (e, location, lap) => {
     if (!Array.isArray(lap) || lap.length < 2 || lap.length > 50000 || !lap.every((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))) throw new Error("bad lap");
@@ -77,7 +80,7 @@ app.whenReady().then(() => {
     [z, x, y] = V.tileArgs(z, x, y);
     if (source === "google") return google.tile(z, x, y);
     if (source !== "eox" && source !== "terrain") throw new Error("unknown tile source");
-    return geo.getTile(path.join(data, "cache"), source, z, x, y);
+    return geo.getTile(cacheDir, source, z, x, y);
   });
   // facility models (facilities.js): self-contained GLB files shipped in src/data/models (also inside app.asar)
   const MODELS = path.join(__dirname, "..", "data", "models");

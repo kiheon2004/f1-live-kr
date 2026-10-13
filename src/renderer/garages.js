@@ -32,26 +32,54 @@ export function standstillEvents(cars, upTo = Infinity) {
     if (upTo < Infinity) { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (c.t[m] <= upTo) lo = m + 1; else hi = m; } n = lo; if (!n) continue; }
     // runs of samples within STILL of the run's first one, joined into one standstill as above (a run of a single
     // sample can join: data jumping back and forth is still standing)
-    let k = 0, a = -1, z = -1, ax = 0, ay = 0, hole = false;   // the standstill so far: samples a..z, standing at (ax, ay)
+    // (also kept, for cutting the event at an earlier moment – eventsUpTo: its samples' indices a..z, the time of the
+    // sample after it, and the first sample after a hole)
+    let k = 0, a = -1, z = -1, ax = 0, ay = 0, holeAt = null;   // the standstill so far: samples a..z, standing at (ax, ay)
     const flush = () => {
       if (a >= 0 && c.t[z] - c.t[a] >= STOP_MIN) {
-        out.push({ num, t0: c.t[a], t1: c.t[z], X: ax, Y: ay, hole, startKnown: a > 0 && c.t[a] - c.t[a - 1] <= HOLE,
-          open: z === n - 1, holeAfter: z + 1 < n && c.t[z + 1] - c.t[z] > HOLE });
+        out.push({ num, t0: c.t[a], t1: c.t[z], X: ax, Y: ay, hole: holeAt != null, startKnown: a > 0 && c.t[a] - c.t[a - 1] <= HOLE,
+          open: z === n - 1, holeAfter: z + 1 < n && c.t[z + 1] - c.t[z] > HOLE, a, z, holeAt, nextT: z + 1 < n ? c.t[z + 1] : null });
       }
       a = -1;
     };
     while (k < n) {
-      let e = k, h = false;
+      let e = k, h = null;
       const x0 = c.x[k], y0 = c.y[k];
-      while (e + 1 < n && Math.hypot(c.x[e + 1] - x0, c.y[e + 1] - y0) < STILL * 10) { if (c.t[e + 1] - c.t[e] > HOLE) h = true; e++; }
-      if (a >= 0 && c.t[k] - c.t[z] <= JOIN_GAP && Math.hypot(x0 - ax, y0 - ay) <= JOIN_R * 10) { z = e; hole = hole || h; }
-      else { flush(); a = k; z = e; ax = x0; ay = y0; hole = h; }
+      while (e + 1 < n && Math.hypot(c.x[e + 1] - x0, c.y[e + 1] - y0) < STILL * 10) { if (h == null && c.t[e + 1] - c.t[e] > HOLE) h = c.t[e + 1]; e++; }
+      if (a >= 0 && c.t[k] - c.t[z] <= JOIN_GAP && Math.hypot(x0 - ax, y0 - ay) <= JOIN_R * 10) { z = e; if (holeAt == null) holeAt = h; }
+      else { flush(); a = k; z = e; ax = x0; ay = y0; holeAt = h; }
       k = e + 1;
     }
     flush();
   }
   return out;
 }
+
+// The events standstillEvents(cars, t) would give, from those of the whole recording (a replay's samples don't change):
+// the ones begun by t, cut at the last sample by t – still standing there as far as t shows (open), and without a hole
+// or end not seen by then. The same result, without going over every sample up to t again.
+export function eventsUpTo(all, cars, t) {
+  const out = [];
+  for (const e of all) {
+    if (e.t0 > t) continue;
+    let f;
+    if (e.t1 <= t) {
+      f = { ...e };
+      if (e.nextT == null || e.nextT > t) { f.open = true; f.holeAfter = false; }
+    } else {
+      const T = cars[e.num].t;
+      let lo = e.a, hi = e.z;   // the last sample of a..z at or before t
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (T[m] <= t) lo = m; else hi = m - 1; }
+      if (T[lo] - e.t0 < STOP_MIN) continue;
+      f = { ...e, z: lo, t1: T[lo], open: true, holeAfter: false, nextT: null };
+    }
+    f.holeAt = e.holeAt != null && e.holeAt <= f.t1 ? e.holeAt : null; f.hole = f.holeAt != null;
+    out.push(f);
+  }
+  return out;
+}
+// (a replay's whole-recording events, per positions object)
+const wholeEvents = new WeakMap();
 
 // What an event counts as: "stop" (a pit stop: 1.5–8 s, finished, its start and end seen, within 60 s of entering the
 // pit lane when that's known), "long" (20 s or more: a garage stay – also while still going on), "uncertain" (it
@@ -95,7 +123,15 @@ const idOf = (e) => `${e.num}@${Math.round(e.t0)}`;
 // project(x, z) → { u, off } for the pit building; span: its garages' first and last u. Returns
 // { num: { stops: [{ u, t, dur, off, id }], long: [...], events } } (t: when the standstill began).
 export function standstills(cars, toScene, project, span, pitIn = null, upTo = Infinity) {
-  const frame = { toScene, project, span }, ev = standstillEvents(cars, upTo);
+  // (a recording – samples that never grow, as a replay's – is gone over once; a live window every time)
+  const fixed = cars && Object.values(cars).every((c) => !c.grow);
+  let ev;
+  if (fixed && upTo < Infinity) {
+    let all = wholeEvents.get(cars);
+    if (!all) wholeEvents.set(cars, (all = standstillEvents(cars)));
+    ev = eventsUpTo(all, cars, upTo);
+  } else ev = standstillEvents(cars, upTo);
+  const frame = { toScene, project, span };
   for (const e of ev) { place(e, frame); e.afterEntry = afterEntry(e, pitIn); e.id = idOf(e); }
   // (every event, also the uncertain ones, for merging with later looks: not enumerated with the cars)
   return Object.defineProperty(byCar(ev), "events", { value: ev, enumerable: false });

@@ -162,3 +162,28 @@ test("confirmed allocations are kept apart from the estimate: drawn as given, no
   assert.strictEqual(b.estimated, false); assert.strictEqual(b.link, "confirmed"); assert.deepStrictEqual(b.slots, [20, 21]); assert.strictEqual(b.source, "test plan");
   assert.ok(!a.slots.some((k) => b.slots.includes(k)));
 });
+
+test("replay: the events at a moment from the whole recording's (cut there) are exactly those computed up to it", async () => {
+  const G = await load();
+  // cars standing, nudged, losing data, standing at the end – at random
+  let seed = 3; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const cars = {};
+  for (let num = 1; num <= 6; num++) {
+    const pts = []; let t = 0, x = 0;
+    while (t < 600000) {
+      const k = r();
+      if (k < 0.25) { const end = t + 500 + r() * 45000; for (; t < end; t += 250) pts.push([t, x + (r() < 0.2 ? 1.0 : 0), 5]); }   // a standstill (sometimes jittering)
+      else if (k < 0.3) t += 2500 + r() * 6000;                                                                                 // a hole
+      else for (let i = 0; i < 20; i++, t += 250) pts.push([t, (x += 6), 5]);                                               // driving
+    }
+    cars[num] = run(pts);
+  }
+  const all = G.standstillEvents(cars), strip = (e) => [e.num, e.t0, e.t1, e.X, e.Y, e.hole, e.startKnown, e.open, e.holeAfter].join(",");
+  let compared = 0;
+  for (let t = 0; t <= 620000; t += 1730) {
+    const want = G.standstillEvents(cars, t).map(strip), got = G.eventsUpTo(all, cars, t).map(strip);
+    assert.deepStrictEqual(got.sort(), want.sort(), `at ${t}`);
+    compared += want.length;
+  }
+  assert.ok(compared > 1000, `enough events compared (${compared})`);
+});

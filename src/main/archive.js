@@ -59,6 +59,39 @@ function flattenPositions(lines) {
   return samples;
 }
 
+// The same per car, as compact typed arrays in time order: { cars: { num: { t: Float64Array, x, y, z: Float32Array, n } } }
+// – what the replay's CarTracks keeps. (The sample list above is ~90 MB of objects for a race; this is ~13 MB, and
+// passes to the page without copying every little array.)
+function flattenTracks(lines) {
+  const per = {};
+  for (const [ms, body] of lines) {
+    const list = body.Position || [];
+    if (!list.length) continue;
+    const last = Date.parse(list[list.length - 1].Timestamp);
+    for (const p of list) {
+      const t = ms - (last - Date.parse(p.Timestamp));
+      for (const [num, e] of Object.entries(p.Entries || {})) {
+        if (!(e.X || e.Y)) continue;
+        (per[num] || (per[num] = [])).push(t, e.X, e.Y, e.Z || 0);
+      }
+    }
+  }
+  const cars = {};
+  for (const [num, a] of Object.entries(per)) {
+    const k = a.length / 4, order = Array.from({ length: k }, (_, i) => i);
+    // (time order, ties as they came – as the sample list's stable sort gives them)
+    order.sort((i, j) => a[i * 4] - a[j * 4] || i - j);
+    const o = { t: new Float64Array(k), x: new Float32Array(k), y: new Float32Array(k), z: new Float32Array(k), n: 0 };
+    for (const i of order) {
+      const t = a[i * 4];
+      if (o.n && t <= o.t[o.n - 1] + 1) continue;   // same moment twice: the first (as CarTracks)
+      o.t[o.n] = t; o.x[o.n] = a[i * 4 + 1]; o.y[o.n] = a[i * 4 + 2]; o.z[o.n] = a[i * 4 + 3]; o.n++;
+    }
+    cars[num] = o;
+  }
+  return { cars };
+}
+
 // Car telemetry, per car, as compact typed arrays (stream ms; speed km/h, rpm, gear, throttle %, brake 0/1, DRS code).
 // F1 channels: 0 RPM, 2 speed, 3 gear, 4 throttle, 5 brake, 45 DRS (8+ = open, gone in 2026).
 function flattenCarData(lines) {
@@ -210,13 +243,14 @@ class Archive {
           if (!lines.length) { drop(topic); throw new Error(`이 세션의 기록(${topic})을 읽을 수 없어요. 파일이 손상됐어요. 잠시 뒤 다시 시도해 주세요`); }
         } else damaged.push(topic);
       }
-      if (topic === "Position.z") topics.Position = flattenPositions(lines);
+      if (topic === "Position.z") topics.PositionTracks = flattenTracks(lines);
       else if (topic === "CarData.z") topics.CarData = flattenCarData(lines);
       else topics[topic] = lines;
     }
     onProgress({ phase: "parse", done: TOPICS.length, total: TOPICS.length });
     let duration = 0;
-    for (const [topic, list] of Object.entries(topics)) if (topic !== "CarData" && list.length) duration = Math.max(duration, list[list.length - 1][0]);
+    for (const [topic, list] of Object.entries(topics)) if (Array.isArray(list) && list.length) duration = Math.max(duration, list[list.length - 1][0]);
+    for (const c of Object.values(topics.PositionTracks?.cars || {})) if (c.n) duration = Math.max(duration, c.t[c.n - 1]);
     return { topics, duration, damaged };
   }
 
@@ -251,4 +285,4 @@ class Archive {
   }
 }
 
-module.exports = { Archive, parseStream, flattenPositions, flattenCarData, inflateZ, TOPICS };
+module.exports = { Archive, parseStream, flattenPositions, flattenTracks, flattenCarData, inflateZ, TOPICS };

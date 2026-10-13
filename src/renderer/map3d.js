@@ -12,6 +12,7 @@ import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, ov
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
+import { firstHit } from "./los.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -174,6 +175,7 @@ function updatePitTeams(force = false) {
   // a layer added at night takes the light field too (its own materials only – the rest of the world has it already)
   pitTeams.group.traverse((o) => { for (const m of [].concat(o.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
+  warmShaders();
 }
 // the pit lane's direction at (x, z) if that's in front of a facility's garages (0–16 m out), else null
 function pitLaneDir(x, z) {
@@ -208,9 +210,12 @@ function rebuild() {
   loadGeo(world);
 }
 
+// (the view's size, read when it changes – reading it every frame after the HUD changed forced a layout each frame)
+let hostW = 1, hostH = 1;
 function resize() {
   const w = host.clientWidth, h = host.clientHeight;
   if (!w || !h) return;
+  hostW = w; hostH = h;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -388,21 +393,20 @@ function measureWidth(samples, grid, center) {
 }
 const edgeOf = (s, side) => (side > 0 ? s.L ?? TRACK_W / 2 : s.R ?? -TRACK_W / 2);
 
+// (cells keyed by a number, not a string: it's asked many times a frame)
 class SpatialGrid {
   constructor(cell) { this.cell = cell; this.map = new Map(); }
-  key(x, z) { return `${Math.floor(x / this.cell)},${Math.floor(z / this.cell)}`; }
-  add(x, z, v) { const k = this.key(x, z); if (!this.map.has(k)) this.map.set(k, []); this.map.get(k).push(v); }
+  key(i, j) { return (i + 32768) * 65536 + (j + 32768); }
+  add(x, z, v) { const k = this.key(Math.floor(x / this.cell), Math.floor(z / this.cell)); if (!this.map.has(k)) this.map.set(k, []); this.map.get(k).push(v); }
   // Nearest track sample within `rings` cells; returns [sample, distance] or [null, Infinity].
   nearest(x, z, rings = 2) {
     const cx = Math.floor(x / this.cell), cz = Math.floor(z / this.cell);
     let best = null, bd = Infinity;
     for (let i = -rings; i <= rings; i++) for (let j = -rings; j <= rings; j++) {
-      for (const s of this.map.get(`${cx + i},${cz + j}`) || []) {
-        const d = Math.hypot(s.p.x - x, s.p.z - z);
-        if (d < bd) { bd = d; best = s; }
-      }
+      const list = this.map.get(this.key(cx + i, cz + j)); if (!list) continue;
+      for (const s of list) { const dx = s.p.x - x, dz = s.p.z - z, d = dx * dx + dz * dz; if (d < bd) { bd = d; best = s; } }
     }
-    return [best, bd];
+    return [best, best ? Math.sqrt(bd) : Infinity];
   }
 }
 
@@ -937,7 +941,7 @@ function updateCars(dt) {
     const out = l.Retired || l.Stopped;
     const inCockpit = camMode === "onboard" && num === focusNum;
     c.obj.visible = true;
-    c.model.getObjectByName("helmet").visible = !inCockpit;   // out of the T-cam's way, as in broadcast onboards
+    (c.helmet || (c.helmet = c.model.getObjectByName("helmet"))).visible = !inCockpit;   // out of the T-cam's way, as in broadcast onboards
     c.label.sp.userData.own = inCockpit;
     paintLabel(c.label, `${l.Position || ""} ${d.Tla}`.trim(), "#" + (d.TeamColour || "888"), num === A.focus);
     c.label.sp.material.opacity = out ? 0.45 : 1;
@@ -988,12 +992,24 @@ function leader() {
 }
 
 // From high up the cars would be specks: grow them with distance, and keep name tags readable.
+// (the small parts of a car: its four wheel covers and its lights)
+function fineParts(c) {
+  if (c.fineList) return c.fineList;
+  const lm = c.model.userData, list = [];
+  for (const w of lm.wheels || []) if (w.children[2]) list.push(w.children[2]);
+  c.model.traverse((o) => { if (o.isMesh && o.material?.isMeshBasicMaterial && o.material !== lm.bandMat) list.push(o); });
+  return (c.fineList = list);
+}
 function scaleForView() {
-  const H = host.clientHeight || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H;
+  const H = hostH || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H;
   for (const c of cars.values()) {
     const dist = camera.position.distanceTo(c.obj.position);
     const s = camMode === "heli" ? Math.min(7, Math.max(1, dist / 115)) : 1;
     c.model.scale.setScalar(s);
+    // far off (the helicopter view), the parts no one can make out at that size aren't drawn: the wheel covers and the
+    // lights – 5 of a car's 20 draw calls (the tyre bands stay: their colour is the compound)
+    const fine = dist < 250;
+    if (c.fine !== fine) { c.fine = fine; for (const o of fineParts(c)) o.visible = fine; }
     c.label.sp.position.set(0, 1.5 * s + 0.4, 0);
     c.label.sp.scale.set(26 * f * (128 / 40), 26 * f, 1);   // ~26 px tall on screen
     c.label.sp.visible = !c.label.sp.userData.own && dist < 6000 && c.obj.visible;
@@ -1001,7 +1017,7 @@ function scaleForView() {
   declutterLabels();
 }
 function declutterLabels() {
-  const lines = app().src?.state.TimingData?.Lines || {}, W = host.clientWidth, H = host.clientHeight, taken = [];
+  const lines = app().src?.state.TimingData?.Lines || {}, W = hostW, H = hostH, taken = [];
   const list = [...cars.values()].filter((c) => c.label.sp.visible)
     .sort((a, b) => (a.num === app().focus ? -1 : b.num === app().focus ? 1 : (+lines[a.num]?.Position || 99) - (+lines[b.num]?.Position || 99)));
   for (const c of list) {
@@ -1064,9 +1080,9 @@ function updateCamera(dt) {
   const want = head.clone().add(new THREE.Vector3(Math.sin(az) * Math.cos(el) * r, Math.sin(el) * r, Math.cos(az) * Math.cos(el) * r));
   // keep a clear line of sight to the car
   const dir = want.clone().sub(head), len = dir.length(); dir.normalize();
-  ray.set(head, dir); ray.far = len;
-  const hit = world.occluders?.length ? ray.intersectObjects(world.occluders, false)[0] : null;
-  if (hit) want.copy(head).addScaledVector(dir, Math.max(3, hit.distance - 0.6));
+  // (los.js: only the triangles near the segment – the same answer as a raycast, at a fraction of the cost)
+  const hitD = world.occluders?.length ? firstHit(world.occluders, head, dir, len) : null;
+  if (hitD != null) want.copy(head).addScaledVector(dir, Math.max(3, hitD - 0.6));
   const g = world.real?.groundAt ? world.real.groundAt(want.x, want.z) : null;
   if (g != null && want.y < g + 1.4) want.y = g + 1.4;
   camera.position.copy(want);
@@ -1316,7 +1332,9 @@ function updateSun(now) {
   let span = camMode === "heli" ? Math.min(1700, Math.max(260, camera.position.distanceTo(controls.target) * 0.95)) : 260;
   span = Math.pow(2, Math.round(Math.log2(span) * 4) / 4);              // a few fixed sizes, not every value
   const grid = span / 8, cx = Math.round(target.x / grid) * grid, cz = Math.round(target.z / grid) * grid;
-  const key = `${cx},${cz},${span},${sunDir.x.toFixed(3)},${sunDir.y.toFixed(3)},${sun.castShadow}`;
+  // (the sun to ~0.5°: it moves that far in about two minutes – redrawing the whole shadow map for less was a stall
+  // every few seconds of a fast replay, for no visible change)
+  const key = `${cx},${cz},${span},${sunDir.x.toFixed(2)},${sunDir.y.toFixed(2)},${sunDir.z.toFixed(2)},${sun.castShadow}`;
   if (key === shadowKey) return;
   shadowKey = key;
   const c = new THREE.Vector3(cx, target.y, cz);
@@ -1395,6 +1413,7 @@ function applyLighting() {
   const sea = world.real?.group.getObjectByName("sea"), water = world.real?.group.getObjectByName("water");
   for (const w of [sea, water]) if (w) { w.material.emissive = new THREE.Color(night ? 0x02060a : 0); }
   world.far.material.color.copy(world.farBase).multiplyScalar(night ? 0.5 : 1);
+  warmShaders();   // (the lit materials changed: their shaders now, not when each comes into view)
 }
 const NIGHT_GAIN = 5.5;   // light field → irradiance
 // Light towers along the track (instanced): a mast, a bank of projectors aimed at the track, their lit faces and
@@ -1425,6 +1444,16 @@ function floodlights(samples) {
   }
   g.add(poles, heads, faces, glowPoints(glow, "floodGlow"));
   return g;
+}
+
+// The shaders of everything in the world compiled now, while the map is being shown – not the first time a part comes
+// into view (the garages' insides, the teams' layer: hidden by distance until the camera is near), which stalled that
+// frame. (three.js compiles what's visible: the hidden parts are shown for the call, then hidden again.)
+function warmShaders() {
+  if (!renderer?.compileAsync) return;
+  const hidden = [];
+  world?.group.traverse((o) => { if (!o.visible && (o.name === "garageInteriors" || o.name === "pitTeams")) { hidden.push(o); o.visible = true; } });
+  try { renderer.compileAsync(scene, camera).catch(() => {}); } finally { for (const o of hidden) o.visible = false; }
 }
 
 // ---------- loop ----------
@@ -1584,8 +1613,8 @@ function frame(now) {
   updateSun(now);
   thinFarTrees();
   world?.real?.stands?.update(camera.position);
-  world?.real?.group.getObjectByName("buildings")?.userData.update?.(camera.position);
-  world?.real?.group.getObjectByName("facilities")?.userData.update?.(camera.position);
+  realPart("buildings")?.userData.update?.(camera.position);
+  realPart("facilities")?.userData.update?.(camera.position);
   updatePitTeams();
   if (!devNoHud) paintHud();
   // glare points: pixels per metre at 1 m away, fading into the haze as the fog does; time for blinking lights
@@ -1599,10 +1628,20 @@ function frame(now) {
 
 // Level of detail for vegetation: each tree chunk holds its instances in random order, so drawing only the
 // first part of them thins a far-away forest evenly. Near chunks get all their trees.
+// (a part of the real map by name, looked up once: the parts don't change once it's built)
+function realPart(name) {
+  const R = world?.real; if (!R) return null;
+  const c = R.parts || (R.parts = {});
+  return name in c ? c[name] : (c[name] = R.group.getObjectByName(name) || null);
+}
+// (done again when the camera has moved 5 m: the forest a frame later is the same)
+let treesAt = null;
 function thinFarTrees() {
-  const trees = world?.real?.group.getObjectByName("trees");
+  const trees = realPart("trees");
   if (!trees) return;
   const cam = camera.position;
+  if (treesAt && treesAt.trees === trees && treesAt.p.distanceToSquared(cam) < 25) return;
+  treesAt = { trees, p: cam.clone() };
   for (const im of trees.children) {
     const full = im.userData.full; if (!full) continue;
     const c = im.userData.centre, d = Math.hypot(c.x - cam.x, c.z - cam.z, (c.y - cam.y) * 0.5);
@@ -1623,10 +1662,16 @@ function adaptResolution(now, dt) {
   if (now - perf.since < 2000) return;
   const avg = perf.acc / perf.n;
   perf.fps = Math.round(1 / avg); perf.acc = 0; perf.n = 0; perf.since = now;
+  // (a change of resolution reallocates the drawing buffers – a ~100 ms stall: down at once when frames are slow (4 s
+  // apart at most), up only after two fast 2 s windows in a row and 10 s after the last change – no stepping back and
+  // forth between two sizes)
+  const want = avg > 0.025 ? -1 : avg < 0.012 ? 1 : 0;
+  perf.trend = want > 0 && perf.lastWant > 0 ? (perf.trend || 0) + 1 : want > 0 ? 1 : 0; perf.lastWant = want;
+  const since = now - (perf.changedAt || 0);
   let r = perf.ratio;
-  if (avg > 0.025 && r > 1) r = Math.max(1, r - 0.25);
-  else if (avg < 0.012 && r < max) r = Math.min(max, r + 0.25);
-  if (r !== perf.ratio) { perf.ratio = r; renderer.setPixelRatio(r); resize(); }
+  if (want < 0 && r > 1 && since > 4000) r = Math.max(1, r - 0.25);
+  else if (want > 0 && perf.trend >= 2 && since > 10000 && r < max) r = Math.min(max, r + 0.25);
+  if (r !== perf.ratio) { perf.ratio = r; perf.changedAt = now; perf.trend = 0; renderer.setPixelRatio(r); resize(); }
 }
 
 // Self-check used in development on every circuit: walks the lap every ~20 m and reports
@@ -1846,6 +1891,13 @@ window.Map3D = {
     if (!G) return "no garages";
     const s = G.slots[Math.max(0, Math.min(G.slots.length - 1, k))], [ix, iz] = s.inward;
     return this.look(s.front[0] + ix * (s.depth + out), s.floor + h, s.front[1] + iz * (s.depth + out), s.front[0] + ix * (s.depth + 18), s.floor + 3, s.front[1] + iz * (s.depth + 18), fov);
+  },
+  // development: what the scene holds, by part – objects, meshes drawn (visible, in view or not), triangles
+  sceneStats() {
+    const out = {}, add = (k, o) => { const r = out[k] || (out[k] = { objects: 0, meshes: 0, visibleMeshes: 0, tris: 0 }); r.objects++; if (o.isMesh || o.isPoints || o.isSprite || o.isLine) { r.meshes++; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (v) { r.visibleMeshes++; const g = o.geometry; if (g?.attributes?.position) r.tris += Math.round(((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1)); } } };
+    scene.traverse((o) => { let top = o, sub = null; while (top.parent && top.parent !== scene) { sub = top; top = top.parent; } const name = top === world?.group ? "world/" + (sub ? (sub === world.real?.group ? "real" : sub.name || sub.type) : "-") : top.name || top.type; add(name, o); });
+    for (const c of world?.real?.group.children || []) c.traverse((o) => add("real/" + (c.name || c.type), o));
+    return JSON.stringify(out);
   },
   // development: how many facility models stand in the current world, and what the renderer holds
   pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: pitTeams.info?.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
