@@ -1410,6 +1410,8 @@
       return gridOk(saved) ? saved : null;
     },
     location: () => src?.state.SessionInfo?.Meeting?.Location || (mode === "replay" ? replayInfo?.location : null),
+    // F1's circuit key of the session's venue (the Grand Prix's name says nothing certain about where it runs)
+    circuitKey: () => { const k = src?.state.SessionInfo?.Meeting?.Circuit?.Key ?? (mode === "replay" ? replayInfo?.circuitKey : null); return Number.isFinite(+k) && k !== null ? +k : null; },
     sessionYear: () => +(src?.state.SessionInfo?.Path || (mode === "replay" ? replayInfo?.path : "") || "").slice(0, 4) || null,
     sessionHour: () => { const m = /T(\d\d):(\d\d)/.exec(src?.state.SessionInfo?.StartDate || (mode === "replay" ? replayInfo?.start : "") || ""); return m ? +m[1] + +m[2] / 60 : null; },
     sourceKey: () => (mode === "replay" ? `replay:${replayInfo?.path || ""}` : `live:${live.state.SessionInfo?.Key || ""}:${liveShape().length}`),

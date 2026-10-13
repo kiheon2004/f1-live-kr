@@ -30,21 +30,42 @@ import * as THREE from "./vendor/three.module.js";
 export const PROFILES = {
   2026: {
     era: "2026", FZ: 1.7, RZ: -1.7, FR: 0.353, RR: 0.355, FW: 0.30, RW: 0.37, W: 1.9, H: 0.95,
-    tcam: [0, 1.05, -0.5], eye: [0, 0.79, -0.06], helmet: [0, 0.735, -0.08],
+    // the broadcast T-cam, fitted to the 2026 onboard footage (Leclerc, Australian GP start – formula1.com, compared
+    // only): the horizon, both front tyres' tops and the halo's top in one frame give the camera 1.10 m up, 0.46 m behind
+    // the car's middle, looking down 15.5°, a 72° wide lens (16:9) – then the helmet's top and the mirrors land where the
+    // footage has them. One frame, a few points: ±3 cm, ±1°
+    // the helmet as wide (~47 % of the frame) and as high (its top at 72 % down) as in that footage: ~0.41 m ahead of the
+    // lens, its top ~0.90 m up, ~28 cm across (a racing helmet with its visor)
+    tcam: [0, 1.10, -0.46], tcamPitch: 15.5, tcamHfov: 72, eye: [0, 0.81, 0.0], helmet: [0, 0.755, -0.05], helmetSize: [0.14, 0.145, 0.16],
     src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre sizes from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm diameter) – the rest estimated",
   },
   2022: {
     era: "2022", FZ: 1.8, RZ: -1.8, FR: 0.36, RR: 0.36, FW: 0.305, RW: 0.405, W: 2.0, H: 0.95,
-    tcam: [0, 1.05, -0.52], eye: [0, 0.79, -0.06], helmet: [0, 0.735, -0.08],
+    // (no footage of these cars compared: the 2026 lens and angle, the mount from photos of the airbox – estimates)
+    tcam: [0, 1.05, -0.52], tcamPitch: 15.5, tcamHfov: 72, eye: [0, 0.79, -0.06], helmet: [0, 0.735, -0.08],
     src: "2022–2025 F1 technical regulations: 3.6 m wheelbase max, 2.0 m width, 0.95 m height; 18-inch wheels, ~720 mm tyres (front ~305 mm, rear ~405 mm wide) – estimates; the rest from photos",
   },
 };
-// Which model for a car: by season (the car of that year) and team (a checked variant where there is one).
+// Team profiles, apart from the era's car: what is known of one team's car in one season – so far its T-cam, where
+// a frame of that team's own onboard footage was fitted. `basis` says how far to trust it; a team without an entry
+// uses the era's numbers (nothing is copied from another team).
+export const TEAM_PROFILES = [
+  { season: 2026, team: /ferrari/i, id: "ferrari-2026", camera: { tcam: [0, 1.10, -0.46], tcamPitch: 15.5, tcamHfov: 72 },
+    basis: "fitted to Leclerc's 2026 Australian GP start onboard (straight, level car): tyres, halo, horizon; helmet and mirrors check out – the era's base" },
+  // Red Bull (Verstappen, Singapore pole lap): a fit to that frame put the lens 0.2 m behind the car's middle – but the
+  // car is rolled in a corner there, and checked in the app that lens has the helmet out of the frame, which the footage
+  // shows plainly: rejected; the era's numbers are used (they put tyres, halo and helmet where that frame has them too)
+  // McLaren (Norris, Hungary) and Mercedes (Russell, Austria): only the left half of each frame is visible in the
+  // thumbnails (a portrait over the rest) – too few points for a fit; the era's numbers are used
+];
+// Which model for a car: by season (the car of that year) and team (a checked variant where there is one); the team's
+// own profile (camera) on top.
 export function profileFor(season, teamName) {
   const y = +season || new Date().getFullYear();
   const era = y >= 2026 ? "2026" : "2022";
   const variant = era === "2022" && y === 2025 && /red bull racing/i.test(teamName || "") ? "rb21" : null;
-  return { key: variant ? `${era}:${variant}` : era, era, variant, season: y, ...PROFILES[era] };
+  const team = TEAM_PROFILES.find((t) => t.season === y && t.team.test(teamName || "")) || null;
+  return { key: variant ? `${era}:${variant}` : era, era, variant, season: y, ...PROFILES[era], ...(team?.camera || {}), team: team?.id || null };
 }
 // (kept for callers of the old single model: the current era's numbers)
 export const WHEELBASE = PROFILES[2026].FZ - PROFILES[2026].RZ;
@@ -280,7 +301,11 @@ function template(prof) {
 // The halo (both eras: the hoop from rear mounts on the chassis up round the driver's head, the centre pillar down to
 // the chassis ahead of the cockpit), its fairing thicker than the titanium tube under it.
 function halo(p) {
-  const hoop = sweep([[-0.335, 0.6, -0.3], [-0.34, 0.74, -0.16], [-0.31, 0.86, 0.04], [-0.22, 0.915, 0.22], [0, 0.935, 0.33], [0.22, 0.915, 0.22], [0.31, 0.86, 0.04], [0.34, 0.74, -0.16], [0.335, 0.6, -0.3]], 0.046, 0.034, 72, 18);
+  // (2026 footage: the hoop reads wide and flat from the T-cam – its fairing ~12 cm across, ~6 cm thick)
+  const wide = p.era === "2026";
+  // (and its rear legs closer in: in that footage they meet the bottom of the frame ~a quarter in from each side)
+  const k = wide ? 0.86 : 1;
+  const hoop = sweep([[-0.335 * k, 0.6, -0.3], [-0.34 * k, 0.74, -0.16], [-0.31 * k, 0.86, 0.04], [-0.22, 0.915, 0.22], [0, 0.935, 0.33], [0.22, 0.915, 0.22], [0.31 * k, 0.86, 0.04], [0.34 * k, 0.74, -0.16], [0.335 * k, 0.6, -0.3]], wide ? 0.06 : 0.046, wide ? 0.03 : 0.034, 72, 18);
   // the pillar: a blade, wide across (the fairing), from the hoop's front down to the chassis
   const pillar = loft(smoothSections([[0.355, 0.925, 0.028, 0.03], [0.45, 0.86, 0.034, 0.03], [0.55, 0.76, 0.04, 0.028], [0.64, 0.64, 0.05, 0.03]].reverse(), 2), 14);
   return merge([hoop, pillar]);
@@ -347,9 +372,12 @@ function wingElementSide(x, y, z0, z1) { const g = wingElement(z0 - z1, 0.1, 0.0
 function body2026(p) {
   const sec = [
     [2.42, 0.2, 0.05, 0.035], [2.3, 0.22, 0.085, 0.06], [2.0, 0.265, 0.12, 0.09], [1.6, 0.33, 0.175, 0.14],
-    [1.2, 0.4, 0.235, 0.19], [0.8, 0.44, 0.285, 0.19], [0.5, 0.445, 0.3, 0.17], [0.3, 0.42, 0.31, 0.135],
-    [0.0, 0.41, 0.315, 0.13], [-0.22, 0.43, 0.32, 0.15], [-0.42, 0.54, 0.31, 0.29], [-0.75, 0.57, 0.27, 0.36],
-    [-1.2, 0.5, 0.22, 0.26], [-1.65, 0.43, 0.15, 0.19], [-2.1, 0.36, 0.085, 0.11], [-2.42, 0.32, 0.05, 0.06],
+    // (ahead of the cockpit the chassis stands high – ~0.67 m at the opening's front in the 2026 footage, hiding the
+    // front suspension from the T-cam)
+    [1.2, 0.42, 0.235, 0.2], [0.8, 0.46, 0.285, 0.22], [0.5, 0.47, 0.3, 0.2], [0.3, 0.43, 0.31, 0.14],
+    // (the airbox stands over the helmet: in 2026 photos its inlet's top is ~0.1 m above the helmet's – an estimate)
+    [0.0, 0.41, 0.315, 0.13], [-0.22, 0.43, 0.32, 0.15], [-0.42, 0.56, 0.3, 0.4], [-0.75, 0.6, 0.26, 0.4],
+    [-1.2, 0.52, 0.22, 0.28], [-1.65, 0.43, 0.15, 0.19], [-2.1, 0.36, 0.085, 0.11], [-2.42, 0.32, 0.05, 0.06],
   ];
   const body = loft(smoothSections(sec, 2).reverse(), 32);
   const podL = loft(smoothSections([
@@ -374,15 +402,18 @@ function body2026(p) {
   const rwPylons = merge([boxAt(0.012, 0.42, 0.12, 0.05, 0.56, -2.28), boxAt(0.012, 0.42, 0.12, -0.05, 0.56, -2.28), boxAt(0.12, 0.12, 0.36, 0, 0.33, -2.42), boxAt(0.6, 0.012, 0.06, 0, 0.5, -2.32)]);
   const susp = suspension(p, false);
   const mirrors = [], heads = [];
-  for (const k of [1, -1]) { mirrors.push(strut([0.27 * k, 0.6, 0.48], [0.44 * k, 0.66, 0.5], 0.03, 0.012)); heads.push(softBox(0.15, 0.06, 0.05, 0.48 * k, 0.67, 0.5, 0.2)); }
-  const tcamPod = softBox(0.1, 0.055, 0.13, 0, 0.995, -0.58, 0.3);
+  // mirrors (2026 footage: larger and higher than before, either side of the halo's legs)
+  for (const k of [1, -1]) { mirrors.push(strut([0.28 * k, 0.62, 0.46], [0.5 * k, 0.72, 0.48], 0.03, 0.012)); heads.push(softBox(0.22, 0.085, 0.07, 0.56 * k, 0.74, 0.48, 0.2)); }
+  // the T-cam pod on the airbox (2026 photos: a black pod with its antennas well over the helmet); the lens at its front
+  const tcamPod = merge([softBox(0.11, 0.075, 0.16, 0, 1.06, -0.58, 0.3), boxAt(0.006, 0.07, 0.03, 0.03, 1.12, -0.62), boxAt(0.006, 0.07, 0.03, -0.03, 1.12, -0.62)]);
   return {
     body, pods: both(podL),
-    carbon: metricUV(merge([floor, diffuser, fw[0], pylons, fwPlates, boards, rwPlates, rwPylons, ...susp, ...mirrors, tcamPod]), 0.04),
+    // (2026 halos are black carbon on every car in the footage and photos – not painted)
+    carbon: metricUV(merge([floor, diffuser, fw[0], pylons, fwPlates, boards, rwPlates, rwPylons, ...susp, ...mirrors, tcamPod, halo(p)]), 0.04),
     wing: merge([rwMain, ...heads]), fwFlaps: merge([fw[1], fw[2]]), rwFlaps,
     fwPivot: [0.16, 2.5], rwPivot: [0.86, -2.2], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
     lights: [boxAt(0.012, 0.05, 0.36, rwSpan / 2 + 0.014, 0.78, -2.24), boxAt(0.012, 0.05, 0.36, -rwSpan / 2 - 0.014, 0.78, -2.24), boxAt(0.06, 0.05, 0.02, 0, 0.36, -2.6)],
-    halo: halo(p),
+    halo: null,
   };
 }
 
@@ -411,10 +442,11 @@ function cockpit(p) {
   // the tub inside (dark), visible through the opening round the driver: seat back and shoulders
   const tub = merge([loft([[0.45, 0.53, 0.25, 0.02], [-0.3, 0.53, 0.26, 0.02]], 16), softBox(0.38, 0.12, 0.22, 0, 0.6, -0.2, 0.3)]);
   // helmet: an egg a little longer than wide, its chin bar lower in front; the visor a band over its eyes
-  const helmet = new THREE.SphereGeometry(1, 32, 24); helmet.scale(0.13, 0.14, 0.155);
+  const [sx, sy, sz] = p.helmetSize || [0.13, 0.14, 0.155];
+  const helmet = new THREE.SphereGeometry(1, 32, 24); helmet.scale(sx, sy, sz);
   { const q = helmet.attributes.position; for (let i = 0; i < q.count; i++) { const y = q.getY(i), z = q.getZ(i); if (y < -0.04 && z > 0) q.setY(i, y - 0.02 * (z / 0.155)); } helmet.computeVertexNormals(); }
   helmet.translate(hx, hy, hz);
-  const visor = new THREE.SphereGeometry(1.01, 32, 8, Math.PI / 2 - 0.95, 1.9, 1.2, 0.42); visor.scale(0.13, 0.14, 0.155); visor.translate(hx, hy, hz);
+  const visor = new THREE.SphereGeometry(1.01, 32, 8, Math.PI / 2 - 0.95, 1.9, 1.2, 0.42); visor.scale(sx, sy, sz); visor.translate(hx, hy, hz);
   // the steering wheel: a rounded rectangle, its face (screen, buttons: −z, towards the driver) tilted up to the
   // driver's eyes, grips and paddles behind
   const wz = 0.36, wy = 0.61, tilt = 0.42;

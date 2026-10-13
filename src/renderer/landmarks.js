@@ -7,6 +7,7 @@
 //   Miami: Hard Rock Stadium (bowl, canopy, four masts)
 // (Circuit facilities – Silverstone's Wing, Suzuka's pit building – are in facilities.js.)
 import * as THREE from "./vendor/three.module.js";
+import { entryAt } from "./venues.js";
 
 const polyArea = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return a / 2; };
 function inPoly(x, y, pts) { let r = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) r = !r; } return r; }
@@ -229,13 +230,13 @@ const SPECS = [
 
 // scene, gf, groundAt, location, toTrack(x, z) → unit direction to the nearest track point.
 // Returns { group, skip(b) → true for buildings a landmark replaces, restyle(b) → style overrides, keepOut(x, z) }.
-export function buildLandmarks({ scene, gf, groundAt, location, toTrack }) {
+export function buildLandmarks({ scene, gf, groundAt, location, venue = null, toTrack }) {
   const group = new THREE.Group(); group.name = "landmarks";
   const skip = new Set(), restyle = new Map(), zones = [], spots = [];
   const add = (m) => { m.castShadow = true; m.receiveShadow = true; group.add(m); };
   const item = (b) => { let pts = b.pts.map(gf.xz); if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1); return { b, pts, area: Math.abs(polyArea(pts)) }; };
   for (const spec of SPECS) {
-    if (!spec.loc.includes(location)) continue;
+    if (!entryAt(spec, venue, location)) continue;
     try {
       if (spec.at) {
         const [x, z] = gf.fromLL(spec.at[0], spec.at[1]), base = groundAt(x, z);

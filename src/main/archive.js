@@ -192,6 +192,8 @@ class Archive {
         out.push({
           path: s.Path, type: s.Type, name: s.Name, start: s.StartDate, gmtOffset: s.GmtOffset,
           meeting: m.Name, location: m.Location, country: m.Country?.Name,
+          // (the venue apart from the Grand Prix's name: F1's circuit key – 2026's "Bahrain Grand Prix" ran at Sepang)
+          circuitKey: Number.isFinite(+m.Circuit?.Key) ? +m.Circuit.Key : null, circuit: m.Circuit?.ShortName || null,
         });
       }
     }

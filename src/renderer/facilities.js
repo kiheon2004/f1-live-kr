@@ -16,12 +16,13 @@
 import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { disposeGroup } from "./dispose.js";
+import { entryAt } from "./venues.js";
 
 // ---------- registry ----------
 export const FACILITIES = [
   {
     id: "suzuka-pit-building", name: "鈴鹿サーキット ピットビル (Paddock Grandstand)", kind: "pit-building",
-    loc: ["Suzuka"], years: [2009, null],
+    venue: [46], loc: ["Suzuka"], years: [2009, null],
     status: "trial",
     // OSM's outline (one footprint, its height only guessed: 8 m)
     replaces: { names: /^ピットビル$/ },
@@ -59,7 +60,7 @@ export const FACILITIES = [
   },
   {
     id: "imola-box", name: "Autodromo Enzo e Dino Ferrari – corpo box", kind: "pit-building",
-    loc: ["Imola"], years: [2007, null],
+    venue: [6], loc: ["Imola"], years: [2007, null],
     status: "trial",
     // the map's "Box" record by the pits (238 × 18 m; 3.2 m – one level's worth, not a measured height)
     replaces: { names: /^Box$/, near: [44.344357, 11.717614], within: 40 },
@@ -90,7 +91,7 @@ export const FACILITIES = [
   },
   {
     id: "red-bull-ring-pits", name: "Red Bull Ring – Boxengebäude", kind: "pit-building",
-    loc: ["Spielberg"], years: [2011, null],
+    venue: [19], loc: ["Spielberg"], years: [2011, null],
     status: "trial",
     // the map's two "Box" records along the pit lane (190 m + 117 m; heights only guessed: 8 m)
     replaces: { names: /^Box$/, near: [47.220102, 14.764084], within: 220 },
@@ -120,7 +121,7 @@ export const FACILITIES = [
   },
   {
     id: "yas-marina-pits", name: "Yas Marina Circuit – pit building", kind: "pit-building",
-    loc: ["Yas Island", "Yas Marina", "Abu Dhabi"], years: [2009, null],
+    venue: [70], loc: ["Yas Island", "Yas Marina", "Abu Dhabi"], years: [2009, null],
     status: "trial",
     // the map's pit building record (375 × 30 m, no name; height only guessed: 8 m) – the one at this point
     replaces: { near: [24.469576, 54.605952], within: 20 },
@@ -151,8 +152,41 @@ export const FACILITIES = [
     },
   },
   {
+    id: "hungaroring-paddock-2025", name: "Hungaroring – paddock building (2025)", kind: "pit-building",
+    venue: [4], loc: ["Budapest"], years: [2025, null],
+    status: "trial",
+    // the map's record of it: OSM's unnamed outline along the pit lane (311.5 × 18.3 m; no height – guessed), at
+    // this point; the new main grandstand across the track is a separate record (kept)
+    replaces: { near: [47.57949, 19.24803], within: 10 },
+    builder: "pitBuilding",
+    params: {
+      // confirmed (DVM Group): a five-storey paddock building, more than 340 m long, 25,000 m², pit boxes and
+      // technical garages; handed over June 2025 (in use from the 2025 Hungarian GP, 1–3 August 2025).
+      // seen in the builder's photos (Hungaroring Media, © DVM – compared only): garages on the ground floor with
+      // numbered doors, a glazed floor over them under a continuous white cantilevered band, a glazed upper floor set
+      // back, a white flat roof (solar panels, red rooftop boxes).
+      // estimated (photos): ~19 m to the roof (five storeys: ~5.5 m garages + ~3.4 m floors), the band's depth, the
+      // garages' pitch (~10 m) – the number of garages isn't published
+      height: 19, garagePitch: 10,
+      balconies: [{ y: 5.6, depth: 3.2 }, { y: 12.4, depth: 1.4 }],
+      plate: 0.9, overhang: { pit: 2.5, paddock: 1.2, end: 1.5 },
+      facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#dfe2e4", fascia: "fasciaWhite",
+    },
+    sources: [
+      "https://www.dvmgroup.com/en/references/projects/hungaroring – 'Hungaroring Renewal (Paddock and Main Grandstand)': paddock 25,000 m², more than 340 m, five storeys, pit boxes and technical garages; handed over June 2025; DVM Group Kft. and S.A.M.O. Építésziroda Kft.",
+      "Photos on that page ('Photos: Hungaroring Media', © 2026 DVM, all rights reserved) – compared only, nothing shipped",
+    ],
+    checked: "2026-10-14: trial (length, floors and use published; height, band depth and garage pitch estimated from photos)",
+    evidence: {
+      confirmed: ["five storeys, more than 340 m, 25,000 m², pit boxes and technical garages; handed over June 2025 (DVM Group)"],
+      photo: ["~19 m to the roof; the cantilevered white band over the garages; the set-back upper floor; the garages' pitch ~10 m (estimates)"],
+      map: ["the footprint: OSM's outline along the pit lane (311.5 × 18.3 m; its height not tagged)"],
+      inferred: [],
+    },
+  },
+  {
     id: "silverstone-wing", name: "Silverstone Wing", kind: "pit-building",
-    loc: ["Silverstone"], years: [2011, null],
+    venue: [2], loc: ["Silverstone"], years: [2011, null],
     status: "permanent",
     // the map's records of the building: Overture's 21 building parts named so (from OSM), with their heights
     replaces: { names: /^Silverstone Wing$/i },
@@ -689,6 +723,12 @@ function pitBuilding(ctx, p) {
       FI.poly("garWall", [at(a1, 0, fl), at(a1, depth, fl), at(a1, depth, fl + ceil), at(a1, 0, fl + ceil)], null, [-u[0], 0, -u[1]]);
       FI.poly("garBack", [at(a0, depth, fl), at(a1, depth, fl), at(a1, depth, fl + ceil), at(a0, depth, fl + ceil)], null, out);
       FI.poly("garCeil", [at(a0, 0.6, fl + ceil), at(a1, 0.6, fl + ceil), at(a1, depth, fl + ceil), at(a0, depth, fl + ceil)], null, [0, -1, 0]);
+      // the fittings any F1 garage has, whoever's it is (a team's panels and equipment are the team layer's, garages.js,
+      // in front of these): service panels along the back wall and a dark kick panel along the side walls up to
+      // 1.2 m, steel beams across the ceiling. No equipment: which garages are in use isn't known
+      FI.poly("garPanel", [at(a0, depth - 0.01, fl + 0.15), at(a1, depth - 0.01, fl + 0.15), at(a1, depth - 0.01, fl + 2.6), at(a0, depth - 0.01, fl + 2.6)], [[0, 0], [(a1 - a0) / 1.2, 0], [(a1 - a0) / 1.2, 1], [0, 1]], out);
+      for (const [x, n] of [[a0 + 0.01, [u[0], 0, u[1]]], [a1 - 0.01, [-u[0], 0, -u[1]]]]) FI.poly("garKick", [at(x, 0.3, fl), at(x, depth - 0.02, fl), at(x, depth - 0.02, fl + 1.2), at(x, 0.3, fl + 1.2)], null, n);
+      for (const d of [depth * 0.35, depth * 0.72]) FI.poly("garBeam", [at(a0, d - 0.15, fl + ceil - 0.02), at(a1, d - 0.15, fl + ceil - 0.02), at(a1, d + 0.15, fl + ceil - 0.02), at(a0, d + 0.15, fl + ceil - 0.02)], null, [0, -1, 0]);
       for (const q of [0.3, 0.7]) { const c0 = a0 + (a1 - a0) * q - 0.25, c1 = c0 + 0.5; FI.poly("garLight", [at(c0, 1.2, fl + ceil - 0.03), at(c1, 1.2, fl + ceil - 0.03), at(c1, depth - 0.8, fl + ceil - 0.03), at(c0, depth - 0.8, fl + ceil - 0.03)], null, [0, -1, 0]); }
       const [fx, fz] = P((u0 + u1) / 2, frontV((u0 + u1) / 2));
       slots.push({ k, u0, u1, uc: (u0 + u1) / 2, floor: fl, front: [fx, fz], along: [u[0], u[1]], inward, width: a1 - a0, height: hO, ceil, depth });
@@ -874,6 +914,9 @@ function facilityMaterial(key, p) {
     case "garWall": return std({ color: "#eceeee", roughness: 0.8 });
     case "garBack": return std({ color: "#d6d9db", roughness: 0.8 });
     case "garCeil": return std({ color: "#f2f3f3", roughness: 0.9 });
+    case "garPanel": { const m = std({ color: "#ffffff", roughness: 0.6, metalness: 0.2 }); m.map = panelTexture(); if (!m.map) m.color.set("#9aa0a6"); return m; }
+    case "garKick": return std({ color: "#3a3e43", roughness: 0.7, metalness: 0.2 });
+    case "garBeam": return std({ color: "#8f959b", roughness: 0.5, metalness: 0.5 });
     case "garLight": return std({ color: "#ffffff", emissive: "#fff6e8", emissiveIntensity: 1.0, roughness: 0.4 });
     case "rail": return std({ color: "#c7d3d8", roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.55 });
     case "column": return std({ color: "#eceeee", roughness: 0.5, metalness: 0.2 });
@@ -885,6 +928,16 @@ function facilityMaterial(key, p) {
     case "tent": return std({ color: "#f4f3ef", roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
     default: return std({ color: "#cccccc" });
   }
+}
+// A garage's service panels: grey sheets 1.2 m wide, a seam between them, a socket box low on each (one repeat)
+function panelTexture() {
+  if (typeof document === "undefined") return null;   // (tests: no canvas)
+  const c = document.createElement("canvas"); c.width = 64; c.height = 128; const g = c.getContext("2d");
+  g.fillStyle = "#9aa0a6"; g.fillRect(0, 0, 64, 128);
+  g.fillStyle = "#6b7177"; g.fillRect(0, 0, 2, 128); g.fillRect(0, 0, 64, 3);
+  g.fillStyle = "#5a6066"; g.fillRect(40, 96, 14, 10);
+  const t = new THREE.CanvasTexture(c); t.wrapS = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
 }
 const BUILDERS = { pitBuilding };
 
@@ -1089,11 +1142,12 @@ export async function buildFacilities(opts) {
   try { const r = await facilitiesFor(opts, own, free); if (!r) free(); return r; }
   catch (e) { free(); throw e; }
 }
-async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge = null, location, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }, own) {
+async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge = null, location, venue = null, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }, own) {
   const group = own.group; group.name = "facilities";
   const skip = new Set(), zones = [], spots = [], info = [];
   for (const spec of registry) {
-    if (!spec.loc.includes(location)) continue;
+    // (by the session's venue – F1's circuit key –, not the Grand Prix's name; entries without venue keys by Location)
+    if (!entryAt(spec, venue, location)) continue;
     if (year && spec.years && (year < spec.years[0] || (spec.years[1] != null && year > spec.years[1]))) { info.push({ id: spec.id, how: "skipped", reason: "year" }); continue; }
     if (spec.status !== "permanent" && !trial) { info.push({ id: spec.id, how: "off" }); continue; }
     let made = null, how = null, reason = null;

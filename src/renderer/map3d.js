@@ -13,6 +13,7 @@ import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment 
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
+import { venueOf } from "./venues.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -1174,13 +1175,14 @@ function updateCamera(dt) {
     const u = c.model.userData, eye = camMode === "eye";
     camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
     c.model.getWorldQuaternion(qTmp);
-    // (the T-cam looks down ~11° to take in the helmet and the cockpit; the eyes ahead, a touch down)
-    shakeE.set(eye ? -0.06 : -0.2, Math.PI, 0, "YXZ");
+    // (the T-cam as the car's profile has it – fitted to the team's onboard footage where there is one; the eyes ahead,
+    // a touch down)
+    shakeE.set(eye ? -0.06 : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI, 0, "YXZ");
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
     setNear(eye ? 0.03 : 0.05);
-    const fov = cockpitFov(eye);
+    const fov = cockpitFov(eye, u.profile.tcamHfov);
     if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
     camLook.copy(c.pos); camInit = true;
     return;
@@ -1237,11 +1239,12 @@ function setNear(n) { if (camera.near !== n) { camera.near = n; camera.updatePro
 // the way round, up and down; scroll / pinch to move the chase camera nearer or further (onboard: zoom).
 // Double-click returns to the straight-ahead view. The angles are kept relative to the car, so the view
 // turns with it through the corners.
-// (fov 0: the cockpit cameras' own – a horizontal angle like a broadcast T-cam's lens, ~88°, the eyes' ~95°, as tall
+// (fov 0: the cockpit cameras' own – the T-cam's lens as the car's profile has it (2026 footage: ~72° wide), the eyes'
+// ~95°, as tall
 // as the window's shape makes it; zooming sets a vertical angle of its own)
 const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 0, dragged: false, down: null };
 function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 0; }
-const cockpitFov = (eye) => look.fov || Math.max(35, Math.min(100, (2 * Math.atan(Math.tan(((eye ? 95 : 88) * Math.PI) / 360) / (camera.aspect || 1.6)) * 180) / Math.PI));
+const cockpitFov = (eye, tcamHfov = 72) => look.fov || Math.max(35, Math.min(100, (2 * Math.atan(Math.tan(((eye ? 95 : tcamHfov) * Math.PI) / 360) / (camera.aspect || 1.6)) * 180) / Math.PI));
 function initLook() {
   const active = () => camMode === "chase" || camMode === "onboard" || camMode === "eye";
   canvas.addEventListener("pointerdown", (e) => {
@@ -1385,7 +1388,7 @@ async function loadGeo(w) {
     // A light map is painted when the session is (or runs into) the night: switched on and off with the sun.
     const evening = isNight() || (app().sessionHour?.() ?? 0) >= 15.5;
     const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width,
-      facilities: opts.facilities, year: A.sessionYear?.() || null, isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
+      facilities: opts.facilities, year: A.sessionYear?.() || null, venue: venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
     if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
     w.group.remove(w.syn.terrain, w.syn.trees);
@@ -2299,6 +2302,6 @@ window.Map3D = {
   debug: () => JSON.stringify({ cam: camera?.position.toArray().map(Math.round), target: controls?.target.toArray().map(Math.round), fov: camera?.fov, aspect: camera?.aspect,
     size: world && [world.size.x, world.size.y, world.size.z].map(Math.round), host: host && [host.clientWidth, host.clientHeight], cars: cars.size, mode: camMode,
     paint: (() => { const c = cars.get(app()?.focus || leader()); const m = c?.model.children[1]?.material; return m && { color: m.color.getHexString(), emissive: m.emissive.getHexString(), ei: m.emissiveIntensity }; })(),
-    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], visible: c.obj.visible, inScene: !!c.obj.parent }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, cap60: !!perf.cap, late: perf.late, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
+    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), pitchDeg: +(c.pitch * 57.3).toFixed(2), modelPitchDeg: +(c.model.rotation.x * 57.3).toFixed(2), camPitchDeg: +(new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ").x * 57.3).toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], visible: c.obj.visible, inScene: !!c.obj.parent }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, cap60: !!perf.cap, late: perf.late, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
 };
 window.dispatchEvent(new Event("map3d-ready"));

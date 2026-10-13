@@ -22,7 +22,11 @@ test("car model: real size within the era's rules, wheels where the profile puts
     car.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(car);
     assert.ok(box.max.x - box.min.x <= W + 0.01 && box.max.x - box.min.x > W - 0.08, `${season} width ${(box.max.x - box.min.x).toFixed(3)}`);
-    assert.ok(box.max.y <= 1.06 && box.min.y >= -0.001, `${season} height ${box.max.y.toFixed(3)}`);
+    // the bodywork within the era's height (airbox: ~1.0 m in 2026 photos), the T-cam pod and its antennas on top of it
+    // (photos: well over the helmet) under 1.2 m
+    const body = new THREE.Box3(); car.traverse((o) => { if (o.isMesh && o.material?.map) body.expandByObject(o); });
+    assert.ok(body.max.y <= 1.01, `${season} bodywork ${body.max.y.toFixed(3)}`);
+    assert.ok(box.max.y <= 1.2 && box.min.y >= -0.001, `${season} height ${box.max.y.toFixed(3)}`);
     assert.ok(Math.abs(P.FZ - P.RZ - WB) < 1e-9, `${season} wheelbase`);
     const len = box.max.z - box.min.z; assert.ok(len > 5.0 && len < 5.75, `${season} length ${len.toFixed(2)}`);
     // the wheels: at the axles, standing on the ground
@@ -34,6 +38,14 @@ test("car model: real size within the era's rules, wheels where the profile puts
     // the T-cam over the helmet and behind it; the eyes inside the helmet
     const hb = new THREE.Box3().setFromObject(u.helmet);
     assert.ok(u.mounts.tcam.y > hb.max.y + 0.1 && u.mounts.tcam.z < hb.min.z, "T-cam above and behind the helmet");
+    // the T-cam isn't inside its own pod or the airbox: nothing of the car within 3 cm of the lens but the pod's front
+    const lens = u.mounts.tcam, near = []; car.traverse((o) => { if (!o.isMesh) return; const b = new THREE.Box3().setFromObject(o); if (b.distanceToPoint(lens) < 0.001) near.push(o); });
+    for (const o of near) {
+      const g = o.geometry, p = g.attributes.position, w = new THREE.Vector3(); let inside = 0;
+      // (a coarse test: the lens inside a closed mesh would have it surrounded on all sides – here: no vertices both above and below within 3 cm straight up/down)
+      for (let i = 0; i < p.count; i++) { w.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); if (Math.abs(w.x - lens.x) < 0.03 && Math.abs(w.z - lens.z) < 0.03 && w.y > lens.y) inside++; }
+      assert.strictEqual(inside, 0, `${season}: nothing straight over the lens (${o.name || o.material?.type})`);
+    }
     assert.ok(hb.containsPoint(u.mounts.eye), "eyes in the helmet");
     // the eye isn't inside anything else the car draws at the near level but the helmet (its own room: 3 cm)
   }

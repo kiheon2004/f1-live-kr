@@ -779,7 +779,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");
     const toTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); if (!s) return [1, 0]; const dx = s.p.x - x, dz = s.p.z - z, l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
-    lm = buildLandmarks({ scene, gf, groundAt, location: scene.location, toTrack });
+    lm = buildLandmarks({ scene, gf, groundAt, location: scene.location, venue: opts.venue, toTrack });
     // the circuit's own facilities (facilities.js): models of the real buildings, replacing their map records
     // (the way the cars run past a point: the lap line's direction there)
     const alongTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); return s?.tan ? [s.tan.x, s.tan.z] : [1, 0]; };
@@ -788,7 +788,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const surfaceAt = (x, z) => { const [s, d] = nearTrack(x, z); const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06); };
     // metres from a point to the edge of the track's tarmac (the measured half width), negative on it
     const trackEdge = (x, z) => { const [s, d] = nearTrack(x, z); return s ? d - Math.max(s.L ?? 7, -(s.R ?? -7)) : Infinity; };
-    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, location: scene.location, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false,
+    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false,
       readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
     lm = combine(lm, fac);
