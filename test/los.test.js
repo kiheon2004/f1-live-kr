@@ -133,3 +133,100 @@ test("chase camera: never behind what's between it and the car – stops short, 
   const gr = chasePlace(roof, head, az, el, r, { groundAt });
   assert.ok(clearBetween(roof, head, gr.pos), "lifted off the ground and still in clear view");
 });
+
+// v0.15 review: an interleaved position attribute (glTF with a byte stride) keeps its version on its shared buffer –
+// a change flagged there is seen; so are a new buffer, a new attribute and a plain attribute's change. The bounds are
+// this module's own: a geometry changed without its bounding sphere recomputed is still found.
+test("line of sight: interleaved positions changed (needsUpdate on the buffer) are seen, as are new buffers and stale bounds", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), { firstHit } = await import("../src/renderer/los.js");
+  const d = new THREE.Vector3(0, 0, -1), mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const rcAt = (m, o) => { const rc = new THREE.Raycaster(o, d, 0, 50); return rc.intersectObject(m)[0]?.distance ?? null; };
+  // one triangle at z = −5 in an interleaved buffer (x, y, z, pad), drawn whole
+  const tri = (dx) => new Float32Array([dx, 0, -5, 9, dx + 10, 0, -5, 9, dx, 10, -5, 9]);
+  const ib = new THREE.InterleavedBuffer(tri(0), 4), g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.InterleavedBufferAttribute(ib, 3, 0));
+  const m = new THREE.Mesh(g, mat); m.updateMatrixWorld(true);
+  assert.strictEqual(firstHit([m], new THREE.Vector3(1, 1, 0), d, 50), 5);
+  // moved 200 m in place, flagged on the buffer, bounds recomputed: found there, not where it was – as three.js does
+  ib.array.set(tri(200)); ib.needsUpdate = true; g.computeBoundingSphere();
+  for (const x of [1, 201]) { const o = new THREE.Vector3(x, 1, 0); assert.strictEqual(firstHit([m], o, d, 50), rcAt(m, o), `x ${x}`); }
+  // moved again without the bounds recomputed: three.js' raycaster skips it (stale sphere), the line of sight doesn't
+  ib.array.set(tri(400)); ib.needsUpdate = true;
+  assert.strictEqual(rcAt(m, new THREE.Vector3(401, 1, 0)), null, "(three.js: stale bounds)");
+  assert.strictEqual(firstHit([m], new THREE.Vector3(401, 1, 0), d, 50), 5);
+  // a new buffer under a new attribute, and then a plain attribute changed in place
+  g.setAttribute("position", new THREE.InterleavedBufferAttribute(new THREE.InterleavedBuffer(tri(600), 4), 3, 0));
+  assert.strictEqual(firstHit([m], new THREE.Vector3(601, 1, 0), d, 50), 5);
+  const plain = new THREE.Float32BufferAttribute([800, 0, -7, 810, 0, -7, 800, 10, -7], 3); g.setAttribute("position", plain);
+  assert.strictEqual(firstHit([m], new THREE.Vector3(801, 1, 0), d, 50), 7);
+  plain.array.set([900, 0, -3, 910, 0, -3, 900, 10, -3]); plain.needsUpdate = true;
+  assert.strictEqual(firstHit([m], new THREE.Vector3(801, 1, 0), d, 50), null);
+  assert.strictEqual(firstHit([m], new THREE.Vector3(901, 1, 0), d, 50), 3);
+  // an interleaved geometry compared with three.js over random segments (several triangles, moved and scaled mesh)
+  let seed = 3; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const box = new THREE.BoxGeometry(20, 8, 12).toNonIndexed(), src = box.attributes.position.array, n = src.length / 3;
+  const arr = new Float32Array(n * 5); for (let i = 0; i < n; i++) arr.set([src[i * 3], src[i * 3 + 1], src[i * 3 + 2], 0, 0], i * 5);
+  const g2 = new THREE.BufferGeometry(); g2.setAttribute("position", new THREE.InterleavedBufferAttribute(new THREE.InterleavedBuffer(arr, 5), 3, 0));
+  const m2 = new THREE.Mesh(g2, new THREE.MeshBasicMaterial()); m2.position.set(5, 4, -3); m2.rotation.y = 0.4; m2.scale.set(1.2, 1, 0.9); m2.updateMatrixWorld(true);
+  for (let k = 0; k < 500; k++) {
+    const o = new THREE.Vector3(r() * 60 - 30, r() * 12 - 2, r() * 60 - 30), dir = new THREE.Vector3(r() - 0.5, (r() - 0.5) * 0.5, r() - 0.5).normalize(), far = 5 + r() * 40;
+    const rc = new THREE.Raycaster(o, dir, 0, far), ref = rc.intersectObject(m2)[0]?.distance ?? null, got = firstHit([m2], o, dir, far);
+    assert.ok(ref == null ? got == null : got != null && Math.abs(got - ref) < 1e-4, `segment ${k}: ${got} vs ${ref}`);
+  }
+});
+
+// v0.15 review: the chase camera checked where it ends up, for all three at once – clear line to the car, nothing
+// within its own room (0.35 m: the near plane), 1.4 m over the ground – never moved after the check (the old ground
+// lift, then pulling it in along the line, left it 6 cm over a bank under a roof).
+test("chase camera: where it ends up the line is clear, no surface is within 0.35 m and it's 1.4 m over the ground – or it says not", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), { chasePlace, clearAround } = await import("../src/renderer/los.js");
+  const box = (x0, y0, z0, x1, y1, z1) => { const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })); m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); m.updateMatrixWorld(true); return m; };
+  const head = new THREE.Vector3(0, 1.1, 0), az = Math.PI, el = Math.atan2(2.4, 10.5), r = Math.hypot(2.4, 10.5);
+  const rc = new THREE.Raycaster();
+  const clearBetween = (meshes, a, b) => { const d = b.clone().sub(a), len = d.length(); rc.set(a, d.normalize()); rc.far = len; return !rc.intersectObjects(meshes, false).length; };
+  // the room round a point measured by brute force: the nearest point of every box's surface (inside one: its nearest
+  // face – a surface is what the near plane would cut; the line from the car can't get inside without crossing one)
+  const toSurface = (b, p) => { if (!b.containsPoint(p)) return b.distanceToPoint(p); return Math.min(p.x - b.min.x, b.max.x - p.x, p.y - b.min.y, b.max.y - p.y, p.z - b.min.z, b.max.z - p.z); };
+  const room = (meshes, p) => Math.min(Infinity, ...meshes.map((m) => toSurface(new THREE.Box3().setFromObject(m), p)));
+  const holds = (name, meshes, groundAt, opts = {}) => {
+    const out = chasePlace(meshes, head, az, el, r, { groundAt, ...opts }), p = out.pos;
+    assert.ok(clearBetween(meshes, head, p), `${name}: clear line`);
+    assert.ok(room(meshes, p) >= 0.35 - 1e-6, `${name}: ${room(meshes, p).toFixed(3)} m to the nearest surface`);
+    if (groundAt) assert.ok(p.y - groundAt(p.x, p.z) >= 1.4 - 1e-6, `${name}: ${(p.y - groundAt(p.x, p.z)).toFixed(3)} m over the ground`);
+    assert.strictEqual(out.safe, true, `${name}: said safe`);
+    return out;
+  };
+  // the review's case: a bank 3 m high from 5 m behind, a roof 3.6–3.9 m over it
+  const bank = (x, z) => (z < -5 ? 3 : 0);
+  holds("bank under a low roof", [box(-20, 3.6, -20, 20, 3.9, -5.2)], bank);
+  // ground sloping up behind (1 in 3) and a low roof over it
+  const slope = (x, z) => Math.max(0, -z / 3);
+  holds("slope under a roof", [box(-20, 4.5, -30, 20, 4.8, -4)], slope);
+  // a bank behind a wall
+  holds("bank behind a wall", [box(-20, 0, -4.4, 20, 2.5, -4)], (x, z) => (z < -4.4 ? 2 : 0));
+  // a narrow passage (walls 1.2 m either side) with a lintel over it
+  holds("narrow passage", [box(-1.6, 0, -15, -1.2, 6, 2), box(1.2, 0, -15, 1.6, 6, 2), box(-2, 4, -9, 2, 4.4, -8)], null);
+  // a thin pillar (4 cm) right beside where the camera would stand, between the five lines: kept 0.35 m off
+  const free = chasePlace([], head, az, el, r).pos;
+  holds("thin pillar by the camera", [box(free.x + 0.18, 0, free.z - 0.02, free.x + 0.22, 6, free.z + 0.02)], null);
+  // with the lift eased part way (the caller's value), every spot on the way holds too
+  for (const lift of [0.1, 0.2, 0.35, 0.5, 0.7]) holds(`low wall, lift ${lift}`, [box(-15, 0, -1.9, 15, 1.8, -1.5)], null, { lift });
+  // under a 2.2 m roof a spot 1.4–1.85 m up holds all three
+  holds("tunnel 2.2 m high", [box(-3, 2.2, -40, 3, 2.6, 40), box(-3.4, 0, -40, -3, 2.6, 40), box(3, 0, -40, 3.4, 2.6, 40)], () => 0);
+  // nowhere holds all three (a roof 1.6 m over the floor: 1.4 m over the ground is within 0.35 m of it): it says so,
+  // and the spot it gives keeps the line clear and the surfaces off
+  const tunnel = [box(-3, 1.6, -40, 3, 2, 40), box(-3.4, 0, -40, -3, 2, 40), box(3, 0, -40, 3.4, 2, 40)];
+  const t = chasePlace(tunnel, head, az, el, r, { groundAt: () => 0 });
+  assert.ok(!t.safe, "no spot 1.4 m over the floor and 0.35 m under a 1.6 m roof");
+  assert.ok(clearBetween(tunnel, head, t.pos) && room(tunnel, t.pos) >= 0.35 - 1e-6, "the fallback still keeps the line and the surfaces");
+  // the room check itself against brute force: random points among random boxes, turned
+  let seed = 9; const rr = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const boxes = []; for (let k = 0; k < 25; k++) { const b = box(-1, -1, -1, 1, 1, 1); b.scale.set(0.2 + rr() * 4, 0.2 + rr() * 4, 0.2 + rr() * 4); b.position.set(rr() * 40 - 20, rr() * 6, rr() * 40 - 20); b.updateMatrixWorld(true); boxes.push(b); }
+  let near = 0;
+  for (let k = 0; k < 3000; k++) {
+    const p = new THREE.Vector3(rr() * 44 - 22, rr() * 8 - 1, rr() * 44 - 22), want = room(boxes, p) > 0.35;
+    if (Math.abs(room(boxes, p) - 0.35) < 1e-4) continue;   // (on the edge: either)
+    assert.strictEqual(clearAround(boxes, p, 0.35), want, `point ${k}`); if (!want) near++;
+  }
+  assert.ok(near > 50, `both cases (${near} near)`);
+});

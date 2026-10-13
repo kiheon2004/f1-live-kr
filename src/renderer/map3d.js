@@ -12,7 +12,7 @@ import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, ov
 import { makeCar, setCompound, setAero, EYE, TCAM } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
-import { chasePlace, firstHit } from "./los.js";
+import { chasePlace, clearAround, firstHit } from "./los.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -1036,7 +1036,7 @@ let camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), camInit = false
 // (kerbs don't shake it). If a building or the ground would come between the car and the camera, the
 // camera moves in. Onboard: the camera sits at the driver's eye on the car itself – same transform as
 // the car, so the halo, mirrors, nose and front wheels stay put in the frame.
-const chase = { yaw: 0, yawVel: 0, y: 0, init: false, lift: 0 };
+const chase = { yaw: 0, yawVel: 0, y: 0, init: false, lift: 0, frames: 0, unsafe: 0 };   // (unsafe: frames no spot was clear, off the surfaces and over the ground)
 const ray = new THREE.Raycaster(), qTmp = new THREE.Quaternion(), qShake = new THREE.Quaternion(), shakeE = new THREE.Euler(), qLook = new THREE.Quaternion(), lookE = new THREE.Euler();
 function updateCamera(dt) {
   const A = app();
@@ -1078,9 +1078,11 @@ function updateCamera(dt) {
   const head = new THREE.Vector3(c.pos.x, chase.y + 1.1, c.pos.z);
   const az = chase.yaw + Math.PI + look.yaw, el = Math.atan2(2.4, 10.5) + look.pitch, r = Math.hypot(2.4, 10.5) * (look.dist / 10.5);
   // keep a clear line of sight to the car: the camera stops short of a building in between (never behind it), rises
-  // over one that would bring it too close (eased, not jumping), stays over the ground (los.js: chasePlace)
+  // over one that would bring it too close (eased, not jumping), keeps off every surface and over the ground – each
+  // spot checked as it stands (los.js: chasePlace)
   const real = world.real, groundAt = real?.groundAt ? (x, z) => real.groundAt(x, z) : null;
   const placed = chasePlace(world.occluders || [], head, az, el, r, { lift: chase.lift, groundAt });
+  chase.frames++; if (!placed.safe) chase.unsafe++;
   chase.lift += (placed.lift - chase.lift) * (1 - Math.exp(-dt * 3));
   camera.position.copy(placed.pos);
   const fwd = new THREE.Vector3(Math.sin(c.yaw), 0, Math.cos(c.yaw));
@@ -1921,14 +1923,19 @@ window.Map3D = {
       if ((got == null) !== (ref == null) || (ref != null && Math.abs(got - ref) > 1e-3)) { diff++; worst = Math.max(worst, ref == null || got == null ? Infinity : Math.abs(got - ref)); }
     }
     // the chase camera at each sample of the track (as updateCamera places it, heading along the track)
-    let tc = 0, blocked = 0; const el = Math.atan2(2.4, 10.5), rr = Math.hypot(2.4, 10.5), groundAt = world.real?.groundAt ? (x, z) => world.real.groundAt(x, z) : null;
+    let tc = 0, tw = 0, blocked = 0, unsafe = 0, low = 0, touching = 0; const el = Math.atan2(2.4, 10.5), rr = Math.hypot(2.4, 10.5), groundAt = world.real?.groundAt ? (x, z) => world.real.groundAt(x, z) : null;
     for (let i = 0; i < world.n; i += 3) {
       const s = world.samples[i], head = new THREE.Vector3(s.p.x, s.p.y + 1.1, s.p.z), az = Math.atan2(s.tan.x, s.tan.z) + Math.PI;
-      const t = performance.now(); const p = chasePlace(occ, head, az, el, rr, { groundAt }); tc += performance.now() - t;
+      const t = performance.now(); const p = chasePlace(occ, head, az, el, rr, { groundAt }); const dt = performance.now() - t; tc += dt; tw = Math.max(tw, dt);
       if (p.lift > 0 || p.pos.distanceTo(head) < rr - 0.01) blocked++;
+      // (checked again from outside: over the ground, off the surfaces)
+      if (!p.safe) unsafe++;
+      if (groundAt && p.pos.y < groundAt(p.pos.x, p.pos.z) + 1.4 - 1e-6) low++;
+      if (!clearAround(occ, p.pos, 0.35)) touching++;
     }
     return JSON.stringify({ occluders: occ.length, tris, kinds, gridMs: Math.round(gridMs), rays: n, hits, diff, worst, losUs: +(tl / n * 1000).toFixed(1), raycastUs: +(tr / n * 1000).toFixed(1),
-      chase: { spots: Math.ceil(world.n / 3), closer: blocked, us: +(tc / Math.ceil(world.n / 3) * 1000).toFixed(1) } });
+      chase: { spots: Math.ceil(world.n / 3), closer: blocked, unsafe, low, touching, us: +(tc / Math.ceil(world.n / 3) * 1000).toFixed(1), worstUs: +(tw * 1000).toFixed(0),
+        frames: chase.frames, unsafeFrames: chase.unsafe } });
   },
   // development: what the scene holds, by part – objects, meshes drawn (visible, in view or not), triangles
   sceneStats() {

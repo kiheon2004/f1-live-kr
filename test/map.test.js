@@ -4,7 +4,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const overture = require("../src/main/overture.js");
-const { mergeBuildings, resolveParts, Scenes } = require("../src/main/scene.js");
+const { mergeBuildings, resolveParts, buildingOf, Scenes } = require("../src/main/scene.js");
 
 // ---------- a minimal vector tile writer (Mapbox Vector Tile 2.1) ----------
 const varint = (n) => { const o = []; do { let b = n % 128; n = Math.floor(n / 128); if (n) b |= 128; o.push(b); } while (n); return Buffer.from(o); };
@@ -178,4 +178,88 @@ test("parts: a roof or canopy part on top of a body of known height doesn't repl
     r = resolveParts([body, { pts: sq(0, 0, x, 20), tags: { "building:part": "yes", height: "10" } }]);
     assert.strictEqual(r.drop.has(body), drop, `${x * 5} %`);
   }
+});
+
+// v0.15 review: OSM's height is to the top of the roof, roof:height the roof's own – a roof part starting where the
+// walls stop (under the very top) is the roof, not a building over the body; the body is drawn up to it, flat, and the
+// part stays (not two roofs in each other). Real parts from the ground still stand in for the body.
+test("parts: a roof part from under the very top (height includes the roof) is the body's roof – the body stays, walls up to it", () => {
+  const body = B(sq(0, 0, 100, 100), { height: "12", "roof:height": "2" });
+  const roof = { pts: sq(0, 0, 100, 100), tags: { "building:part": "roof", min_height: "10", height: "12", "roof:shape": "gabled" } };
+  let r = resolveParts([body, roof]);
+  assert.ok(!r.drop.has(body) && !r.drop.has(roof), "both drawn");
+  assert.strictEqual(r.topOf.get(body), 10, "the body's walls stop where the roof part starts");
+  // what the renderer gets: the body to 10 m, flat (its own roof is the part), height known; the roof from 10 to 12
+  const b = buildingOf(body, r), p = buildingOf(roof, r);
+  assert.deepStrictEqual([b.h, b.min, b.roof, b.rh, b.est], [10, 0, "flat", null, 0]);
+  assert.deepStrictEqual([p.h, p.min, p.roof], [12, 10, "gabled"]);
+  // a pitched roof without roof:height: the same (any part starting over the ground and under the top that is a roof)
+  const pitched = B(sq(0, 0, 100, 100), { height: "12", "roof:shape": "gabled" });
+  r = resolveParts([pitched, roof]); assert.ok(!r.drop.has(pitched) && r.topOf.get(pitched) === 10);
+  // a roof part without a min_height (starting at the ground by its tags): never the building – the body stays, the
+  // part inside it isn't drawn into its walls
+  const flatRoof = { pts: sq(0, 0, 100, 100), tags: { "building:part": "roof", height: "12" } };
+  r = resolveParts([body, flatRoof]); assert.ok(!r.drop.has(body) && r.drop.has(flatRoof) && !r.topOf.has(body));
+  // a canopy part high up on 60 % of it: the same
+  const canopy = { pts: sq(0, 0, 60, 100), tags: { "building:part": "canopy", min_height: "10", height: "11" } };
+  r = resolveParts([body, canopy]); assert.ok(!r.drop.has(body) && !r.drop.has(canopy) && r.topOf.get(body) === 10);
+  // a real part from the ground covering it, with the roof part on top: the parts stand in for the body, as before
+  const lower = { pts: sq(0, 0, 100, 100), tags: { "building:part": "yes", height: "10" } };
+  r = resolveParts([body, lower, roof]); assert.ok(r.drop.has(body) && !r.drop.has(lower) && !r.drop.has(roof));
+  // roof:height that can't be (as tall as the building, or none): the walls taken to the top – a part from 10 m on a
+  // 12 m body is then inside its roof space, and still the roof, not a building in its place
+  for (const rh of ["12", "15", "0", "x"]) {
+    const odd = B(sq(0, 0, 100, 100), { height: "12", "roof:height": rh });
+    r = resolveParts([odd, roof]); assert.ok(!r.drop.has(odd), `roof:height ${rh}: the body stays`);
+  }
+  // the body's height unknown: a roof part (tagged so) doesn't replace it; its walls go up to where the roof starts
+  const guess = B(sq(0, 0, 100, 100), {});
+  r = resolveParts([guess, roof]); assert.ok(!r.drop.has(guess) && r.topOf.get(guess) === 10);
+  assert.deepStrictEqual([buildingOf(guess, r).h, buildingOf(guess, r).est], [10, 0], "the walls from the roof, not a guess");
+  // a roof part on less than half of it: the body keeps its own roof; the part inside the body's roof space isn't drawn
+  const small = { pts: sq(0, 0, 30, 100), tags: { "building:part": "roof", min_height: "10", height: "12" } };
+  r = resolveParts([body, small]); assert.ok(!r.drop.has(body) && !r.topOf.has(body) && r.drop.has(small));
+  // a tower part rising out of a body under roof parts starts at the walls' top
+  const tower = { pts: sq(80, 80, 95, 95), tags: { "building:part": "yes", height: "40" } };
+  r = resolveParts([body, roof, tower]); assert.ok(r.topOf.get(body) === 10 && r.minOf.get(tower) === 10 && !r.drop.has(tower));
+});
+
+// v0.15 review: an Overture building inside a kept OSM one goes only when it's the same building a little off – no
+// more than a sliver (1 m) outside; an annex reaching out of it is drawn (its part outside is nobody else's).
+test("merge: an annex reaching out of the OSM building it's mostly inside is kept; the same building a little off isn't drawn twice", () => {
+  const main = B(sq(0, 0, 100, 100), { height: "10" });
+  const annex = B(sq(82, 40, 102, 50), { height: "8", name: "Annex" });   // 90 % inside, 2 m out
+  let out = mergeBuildings([main], [annex]);
+  assert.ok(out.includes(main) && out.includes(annex), "both: the annex's 2 m outside is only its own");
+  // the same building a little off (all 83 absorbed over 28 circuits reach out under 1 m): one only
+  const hall = B(sq(0, 0, 100, 100), { height: "10" }), shed = B(sq(60.5, -0.6, 80, 20), { height: "6", name: "Shed" });
+  out = mergeBuildings([hall], [shed]);
+  assert.ok(out.includes(hall) && !out.includes(shed), "a shed 0.6 m over the hall's edge is the hall's");
+  assert.strictEqual(hall.tags.name, "Shed", "its name goes to the hall that had none");
+  // reaching out 1.5 m: kept
+  const shed2 = B(sq(60, -1.5, 80, 20), { height: "6" });
+  out = mergeBuildings([B(sq(0, 0, 100, 100), { height: "10" })], [shed2]);
+  assert.ok(out.includes(shed2));
+  // an Overture building bridging a notch of a U-shaped OSM building (all its corners inside): the notch is outside
+  const U = B([[0, 0], [100, 0], [100, 100], [60, 100], [60, 40], [40, 40], [40, 100], [0, 100]], { height: "10" });
+  const bridge = B(sq(10, 50, 90, 70), { height: "6" });
+  out = mergeBuildings([U], [bridge]);
+  assert.ok(out.includes(bridge), "the part over the notch is its own");
+});
+
+// v0.15 review: coverage is the exact area (the plan cut into strips), not a 10 × 10 grid of points – which counted a
+// 55.1 %-covered building as 60 % and replaced it (14 such decisions over 28 circuits, both ways).
+test("merge: the 60 % rule on exact areas – 55.1 % stays, 61 % goes, wherever the shapes sit", () => {
+  const run = (ow, shift = 0) => { const osm = B(sq(shift, 0, 100 + shift, 100), {}); return mergeBuildings([osm], [B(sq(shift, 0, ow + shift, 100), {})]).includes(osm); };
+  for (const [w, kept] of [[55.1, true], [59, true], [59.9, true], [60.1, false], [61, false], [65, false]]) {
+    for (const shift of [0, 1, 2.5, 7, 13.3]) assert.strictEqual(run(w, shift), kept, `${w} % (moved ${shift} m)`);
+  }
+  // a thin L (two arms 8 m wide, 1,536 m²): covered by one arm (800 m², 52 %) – stays; by both – goes
+  const L = B([[0, 0], [100, 0], [100, 8], [8, 8], [8, 100], [0, 100]], {});
+  assert.ok(mergeBuildings([L], [B(sq(0, 0, 100, 8), {})]).includes(L), "one arm: 52 %");
+  assert.ok(!mergeBuildings([L], [B(sq(0, 0, 100, 8), {}), B(sq(0, 8, 8, 100), {})]).includes(L), "both arms");
+  // overlapping Overture pieces count once (their union): 35 % and 35 % overlapping by 30 % cover 40 %, not 70 %
+  const o = B(sq(0, 0, 100, 100), {});
+  assert.ok(mergeBuildings([o], [B(sq(0, 0, 35, 100), {}), B(sq(5, 0, 40, 100), {})]).includes(o), "40 %: stays");
+  assert.ok(!mergeBuildings([o], [B(sq(0, 0, 35, 100), {}), B(sq(30, 0, 65, 100), {})]).includes(o), "65 %: goes");
 });

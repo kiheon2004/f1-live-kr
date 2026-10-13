@@ -81,34 +81,88 @@ function cellIndex(items, pts = (a) => a.pts) {
 const isBuilding = (t) => !!(t.building || (t["building:part"] && t["building:part"] !== "no"));
 const isStand = (t) => t.building === "grandstand" || t.leisure === "grandstand";
 
-// How much of polygon `pts` the polygons `by` cover (0–1): a grid of points over it (n × n over its bounding box),
-// stopping as soon as the answer against `at` is known.
-function coverage(pts, by, at = 0.5, n = 10) {
+// How much of polygon `pts` (even-odd, as `inside`) the union of the polygons `by` covers (0–1), exactly: the plan cut
+// into strips at every height where a vertex is or two edges cross – inside a strip each interval's ends move linearly,
+// so the lengths at its middle times its height are its areas. (A grid of sample points decided wrongly near the
+// thresholds: a 55 %-covered building counted as 60 %; over 28 circuits 14 decisions went the wrong way – Baku's
+// university lost 590 m², a Las Vegas block drawn twice.)
+const edgesOf = (p) => { const E = []; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if (p[j][1] !== p[i][1]) E.push([p[j][0], p[j][1], p[i][0], p[i][1]]); return E; };
+function crossingsAt(E, y, out) {
+  out.length = 0;
+  for (const [x0, y0, x1, y1] of E) if ((y0 > y) !== (y1 > y)) out.push(x0 + ((y - y0) * (x1 - x0)) / (y1 - y0));
+  return out.sort((a, b) => a - b);
+}
+function coverage(pts, by) {
   if (!by.length) return 0;
-  const bb = bboxOf(pts), inPts = [];
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-    const x = bb[0] + ((i + 0.5) / n) * (bb[2] - bb[0]), y = bb[1] + ((j + 0.5) / n) * (bb[3] - bb[1]);
-    if (inside(x, y, pts)) inPts.push([x, y]);
+  const [x0, lo, x1, hi] = bboxOf(pts);
+  // (only its heights matter: the other polygons' edges across them – all of them, each interval needs both its ends;
+  // where two edges cross matters only over its box)
+  const A = edgesOf(pts), B = by.map((p) => edgesOf(p).filter((e) => Math.max(e[1], e[3]) > lo && Math.min(e[1], e[3]) < hi));
+  const all = A.concat(...B).filter((e) => Math.max(e[0], e[2]) >= x0 && Math.min(e[0], e[2]) <= x1);
+  const ys = new Set(pts.map((p) => p[1]));
+  for (const p of by) for (const q of p) if (q[1] > lo && q[1] < hi) ys.add(q[1]);
+  for (let i = 0; i < all.length; i++) {
+    const [ax, ay, ax1, ay1] = all[i], dx = ax1 - ax, dy = ay1 - ay;
+    for (let j = i + 1; j < all.length; j++) {
+      const [bx, by_, bx1, by1] = all[j];
+      if (Math.max(ay, ay1) <= Math.min(by_, by1) || Math.max(by_, by1) <= Math.min(ay, ay1) ||
+        Math.max(ax, ax1) < Math.min(bx, bx1) || Math.max(bx, bx1) < Math.min(ax, ax1)) continue;
+      const ex = bx1 - bx, ey = by1 - by_, den = dx * ey - dy * ex;
+      if (!den) continue;
+      const t = ((bx - ax) * ey - (by_ - ay) * ex) / den, u = ((bx - ax) * dy - (by_ - ay) * dx) / den;
+      if (t > 0 && t < 1 && u > 0 && u < 1) { const y = ay + t * dy; if (y > lo && y < hi) ys.add(y); }
+    }
   }
-  if (!inPts.length) return 0;
-  let hit = 0;
-  for (let k = 0; k < inPts.length; k++) {
-    if (by.some((p) => inside(inPts[k][0], inPts[k][1], p))) hit++;
-    if (hit >= at * inPts.length || hit + inPts.length - k - 1 < at * inPts.length) break;   // (decided)
+  const Y = [...ys].sort((a, b) => a - b), sa = [], sb = [], u = [];
+  let area = 0, hit = 0;
+  for (let k = 0; k + 1 < Y.length; k++) {
+    const h = Y[k + 1] - Y[k]; if (!(h > 0)) continue;
+    const ym = (Y[k] + Y[k + 1]) / 2;
+    crossingsAt(A, ym, sa);
+    u.length = 0;
+    for (const E of B) { crossingsAt(E, ym, sb); for (let i = 0; i + 1 < sb.length; i += 2) u.push([sb[i], sb[i + 1]]); }
+    u.sort((a, b) => a[0] - b[0]);
+    const m = []; for (const s of u) { if (m.length && s[0] <= m[m.length - 1][1]) m[m.length - 1][1] = Math.max(m[m.length - 1][1], s[1]); else m.push([s[0], s[1]]); }
+    for (let i = 0; i + 1 < sa.length; i += 2) {
+      area += (sa[i + 1] - sa[i]) * h;
+      for (const [b0, b1] of m) { const l = Math.min(sa[i + 1], b1) - Math.max(sa[i], b0); if (l > 0) hit += l * h; }
+    }
   }
-  return hit / inPts.length;
+  return area > 0 ? Math.min(1, hit / area) : 0;
+}
+// How far polygon `pts` reaches outside polygon `of` (m): its outline walked in steps of half a metre, the furthest
+// point outside from `of`'s edges. (The furthest part of what's outside is on its outline – the rest of its edge is `of`'s.)
+const segDist = (px, py, ax, ay, bx, by) => { const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy, t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l)) : 0; return Math.hypot(px - ax - t * dx, py - ay - t * dy); };
+function reachOut(pts, of) {
+  let worst = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [ax, ay] = pts[j], [bx, by] = pts[i], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.5));
+    for (let s = 0; s < n; s++) {
+      const x = ax + ((bx - ax) * s) / n, y = ay + ((by - ay) * s) / n;
+      if (inside(x, y, of)) continue;
+      let d = Infinity; for (let k = 0, l = of.length - 1; k < of.length; l = k++) d = Math.min(d, segDist(x, y, of[l][0], of[l][1], of[k][0], of[k][1]));
+      worst = Math.max(worst, d);
+    }
+  }
+  return worst;
 }
 // (an OSM building goes when Overture's buildings on its spot cover this much of it; measured over 28 circuits'
 // cached data: ~99.6 % of the OSM buildings with an Overture one on the spot are covered 80 % or more – the same
 // building – and the rest mostly a few %: a shed inside a big hall, an annex, one tile's piece of a building)
 const SAME = 0.6;
+// (an Overture building inside one OSM keeps is the same building when it reaches out no further than this (m): over
+// the 28 circuits all 83 such reach out under 1 m – the same outline a little off –, an annex reaching out of it is
+// another building)
+const SLIVER = 1;
 
 // OSM's areas and Overture's buildings as one list. Overture (OSM's buildings plus Microsoft's and Google's footprints,
 // with more heights and roofs) stands for a building where it has one: an OSM building goes only when Overture's
 // buildings on the same spot (either's centre inside the other: candidates) cover most of it – so OSM's buildings stay
 // wherever Overture has nothing or only something smaller (a tile that failed or was damaged, a building only OSM has,
 // a shed or annex inside a big hall Overture lacks), and none is drawn twice: an Overture building standing inside one
-// kept that way, no taller, isn't drawn (it adds nothing). A grandstand is OSM's – also one mapped only as an area
+// kept that way, no taller and reaching out of it by no more than a sliver, isn't drawn (it adds nothing; its name goes
+// to the kept one if that has none) – one reaching out further (an annex) is, the part outside being its own. A
+// grandstand is OSM's – also one mapped only as an area
 // (leisure=grandstand): its seats are built from that outline, and an Overture block on it goes instead. OSM's names
 // (Overture often leaves them out; the facilities find their buildings by name) go to the Overture buildings that stand
 // for that OSM building – not to a smaller one inside a building OSM keeps; a stadium's or sports centre's area names
@@ -121,16 +175,21 @@ function mergeBuildings(osmAreas, ob) {
     if (isStand(a.tags)) { stands.push(a); kept.add(a); continue; }
     if (!isBuilding(a.tags)) { kept.add(a); continue; }
     const same = sameAs(a);
-    if (same.length && coverage(a.pts, same.map((o) => o.pts), SAME) >= SAME) {
+    if (same.length && coverage(a.pts, same.map((o) => o.pts)) >= SAME) {
       // Overture's stand for it: those whose centre is in it take its name
       if (a.tags.name && a.pts.length > 3) for (const o of same) if (!heir.has(o) && inside(...o._c, a.pts)) heir.set(o, a.tags.name);
       continue;
     }
     kept.add(a);
-    // Overture's buildings inside it (most of their footprint), no taller: nothing they'd add
+    // Overture's buildings inside it (most of their footprint, nothing more than a sliver outside), no taller: nothing
+    // they'd add but a name
     if (same.length) {
       const h = buildingHeight(a.tags);
-      for (const o of same) if (buildingHeight(o.tags) <= h + 0.5 && coverage(o.pts, [a.pts], 0.8) >= 0.8) gone.add(o);
+      for (const o of same) {
+        if (buildingHeight(o.tags) > h + 0.5 || coverage(o.pts, [a.pts]) < 0.8 || reachOut(o.pts, a.pts) > SLIVER) continue;
+        gone.add(o);
+        if (o.tags.name && !a.tags.name) a.tags = { ...a.tags, name: o.tags.name };
+      }
     }
   }
   const areas = osmAreas.filter((a) => /^(stadium|sports_centre)$/.test(a.tags.leisure || "") && a.tags.name && a.pts.length > 3);
@@ -150,16 +209,23 @@ function mergeBuildings(osmAreas, ob) {
 }
 
 // Outlines drawn in detail as building parts: the parts stand in for the outline where they cover it (half of it or
-// more) – as 3D map renderers do. A part starting at or above the outline's roof doesn't count when the outline's
-// height is known (tagged): a roof, canopy or link on top covers the plan, not the building under it. Where they cover
-// less (one tower part in a long hall, parts lost with a failed tile, only the roof mapped as a part), the outline stays
-// and its parts are fitted to it so no two walls stand in each other: a part reaching above the outline's roof starts
-// at that roof, one inside its volume isn't drawn. A grandstand's outline always stays (its seats are built from it).
-// Returns { drop: Set of areas left out, minOf: Map of parts → their new min height }.
+// more) – as 3D map renderers do. Parts that are its roof don't count: a roof or canopy part (building:part=roof/canopy,
+// whatever its heights), and – the outline's height known (tagged) – any part starting where its walls stop: its height
+// less its roof:height (OSM's height is to the top of the roof), so a roof from 10 m on a 12 m building with a 2 m roof
+// is its roof, not a building over it. A roof, canopy or link on top covers the plan, not the building under it. Where
+// they cover less (one tower part in a long hall, parts lost with a failed tile, only the roof mapped as a part), the
+// outline stays and its parts are fitted to it so no two walls stand in each other: a part reaching above the outline's
+// roof starts at that roof, one inside its volume isn't drawn. When roof parts sitting on its walls cover it, they are
+// its roof: the outline is drawn up to where they start, flat, and they stay as they are (not two roofs in each other;
+// an outline whose height was a guess gets its walls from them). A grandstand's outline always stays (its seats are
+// built from it).
+// Returns { drop: Set of areas left out, minOf: Map of parts → their new min height, topOf: Map of outlines → the
+// height their walls stop at, under their roof parts (drawn flat) }.
+const ROOF_PART = /^(roof|canopy)$/;
 function resolveParts(areas) {
   const parts = areas.filter((a) => a.tags["building:part"] && a.tags["building:part"] !== "no");
-  const drop = new Set(), minOf = new Map();
-  if (!parts.length) return { drop, minOf };
+  const drop = new Set(), minOf = new Map(), topOf = new Map();
+  if (!parts.length) return { drop, minOf, topOf };
   const near = cellIndex(parts);
   const num = (v) => { const m = /^\s*(\d+(?:\.\d+)?)/.exec(String(v ?? "")); return m ? +m[1] : 0; };
   for (const o of areas) {
@@ -169,25 +235,48 @@ function resolveParts(areas) {
     const mine = near(bb).filter((p) => inside(...centroidOf(p.pts), o.pts));
     if (!mine.length) continue;
     const oh = buildingHeight(t);   // (heights are from the ground: the outline's roof)
-    // how much of the outline the parts cover: a grid of points over it (with its height a guess, any part may be
-    // the building itself)
     const known = !!(t.height || t["building:height"] || t["building:levels"]);
-    const low = known ? mine.filter((p) => num(p.tags.min_height) < oh - 0.3) : mine;
-    let n = 0, hit = 0;
-    for (let i = 0; i < 14; i++) for (let j = 0; j < 14; j++) {
-      const x = bb[0] + ((i + 0.5) / 14) * (bb[2] - bb[0]), y = bb[1] + ((j + 0.5) / 14) * (bb[3] - bb[1]);
-      if (!inside(x, y, o.pts)) continue;
-      n++; if (low.some((p) => inside(x, y, p.pts))) hit++;
-    }
-    if (n && hit / n >= 0.5) { drop.add(o); continue; }
+    // where its walls stop: under its roof, when the roof's own height is tagged (and makes sense)
+    const rh = num(t["roof:height"]), wall = known && rh > 0 && rh < oh ? oh - rh : oh;
+    const onTop = (p) => ROOF_PART.test(p.tags["building:part"]) || (known && num(p.tags.min_height) >= wall - 0.3);
+    // how much of the outline the parts that aren't its roof cover (with its height a guess, any other part may be
+    // the building itself)
+    const low = mine.filter((p) => !onTop(p));
+    if (low.length && coverage(o.pts, low.map((p) => p.pts)) >= 0.5) { drop.add(o); continue; }
+    // its roof in detail: roof parts starting over the ground and under its top (a guess: anywhere over the ground)
+    const roofs = mine.filter((p) => onTop(p) && num(p.tags.min_height) >= 2.5 && (!known || num(p.tags.min_height) < oh - 0.3));
+    let top = oh;
+    if (roofs.length && coverage(o.pts, roofs.map((p) => p.pts)) >= 0.5) topOf.set(o, (top = Math.min(...roofs.map((p) => num(p.tags.min_height)))));
+    else roofs.length = 0;
+    // the other parts fitted to its top
     for (const p of mine) {
+      if (roofs.includes(p)) continue;
       const pmin = num(p.tags.min_height), ph = buildingHeight(p.tags);
-      if (pmin >= oh - 0.3) continue;
-      if (ph > oh + 0.5) minOf.set(p, oh); else drop.add(p);
+      if (pmin >= top - 0.3) continue;
+      if (ph > top + 0.5) minOf.set(p, top); else drop.add(p);
     }
   }
   for (const p of parts) delete p._bb;
-  return { drop, minOf };
+  return { drop, minOf, topOf };
+}
+
+// What the renderer draws for one building or part (its outline added by the caller), or null for none: a canopy
+// over a fuel station etc. without heights. parts: resolveParts' answer – a part's new min height, an outline's walls
+// stopping under its roof parts (up to where they start, flat: they are its roof).
+function buildingOf(a, parts) {
+  const t = a.tags;
+  if (t.building === "roof" && !t.height && !t["building:levels"]) return null;
+  const top = parts.topOf.get(a), h = top ?? buildingHeight(t);
+  const minH = parts.minOf.get(a) ?? +(/^\d+(\.\d+)?/.exec(t.min_height || "")?.[0] || 0);
+  const kind = t.building === "grandstand" || t.leisure === "grandstand" ? "grandstand" : /^(house|detached|residential|apartments|terrace|semidetached_house)$/.test(t.building || "") ? "home" : /^(industrial|warehouse|hangar|garage|garages|shed|service)$/.test(t.building || "") ? "shed" : "block";
+  const est = top == null && !(t.height || t["building:height"] || t["building:levels"]);   // height guessed from the kind
+  const num = (v) => { const m = /^\s*(\d+(?:\.\d+)?)/.exec(String(v ?? "")); return m ? +m[1] : null; };
+  return { h: Math.round(h * 10) / 10, min: minH, kind, est: est ? 1 : 0, roof: top != null ? "flat" : t["roof:shape"] || null,
+    colour: t["building:colour"] || null, roofColour: t["roof:colour"] || null, name: t.name || null,
+    // what the renderer picks the look from: the kind of building, floors, materials, roof details
+    cls: t.building || t["building:part"] || null, part: t["building:part"] ? 1 : 0, lv: num(t["building:levels"]),
+    mat: t["building:material"] || null, rmat: t["roof:material"] || null, rh: top != null ? null : num(t["roof:height"]), rd: num(t["roof:direction"]),
+    ro: t["roof:orientation"] || null, ml: /ML|Open Buildings/.test(t["overture:source"] || "") ? 1 : 0 };
 }
 
 const MEM_SCENES = 4;
@@ -288,18 +377,8 @@ class Scenes {
       if (t.leisure === "grandstand" && !t.building) { buildings.push({ h: 12, min: 0, kind: "grandstand", est: 1, roof: null, colour: null, roofColour: null, name: t.name || null, pts: conv(a.pts) }); continue; }
       if (parts.drop.has(a)) continue;
       if (t.building || t["building:part"]) {
-        if (t.building === "roof" && !t.height && !t["building:levels"]) continue;   // canopies over fuel stations etc.
-        const h = buildingHeight(t);
-        const minH = parts.minOf.get(a) ?? +(/^\d+(\.\d+)?/.exec(t.min_height || "")?.[0] || 0);
-        const kind = t.building === "grandstand" || t.leisure === "grandstand" ? "grandstand" : /^(house|detached|residential|apartments|terrace|semidetached_house)$/.test(t.building || "") ? "home" : /^(industrial|warehouse|hangar|garage|garages|shed|service)$/.test(t.building || "") ? "shed" : "block";
-        const est = !(t.height || t["building:height"] || t["building:levels"]);   // height guessed from the kind
-        const num = (v) => { const m = /^\s*(\d+(?:\.\d+)?)/.exec(String(v ?? "")); return m ? +m[1] : null; };
-        buildings.push({ h: Math.round(h * 10) / 10, min: minH, kind, est: est ? 1 : 0, roof: t["roof:shape"] || null,
-          colour: t["building:colour"] || null, roofColour: t["roof:colour"] || null, name: t.name || null,
-          // what the renderer picks the look from: the kind of building, floors, materials, roof details
-          cls: t.building || t["building:part"] || null, part: t["building:part"] ? 1 : 0, lv: num(t["building:levels"]),
-          mat: t["building:material"] || null, rmat: t["roof:material"] || null, rh: num(t["roof:height"]), rd: num(t["roof:direction"]),
-          ro: t["roof:orientation"] || null, ml: /ML|Open Buildings/.test(t["overture:source"] || "") ? 1 : 0, pts: conv(a.pts) });
+        const b = buildingOf(a, parts);
+        if (b) buildings.push({ ...b, pts: conv(a.pts) });
         continue;
       }
       const k = areaKind(t);
@@ -338,4 +417,4 @@ class Scenes {
   }
 }
 
-module.exports = { Scenes, buildingHeight, areaKind, mergeBuildings, resolveParts };
+module.exports = { Scenes, buildingHeight, buildingOf, areaKind, mergeBuildings, resolveParts };
