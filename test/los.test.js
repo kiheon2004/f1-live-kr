@@ -230,3 +230,110 @@ test("chase camera: where it ends up the line is clear, no surface is within 0.3
   }
   assert.ok(near > 50, `both cases (${near} near)`);
 });
+
+// v0.15 audit (R2–R5): the camera's room is looked for wherever a mesh's matrix stretches it (rotation with uneven
+// scale, shear, mirroring), is as wide as the near plane's corners, is exact for meshes the grid doesn't cover
+// (instances, groups, draw ranges, morphs – 26 rays missed what lay between them), and an unsafe spot isn't used.
+const bruteNear = (THREE, m, p, radius) => {
+  // every triangle as drawn, in the world (the reference)
+  const g = m.geometry, n = g.index ? g.index.count : g.attributes.position.count, tri = new THREE.Triangle(), w = new THREE.Vector3(), M = new THREE.Matrix4(), I = new THREE.Matrix4();
+  const dr = g.drawRange, ranges = Array.isArray(m.material) ? g.groups.filter((gr) => m.material[gr.materialIndex]).map((gr) => [Math.max(gr.start, dr.start), Math.min(n, gr.start + gr.count, dr.start + dr.count)]) : [[dr.start, Math.min(n, dr.start + dr.count)]];
+  let best = Infinity;
+  for (let k = 0; k < (m.isInstancedMesh ? m.count : 1); k++) {
+    M.copy(m.matrixWorld); if (m.isInstancedMesh) { m.getMatrixAt(k, I); M.multiply(I); }
+    for (const [a, b] of ranges) for (let i = a; i + 2 < b; i += 3) {
+      const v = (j) => (g.index ? g.index.getX(j) : j);
+      m.getVertexPosition(v(i), tri.a).applyMatrix4(M); m.getVertexPosition(v(i + 1), tri.b).applyMatrix4(M); m.getVertexPosition(v(i + 2), tri.c).applyMatrix4(M);
+      best = Math.min(best, tri.closestPointToPoint(p, w).distanceTo(p));
+    }
+  }
+  return best <= radius;
+};
+
+test("camera room: a mesh turned with uneven scale (or sheared, mirrored) – a triangle 0.3 m away is found", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), { clearAround, stretchOf } = await import("../src/renderer/los.js");
+  // the audit's case: scale (1, 0.1, 1), turned 45° about z, the camera at the origin, 0.35 m room
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([-1, 3, -1, 1, 3, -1, 0, 3, 1], 3));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial()); m.scale.set(1, 0.1, 1); m.rotation.z = Math.PI / 4; m.updateMatrixWorld(true);
+  const p = new THREE.Vector3(), inv = m.matrixWorld.clone().invert();
+  assert.ok(bruteNear(THREE, m, p, 0.35), "the triangle is within 0.35 m in the world");
+  assert.ok(0.35 * inv.getMaxScaleOnAxis() < 3 - 1e-6, "the inverse's longest axis would have looked short of it");
+  assert.ok(0.35 * stretchOf(inv) >= 3, "the bound used reaches it");
+  assert.strictEqual(clearAround([m], p, 0.35), false, "not clear");
+  // random meshes: turned, unevenly scaled, sheared (by a turned parent), mirrored – against every triangle in the world
+  let seed = 5; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  let near = 0, far = 0;
+  for (let k = 0; k < 400; k++) {
+    const parent = new THREE.Group(); parent.rotation.set(r() * 6, r() * 6, r() * 6); parent.scale.set(0.2 + r() * 3, (r() < 0.2 ? -1 : 1) * (0.05 + r() * 2), 0.2 + r() * 3);
+    const mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(1 + r() * 4), new THREE.MeshBasicMaterial());
+    mesh.rotation.set(r() * 6, r() * 6, r() * 6); mesh.scale.set((r() < 0.2 ? -1 : 1) * (0.1 + r() * 2), 0.1 + r() * 2, 0.1 + r() * 2); mesh.position.set(r() * 4 - 2, r() * 4 - 2, r() * 4 - 2);
+    parent.add(mesh); parent.updateMatrixWorld(true);
+    const q = new THREE.Vector3(r() * 12 - 6, r() * 12 - 6, r() * 12 - 6), rad = 0.2 + r() * 2;
+    const ref = bruteNear(THREE, mesh, q, rad);
+    assert.strictEqual(clearAround([mesh], q, rad), !ref, `mesh ${k}`);
+    ref ? near++ : far++;
+  }
+  assert.ok(near > 30 && far > 30, `both cases (${near} near, ${far} clear)`);
+});
+
+test("camera room: as wide as the near plane's corners, for the window's shape", async () => {
+  const { nearRoom } = await import("../src/renderer/los.js");
+  assert.ok(Math.abs(nearRoom(0.3, 58, 1.8) - 0.455) < 0.001, nearRoom(0.3, 58, 1.8));
+  assert.ok(Math.abs(nearRoom(0.3, 58, 2.6) - 0.552) < 0.001, nearRoom(0.3, 58, 2.6));
+  assert.ok(nearRoom(0.3, 58, 1) > 0.35, "wider than the old fixed room even square");
+});
+
+test("camera room: exact for instances, groups, draw ranges and morphs – a thin plate between the 26 directions is found", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), { clearAround } = await import("../src/renderer/los.js");
+  const mat = () => new THREE.MeshBasicMaterial();
+  // a small plate 0.3 m out, between the 26 ray directions (none of them crosses it), as an instanced mesh
+  const plate = new THREE.PlaneGeometry(0.06, 0.06);
+  const inst = new THREE.InstancedMesh(plate, mat(), 2);
+  const dir = new THREE.Vector3(1, 0.45, 0.2).normalize();
+  const o = new THREE.Object3D(); o.position.copy(dir).multiplyScalar(0.3); o.lookAt(0, 0, 0); o.updateMatrix(); inst.setMatrixAt(0, o.matrix);
+  o.position.set(50, 0, 0); o.updateMatrix(); inst.setMatrixAt(1, o.matrix); inst.updateMatrixWorld(true);
+  const p = new THREE.Vector3();
+  assert.ok(bruteNear(THREE, inst, p, 0.35), "within the room");
+  assert.strictEqual(clearAround([inst], p, 0.35), false, "found (instanced)");
+  inst.count = 0; assert.strictEqual(clearAround([inst], p, 0.35), true, "no instances drawn: clear");
+  // random: boxes with groups (some materials missing), draw ranges, morphs and instances, against the reference
+  let seed = 9; const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  let near = 0, clear = 0;
+  for (let k = 0; k < 300; k++) {
+    const g = new THREE.BoxGeometry(0.5 + r() * 3, 0.5 + r() * 3, 0.5 + r() * 3);
+    let m;
+    const kind = k % 4;
+    if (kind === 0) { g.clearGroups(); g.addGroup(0, 12, 0); g.addGroup(18, 12, 1); m = new THREE.Mesh(g, [mat(), r() < 0.5 ? mat() : undefined]); }
+    else if (kind === 1) { g.setDrawRange(6, 18); m = new THREE.Mesh(g, mat()); }
+    else if (kind === 2) {
+      const base = g.attributes.position, d = base.clone(); for (let i = 0; i < d.count; i++) d.setXYZ(i, d.getX(i) * 0.5, d.getY(i) * 2, d.getZ(i));
+      g.morphAttributes.position = [d]; m = new THREE.Mesh(g, mat()); m.updateMorphTargets(); m.morphTargetInfluences[0] = r();
+    } else { m = new THREE.InstancedMesh(g, mat(), 3); for (let i = 0; i < 3; i++) { o.position.set(r() * 6 - 3, r() * 6 - 3, r() * 6 - 3); o.rotation.set(r() * 3, r() * 3, 0); o.updateMatrix(); m.setMatrixAt(i, o.matrix); } }
+    m.position.set(r() * 6 - 3, r() * 6 - 3, r() * 6 - 3); m.rotation.y = r() * 6; m.updateMatrixWorld(true);
+    const q = new THREE.Vector3(r() * 6 - 3, r() * 6 - 3, r() * 6 - 3), rad = 0.3 + r() * 1.5;
+    const ref = bruteNear(THREE, m, q, rad);
+    assert.strictEqual(clearAround([m], q, rad), !ref, `mesh ${k} (kind ${kind})`);
+    ref ? near++ : clear++;
+  }
+  assert.ok(near > 20 && clear > 20, `both cases (${near} near, ${clear} clear)`);
+});
+
+test("chase camera: no safe spot – the last safe one relative to the car, else over it, else none (never a spot that isn't safe)", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), { chasePlace, chaseFallback, clearAround } = await import("../src/renderer/los.js");
+  const box = (w, h, d, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })); m.position.set(x, y, z); m.updateMatrixWorld(true); return m; };
+  const head = new THREE.Vector3(0, 1.1, 0), az = Math.PI, el = Math.atan2(2.4, 10.5), r = Math.hypot(2.4, 10.5);
+  // a car in a low tunnel (roof at 1.7 m, ground at 0): nothing holds 1.4 m over the ground and 0.455 m off the roof
+  const tunnel = [box(30, 0.2, 60, 0, 1.8, 0)];
+  const groundAt = () => 0;
+  const placed = chasePlace(tunnel, head, az, el, r, { groundAt, room: 0.455 });
+  assert.strictEqual(placed.safe, false, "no safe spot in there");
+  // the last safe spot relative to the car is in the roof now: not taken; over the car neither: none
+  assert.strictEqual(chaseFallback(tunnel, head, new THREE.Vector3(0, 2, -10), { groundAt, room: 0.455 }), null);
+  // out in the open again, with a wall right behind the car: the last safe offset is taken if it still holds
+  const wall = [box(30, 40, 0.4, 0, 20, -0.9)];
+  const off = new THREE.Vector3(0, 9, 0), fb = chaseFallback(wall, head, off, { groundAt, room: 0.455 });
+  assert.ok(fb && fb.distanceTo(head.clone().add(off)) < 1e-9, "the held spot");
+  // the held spot blocked: straight over the car instead, clear of everything
+  const blocked = chaseFallback(wall, head, new THREE.Vector3(0, 2, -5), { groundAt, room: 0.455 });
+  assert.ok(blocked && Math.abs(blocked.x) < 1e-9 && Math.abs(blocked.z) < 1e-9 && blocked.y >= 1.4 && clearAround(wall, blocked, 0.455), "over the car");
+});

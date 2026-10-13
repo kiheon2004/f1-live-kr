@@ -215,17 +215,27 @@ function mergeBuildings(osmAreas, ob) {
 // is its roof, not a building over it. A roof, canopy or link on top covers the plan, not the building under it. Where
 // they cover less (one tower part in a long hall, parts lost with a failed tile, only the roof mapped as a part), the
 // outline stays and its parts are fitted to it so no two walls stand in each other: a part reaching above the outline's
-// roof starts at that roof, one inside its volume isn't drawn. When roof parts sitting on its walls cover it, they are
-// its roof: the outline is drawn up to where they start, flat, and they stay as they are (not two roofs in each other;
-// an outline whose height was a guess gets its walls from them). A grandstand's outline always stays (its seats are
-// built from it).
+// roof starts at that roof, one inside its volume isn't drawn.
+// Roof parts sitting on its walls replace its top only where they cover all of it (FULL – the outline can't be cut, so
+// a roof over part of it can't lower only that part):
+//   - all starting at one height (within 0.5 m): the outline is drawn up to there, flat, they stay as they are (not two
+//     roofs in each other);
+//   - starting at different heights (a hall with a low and a high roof): each roof gets walls of its own, its outline
+//     from the ground up to where it starts (`wallsOf`, drawn as the outline would be), and the outline goes – a
+//     single top for all would cut the high part's walls down to the low roof.
+// Roof parts over only some of it leave it whole – its own height and roof, the part not covered kept – and are fitted
+// to it as any part (inside its volume: not drawn). An outline whose height was a guess gets its walls from roof parts
+// over half of it or more, at the lowest (the guess says less than they do). A grandstand's outline always stays (its
+// seats are built from it).
 // Returns { drop: Set of areas left out, minOf: Map of parts → their new min height, topOf: Map of outlines → the
-// height their walls stop at, under their roof parts (drawn flat) }.
+// height their walls stop at, under their roof parts (drawn flat), wallsOf: Map of roof parts → { of: the outline,
+// h: the height of the walls under them } }.
+const FULL = 0.95;
 const ROOF_PART = /^(roof|canopy)$/;
 function resolveParts(areas) {
   const parts = areas.filter((a) => a.tags["building:part"] && a.tags["building:part"] !== "no");
-  const drop = new Set(), minOf = new Map(), topOf = new Map();
-  if (!parts.length) return { drop, minOf, topOf };
+  const drop = new Set(), minOf = new Map(), topOf = new Map(), wallsOf = new Map();
+  if (!parts.length) return { drop, minOf, topOf, wallsOf };
   const near = cellIndex(parts);
   const num = (v) => { const m = /^\s*(\d+(?:\.\d+)?)/.exec(String(v ?? "")); return m ? +m[1] : 0; };
   for (const o of areas) {
@@ -246,7 +256,22 @@ function resolveParts(areas) {
     // its roof in detail: roof parts starting over the ground and under its top (a guess: anywhere over the ground)
     const roofs = mine.filter((p) => onTop(p) && num(p.tags.min_height) >= 2.5 && (!known || num(p.tags.min_height) < oh - 0.3));
     let top = oh;
-    if (roofs.length && coverage(o.pts, roofs.map((p) => p.pts)) >= 0.5) topOf.set(o, (top = Math.min(...roofs.map((p) => num(p.tags.min_height)))));
+    const cov = roofs.length ? coverage(o.pts, roofs.map((p) => p.pts)) : 0, starts = roofs.map((p) => num(p.tags.min_height));
+    const lo = Math.min(...starts), hi = Math.max(...starts);
+    if (known && cov >= FULL && hi - lo > 0.5) {
+      // roofs at different heights over all of it: walls under each, the outline not drawn
+      drop.add(o);
+      for (const p of roofs) wallsOf.set(p, { of: o, h: num(p.tags.min_height) });
+      for (const p of mine) if (!roofs.includes(p) && !drop.has(p)) {
+        // (a part that isn't a roof: as it is, unless it is inside the walls under the roof over it)
+        const under = roofs.find((r) => inside(...centroidOf(p.pts), r.pts)), wt = under ? num(under.tags.min_height) : oh;
+        const pmin = num(p.tags.min_height), ph = buildingHeight(p.tags);
+        if (pmin >= wt - 0.3) continue;
+        if (ph > wt + 0.5) minOf.set(p, wt); else drop.add(p);
+      }
+      continue;
+    }
+    if (roofs.length && (known ? cov >= FULL : cov >= 0.5)) topOf.set(o, (top = lo));
     else roofs.length = 0;
     // the other parts fitted to its top
     for (const p of mine) {
@@ -257,7 +282,7 @@ function resolveParts(areas) {
     }
   }
   for (const p of parts) delete p._bb;
-  return { drop, minOf, topOf };
+  return { drop, minOf, topOf, wallsOf };
 }
 
 // What the renderer draws for one building or part (its outline added by the caller), or null for none: a canopy
@@ -277,6 +302,16 @@ function buildingOf(a, parts) {
     cls: t.building || t["building:part"] || null, part: t["building:part"] ? 1 : 0, lv: num(t["building:levels"]),
     mat: t["building:material"] || null, rmat: t["roof:material"] || null, rh: top != null ? null : num(t["roof:height"]), rd: num(t["roof:direction"]),
     ro: t["roof:orientation"] || null, ml: /ML|Open Buildings/.test(t["overture:source"] || "") ? 1 : 0 };
+}
+
+// The walls under a roof part that has walls of its own (resolveParts' wallsOf), or null: drawn as the outline they
+// stand for would be – its kind and look –, from the ground to where the roof starts, flat (the outline is given by
+// the caller: the roof part's).
+function wallsUnder(a, parts) {
+  const w = parts.wallsOf?.get(a);
+  if (!w) return null;
+  const b = buildingOf(w.of, { minOf: new Map(), topOf: new Map([[w.of, w.h]]) });
+  return b && { ...b, name: null };
 }
 
 const MEM_SCENES = 4;
@@ -379,6 +414,9 @@ class Scenes {
       if (t.building || t["building:part"]) {
         const b = buildingOf(a, parts);
         if (b) buildings.push({ ...b, pts: conv(a.pts) });
+        // (a roof part standing on walls of its own: those too, under it)
+        const w = wallsUnder(a, parts);
+        if (w) buildings.push({ ...w, pts: conv(a.pts) });
         continue;
       }
       const k = areaKind(t);
@@ -417,4 +455,4 @@ class Scenes {
   }
 }
 
-module.exports = { Scenes, buildingHeight, buildingOf, areaKind, mergeBuildings, resolveParts };
+module.exports = { Scenes, buildingHeight, buildingOf, wallsUnder, areaKind, mergeBuildings, resolveParts };

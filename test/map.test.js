@@ -4,7 +4,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const overture = require("../src/main/overture.js");
-const { mergeBuildings, resolveParts, buildingOf, Scenes } = require("../src/main/scene.js");
+const { mergeBuildings, resolveParts, buildingOf, wallsUnder, Scenes } = require("../src/main/scene.js");
 
 // ---------- a minimal vector tile writer (Mapbox Vector Tile 2.1) ----------
 const varint = (n) => { const o = []; do { let b = n % 128; n = Math.floor(n / 128); if (n) b |= 128; o.push(b); } while (n); return Buffer.from(o); };
@@ -200,9 +200,10 @@ test("parts: a roof part from under the very top (height includes the roof) is t
   // part inside it isn't drawn into its walls
   const flatRoof = { pts: sq(0, 0, 100, 100), tags: { "building:part": "roof", height: "12" } };
   r = resolveParts([body, flatRoof]); assert.ok(!r.drop.has(body) && r.drop.has(flatRoof) && !r.topOf.has(body));
-  // a canopy part high up on 60 % of it: the same
+  // a canopy part high up on 60 % of it: the body stays whole (its height and roof over the 40 % not under it), the
+  // canopy inside its roof space isn't drawn
   const canopy = { pts: sq(0, 0, 60, 100), tags: { "building:part": "canopy", min_height: "10", height: "11" } };
-  r = resolveParts([body, canopy]); assert.ok(!r.drop.has(body) && !r.drop.has(canopy) && r.topOf.get(body) === 10);
+  r = resolveParts([body, canopy]); assert.ok(!r.drop.has(body) && r.drop.has(canopy) && !r.topOf.has(body));
   // a real part from the ground covering it, with the roof part on top: the parts stand in for the body, as before
   const lower = { pts: sq(0, 0, 100, 100), tags: { "building:part": "yes", height: "10" } };
   r = resolveParts([body, lower, roof]); assert.ok(r.drop.has(body) && !r.drop.has(lower) && !r.drop.has(roof));
@@ -262,4 +263,64 @@ test("merge: the 60 % rule on exact areas – 55.1 % stays, 61 % goes, wherever 
   const o = B(sq(0, 0, 100, 100), {});
   assert.ok(mergeBuildings([o], [B(sq(0, 0, 35, 100), {}), B(sq(5, 0, 40, 100), {})]).includes(o), "40 %: stays");
   assert.ok(!mergeBuildings([o], [B(sq(0, 0, 35, 100), {}), B(sq(30, 0, 65, 100), {})]).includes(o), "65 %: goes");
+});
+
+// v0.15 audit (R1): roof parts lower the outline's walls only where they cover all of it – the outline can't be cut, so
+// a roof over part of it kept the rest at the roof's height (55 % roofed: the other 45 % lost 2 m and its gable), and
+// roofs starting at different heights took the lowest for all (a 20 m hall drawn 10 m tall under its 15 m roof).
+test("parts: roof parts over part of a body leave it whole; roofs at different heights over all of it get walls each", async () => {
+  const { mergeSameOutline } = await import("../src/renderer/buildings.js");
+  const body = B(sq(0, 0, 100, 100), { height: "12", "roof:height": "2", "roof:shape": "gabled" });
+  const roofOver = (x) => ({ pts: sq(0, 0, x, 100), tags: { "building:part": "roof", min_height: "10", height: "12" } });
+  // 49 / 50 / 55 %: the body as tagged (12 m, gabled), the roof part inside its roof space not drawn
+  for (const x of [49, 50, 55]) {
+    const roof = roofOver(x), r = resolveParts([body, roof]);
+    assert.ok(!r.drop.has(body) && !r.topOf.has(body) && r.drop.has(roof), `${x} %: body kept, part dropped`);
+    const b = buildingOf(body, r);
+    assert.deepStrictEqual([b.h, b.roof, b.rh], [12, "gabled", 2], `${x} %: its own height and roof`);
+  }
+  // all of it: the walls stop under the roof part (as before)
+  let roof = roofOver(100), r = resolveParts([body, roof]);
+  assert.ok(r.topOf.get(body) === 10 && !r.drop.has(roof));
+  // two roofs on one height covering it: one top, the outline kept
+  const halves = [sq(0, 0, 50, 100), sq(50, 0, 100, 100)];
+  r = resolveParts([body, ...halves.map((p) => ({ pts: p, tags: { "building:part": "roof", min_height: "10", height: "12" } }))]);
+  assert.ok(!r.drop.has(body) && r.topOf.get(body) === 10 && r.wallsOf.size === 0);
+  // two roofs starting at 10 and 15 m on a 20 m hall: walls of 10 and 15 m under each, the outline not drawn
+  const hall = B(sq(0, 0, 100, 100), { height: "20", "building:colour": "#808080", building: "industrial" });
+  const low = { pts: halves[0], tags: { "building:part": "roof", min_height: "10", height: "12" } };
+  const high = { pts: halves[1], tags: { "building:part": "roof", min_height: "15", height: "20" } };
+  r = resolveParts([hall, low, high]);
+  assert.ok(r.drop.has(hall) && !r.drop.has(low) && !r.drop.has(high) && !r.topOf.has(hall));
+  const wl = wallsUnder(low, r), wh = wallsUnder(high, r);
+  assert.deepStrictEqual([wl.h, wl.min, wl.roof, wl.kind, wl.colour, wl.part], [10, 0, "flat", "shed", "#808080", 0]);
+  assert.deepStrictEqual([wh.h, wh.min, wh.roof], [15, 0, "flat"]);
+  assert.strictEqual(wallsUnder(hall, r), null);
+  // those over half of it only: the hall whole at 20 m, the roofs inside it not drawn
+  r = resolveParts([hall, high]);
+  assert.ok(!r.drop.has(hall) && r.drop.has(high) && buildingOf(hall, r).h === 20);
+  // a gabled body under a canopy over half: kept whole
+  const gab = B(sq(0, 0, 100, 100), { height: "12", "roof:shape": "gabled" });
+  r = resolveParts([gab, { pts: halves[0], tags: { "building:part": "canopy", min_height: "10", height: "11" } }]);
+  assert.ok(!r.drop.has(gab) && !r.topOf.has(gab) && buildingOf(gab, r).roof === "gabled");
+
+  // what the renderer gets, through mergeSameOutline: walls and roof on one outline touch, not overlap – both kept
+  const rec = (b, pts) => ({ ...b, pts });
+  r = resolveParts([hall, low, high]);
+  const list = [];
+  for (const a of [hall, low, high]) {
+    if (r.drop.has(a)) continue;
+    list.push(rec(buildingOf(a, r), a.pts));
+    const w = wallsUnder(a, r); if (w) list.push(rec(w, a.pts));
+  }
+  assert.strictEqual(list.length, 4, "two roofs, two walls");
+  const { merged, twice } = mergeSameOutline(list);
+  assert.strictEqual(merged.size + twice.size, 0, "stacked, nothing folded into anything");
+  const spans = list.map((b) => [b.min, b.h]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  assert.deepStrictEqual(spans, [[0, 10], [0, 15], [10, 12], [15, 20]]);
+  // the 55 % case through the same path: the body alone, 0–12
+  const r55 = roofOver(55);
+  r = resolveParts([body, r55]);
+  const one = [body, r55].filter((a) => !r.drop.has(a)).map((a) => rec(buildingOf(a, r), a.pts));
+  assert.deepStrictEqual(one.map((b) => [b.min, b.h, b.roof]), [[0, 12, "gabled"]]);
 });

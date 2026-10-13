@@ -112,28 +112,53 @@ export function firstHit(meshes, origin, dir, far) {
   return best < Infinity ? best : null;
 }
 
-// Whether any surface of `meshes` is within `radius` of the point `p` – the camera's own room: its near plane reaches
-// ~0.3 m from it (0.3 m away, 58° tall, up to 1.8 : 1 wide), so nothing may be nearer than that or it's cut open on
-// screen. Exact for what the grid covers (every triangle near, whatever its side); the rest (instanced, several
-// materials, …) by three.js' raycast in 26 directions.
-const _p = new THREE.Vector3(), _q = new THREE.Vector3(), _tri = new THREE.Triangle(), _w = new THREE.Vector3();
-const DIRS = [];
-for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) if (x || y || z) DIRS.push(new THREE.Vector3(x, y, z).normalize());
+// Whether any surface of `meshes` is within `radius` of the point `p` – the camera's own room: nothing may be nearer
+// than the corners of its near plane or it's cut open on screen (nearRoom: the radius for a camera). Exact for every
+// mesh, whatever its sides: what the grid covers by its cells round the point, the rest (instanced, skinned or morphed,
+// several materials, a draw range) triangle by triangle as three.js draws them – each instance with its own matrix,
+// only the triangles in the groups and the draw range, morphs and skinning applied (Mesh.getVertexPosition).
+// The cells to look in are found in the mesh's own space, so the room there must hold every point within `radius` of
+// `p` in the world, in any direction: the inverse matrix's Frobenius norm bounds its largest stretch (whatever the
+// rotation, shear or mirroring – the longest of its axes doesn't: a mesh scaled (1, 0.1, 1) and turned 45° about z
+// stretches 10× along one direction, its longest axis only 7×, and a triangle 0.3 m away was looked for in the wrong cells).
+const _p = new THREE.Vector3(), _q = new THREE.Vector3(), _tri = new THREE.Triangle(), _w = new THREE.Vector3(), _im = new THREE.Matrix4(), _wm = new THREE.Matrix4();
+export const stretchOf = (inv) => { const e = inv.elements; let s = 0; for (const k of [0, 1, 2, 4, 5, 6, 8, 9, 10]) s += e[k] * e[k]; return Math.sqrt(s); };
+// The radius round a camera that holds its near plane: the distance to its corners.
+export const nearRoom = (near, fovDeg, aspect) => { const t = Math.tan((fovDeg * Math.PI) / 360); return near * Math.sqrt(1 + t * t * (1 + aspect * aspect)); };
+// [start, end) of the vertex (or index) numbers drawn, as three.js' raycast takes them
+function drawnRanges(m, g) {
+  const n = g.index ? g.index.count : g.attributes.position.count, dr = g.drawRange;
+  if (!Array.isArray(m.material)) return [[Math.max(0, dr.start), Math.min(n, dr.start + dr.count)]];
+  return g.groups.filter((gr) => m.material[gr.materialIndex]).map((gr) => [Math.max(gr.start, dr.start), Math.min(n, gr.start + gr.count, dr.start + dr.count)]);
+}
+function nearAny(m, g, p, radius) {
+  const r2 = radius * radius, deformed = m.isSkinnedMesh || !!g.morphAttributes?.position?.length;
+  const count = m.isInstancedMesh ? m.count : 1, ranges = drawnRanges(m, g), sph = deformed ? null : sphereOf(g);
+  for (let k = 0; k < count; k++) {
+    _wm.copy(m.matrixWorld);
+    if (m.isInstancedMesh) { m.getMatrixAt(k, _im); _wm.multiply(_im); }
+    if (sph) { _sphere.copy(sph).applyMatrix4(_wm); if (p.distanceTo(_sphere.center) > _sphere.radius + radius) continue; }
+    for (const [s0, s1] of ranges) for (let i = s0; i + 2 < s1; i += 3) {   // (whole triangles: what the GPU draws)
+      const ia = g.index ? g.index.getX(i) : i, ib = g.index ? g.index.getX(i + 1) : i + 1, ic = g.index ? g.index.getX(i + 2) : i + 2;
+      m.getVertexPosition(ia, _tri.a).applyMatrix4(_wm); m.getVertexPosition(ib, _tri.b).applyMatrix4(_wm); m.getVertexPosition(ic, _tri.c).applyMatrix4(_wm);
+      if (_tri.closestPointToPoint(p, _w).distanceToSquared(p) <= r2) return true;
+    }
+  }
+  return false;
+}
 export function clearAround(meshes, p, radius) {
   const r2 = radius * radius;
   for (const m of meshes) {
     if (!m?.isMesh || !m.material) continue;
     const g = m.geometry;
-    if (!plain(m, g)) {
-      for (const d of DIRS) { _rc.set(p, d); _rc.far = radius; _hits.length = 0; m.raycast(_rc, _hits); if (_hits.some((h) => h.distance <= radius)) return false; }
-      continue;
-    }
+    if (!g?.attributes?.position) continue;
+    if (!plain(m, g)) { if (nearAny(m, g, p, radius)) return false; continue; }
     _sphere.copy(sphereOf(g)).applyMatrix4(m.matrixWorld);
     if (p.distanceTo(_sphere.center) > _sphere.radius + radius) continue;
-    // the point and the room round it in the mesh's own space (its scale may differ by axis: the largest)
+    // the point and the room round it in the mesh's own space
     _inv.copy(m.matrixWorld).invert();
     _p.copy(p).applyMatrix4(_inv);
-    const rl = radius * _inv.getMaxScaleOnAxis(), G = gridOf(g), pos = G.pos;
+    const rl = radius * stretchOf(_inv), G = gridOf(g), pos = G.pos;
     const near = (tri) => {
       const pa = G.v(tri * 3), pb = G.v(tri * 3 + 1), pc = G.v(tri * 3 + 2);
       const y0 = Math.min(pos.getY(pa), pos.getY(pb), pos.getY(pc)), y1 = Math.max(pos.getY(pa), pos.getY(pb), pos.getY(pc));
@@ -142,11 +167,13 @@ export function clearAround(meshes, p, radius) {
       return _tri.closestPointToPoint(p, _w).distanceToSquared(p) <= r2;
     };
     for (const tri of G.big) if (near(tri)) return false;
-    for (let i = Math.floor((_p.x - rl) / CELL); i <= Math.floor((_p.x + rl) / CELL); i++)
-      for (let j = Math.floor((_p.z - rl) / CELL); j <= Math.floor((_p.z + rl) / CELL); j++) {
-        const list = G.cells.get(key(i, j)); if (!list) continue;
-        for (const tri of list) if (near(tri)) return false;
-      }
+    const i0 = Math.floor((_p.x - rl) / CELL), i1 = Math.floor((_p.x + rl) / CELL), j0 = Math.floor((_p.z - rl) / CELL), j1 = Math.floor((_p.z + rl) / CELL);
+    // (a room spanning more cells than that – a mesh shrunk a thousandfold –: every triangle)
+    if (!((i1 - i0 + 1) * (j1 - j0 + 1) <= 4096)) { for (const list of G.cells.values()) for (const tri of list) if (near(tri)) return false; continue; }
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const list = G.cells.get(key(i, j)); if (!list) continue;
+      for (const tri of list) if (near(tri)) return false;
+    }
   }
   return true;
 }
@@ -156,7 +183,8 @@ export function clearAround(meshes, p, radius) {
 //   1. the line to the car is clear – tested along the centre and four lines `radius` to the sides, above and below,
 //      the camera `gap` short of the first thing any of them meets: never beyond it (the old rule kept at least 3 m,
 //      which put it behind a wall 1.5 m away);
-//   2. no surface within `radius` of the camera itself (clearAround: its near plane would cut into it);
+//   2. no surface within `room` of the camera itself (clearAround: its near plane would cut into it – nearRoom of the
+//      camera; `radius`, the lines' spacing, if not given);
 //   3. at least `ground` m over the ground (groundAt(x, z) → height or null).
 // Each candidate spot is checked for all three as it stands – nothing is moved after the check. The search, bounded:
 // at the eased elevation as far out as the line is clear; when that point is under the ground, higher up – the
@@ -186,7 +214,7 @@ export function clearReach(meshes, from, to, radius = 0.35, gap = 0.6) {
 }
 // the point at elevation `el`, azimuth `az`, `r` from `head` (as the chase camera's sphere)
 const onSphere = (head, az, el, r, out) => out.set(head.x + Math.sin(az) * Math.cos(el) * r, head.y + Math.sin(el) * r, head.z + Math.cos(az) * Math.cos(el) * r);
-export function chasePlace(meshes, head, az, el, r, { lift = 0, lifts = [0.35, 0.7, 1.05], near = 2.5, radius = 0.35, gap = 0.6, groundAt = null, ground = 1.4, maxEl = 1.35 } = {}) {
+export function chasePlace(meshes, head, az, el, r, { lift = 0, lifts = [0.35, 0.7, 1.05], near = 2.5, radius = 0.35, room = radius, gap = 0.6, groundAt = null, ground = 1.4, maxEl = 1.35 } = {}) {
   const reachAt = (e) => { onSphere(head, az, Math.min(maxEl, e), r, _f); return Math.min(r, clearReach(meshes, head, _f, radius, gap)); };
   // the lift wanted now: none if the view is clear enough at the set elevation, else the first that is
   let want = 0;
@@ -200,9 +228,9 @@ export function chasePlace(meshes, head, az, el, r, { lift = 0, lifts = [0.35, 0
   let best = null, fallback = null;
   const consider = (e, s) => {
     const p = at(e, s, new THREE.Vector3()), clear = over(p);
-    if (clear >= ground - 1e-6) { if (clearAround(meshes, p, radius)) { if (!best || s > best.s) best = { s, pos: p }; return true; } return false; }
+    if (clear >= ground - 1e-6) { if (clearAround(meshes, p, room)) { if (!best || s > best.s) best = { s, pos: p }; return true; } return false; }
     // (clear of surfaces but under the ground margin: kept only to fall back on, the highest over the ground)
-    if ((!fallback || clear > fallback.clear) && clearAround(meshes, p, radius)) fallback = { clear, pos: p };
+    if ((!fallback || clear > fallback.clear) && clearAround(meshes, p, room)) fallback = { clear, pos: p };
     return false;
   };
   // from as far out as the line is clear, inwards in steps until the spot holds (2 and 3)
@@ -224,4 +252,19 @@ export function chasePlace(meshes, head, az, el, r, { lift = 0, lifts = [0.35, 0
   if (best) return { pos: best.pos, lift: want, safe: true };
   // (nothing holds all three: what keeps the surfaces off, highest over the ground – else where the line is clear)
   return { pos: fallback ? fallback.pos : at(e0, s0, new THREE.Vector3()), lift: want, safe: false };
+}
+
+// When chasePlace finds no spot that holds (safe false), the camera doesn't go there: where it stood last, relative to
+// the car (`offset`, from the last safe spot) if that still holds all three – off the surfaces by `room`, `ground` m
+// over the ground, the line to `head` clear –, else straight over the car as high as the line allows (a crane looking
+// down), else null: nothing safe – the caller keeps the camera where it is, still counted unsafe.
+export function chaseFallback(meshes, head, offset, { room = 0.35, radius = 0.35, gap = 0.6, groundAt = null, ground = 1.4, up = 9 } = {}) {
+  const holds = (p) => { const g = groundAt ? groundAt(p.x, p.z) : null; return (g == null || p.y - g >= ground - 1e-6) && clearAround(meshes, p, room); };
+  if (offset) {
+    const p = new THREE.Vector3().copy(head).add(offset), d = offset.length();
+    if (d > 1e-6 && clearReach(meshes, head, p, radius, gap) >= d - 1e-6 && holds(p)) return p;
+  }
+  const top = new THREE.Vector3(head.x, head.y + up, head.z), s = clearReach(meshes, head, top, radius, gap);
+  for (const k of [1, 0.75, 0.5]) { const p = new THREE.Vector3(head.x, head.y + s * k, head.z); if (s * k >= ground && holds(p)) return p; }
+  return null;
 }
