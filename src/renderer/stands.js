@@ -15,7 +15,10 @@ const WALK = 1.6;           // cross aisle along the front
 const FRONT_H = 1.8;        // front wall: the first row looks over the fence and the people in front
 const AISLE_EVERY = 14;     // a stepped aisle every ~28 seats
 const AISLE_W = 1.2;
-const SEATS_NEAR = 520;     // seats are drawn within this distance of the camera; beyond, the treads take their colour
+// seats are drawn within this distance of the camera; beyond, the treads take their colour. From the track (chase,
+// onboard) 300 m – a seat 0.5 m wide is ~2 px there and tens of thousands of them cost the GPU for nothing to see;
+// from the helicopter 520 m, where a far stand's colour comes from its many seats (the treads alone read duller).
+const SEATS_NEAR = 520;
 const SECTION = 48;         // metres of stand per instanced seat batch (for the distance cut-off and culling)
 
 function rand(seed) { let a = seed | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -93,8 +96,10 @@ function latticeTexture() {
 // seated once the individual seats are no longer drawn.
 function standMaterial(opts = {}) {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0.05, ...opts });
+  // (the fade's range, moved with the seats' distance by update())
+  mat.userData.seatFar = new THREE.Vector2(SEATS_NEAR * 0.55, SEATS_NEAR * 1.05);
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.seatFar = { value: new THREE.Vector2(SEATS_NEAR * 0.55, SEATS_NEAR * 1.05) };
+    sh.uniforms.seatFar = { value: mat.userData.seatFar };
     sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute vec4 seatTint;\nvarying vec4 vSeatTint;\nvarying vec3 vStandPos;")
       .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvSeatTint = seatTint;\nvStandPos = (modelMatrix * vec4(transformed, 1.0)).xyz;");
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform vec2 seatFar;\nvarying vec4 vSeatTint;\nvarying vec3 vStandPos;")
@@ -601,10 +606,11 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
   return {
     group, footprints, structure,
     // per frame: seats only near the camera (beyond that the treads carry their colour)
-    update(cam) {
+    update(cam, near = SEATS_NEAR) {
+      structure.material.userData.seatFar.set(near * 0.55, near * 1.05);
       for (const im of seats.children) {
         const c = im.userData.centre;
-        im.visible = Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) < SEATS_NEAR;
+        im.visible = Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) < near;
       }
     },
     info: { between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },

@@ -1755,7 +1755,7 @@ function frame(now) {
   if (devRec) devRec(now, dt);
   updateSun(now);
   thinFarTrees();
-  world?.real?.stands?.update(camera.position);
+  world?.real?.stands?.update(camera.position, camMode === "heli" || camMode === "inspect" ? 520 : 300);
   realPart("buildings")?.userData.update?.(camera.position);
   realPart("facilities")?.userData.update?.(camera.position);
   updatePitTeams();
@@ -1791,7 +1791,8 @@ function thinFarTrees() {
   for (const im of trees.children) {
     const full = im.userData.full; if (!full) continue;
     const c = im.userData.centre, d = Math.hypot(c.x - cam.x, c.z - cam.z, (c.y - cam.y) * 0.5);
-    const f = Math.max(0.12, Math.min(1, 450 / Math.max(1, d)));
+    // (all of them within 380 m, thinning with distance beyond – a forest far off reads the same with fewer)
+    const f = Math.max(0.1, Math.min(1, 380 / Math.max(1, d)));
     im.count = Math.max(1, Math.round(full * f));
   }
 }
@@ -2246,6 +2247,9 @@ window.Map3D = {
     if ("cap" in o) perf.cap = o.cap;
     if (o.hide) for (const [n, v] of Object.entries(o.hide)) { if (n === "cars") { for (const c of cars.values()) c.model.visible = !v; continue; } if (n === "road") { for (const m of [world.road, world.kerb, world.lines]) m.visible = !v; continue; } world.group.traverse((x) => { if (x.name === n) x.visible = !v; }); }
     if ("fog" in o) scene.fog.far = o.fog ? 5000 : 1e9;
+    if ("sky" in o) scene.background = o.sky ? (nightNow ? nightSky : daySky) : new THREE.Color(0x8fb3d6);
+    if ("all" in o) world.group.visible = o.all;
+    if ("labels" in o) for (const c of cars.values()) c.label.sp.visible = o.labels;
     if (o.shadowSize) { sun.shadow.mapSize.set(o.shadowSize, o.shadowSize); sun.shadow.map?.dispose(); sun.shadow.map = null; refreshShadows(); }
     if (o.shadowType) { renderer.shadowMap.type = THREE[o.shadowType]; scene.traverse((x) => { if (x.material) [].concat(x.material).forEach((m) => { m.needsUpdate = true; }); }); refreshShadows(); }
     return "ok";
