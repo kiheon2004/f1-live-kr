@@ -7,8 +7,10 @@
 import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
-import { smoothedTracks, steadiness, racingLine, trackFrame } from "./smooth.js";
-import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor } from "./grid.js";
+import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
+import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
+import { START_DATA } from "./startdata.js";
+import { StartHistory, startContext, carKind, placeWithout, arrivalBy, PLAN } from "./startplan.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -823,7 +825,7 @@ function trackPointFor(c, x, z) {
   return c.sample ? c.sample.p.y : null;
 }
 
-const posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
+const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 // x → target as a critically damped spring of rate w (1/s), the value and its rate kept on the object
 function spring(o, key, rateKey, target, w, dt) {
   let x = o[key] || 0, v = o[rateKey] || 0;
@@ -996,8 +998,17 @@ function gridCar(c, num, v, ctx) {
   }
   if (!off || !w || w.state === "free") { c.grid = a ? { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: "free" } : null; return; }
   const sl = off[2], da = off[0] * sl.tx + off[1] * sl.tz, dc = off[0] * sl.nx + off[1] * sl.nz;
-  v.x += sl.tx * da * w.along + sl.nx * dc * w.across;
-  v.z += sl.tz * da * w.along + sl.nz * dc * w.across;
+  // standing: in the slot's own axes; arriving and leaving: along and across the track where the car is now (on a
+  // curved grid – Monaco's – the slot's axes turn away from the road within metres), kept on the tarmac
+  const cs = w.state === "standing" ? null : c.sample;
+  const tx = cs ? cs.tan.x : sl.tx, tz = cs ? cs.tan.z : sl.tz, nx = cs ? cs.nor.x : sl.nx, nz = cs ? cs.nor.z : sl.nz;
+  v.x += tx * da * w.along + nx * dc * w.across;
+  v.z += tz * da * w.along + nz * dc * w.across;
+  if (cs) {
+    const lat = (v.x - cs.p.x) * cs.nor.x + (v.z - cs.p.z) * cs.nor.z, lo = (cs.R ?? -7) + 0.95, hi = (cs.L ?? 7) - 0.95;
+    const cl = Math.max(lo, Math.min(hi, lat)) - lat;
+    if (cl) { v.x += cs.nor.x * cl; v.z += cs.nor.z * cl; }
+  }
   // heading: the slot's (standing) or the path's turned by the sideways easing (arriving, leaving)
   if (w.state === "standing") c.yaw = sl.yaw;
   else c.yaw = wrap(c.yaw + (w.state === "arriving" ? wrap(sl.yaw - c.yaw) * w.across : 0) - Math.atan(dc * w.dAcross));
@@ -1020,14 +1031,27 @@ function updateCars(dt) {
   if (F) traffic(sm, F, A.t, dt, pos);
   gridCost.frames++; { const f = gridCost.ms - gridCost.last; if (f > gridCost.worst) gridCost.worst = f; gridCost.last = gridCost.ms; }
   // (live: the grid is looked for again every 5 s until the field has been seen standing on it)
-  if (isRace && src.isLive && world && !world.gridModel && performance.now() - (world.gridTry || 0) > 5000) { world.gridTry = performance.now(); addGrid(); }
+  // (the grid again when what it depends on has come in: the entrants (a live feed's driver list), or – live, before a
+  // grid of this race's own – the field standing on it; checked every 2 s, live 5 s)
+  if (world && performance.now() - (world.gridTry || 0) > (src.isLive ? 5000 : 2000)) {
+    world.gridTry = performance.now();
+    const own = /^(session|live)/.test(world.gridInfo?.source || "");
+    if (gridKeyNow() !== world.gridKey || (src.isLive && isRace && !own)) addGrid();
+  }
   const g0 = performance.now(), gridNow = isRace && world?.gridModel && F ? gridContext(src, A.t, sm) : null;
+  // cars the feed has no position for now, placed from the start and their own telemetry where that can be done
+  // (startplan.js placeWithout): in their slot, launched from it, waiting at the pit exit
+  const without = isRace && world ? carsWithout(src, A.t, pos, F, sm?.lag || 0) : [];
   gridCost.ms += performance.now() - g0;
-  for (const [num, p] of Object.entries(pos)) {
+  if (isRace && world) updatePitLight(src, A.t);
+  const list = without.length ? [...Object.entries(pos).filter(([n]) => !without.some((w) => w.override && w.num === n)), ...without.map((w) => [w.num, null, w.est])] : Object.entries(pos);
+  for (const [num, p, est] of list) {
     const d = drivers[num]; if (!d || !world) continue;
+    if (est && !est.pit && !F) continue;
     seen.add(num);
     const c = carFor(num, d);
-    const st = F ? sm.state(num, A.t, c.st || (c.st = {})) : null;
+    const st = est ? (est.pit ? null : Object.assign(c.st || (c.st = {}), { s: est.s, d: est.d, vs: est.vs, vd: est.vd || 0, as: est.as || 0, run: -1 })) : F ? sm.state(num, A.t, c.st || (c.st = {})) : null;
+    c.est = est || null;
     const v = vTmp;
     let speed;
     if (st) {
@@ -1035,7 +1059,7 @@ function updateCars(dt) {
       // telemetry, across on the racing line plus any room it's making in traffic – and from them how an F1 car
       // moves: the path's heading and turning rate, the body a touch more into the corner than the path (slip),
       // the nose dipping under braking, the car leaning a little and squatting on its downforce at speed.
-      const off = c.trafD || 0, offRate = c.trafRate || 0;
+      const off = est ? 0 : c.trafD || 0, offRate = est ? 0 : c.trafRate || 0;
       const dTot = st.d + off, dRate = st.vd + offRate;
       F.at(st.s, dTot, P0, DIR);
       speed = Math.hypot(st.vs, dRate);
@@ -1075,17 +1099,26 @@ function updateCars(dt) {
       v.y += ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (speed / 90) ** 2);
     } else {
       // Off the track (pit lane, a trip across the run-off) and before the steadied tracks are ready: from the
-      // positions, heading from the velocity.
-      v.set(p[0] * DM - world.center.x, (p[2] || 0) * DM - world.center.y, -(p[1] * DM - world.center.z));
-      const ground = trackPointFor(c, v.x, v.z);
-      if (ground != null) v.y = ground + ROAD_LIFT - 0.02;   // (the pit lane's tarmac is laid 4 cm over the ground)
-      const vel = velBuf[num];                                               // dm/ms → m/s is ×100
-      const mx = vel ? vel[0] * 100 : 0, mz = vel ? -vel[1] * 100 : 0;
+      // positions, heading from the velocity. (A pit-lane starter the feed has no position for: along the pit lane.)
+      let mx, mz, pitYaw = null;
+      if (est?.pit) {
+        const q = pitLaneAt(est.u, pitTmp);
+        v.set(q.x, q.y, q.z); pitYaw = q.yaw;
+        trackPointFor(c, v.x, v.z); v.y = q.y + ROAD_LIFT - 0.02;
+        mx = Math.sin(q.yaw) * est.vs; mz = Math.cos(q.yaw) * est.vs;
+      } else {
+        v.set(p[0] * DM - world.center.x, (p[2] || 0) * DM - world.center.y, -(p[1] * DM - world.center.z));
+        const ground = trackPointFor(c, v.x, v.z);
+        if (ground != null) v.y = ground + ROAD_LIFT - 0.02;   // (the pit lane's tarmac is laid 4 cm over the ground)
+        const vel = velBuf[num];                                               // dm/ms → m/s is ×100
+        mx = vel ? vel[0] * 100 : 0; mz = vel ? -vel[1] * 100 : 0;
+      }
       speed = Math.hypot(mx, mz);
       // (crawling, the velocity of 4 Hz positions points anywhere: below 6 m/s the heading is kept – in front of the
       // garages it lies along the pit lane, the way the car was already facing; first seen, the lap line's direction)
       let yaw = c.yaw;
-      if (speed > 6) yaw = Math.atan2(mx, mz);
+      if (pitYaw != null) yaw = pitYaw;
+      else if (speed > 6) yaw = Math.atan2(mx, mz);
       else {
         const pl = pitLaneDir(v.x, v.z);
         if (pl) { const a = Math.atan2(pl[0], pl[1]); yaw = Math.abs(wrap(a - c.yaw)) <= Math.PI / 2 ? a : wrap(a + Math.PI); }
@@ -1124,7 +1157,16 @@ function updateCars(dt) {
     // eased in as it rolls up to it before the start and let go with the distance it drives off (grid.js, gridCar)
     (c.raw || (c.raw = new THREE.Vector3())).copy(v);
     c.grid = null;
-    if (gridNow && st) { const g1 = performance.now(); gridCar(c, num, v, gridNow); const e = performance.now() - g1; gridCost.ms += e; }
+    if (gridNow && st && !est) { const g1 = performance.now(); gridCar(c, num, v, gridNow); const e = performance.now() - g1; gridCost.ms += e; }
+    if (est) { if (!est.pit) c.yaw = wrap(c.yaw); c.grid = { g: est.g, by: est.from, state: est.est, estimated: true }; }
+    // From a placement without position data to the feed's own: the difference at that moment let go over 1.5 s of the
+    // session's time (so the car doesn't jump when its positions start; a seek starts over)
+    if (est) { c.estAt = A.t; (c.estPos || (c.estPos = new THREE.Vector3())).copy(v); }
+    else if (c.estAt != null) { if (A.t >= c.estAt && A.t - c.estAt < 1000) c.hand = { t: A.t, dx: c.estPos.x - v.x, dz: c.estPos.z - v.z }; c.estAt = null; }
+    if (c.hand) {
+      const w = A.t < c.hand.t || A.t - c.hand.t > 1500 ? 0 : 1 - smoothstep(0, 1500, A.t - c.hand.t);
+      if (w <= 0) c.hand = null; else { v.x += c.hand.dx * w; v.z += c.hand.dz * w; }
+    }
     c.pos.copy(v); c.has = true;
     c.obj.position.copy(v);
     // The car the cockpit cameras ride in is steadied: its pitch and roll follow slowly (~0.4 s) and its height over
@@ -1165,7 +1207,8 @@ function updateCars(dt) {
     paintLabel(c.label, `${l.Position || ""} ${d.Tla}`.trim(), "#" + (d.TeamColour || "888"), num === A.focus);
     c.label.sp.material.opacity = out ? 0.45 : 1;
   }
-  for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; }
+  // (a car not drawn this frame is drawn afresh when it's back: no easing from where it was before)
+  for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; c.has = false; c.est = null; c.estAt = null; c.hand = null; }
   separate(dt, seen);
   // F1's archive sometimes stops publishing car positions part-way through a session (e.g. Monaco 2026):
   // say so instead of showing an empty track without explanation.
@@ -1258,13 +1301,63 @@ let camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), camInit = false
 // spots needed to leave a fallback – so the view doesn't flick between the two)
 const chase = { yaw: 0, yawVel: 0, y: 0, init: false, lift: 0, frames: 0, unsafe: 0, held: 0, exposed: 0, offset: null, holding: false, back: 0 };
 const ray = new THREE.Raycaster(), qTmp = new THREE.Quaternion(), qShake = new THREE.Quaternion(), shakeE = new THREE.Euler(), qLook = new THREE.Quaternion(), lookE = new THREE.Euler();
+// The car the cameras are on: the selected driver (else the leader) – only as drawn this frame. A car the feed has no
+// position for at this moment isn't drawn, and no camera rides where it last was.
+// (camFor: the car and world the cameras' history – the chase rig's swing and height, the steadied ride – belongs to;
+// another car or a new session starts it over)
+let camFor = { num: null, world: null }, camNote = "";
+const heli = { follow: false, last: new THREE.Vector3(), at: new THREE.Vector3() };
+function camNoteSet(text) {
+  if (text === camNote) return;
+  camNote = text;
+  let el = document.getElementById("camNote3d");
+  if (!el && text) { el = document.createElement("div"); el.id = "camNote3d"; el.style.cssText = "position:absolute;left:84px;top:12px;max-width:46%;padding:4px 9px;border-radius:6px;background:rgba(14,16,19,.78);color:#e3e8ee;font-size:12px;line-height:1.4;pointer-events:none;z-index:4"; host?.appendChild(el); }
+  if (el) { el.textContent = text; el.hidden = !text; }
+}
+function carNoteFor(num, c) {
+  const d = app().src?.state.DriverList?.[num], name = d ? `${d.Tla || num}` : num;
+  if (!c?.obj.visible) return `${name}: 이 시점의 위치 자료가 없어 차를 그릴 수 없어요 (출발 상태로도 위치를 정할 수 없음).`;
+  if (c.est?.pit) return `${name}: 피트레인 출발 · 이 시점 위치 자료가 없어 피트 출구 대기 위치로 표시 (대기 순서는 추정)`;
+  if (c.est) return `${name}: 이 시점 위치 자료가 없어 ${c.est.est === "slot" ? `출발 그리드 ${c.est.g}번 칸에 표시` : `${c.est.g}번 칸에서 텔레메트리 속도로 출발 위치를 추정`}`;
+  return "";
+}
 function updateCamera(dt) {
   const A = app();
   if (camMode === "inspect") return;
-  if (camMode === "heli") { controls.enabled = true; controls.update(); setNear(0.3); return; }
+  const num = A.focus || leader(), c = cars.get(num), shown = !!c?.obj.visible;
+  // (a seek – the session's time jumping, or going back – starts the chase rig's swing and height over too)
+  const t = A.t, jumped = camFor.t != null && (t < camFor.t - 50 || t - camFor.t > 2000);
+  camFor.t = t;
+  if (jumped) { chase.init = false; for (const x of cars.values()) x.stab = null; }
+  if (camFor.num !== num || camFor.world !== world) {
+    // another car (or session): the chase rig and the ridden car's steadying start over; the helicopter, following,
+    // goes over to the new car keeping its view
+    if (camMode === "heli" && camFor.num && camFor.num !== num && camFor.world === world) heli.follow = true;
+    camFor = { num, world, t }; chase.init = false; camInit = false; chase.offset = null; chase.holding = false;
+    for (const x of cars.values()) x.stab = null;
+  }
+  if (camMode === "heli") {
+    controls.enabled = true; setNear(0.3);
+    // following the selected car: target and camera moved with it (orbit and zoom stay the user's); a drag that moves
+    // the target (pan) lets go of it – a free view from then on
+    if (heli.follow && shown) { tmp.subVectors(c.pos, controls.target); controls.target.add(tmp); camera.position.add(tmp); }
+    heli.at.copy(controls.target);
+    controls.update();
+    if (heli.follow && controls.target.distanceTo(heli.at) > 0.05) heli.follow = false;
+    camNoteSet(heli.follow ? (shown ? `헬기: ${A.src?.state.DriverList?.[num]?.Tla || num} 추적 중 · 끌어서 옮기면 자유 시점` + (c.est ? " · " + carNoteFor(num, c) : "") : carNoteFor(num, c)) : "");
+    return;
+  }
   controls.enabled = false;
-  const num = A.focus || leader(), c = cars.get(num);
-  if (!c || !c.has) { controls.enabled = true; controls.update(); return; }
+  if (!shown) {
+    // no car to ride: a view over the grid (or the circuit) instead of the road where it was, said so
+    controls.enabled = true;
+    if (camInit !== "overview") { overview(); camInit = "overview"; }
+    controls.update();
+    camNoteSet(carNoteFor(num, c));
+    return;
+  }
+  if (camInit === "overview") { camInit = false; chase.init = false; }
+  camNoteSet(carNoteFor(num, c));
   if (camMode === "onboard" || camMode === "eye") {
     // Fixed to the car (its mounts, per model): the broadcast T-cam on top of the airbox, looking down the car over
     // the driver's helmet – or the driver's own eyes (first person). The car under it is steadied (updateCars), and no
@@ -1376,11 +1469,14 @@ function setCam(mode) {
   resetLook();
   camera.up.copy(UP); chase.init = false;
   if (mode === "heli") {
-    // take over from wherever the chase camera was, orbiting the selected car
-    const c = cars.get(app().focus || leader());
-    controls.target.copy(c?.has ? c.pos : new THREE.Vector3());
+    // take over from wherever the chase camera was, orbiting – and following – the selected car (when it is drawn;
+    // else the view stays where it is, free)
+    const c = cars.get(app().focus || leader()), shown = !!c?.obj.visible;
     camera.fov = 50; camera.updateProjectionMatrix();
-    if ((camMode === "onboard" || camMode === "eye") && c?.has) camera.position.copy(c.pos).add(new THREE.Vector3(0, 120, 160));
+    if (shown) {
+      controls.target.copy(c.pos); heli.follow = true;
+      if (camMode !== "chase") camera.position.copy(c.pos).add(new THREE.Vector3(0, 120, 160));
+    } else heli.follow = false;
   }
   camMode = mode; camInit = false; resetPace();
   try { localStorage.setItem("f1kr:cam3d", JSON.stringify(mode)); } catch {}
@@ -1392,7 +1488,7 @@ function paintCamButtons() {
 }
 function cycleCar(dir) {
   const lines = app().src?.state.TimingData?.Lines || {};
-  const order = Object.keys(lines).filter((n) => cars.get(n)?.has).sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
+  const order = Object.keys(lines).filter((n) => cars.get(n)?.obj.visible).sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
   if (!order.length) return;
   const cur = order.indexOf(app().focus || leader());
   app().setFocus(order[(cur + dir + order.length) % order.length]);
@@ -1411,8 +1507,19 @@ function pickCar(e) {
   if (best) app().setFocus(best);
 }
 
+// A view over the starting grid from behind and above when there is one, else over the whole circuit
+function overview() {
+  camera.up.copy(UP); camera.fov = 50; camera.updateProjectionMatrix();
+  const sl = world?.slots;
+  if (!sl?.size) { frameCircuit(); return; }
+  const p1 = sl.get(1), pl = sl.get(Math.min(sl.size, 12)) || p1;
+  controls.target.set((p1.x + pl.x) / 2, p1.y, (p1.z + pl.z) / 2);
+  camera.position.set(pl.x - p1.tx * 90 + p1.nx * 30, pl.y + 55, pl.z - p1.tz * 90 + p1.nz * 30);
+  controls.update();
+}
 // Fit the helicopter view to the whole circuit.
 function frameCircuit() {
+  heli.follow = false;
   const s = Math.max(world.size.x, world.size.z);
   controls.target.set(0, 0, 0);
   camera.position.set(0, s * 0.75, s * 0.75);
@@ -1718,7 +1825,7 @@ function ensureWorld(now) {
   disposeWorld();
   sepMemory = {};
   world = buildWorld(pts);
-  if (world) { world.sourceKey = key; world.pts = pts.length; addCorners(); addGrid(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
+  if (world) { world.sourceKey = key; world.pts = pts.length; addCorners(); addGrid(); addPitLane(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
   note.hidden = !!world;
 }
 function showNote(text) { const n = document.getElementById("note3d"); n.textContent = text; n.hidden = false; }
@@ -1752,51 +1859,255 @@ function disposeWorld() {
 // the session a source key belongs to (a live key also carries the outline's length, which grows)
 const sessionOf = (key) => (key || "").startsWith("live:") ? key.split(":").slice(0, 2).join(":") : key || "";
 
-// ---------- the starting grid ----------
-// Slots (grid.js): fitted to where the cars stood before a race start (this session's, or the last one seen at this
-// circuit), one every 8 m along the lap line, the columns in the middle of each half of the tarmac. The painted boxes
-// and the cars standing in them use the same slots: the box's front line is half a metre ahead of the car's front
-// axle (the car model's origin is between its axles; the feed's point is taken to be the same – unverified, ±1 m).
-// world.gridModel = { s1, pitch, side, slots: Map(g → { s, lat, x, y, z, yaw, tx, tz, nx, nz }), info } or null
-function gridModelFor(spots) {
-  const F = world.frame, L = F.L, A = app();
-  const obs = [];
-  for (const sp of spots || []) {
-    const v = toWorld(sp.p, world.center), pr = F.project(v.x, v.z);
-    if (!pr) continue;
-    const half = Math.max(edgeOf(pr.sample, 1), -edgeOf(pr.sample, -1));
-    if (Math.abs(pr.d) <= half + 1) obs.push({ g: sp.grid, s: pr.s, d: pr.d });   // (pit-lane starters left out)
+// ---------- the start (startplan.js) ----------
+// Per source: its start history (a replay's from its events; a live feed's noted as it is applied – only what has
+// come in), each car's distance from its speed telemetry, the share of the field standing still (per 250 ms).
+let startFor = null;
+function startState(src, t) {
+  if (!startFor || startFor.src !== src) startFor = { src, hist: src.isLive ? new StartHistory() : StartHistory.fromEvents(src.events || []), sv: new Map(), still: new Map(), ctx: new Map(), arr: new Map() };
+  const S = startFor;
+  if (src.isLive) S.hist.note(t, src.state);
+  return S;
+}
+function startCtxAt(S, t) {
+  const key = Math.round(t / 250);
+  if (!S.ctx.has(key)) { if (S.ctx.size > 200) S.ctx.clear(); S.ctx.set(key, startContext(S.hist, key * 250)); }
+  return S.ctx.get(key);
+}
+// (a car's arrival on the grid by its telemetry, per 250 ms: it scans back over the drive to the grid)
+function arrivalFor(S, src, num, t, need, lag) {
+  const key = num + ":" + Math.floor(t / 250);
+  let a = S.arr.get(key);
+  if (a === undefined) { if (S.arr.size > 2000) S.arr.clear(); a = arrivalBy(src.car?.[num], Math.floor(t / 250) * 250, need, lag); S.arr.set(key, a); }
+  return a;
+}
+function svFor(S, src, num, lag) {
+  const car = src.car?.[num]; if (!car?.t?.length) return null;
+  let e = S.sv.get(num);
+  // (live: the telemetry grows – the integral again every 2 s)
+  if (!e || e.lag !== lag || (src.isLive && performance.now() - e.at > 2000)) { e = { fn: speedIntegral(car, lag), lag, at: performance.now() }; S.sv.set(num, e); }
+  return e.fn;
+}
+// the distance integral built only when a car is moving without positions (it is a pass over all its telemetry)
+function lazySv(S, src, num, lag) {
+  let f = null;
+  const get = () => f || (f = svFor(S, src, num, lag));
+  const fn = (t) => get()?.(t) ?? 0;
+  fn.v = (t) => get()?.v(t) ?? 0; fn.a = (t) => get()?.a(t) ?? 0; fn.ok = () => !!get();
+  return src.car?.[num]?.t?.length ? fn : null;
+}
+function fieldStillAt(S, src, t) {
+  const key = Math.round(t / 250);
+  let v = S.still.get(key);
+  if (v == null) {
+    let n = 0, still = 0;
+    for (const num of Object.keys(src.car || {})) { const c = src.carAt(num, key * 250); if (!c) continue; n++; if (c.speed <= PLAN.still) still++; }
+    v = n >= 6 ? still / n : 0;
+    if (S.still.size > 600) S.still.clear();
+    S.still.set(key, v);
   }
-  const fit = fitGrid(obs, L);
-  if (!fit.ok) return { info: { ok: false, reason: fit.reason, n: fit.n, rms: fit.rms, dropped: fit.dropped } };
+  return v;
+}
+// Cars the feed has no position for at t that can be placed from the start and their telemetry (placeWithout):
+// [{ num, est }] – est in track coordinates, or { pit, u } along the pit lane. Also a car the feed does have that is
+// standing still in a field standing on the grid, after its drive to the grid, not in the pit lane – a car on the grid
+// by everything else known – but whose position is nowhere near its slot (over 1.5 slots, or off the track: Monaco 2026,
+// the first positions after the gap put Hamilton, third on the grid, at the swimming pool): drawn in its slot, the
+// feed's position kept for everything else (est.feedOff: how far it is) – not a car that is moving, or in the pits.
+function carsWithout(src, t, pos, F, lag) {
+  if (!world?.gridModel && !world?.pitLane) return [];
+  const S = startState(src, t), ctx = startCtxAt(S, t);
+  if (!ctx) return [];
+  const drivers = src.state.DriverList || {}, out = [];
+  const kinds = new Map(); for (const num of Object.keys(drivers)) kinds.set(num, carKind(S.hist, ctx, num, t));
+  // the pit-lane starters' queue: in grid order (their real order in the queue isn't in the data – an estimate)
+  const pitters = [...kinds].filter(([, k]) => k.kind === "pit").sort((a, b) => (a[1].g || 99) - (b[1].g || 99)).map(([n]) => n);
+  const field = (tt) => fieldStillAt(S, src, tt);
+  const need = PLAN.formation * (F?.L || 5000), c0 = world.center;
+  for (const num of Object.keys(drivers)) {
+    const kind = kinds.get(num), slot = kind.kind === "grid" ? world.gridModel?.slots.get(kind.g) : null;
+    let feedOff = null;
+    if (pos[num]) {
+      // the feed has it: only a car standing on the grid by its telemetry whose position is far from its slot
+      if (!slot || !F) continue;
+      const a = arrivalFor(S, src, num, t, need, lag);
+      if (!a?.still || !a.ok || kind.inPitNow) continue;
+      const p = pos[num], pr = F.project(p[0] * DM - c0.x, -(p[1] * DM - c0.z));
+      let ds = pr ? pr.s - slot.s : Infinity; if (pr) ds = ((ds % F.L) + F.L * 1.5) % F.L - F.L / 2;
+      const onTrack = pr && Math.abs(pr.d) <= Math.max(edgeOf(pr.sample, 1), -edgeOf(pr.sample, -1)) + 1;
+      if (onTrack && Math.abs(ds) <= ASSIGN_TOL.gridPos) continue;
+      feedOff = pr ? Math.round(Math.hypot(ds, pr.d)) : null;
+    }
+    const pit = kind.kind === "pit" && world.pitLane && !pos[num] ? { queueU: world.pitLane.queueU, queueIndex: pitters.indexOf(num) } : null;
+    if (!slot && !pit) continue;
+    const est = placeWithout({ start: ctx, kind, slot, car: src.car?.[num], lag, Sv: lazySv(S, src, num, lag), t, line: F ? (x) => F.lineAt(x) : null, L: F?.L, need, pit, fieldStill: field, arrival: (tt) => arrivalFor(S, src, num, tt, need, lag) });
+    if (est && (!pos[num] || est.est === "slot")) out.push({ num, est: { ...est, kind: kind.kind, g: kind.g ?? null, from: ctx.orderFrom, feedOff }, override: !!pos[num] });
+  }
+  return out;
+}
+
+// ---------- the pit lane (startdata.js) ----------
+// The venue's pit lane as measured from F1's data (its path from where cars leave the lap line to where they join it,
+// the limiter's on and off points from their speed telemetry), placed in this world only where its ends lie on this
+// session's lap line. What is drawn of it: the speed-limit lines across it and the pit exit light (red / green as race
+// control's last pit-exit message says, unlit without one). Pit-lane starters wait at its exit (placeWithout).
+function addPitLane() {
+  const old = world.group.getObjectByName("pitLane");
+  if (old) { world.group.remove(old); disposeGroup(old); }
+  world.pitLane = null;
+  const A = app(), venue = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), pd = START_DATA[venue?.key]?.pit, F = world.frame;
+  if (!pd) { world.pitInfo = { ok: false, reason: "no measured pit lane for this venue" }; return; }
+  const pts = pd.path.map((p) => toWorld([p[0], p[1], 0], world.center));
+  const a = F.project(pts[0].x, pts[0].z), b = F.project(pts[pts.length - 1].x, pts[pts.length - 1].z);
+  if (!a || !b || Math.abs(a.d) > 4 || Math.abs(b.d) > 4) { world.pitInfo = { ok: false, reason: "the measured pit lane's ends don't lie on this session's lap line", ends: [a?.d, b?.d] }; return; }
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+  for (const p of pts) { const [smp] = world.grid.nearest(p.x, p.z, 4); p.y = smp ? smp.p.y : 0; }
+  const len = cum[cum.length - 1];
+  // the queue of pit-lane starters: its head where such cars were seen waiting at this venue (startdata.js pit.queue),
+  // else just short of where the limiter goes off (an estimate: the telemetry puts that 10–90 m past the waiting place
+  // at venues where both are known); the pit exit line and its light just ahead of the head
+  const head = pd.queue?.head ?? Math.max(20, pd.limitOff - 4);
+  world.pitLane = { pts, cum, len, entryS: a.s, exitS: b.s, limit: pd.limit, limitOn: pd.limitOn, limitOff: pd.limitOff, queueU: head, exitU: Math.min(len - 5, head + 3) };
+  world.pitInfo = { ok: true, from: pd.session, passes: pd.passes, limit: pd.limit, limitOn: pd.limitOn, limitOff: pd.limitOff, spread: [pd.onMAD, pd.offMAD], length: Math.round(len),
+    queueHead: head, queueFrom: pd.queue ? `measured: pit-lane starters waiting (${pd.queue.seen.map((q) => q.session).join(", ")})` : "estimate: 4 m short of the limiter's end",
+    queueOrder: "estimate: one car every 7.5 m back from the head, in grid order (the real order isn't in the data)" };
+  paintPitLane(world.pitLane);
+}
+// where u metres along the pit lane is: { x, y, z, yaw }; past its end, on along the lap line from where it joins it
+function pitLaneAt(u, out = {}) {
+  const P = world.pitLane, F = world.frame;
+  if (u >= P.len) { const D = [0, 0], q = [0, 0, 0]; F.at(P.exitS + (u - P.len), F.lineAt(P.exitS + (u - P.len)) * Math.min(1, (u - P.len) / 120), q, D); out.x = q[0]; out.y = q[1]; out.z = q[2]; out.yaw = Math.atan2(D[0], D[1]); return out; }
+  u = Math.max(0, u);
+  let i = 1; while (i < P.cum.length - 1 && P.cum[i] < u) i++;
+  const p0 = P.pts[i - 1], p1 = P.pts[i], f = (u - P.cum[i - 1]) / (P.cum[i] - P.cum[i - 1] || 1);
+  out.x = p0.x + (p1.x - p0.x) * f; out.y = p0.y + (p1.y - p0.y) * f; out.z = p0.z + (p1.z - p0.z) * f;
+  // (the heading over ±6 m: the path's points are 4 m apart)
+  const ua = Math.max(0, u - 6), ub = Math.min(P.len, u + 6), A1 = pitLaneAt2(ua), B1 = pitLaneAt2(ub);
+  out.yaw = Math.atan2(B1[0] - A1[0], B1[1] - A1[1]);
+  return out;
+}
+function pitLaneAt2(u) { const P = world.pitLane; let i = 1; while (i < P.cum.length - 1 && P.cum[i] < u) i++; const p0 = P.pts[i - 1], p1 = P.pts[i], f = (u - P.cum[i - 1]) / (P.cum[i] - P.cum[i - 1] || 1); return [p0.x + (p1.x - p0.x) * f, p0.z + (p1.z - p0.z) * f]; }
+let pitLight = null;
+function paintPitLane(P) {
+  const g = new THREE.Group(); g.name = "pitLane";
+  const pos = [], idx = [], o = {};
+  // a line across the lane (6 m: the fast lane – the data has the cars on one line in it; the working lane's side
+  // isn't in the data) at u
+  const across = (u, w = 6, t = 0.3) => {
+    pitLaneAt(u, o); const fx = Math.sin(o.yaw), fz = Math.cos(o.yaw), nx = -fz, nz = fx, v = pos.length / 3, y = o.y + ROAD_LIFT + 0.006;
+    for (const [a, b] of [[-t / 2, -w / 2], [t / 2, -w / 2], [t / 2, w / 2], [-t / 2, w / 2]]) pos.push(o.x + fx * a + nx * b, y, o.z + fz * a + nz * b);
+    idx.push(v, v + 2, v + 1, v, v + 3, v + 2);
+  };
+  across(P.limitOn); across(P.exitU);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  geo.setIndex(idx);
+  const paint = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }));
+  paint.name = "pitLines"; g.add(paint);
+  // the pit exit light: a post on the far side from the track at the exit line, its lamp lit as race control says
+  pitLaneAt(P.exitU, o);
+  const pr = world.frame.project(o.x, o.z), away = pr && pr.d >= 0 ? 1 : -1, fx = Math.sin(o.yaw), fz = Math.cos(o.yaw), nx = -fz, nz = fx;
+  const px = o.x + nx * 4 * away, pz = o.z + nz * 4 * away;
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.6, 0.18), new THREE.MeshStandardMaterial({ color: 0x30343a, roughness: 0.6, metalness: 0.4 }));
+  post.position.set(px, o.y + 1.3, pz); g.add(post);
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x000000, emissiveIntensity: 1.6 });
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.25), lampMat);
+  lamp.position.set(px, o.y + 2.75, pz); lamp.rotation.y = o.yaw + Math.PI; g.add(lamp);
+  pitLight = { mat: lampMat, state: undefined };
+  world.group.add(g);
+}
+function updatePitLight(src, t) {
+  if (!pitLight || !world?.pitLane) return;
+  const st = startState(src, t).hist.pitExitAt(t);
+  if (st === pitLight.state) return;
+  pitLight.state = st;
+  pitLight.mat.emissive.setHex(st === "open" ? 0x22ff44 : st === "closed" ? 0xff2211 : 0x000000);
+  pitLight.mat.color.setHex(st ? 0x222222 : 0x111111);
+}
+
+// ---------- the starting grid ----------
+// Three layers (grid.js, startplan.js):
+//   the circuit's grid – where the slots are: fitted to this session's own field standing before a start (when the feed
+//     has it and it agrees with the circuit's measured grid), else the circuit's grid as measured from F1's position data
+//     in other races there (startdata.js, placed on this lap line only where that lap line lies on this one). One slot
+//     every 8 m along the lap line (or the venue's measured pitch), the columns in the middle of each half of the
+//     tarmac, as many slots as this session has entrants. Drawn whether or not any car stands in them;
+//   the start – which car has which slot, who starts from the pit lane (startplan.js);
+//   the moment – where each car is drawn (updateCars: gridCar for cars the feed has, placeWithout for cars it hasn't).
+// The painted boxes and the cars standing in them use the same slots: the box's front line is half a metre ahead of
+// the car's front axle (the car model's origin is between its axles; the feed's point is taken to be the same –
+// unverified, ±1 m).
+// world.gridModel = { s1, pitch, side, slots: Map(g → { s, lat, x, y, z, yaw, tx, tz, nx, nz }), info } or null
+const feedProject = (p) => { const v = toWorld(p, world.center), pr = world.frame.project(v.x, v.z); return pr ? { s: pr.s, d: pr.d } : null; };
+function gridSources(spots) {
+  const F = world.frame, L = F.L, A = app();
   const year = A.sessionYear?.() || null, venue = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() });
-  const drivers = Object.keys(A.src?.state.DriverList || {}).length;
-  const count = Math.min(26, Math.max(drivers, ...obs.map((o) => o.g), year >= 2026 ? 22 : 20));
-  const model = { s1: fit.s1, pitch: fit.pitch, slots: new Map() };
+  // the circuit's measured grid
+  const surveyed = surveyedGrid(START_DATA[venue?.key], year, feedProject, L);
+  // this session's own field standing on it
+  let fit = null;
+  if (spots?.length) {
+    const obs = [];
+    for (const sp of spots) {
+      const pr = feedProject(sp.p);
+      if (!pr) continue;
+      const smp = F.sampleAt(pr.s), half = Math.max(edgeOf(smp, 1), -edgeOf(smp, -1));
+      if (Math.abs(pr.d) <= half + 1) obs.push({ g: sp.grid, s: pr.s, d: pr.d });   // (pit-lane starters left out)
+    }
+    fit = fitGrid(obs, L);
+    // a field standing still somewhere else (a queue in the pit lane, cars parked after a red flag) isn't the grid:
+    // where the circuit's grid is known, the session's has to be within a slot of it
+    if (fit.ok && surveyed.ok) {
+      const off = ((fit.s1 - surveyed.s1) % L + L * 1.5) % L - L / 2;
+      fit.offSurvey = +off.toFixed(1);
+      if (Math.abs(off) > 2 * GRID_RULES.pitch) { fit.ok = false; fit.reason = `stood ${off.toFixed(0)} m from the circuit's measured grid`; }
+    }
+  }
+  return { venue, year, surveyed, fit, spots };
+}
+function gridModelFor(src) {
+  const F = world.frame, L = F.L, A = app(), { venue, year, surveyed, fit, spots } = src;
+  let s1, pitch, from;
+  if (fit?.ok) { s1 = fit.s1; pitch = fit.pitch; from = { kind: spots.source || "session", n: fit.n, rms: fit.rms, maxRes: fit.maxRes, dropped: fit.dropped, pitchFrom: fit.pitchFrom, pitchData: fit.pitchData, offSurvey: fit.offSurvey ?? null, res: fit.res.map((r) => [r.g, +r.r.toFixed(1)]) }; }
+  else if (surveyed.ok) { s1 = surveyed.s1; pitch = surveyed.pitch; from = { kind: "survey", sessions: surveyed.sessions, others: surveyed.others, pitchFrom: surveyed.pitchFrom, sessionFit: fit ? { reason: fit.reason, n: fit.n, rms: fit.rms } : null }; }
+  else return { info: { ok: false, reason: spots?.length ? `this session's standing field didn't fit (${fit?.reason}) and ${surveyed.reason}` : `no standing grid in this session and ${surveyed.reason}`, survey: surveyed.fits || null } };
+  const src0 = A.src, drivers = Object.keys(src0?.state.DriverList || {}).length;
+  const maxGridPos = Math.max(0, ...Object.values(src0?.state.TimingAppData?.Lines || {}).map((l) => +l?.GridPos || 0));
+  const count = slotCount({ drivers, maxGridPos, year });
+  const model = { s1, pitch, slots: new Map() };
   // pole's side: from a source where there is one; else the side the racing line takes there (an estimate)
-  const known = poleSideFor(venue?.key, year), s1 = F.sampleAt(slotS(model, 1, L));
-  const side = known ? known.side : (Math.sign((s1.M ?? 0) - (edgeOf(s1, 1) + edgeOf(s1, -1)) / 2) || 1);
+  const known = poleSideFor(venue?.key, year), p1 = F.sampleAt(slotS(model, 1, L));
+  const side = known ? known.side : (Math.sign((p1.M ?? 0) - (edgeOf(p1, 1) + edgeOf(p1, -1)) / 2) || 1);
   model.side = side;
   const P = [0, 0, 0], D = [0, 0];
-  for (let g = 1; g <= count; g++) {
+  for (let g = 1; g <= count.n; g++) {
     const ss = slotS(model, g, L), smp = F.sampleAt(ss), lat = slotLat(g, edgeOf(smp, 1), edgeOf(smp, -1), side);
     F.at(ss, lat, P, D);
     model.slots.set(g, { g, s: ss, lat, x: P[0], y: P[1], z: P[2], yaw: Math.atan2(D[0], D[1]), tx: D[0], tz: D[1], nx: -D[1], nz: D[0] });
   }
-  model.info = { ok: true, source: spots.source || "session", n: fit.n, dropped: fit.dropped, rms: fit.rms, maxRes: fit.maxRes, pitch: +fit.pitch.toFixed(2), pitchFrom: fit.pitchFrom, pitchData: fit.pitchData, pitchSE: fit.pitchSE,
-    poleSide: side > 0 ? "left" : "right", poleSideFrom: known ? known.src : "estimate: the racing line's side at pole", slots: count, columns: "estimate: middle of each half of the tarmac",
-    res: fit.res.map((r) => [r.g, +r.r.toFixed(1)]) };
+  model.count = count;
+  model.info = { ok: true, source: from.kind, from, pitch: +pitch.toFixed(2), poleSide: side > 0 ? "left" : "right", poleSideFrom: known ? known.src : "estimate: the racing line's side at pole",
+    slots: count.n, slotsFrom: count.from, columns: "estimate: middle of each half of the tarmac", venue: venue?.key ?? null, year };
   return model;
 }
 function addGrid() {
-  const spots = app().gridSpots?.();
+  const old = world.group.getObjectByName("grid");
+  if (old) { world.group.remove(old); disposeGroup(old); }
   world.gridModel = null; world.slots = null; world.gridInfo = null;
-  if (!spots?.length) { world.gridInfo = { ok: false, reason: "no standing grid seen at this circuit" }; return; }
-  const m = gridModelFor(spots);
+  gridFields.clear(); gridFieldsFor = null;
+  const m = gridModelFor(gridSources(app().gridSpots?.()));
   world.gridInfo = m.info;
+  world.gridKey = gridKeyNow();
   if (!m.slots) return;
   world.gridModel = m; world.slots = m.slots;
   paintGrid(m);
+}
+// (what the grid depends on that can come late in a live feed: the field standing before the start, the entrants)
+function gridKeyNow() {
+  const s = app().src; if (!s) return "";
+  return `${Object.keys(s.state.DriverList || {}).length}|${Math.max(0, ...Object.values(s.state.TimingAppData?.Lines || {}).map((l) => +l?.GridPos || 0))}`;
 }
 // The paint: per slot a box open at the back – a front line across (2.7 m between the side lines' outer edges) and two
 // short side lines –, the start line a metre ahead of pole's box, and the light gantry over it. Flat on the tarmac
@@ -2345,7 +2656,11 @@ window.Map3D = {
     const cs = [...cars.values()].filter((c) => c.grid).map((c) => ({ num: c.num, ...c.grid, drawnOff: c.raw ? +Math.hypot(c.pos.x - c.raw.x, c.pos.z - c.raw.z).toFixed(2) : null })).sort((a, b) => a.g - b.g);
     const f = gridFieldsFor && world?.gridModel ? fieldAt(app().src, app().t) : null;
     const p1 = world?.gridModel?.slots.get(1), gf = world?.real?.geo, poleLL = p1 && gf ? gf.toLL(p1.x, p1.z).map((v) => +v.toFixed(6)) : null;
-    return JSON.stringify({ cost: { avgMs: +(gridCost.ms / Math.max(1, gridCost.frames)).toFixed(3), worstMs: +gridCost.worst.toFixed(2), frames: gridCost.frames }, model: world?.gridInfo || null, poleLL, preStart: f?.preStart ?? null, cars: cs });
+    const S = app().src ? startState(app().src, app().t) : null, ctx = S ? startCtxAt(S, app().t) : null;
+    const lastLL = (() => { const sl = world?.gridModel?.slots, l = sl?.get(sl.size); return l && gf ? gf.toLL(l.x, l.z).map((v) => +v.toFixed(6)) : null; })();
+    return JSON.stringify({ cost: { avgMs: +(gridCost.ms / Math.max(1, gridCost.frames)).toFixed(3), worstMs: +gridCost.worst.toFixed(2), frames: gridCost.frames }, model: world?.gridInfo || null, poleLL, lastLL, pit: world?.pitInfo || null,
+      start: ctx ? { t: ctx.t, n: ctx.n, pending: !!ctx.pending, standing: ctx.standing, orderFrom: ctx.orderFrom, order: ctx.order } : null, pitExit: S?.hist.pitExitAt(app().t) ?? null, preStart: f?.preStart ?? null, cars: cs,
+      drawn: [...cars.values()].filter((c) => c.obj.visible).length, estimated: [...cars.values()].filter((c) => c.obj.visible && c.est).map((c) => [c.num, c.est.kind, c.est.g, c.est.est]) });
   },
   // development: look at slot g from `back` m behind it, `h` m up, `side` m to the left, towards `ahead` m in front
   viewSlot(g = 1, back = 12, h = 4, side = 0, ahead = 6, fov = 50) {

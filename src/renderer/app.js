@@ -18,11 +18,12 @@
 
   // ---------- state ----------
   let mode = "replay", replay = null, src = null;
-  let t0 = 0, t1 = 0, tStart = 0;   // replay range: session start (a race: the grid formed) → results confirmed; tStart: the clock starts
+  let t0 = 0, t1 = 0, tStart = 0, tOpen = 0;   // replay range: session start (a race: the grid formed) → results confirmed; tStart: the clock starts
   // A race's clock starts at lights out. The bar starts a little earlier, 15 s before the last car stops on the
-  // grid, so the start is seen from the standing grid (capped at 2 minutes before the start).
-  function gridFormedAt(r, start) {
-    if (!/Race/.test(r.state?.SessionInfo?.Type || "")) return start;
+  // grid, so the cars can be seen rolling into their slots (capped at 2 minutes before the start); a loaded race opens
+  // at the moment the field stands on the grid (gridFormed), not in that run-up. [bar start, opening moment]
+  function gridFormed(r, start) {
+    if (!/Race/.test(r.state?.SessionInfo?.Type || "")) return [start, start];
     const moving = (t) => { const a = r.positionsAt(t), b = r.positionsAt(t - 1000); let n = 0, all = 0; for (const [k, p] of Object.entries(a)) { const q = b[k]; if (!q) continue; all++; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 15) n++; } return [n, all]; };
     // back from lights out: the grid has formed while (almost) nobody moves
     let formed = null;
@@ -31,7 +32,10 @@
       if (all < 5) break;
       if (n <= Math.max(2, all * 0.15)) formed = t; else if (formed != null) break;   // (pit-lane starters may still be rolling)
     }
-    return formed == null ? start : Math.max(start - 120000, formed - 15000);
+    if (formed == null) return [start, start];
+    // (opening: the first moment from there that at most one car still moves – a pit-lane starter rolling to the exit)
+    let open = formed; while (open < start - 1500 && moving(open)[0] > 1) open += 1000;
+    return [Math.max(start - 120000, formed - 15000), Math.min(start, open + 500)];
   }
   let schedule = null, schedulePromise = null;   // season calendar, loaded on first use
   const live = new ReplayKit.LiveSource();
@@ -121,10 +125,10 @@
       replay = r; replayInfo = info;
       // The recording starts long before the session (an hour before a race); the bar covers the session itself.
       tStart = r.startTime(); r.seek(tStart);   // (seek first: that reads the session info)
-      t0 = gridFormedAt(r, tStart); t1 = Math.max(tStart + 1000, r.endTime());
+      [t0, tOpen] = gridFormed(r, tStart); t1 = Math.max(tStart + 1000, r.endTime());
       $("seek").min = t0; $("seek").max = t1;
       for (const id of ["play", "speed", "toStart", "seek"]) $(id).disabled = false;
-      t = t0; r.seek(t0);
+      t = tOpen; r.seek(tOpen);
       // (switched to live while it downloaded: the replay is ready for when replay is picked again – setMode shows it
       // then – and the live screen's circuit, alerts, lists and title are left as they are)
       if (mode === "replay") {
@@ -132,7 +136,7 @@
         rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
         outline = r.lapShape() || replayFallbackLap(); if (!outline.length) outline = r.trackOutline(); outlineFor = "replay";
         refreshTitle();
-        seekTo(t0);
+        seekTo(tOpen);
       }
       showLoad(100, "준비 완료 ·");
       loadHideTimer = setTimeout(() => { $("loadBar").hidden = true; $("progress").textContent = "준비 완료"; }, 2500);
@@ -151,7 +155,7 @@
   }
   $("play").addEventListener("click", () => (playing ? pause() : play()));
   $("speed").addEventListener("change", () => { speed = +$("speed").value; });
-  $("toStart").addEventListener("click", () => seekTo(t0));   // (a race: the standing grid)
+  $("toStart").addEventListener("click", () => seekTo(tOpen));   // (a race: the standing grid)
   $("seek").addEventListener("input", () => seekTo(+$("seek").value));
   // Shortcuts. A clicked button keeps the focus, and Space would also press it a second time (play → pause
   // straight away), so the focus is dropped first.
@@ -1395,14 +1399,12 @@
       if (src.isLive) { for (const tr of Object.values(live.trail)) for (let i = 0; i < tr.length; i += 2) out.push(tr[i]); return out; }
       return replay.carPoints(150000);
     },
-    // Grid slots: where each car stood just before a race start, remembered per circuit so practice, qualifying and
-    // live sessions there can show them too. [{ grid, p: [x, y, z] }] with .source: "session" (this race's grid before
-    // lights out – or, when the start was delayed, the first moment after the clock ran that the field stood still),
-    // "live" (seen standing in this live race before the start) or "saved" (an earlier race here); or null.
+    // This race's own standing grid: where each car stood just before the start – a replay's before lights out (or, when
+    // the start was delayed, the first moment within 20 minutes after the clock ran that the field stood still), or a
+    // live race's field standing before the start. [{ grid, p: [x, y, z] }] with .source ("session", "session (delayed
+    // start)", "live"), or null. Nothing is kept from one session to the next (a race's grid is no other race's): the
+    // circuit's own grid, measured from earlier races, is in startdata.js.
     gridSpots: () => {
-      const loc = window.F1KR.location();
-      if (!loc) return null;
-      const key = "grid:" + loc;
       const standingAt = (s, t) => {
         const a = s.positionsAt(t), b = s.positionsAt(t - 3000), lines = s.state.TimingAppData?.Lines || {};
         return Object.entries(a).filter(([n, p]) => b[n] && Math.hypot(p[0] - b[n][0], p[1] - b[n][1]) < 15 && +lines[n]?.GridPos > 0)
@@ -1411,16 +1413,15 @@
       const tag = (spots, source) => Object.assign(spots, { source });
       if (mode === "replay" && replay && /Race/.test(sessionType())) {
         const t0s = replay.startTime();
-        let spots = standingAt(replay, t0s - 1500);
-        if (!gridOk(spots)) for (let t = t0s; t < t0s + 20 * 60e3 && !gridOk(spots); t += 2000) spots = standingAt(replay, t);
-        if (gridOk(spots)) { store.set(key, spots); return tag(spots, "session"); }
+        let spots = standingAt(replay, t0s - 1500), source = "session";
+        if (!gridOk(spots)) { source = "session (delayed start)"; for (let t = t0s; t < t0s + 20 * 60e3 && !gridOk(spots); t += 2000) spots = standingAt(replay, t); }
+        if (gridOk(spots)) return tag(spots, source);
       }
       if (mode === "live" && src === live && /Race/.test(sessionType()) && !live.state.ExtrapolatedClock?.Extrapolating) {
         const spots = standingAt(live, live.now());
-        if (gridOk(spots)) { store.set(key, spots); return tag(spots, "live"); }
+        if (gridOk(spots)) return tag(spots, "live");
       }
-      const saved = store.get(key, null);
-      return gridOk(saved) ? tag(saved, "saved") : null;
+      return null;
     },
     location: () => src?.state.SessionInfo?.Meeting?.Location || (mode === "replay" ? replayInfo?.location : null),
     // F1's circuit key of the session's venue (the Grand Prix's name says nothing certain about where it runs)

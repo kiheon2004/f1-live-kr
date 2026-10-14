@@ -136,7 +136,7 @@ export function racingLine(samples, margin = 0.75) {
 }
 
 // Distance travelled from the speed telemetry: returns S(t) (metres since the first sample), or null.
-function speedIntegral(car, lag = 0) {
+export function speedIntegral(car, lag = 0) {
   if (!car || !car.t || car.t.length < 20) return null;
   const n = car.t.length, S = new Float64Array(n), T = Float64Array.from(car.t, (t) => t - lag);
   // the speed channel is whole km/h a few times a second: lightly smoothed (±0.18 s) so it has no steps, and the

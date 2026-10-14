@@ -135,3 +135,41 @@ export function assignSlots(cars, model, L, preStart) {
   for (const y of best.r) if (Math.abs(y.d) <= tol) out.set(y.x.c.num, { g: y.g, delta: y.d, by: best.by });
   return out;
 }
+
+// ---------- the circuit's own grid (startdata.js) ----------
+// The grid as measured at this venue from F1's position data (tools/grid-survey.js), placed on this session's lap line.
+// F1's coordinates are the same at a venue from year to year as a rule, but not always (Suzuka moved ~21 m between 2023
+// and 2025), so a measurement is used only where its own lap line lies on this session's: its reference strip (the
+// lap line around the grid, every 10 m) within 1.5 m (median) and 3 m (90 %), running the same way. Of those, the
+// nearest year's (the later on a tie), pole's place their median along this lap line.
+//   venueData – START_DATA[venue]; project([x, y] feed dm) → { s, d } on this session's lap line, or null
+export function surveyedGrid(venueData, year, project, L) {
+  const g = venueData?.grid;
+  if (!g?.sessions?.length) return { ok: false, reason: "no measured grid for this venue" };
+  const wrapD = (d) => (L ? ((d % L) + L * 1.5) % L - L / 2 : d);
+  const fits = g.sessions.map((s) => {
+    const ds = (s.ref || []).map((p) => { const pr = project(p); return pr ? Math.abs(pr.d) : Infinity; }).sort((a, b) => a - b);
+    const med = ds.length ? ds[ds.length >> 1] : Infinity, p90 = ds.length ? ds[Math.floor(ds.length * 0.9)] : Infinity;
+    const pr = project(s.pole), ahead = project([s.pole[0] + s.dir[0] * 200, s.pole[1] + s.dir[1] * 200]);
+    const sameWay = pr && ahead ? wrapD(ahead.s - pr.s) > 10 : false;
+    return { session: s.session, year: s.year, s1: pr?.s ?? null, med: +med.toFixed(2), p90: +p90.toFixed(2), sameWay, aligned: med < 1.5 && p90 < 3 && sameWay && !!pr };
+  });
+  const ok = fits.filter((f) => f.aligned);
+  if (!ok.length) return { ok: false, reason: "the measured grids' lap lines don't lie on this session's", fits };
+  const near = Math.min(...ok.map((f) => Math.abs(f.year - (year || 0))));
+  const pickYear = Math.max(...ok.filter((f) => Math.abs(f.year - (year || 0)) === near).map((f) => f.year));
+  const pick = ok.filter((f) => f.year === pickYear), ref = pick[0].s1;
+  const rel = pick.map((f) => wrapD(f.s1 - ref)).sort((a, b) => a - b), mid = rel.length % 2 ? rel[rel.length >> 1] : (rel[rel.length / 2 - 1] + rel[rel.length / 2]) / 2;
+  const s1 = L ? (((ref + mid) % L) + L) % L : ref + mid;
+  // (how far the other years' grids are from this one, along the lap: a repainted grid would show here)
+  const others = ok.filter((f) => f.year !== pickYear).map((f) => ({ session: f.session, along: +wrapD(f.s1 - s1).toFixed(1) }));
+  return { ok: true, s1, pitch: g.pitch, pitchFrom: g.pitchFrom, sessions: pick.map((f) => f.session), others, fits };
+}
+
+// How many slots to draw: one per entrant of this session (its driver list, or the highest grid position if that is
+// more); without either yet, the season's usual field (22 from 2026, 20 before) – an estimate, said so.
+export function slotCount({ drivers = 0, maxGridPos = 0, year = null } = {}) {
+  const n = Math.max(drivers, maxGridPos);
+  if (n > 0) return { n: Math.min(26, n), from: drivers >= maxGridPos ? "driver list" : "grid positions" };
+  return { n: (year || 0) >= 2026 ? 22 : 20, from: "estimate: the season's usual field" };
+}
