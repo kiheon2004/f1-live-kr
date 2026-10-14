@@ -851,8 +851,11 @@ function traffic(sm, F, t, dt, pos) {
   // per car the biggest push each way (several cars at once don't add up beyond a car's width)
   const want = new Map();
   const add = (num, x) => { const w = want.get(num) || [0, 0]; if (x > 0) w[0] = Math.max(w[0], x); else w[1] = Math.min(w[1], x); want.set(num, w); };
+  // (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already:
+  // no room-making between them, which pushed one into the other column)
+  const held = (num) => { const g = cars.get(num)?.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
   for (const A of list) for (const B of list) {
-    if (A === B) continue;
+    if (A === B || held(A.num) || held(B.num)) continue;
     const du = wrapL(B.u - A.u);
     if (du <= 0 || du > 25) continue;   // B ahead of A, within 25 m
     let passer = null;
