@@ -1000,6 +1000,7 @@ function gridCar(c, num, v, ctx) {
   else c.yaw = wrap(c.yaw + (w.state === "arriving" ? wrap(sl.yaw - c.yaw) * w.across : 0) - Math.atan(dc * w.dAcross));
   c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
 }
+const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 function updateCars(dt) {
   const A = app(), src = A.src;
@@ -1014,9 +1015,11 @@ function updateCars(dt) {
   const k = 1 - Math.exp(-dt * 25), kSlow = 1 - Math.exp(-dt * 5);   // the heading is smooth already: only a touch of damping
   const F = sm?.frame, kBody = 1 - Math.exp(-dt * 12);
   if (F) traffic(sm, F, A.t, dt, pos);
+  gridCost.frames++; { const f = gridCost.ms - gridCost.last; if (f > gridCost.worst) gridCost.worst = f; gridCost.last = gridCost.ms; }
   // (live: the grid is looked for again every 5 s until the field has been seen standing on it)
   if (isRace && src.isLive && world && !world.gridModel && performance.now() - (world.gridTry || 0) > 5000) { world.gridTry = performance.now(); addGrid(); }
-  const gridNow = isRace && world?.gridModel && F ? gridContext(src, A.t, sm) : null;
+  const g0 = performance.now(), gridNow = isRace && world?.gridModel && F ? gridContext(src, A.t, sm) : null;
+  gridCost.ms += performance.now() - g0;
   for (const [num, p] of Object.entries(pos)) {
     const d = drivers[num]; if (!d || !world) continue;
     seen.add(num);
@@ -1118,7 +1121,7 @@ function updateCars(dt) {
     // eased in as it rolls up to it before the start and let go with the distance it drives off (grid.js, gridCar)
     (c.raw || (c.raw = new THREE.Vector3())).copy(v);
     c.grid = null;
-    if (gridNow && st) gridCar(c, num, v, gridNow);
+    if (gridNow && st) { const g1 = performance.now(); gridCar(c, num, v, gridNow); const e = performance.now() - g1; gridCost.ms += e; }
     c.pos.copy(v); c.has = true;
     c.obj.position.copy(v);
     // The car the cockpit cameras ride in is steadied: its pitch and roll follow slowly (~0.4 s) and its height over
@@ -2338,7 +2341,8 @@ window.Map3D = {
   gridState() {
     const cs = [...cars.values()].filter((c) => c.grid).map((c) => ({ num: c.num, ...c.grid, drawnOff: c.raw ? +Math.hypot(c.pos.x - c.raw.x, c.pos.z - c.raw.z).toFixed(2) : null })).sort((a, b) => a.g - b.g);
     const f = gridFieldsFor && world?.gridModel ? fieldAt(app().src, app().t) : null;
-    return JSON.stringify({ model: world?.gridInfo || null, preStart: f?.preStart ?? null, cars: cs });
+    const p1 = world?.gridModel?.slots.get(1), gf = world?.real?.geo, poleLL = p1 && gf ? gf.toLL(p1.x, p1.z).map((v) => +v.toFixed(6)) : null;
+    return JSON.stringify({ cost: { avgMs: +(gridCost.ms / Math.max(1, gridCost.frames)).toFixed(3), worstMs: +gridCost.worst.toFixed(2), frames: gridCost.frames }, model: world?.gridInfo || null, poleLL, preStart: f?.preStart ?? null, cars: cs });
   },
   // development: look at slot g from `back` m behind it, `h` m up, `side` m to the left, towards `ahead` m in front
   viewSlot(g = 1, back = 12, h = 4, side = 0, ahead = 6, fov = 50) {
@@ -2365,6 +2369,8 @@ window.Map3D = {
     for (const [k, p] of Object.entries(pts)) { const v = new THREE.Vector3(...p).applyMatrix4(c.model.matrixWorld).project(camera); out[k] = [+((v.x + 1) / 2).toFixed(3), +((1 - v.y) / 2).toFixed(3)]; }
     return JSON.stringify(out);
   },
+  // development: the camera as it is – position, a point 10 m ahead, fov – to set the same view elsewhere with look()
+  camState() { const d = new THREE.Vector3(); camera.getWorldDirection(d); const p = camera.position; return JSON.stringify([p.x, p.y, p.z, p.x + d.x * 10, p.y + d.y * 10, p.z + d.z * 10, camera.fov].map((v) => +v.toFixed(3))); },
   // development: where the cars stand across the track (lateral offset from the lap line, m) and along it
   gridDebug() {
     const out = [];

@@ -156,7 +156,11 @@ export const FACILITIES = [
     venue: [4], loc: ["Budapest"], years: [2025, null],
     status: "trial",
     // the map's record of it: OSM's unnamed outline along the pit lane (311.5 × 18.3 m; no height – guessed), at
-    // this point; the new main grandstand across the track is a separate record (kept)
+    // this point; the new main grandstand across the track is a separate record (kept).
+    // Why 311.5 m against the published "more than 340 m" (checked 2026-10-14 in the OSM history of way 123905481): the
+    // outline is the old pit building's – its nodes were last moved in 2014–2017; it was tagged demolished in Nov 2024 and
+    // re-tagged a building in July 2025 without being redrawn. The new building's own footprint isn't mapped, and which end
+    // it grew at isn't published either, so the old outline is used as it is (not stretched to 340 m).
     replaces: { near: [47.57949, 19.24803], within: 10 },
     builder: "pitBuilding",
     params: {
