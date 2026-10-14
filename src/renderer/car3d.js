@@ -29,15 +29,20 @@ import * as THREE from "./vendor/three.module.js";
 // H: height of the airbox top. src: where the numbers come from.
 export const PROFILES = {
   2026: {
-    era: "2026", FZ: 1.7, RZ: -1.7, FR: 0.353, RR: 0.355, FW: 0.30, RW: 0.37, W: 1.9, H: 0.95,
+    era: "2026", FZ: 1.7, RZ: -1.7, FR: 0.353, RR: 0.355, FW: 0.28, RW: 0.375, W: 1.9, H: 0.95,
     // the broadcast T-cam, fitted to the 2026 onboard footage (Leclerc, Australian GP start – formula1.com, compared
     // only): the horizon, both front tyres' tops and the halo's top in one frame give the camera 1.10 m up, 0.46 m behind
-    // the car's middle, looking down 15.5°, a 72° wide lens (16:9) – then the helmet's top and the mirrors land where the
-    // footage has them. One frame, a few points: ±3 cm, ±1°
-    // the helmet as wide (~47 % of the frame) and as high (its top at 72 % down) as in that footage: ~0.41 m ahead of the
-    // lens, its top ~0.90 m up, ~28 cm across (a racing helmet with its visor)
-    tcam: [0, 1.10, -0.46], tcamPitch: 15.5, tcamHfov: 72, eye: [0, 0.81, 0.0], helmet: [0, 0.755, -0.05], helmetSize: [0.14, 0.145, 0.16],
-    src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre sizes from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm diameter) – the rest estimated",
+    // the car's middle, looking down 15.5°, a 72° wide lens (16:9). Checked against two more (v0.22: Verstappen,
+    // Singapore pole lap, a level straight; Russell, Barcelona pole lap, a corner – formula1.com thumbnails, 1920×1080,
+    // compared only): tyres' tops (0.25, 0.39)/(0.76, 0.40) – the app 0.25/0.75, 0.39 –, horizon ~0.17 (0.17), helmet's
+    // top 0.73 (0.72), mirror 0.62 (0.62). In both the helmet stands right of the middle (its centre 0.62–0.66 across)
+    // while the tyres are centred (0.505): a lens off the car's centreline, turned back in – 8 cm to the left, 2° to the
+    // right (solved from tyres and helmet; the halo's top then lands at 0.55, footage 0.535). A few points from two frames:
+    // a few cm, a degree or two – not a measured mount
+    // the helmet as wide (~30 % of the frame in the two newer frames, ~47 % in the first – that one closer in) with its
+    // top at ~72 % down: ~0.41 m ahead of the lens, its top ~0.90 m up, ~28 cm across (a racing helmet with its visor)
+    tcam: [0.08, 1.10, -0.46], tcamPitch: 15.5, tcamYaw: -2, tcamHfov: 72, eye: [0, 0.81, 0.0], helmet: [0, 0.755, -0.05], helmetSize: [0.14, 0.145, 0.16],
+    src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre sizes from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm diameter; 25 mm / 30 mm narrower than 2025's 305 / 405 mm – motorsport.com) – the rest estimated",
   },
   2022: {
     era: "2022", FZ: 1.8, RZ: -1.8, FR: 0.36, RR: 0.36, FW: 0.305, RW: 0.405, W: 2.0, H: 0.95,
@@ -50,11 +55,15 @@ export const PROFILES = {
 // a frame of that team's own onboard footage was fitted. `basis` says how far to trust it; a team without an entry
 // uses the era's numbers (nothing is copied from another team).
 export const TEAM_PROFILES = [
-  { season: 2026, team: /ferrari/i, id: "ferrari-2026", camera: { tcam: [0, 1.10, -0.46], tcamPitch: 15.5, tcamHfov: 72 },
-    basis: "fitted to Leclerc's 2026 Australian GP start onboard (straight, level car): tyres, halo, horizon; helmet and mirrors check out – the era's base" },
-  // Red Bull (Verstappen, Singapore pole lap): a fit to that frame put the lens 0.2 m behind the car's middle – but the
-  // car is rolled in a corner there, and checked in the app that lens has the helmet out of the frame, which the footage
-  // shows plainly: rejected; the era's numbers are used (they put tyres, halo and helmet where that frame has them too)
+  { season: 2026, team: /ferrari/i, id: "ferrari-2026", camera: { tcam: [0, 1.10, -0.46], tcamPitch: 15.5, tcamYaw: 0, tcamHfov: 72 },
+    basis: "fitted to Leclerc's 2026 Australian GP start onboard (straight, level car): tyres, halo, horizon; helmet and mirrors check out (the lens's sideways place not checked in that frame)" },
+  { season: 2026, team: /red bull/i, id: "redbull-2026", camera: { tcam: [0.08, 1.10, -0.46], tcamPitch: 15.5, tcamYaw: -2, tcamHfov: 72 },
+    basis: "checked against Verstappen's 2026 Singapore pole-lap onboard (level straight): tyres, horizon, helmet, mirror, halo – the lens 8 cm left of the centreline, turned 2° in" },
+  { season: 2026, team: /mercedes/i, id: "mercedes-2026", camera: { tcam: [0.08, 1.10, -0.46], tcamPitch: 15.5, tcamYaw: -2, tcamHfov: 72 },
+    basis: "Russell's 2026 Barcelona pole-lap onboard (a corner, car rolled): helmet right of the middle as in Verstappen's – the same lens place; heights not refitted from a rolled frame" },
+  // (v0.20 tried a free fit to a Verstappen Singapore frame – read then as a rolled car – which put the lens 0.2 m behind
+  // the car's middle and the helmet out of the frame: rejected. v0.22 keeps the height, distance, angle and lens and only
+  // adds the sideways place above, which the tyres-vs-helmet offset in two frames calls for)
   // McLaren (Norris, Hungary) and Mercedes (Russell, Austria): only the left half of each frame is visible in the
   // thumbnails (a portrait over the rest) – too few points for a fit; the era's numbers are used
 ];
@@ -301,13 +310,16 @@ function template(prof) {
 // The halo (both eras: the hoop from rear mounts on the chassis up round the driver's head, the centre pillar down to
 // the chassis ahead of the cockpit), its fairing thicker than the titanium tube under it.
 function halo(p) {
-  // (2026 footage: the hoop reads wide and flat from the T-cam – its fairing ~12 cm across, ~6 cm thick)
+  // (2026 footage: the hoop reads wide and flat from the T-cam. v0.22: its top bar ~6 % of the frame's height in the
+  // Singapore and Barcelona pole-lap frames, its top edge at ~0.43 – the fairing ~9 cm across, ~4.5 cm thick, the top
+  // at 0.91 m; it was 12 × 6 cm and 0.935 m, 8 % and 0.38 on screen)
   const wide = p.era === "2026";
   // (and its rear legs closer in: in that footage they meet the bottom of the frame ~a quarter in from each side)
   const k = wide ? 0.86 : 1;
-  const hoop = sweep([[-0.335 * k, 0.6, -0.3], [-0.34 * k, 0.74, -0.16], [-0.31 * k, 0.86, 0.04], [-0.22, 0.915, 0.22], [0, 0.935, 0.33], [0.22, 0.915, 0.22], [0.31 * k, 0.86, 0.04], [0.34 * k, 0.74, -0.16], [0.335 * k, 0.6, -0.3]], wide ? 0.06 : 0.046, wide ? 0.03 : 0.034, 72, 18);
+  const top = wide ? 0.91 : 0.935;
+  const hoop = sweep([[-0.335 * k, 0.6, -0.3], [-0.34 * k, 0.74, -0.16], [-0.31 * k, top - 0.075, 0.04], [-0.22, top - 0.02, 0.22], [0, top, 0.33], [0.22, top - 0.02, 0.22], [0.31 * k, top - 0.075, 0.04], [0.34 * k, 0.74, -0.16], [0.335 * k, 0.6, -0.3]], wide ? 0.045 : 0.046, wide ? 0.0225 : 0.034, 72, 18);
   // the pillar: a blade, wide across (the fairing), from the hoop's front down to the chassis
-  const pillar = loft(smoothSections([[0.355, 0.925, 0.028, 0.03], [0.45, 0.86, 0.034, 0.03], [0.55, 0.76, 0.04, 0.028], [0.64, 0.64, 0.05, 0.03]].reverse(), 2), 14);
+  const pillar = loft(smoothSections([[0.355, top - 0.01, 0.028, 0.03], [0.45, top - 0.075, 0.034, 0.03], [0.55, top - 0.175, 0.04, 0.028], [0.64, 0.64, 0.05, 0.03]].reverse(), 2), 14);
   return merge([hoop, pillar]);
 }
 
@@ -374,7 +386,9 @@ function body2026(p) {
     [2.42, 0.2, 0.05, 0.035], [2.3, 0.22, 0.085, 0.06], [2.0, 0.265, 0.12, 0.09], [1.6, 0.33, 0.175, 0.14],
     // (ahead of the cockpit the chassis stands high – ~0.67 m at the opening's front in the 2026 footage, hiding the
     // front suspension from the T-cam)
-    [1.2, 0.42, 0.235, 0.2], [0.8, 0.46, 0.285, 0.22], [0.5, 0.47, 0.3, 0.2], [0.3, 0.43, 0.31, 0.14],
+    // (v0.22: its top rounded – from the T-cam the chassis ahead of the opening reads ~0.32 m across near its top in the
+    // 2026 pole-lap frames, not the full width of a box: elliptical sections there)
+    [1.2, 0.42, 0.235, 0.2, 0, 2.1], [0.8, 0.46, 0.28, 0.22, 0, 2.1], [0.5, 0.47, 0.295, 0.2, 0, 2.2], [0.3, 0.43, 0.31, 0.14],
     // (the airbox stands over the helmet: in 2026 photos its inlet's top is ~0.1 m above the helmet's – an estimate)
     [0.0, 0.41, 0.315, 0.13], [-0.22, 0.43, 0.32, 0.15], [-0.42, 0.56, 0.3, 0.4], [-0.75, 0.6, 0.26, 0.4],
     [-1.2, 0.52, 0.22, 0.28], [-1.65, 0.43, 0.15, 0.19], [-2.1, 0.36, 0.085, 0.11], [-2.42, 0.32, 0.05, 0.06],

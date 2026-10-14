@@ -1269,7 +1269,7 @@ function updateCamera(dt) {
     c.model.getWorldQuaternion(qTmp);
     // (the T-cam as the car's profile has it – fitted to the team's onboard footage where there is one; the eyes ahead,
     // a touch down)
-    shakeE.set(eye ? -0.06 : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI, 0, "YXZ");
+    shakeE.set(eye ? -0.06 : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI + (eye ? 0 : ((u.profile.tcamYaw || 0) * Math.PI) / 180), 0, "YXZ");
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
@@ -2344,6 +2344,26 @@ window.Map3D = {
   viewSlot(g = 1, back = 12, h = 4, side = 0, ahead = 6, fov = 50) {
     const sl = world?.gridModel?.slots.get(g); if (!sl) return "no grid";
     return window.Map3D.look(sl.x - sl.tx * back + sl.nx * side, sl.y + h, sl.z - sl.tz * back + sl.nz * side, sl.x + sl.tx * ahead, sl.y, sl.z + sl.tz * ahead, fov);
+  },
+  // development: the lap line in latitude / longitude every `every` samples, with the left normal's bearing and the
+  // drawn edges (m) – for measuring the tarmac against aerial imagery outside the app
+  lapLL(every = 5) {
+    const gf = world?.real?.geo; if (!gf) return "no map";
+    const out = [];
+    for (let i = 0; i < world.n; i += every) {
+      const s = world.samples[i], [la, lo] = gf.toLL(s.p.x, s.p.z), [la2, lo2] = gf.toLL(s.p.x + s.nor.x, s.p.z + s.nor.z);
+      out.push([+la.toFixed(7), +lo.toFixed(7), +(la2 - la).toExponential(5), +(lo2 - lo).toExponential(5), +edgeOf(s, 1).toFixed(2), +edgeOf(s, -1).toFixed(2), i]);
+    }
+    return JSON.stringify({ loc: app().location(), n: world.n, L: world.frame.L, pts: out });
+  },
+  // development: where points of the ridden car land on screen (0..1 from the top left) with the cockpit camera as it
+  // is – for comparing with onboard footage. pts: { name: [x, y, z] in car metres }
+  projectCar(pts) {
+    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    c.model.updateMatrixWorld(true); camera.updateMatrixWorld(true);
+    const out = { fov: +camera.fov.toFixed(2), aspect: +camera.aspect.toFixed(3), pitch: +(c.model.rotation.x * 57.3).toFixed(2), roll: +(c.model.rotation.z * 57.3).toFixed(2) };
+    for (const [k, p] of Object.entries(pts)) { const v = new THREE.Vector3(...p).applyMatrix4(c.model.matrixWorld).project(camera); out[k] = [+((v.x + 1) / 2).toFixed(3), +((1 - v.y) / 2).toFixed(3)]; }
+    return JSON.stringify(out);
   },
   // development: where the cars stand across the track (lateral offset from the lap line, m) and along it
   gridDebug() {
