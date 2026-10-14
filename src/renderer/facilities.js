@@ -185,6 +185,37 @@ export const FACILITIES = [
     },
   },
   {
+    id: "lusail-pit-building", name: "Lusail International Circuit – pit building (2023)", kind: "pit-building",
+    venue: [150], loc: ["Lusail"], years: [2023, null],
+    status: "trial",
+    // the map's record of it: the unnamed building along the pit lane (404.5 m – the published 402 m), at this point
+    replaces: { near: [25.48872, 51.45058], within: 15 },
+    builder: "pitBuilding",
+    params: {
+      // confirmed (Tilke; Guinness World Records): 402 m along the pit lane – the longest pit building –, fifty team
+      // garages on the ground floor, the race control tower at its southern end, the Paddock Club at its northern end;
+      // rebuilt 2022–23 for the 2023 Qatar GP. seen in Tilke's photos (compared only, no licence stated): light stone
+      // cladding, white ceiling edges over the ground and first floors as horizontal bands, glass balustrades.
+      // estimated (photos): ~15 m to the roof (ground floor and two upper levels), the bands' depth
+      garages: 50, height: 15,
+      balconies: [{ y: 6.0, depth: 2.4, rail: true }, { y: 10.6, depth: 1.6, rail: true }],
+      plate: 0.8, overhang: { pit: 1.6, paddock: 1.6, end: 1 },
+      facade: { pit: "pitGlass", paddock: "yasPaddock" }, roofTop: "#d9d2c4", fascia: "fasciaWhite",
+    },
+    sources: [
+      "https://tilke.de/portfolio/lusail-race-track-qatar/ – pit building 402 m (Guinness World Record), fifty team garages on the ground floor, race control tower at the southern end, Paddock Club at the northern end; white ceiling edges as horizontal bands; 2022–2023",
+      "https://marhaba.qa/lusail-international-circuit-sets-new-guinness-world-records-for-longest-motorsport-pitlane-building/ – 402.1 m",
+      "Photos on Tilke's page – compared only (no licence stated), nothing shipped",
+    ],
+    checked: "2026-10-14: trial (length and garages published; height and bands estimated from photos)",
+    evidence: {
+      confirmed: ["402 m long, fifty garages on the ground floor, race control tower at the south end (Tilke; Guinness)"],
+      photo: ["~15 m to the roof; white bands over the ground and first floors; stone cladding (estimates)"],
+      map: ["the footprint: the map's unnamed building along the pit lane (404.5 m)"],
+      inferred: [],
+    },
+  },
+  {
     id: "silverstone-wing", name: "Silverstone Wing", kind: "pit-building",
     venue: [2], loc: ["Silverstone"], years: [2011, null],
     status: "permanent",

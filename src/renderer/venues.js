@@ -89,7 +89,7 @@ export const STATUS_2026 = [
   { key: 65, state: "missing", note: "Hermanos Rodríguez: pit building; no dimensions found yet" },
   { key: 14, state: "missing", note: "Interlagos: new pit building (2023/24); no dimensions found yet" },
   { key: 152, state: "missing", note: "Las Vegas: Grand Prix Plaza pit building (2023); no dimensions found yet" },
-  { key: 150, state: "missing", note: "Lusail: pit building (rebuilt 2023); no dimensions found yet" },
+  { key: 150, state: "partial", facility: ["lusail-pit-building"], note: "Lusail: pit building 402 m with fifty garages (Tilke, Guinness); height and facade bands estimated from Tilke's photos" },
   { key: 70, state: "partial", facility: ["yas-marina-pits"], note: "Yas Marina pit building: 40 garages (formula1.com) + photos; height estimated" },
 ];
 
@@ -131,6 +131,11 @@ export const REFERENCES = [
     taken: null, published: null, author: "Sepang International Circuit", licence: "© 2026 Sepang International Circuit, all rights reserved", use: "compared",
     shows: ["four air-conditioned halls on the main pit building's upper entrance: 21 × 50, 21 × 32, 21 × 50, 21 × 16 (× 4 high, units not stated)"],
     estimated: ["which floor; the halls are VIP space, not the teams' paddock"] },
+  { id: "lusail-pit-2023", venue: 150, facility: "lusail-pit-building", season: 2023, kind: "pit",
+    page: "https://tilke.de/portfolio/lusail-race-track-qatar/", image: "https://tilke.de/wp-content/uploads/2023/12/IMG_4428-Kopie-scaled.jpg",
+    taken: null, published: "2023-12 (upload path)", author: "Tilke GmbH", licence: "not stated (all rights reserved assumed)", use: "compared",
+    shows: ["402 m pit building, fifty garages, race control tower south, Paddock Club north (text)", "the paddock side: stone cladding, white bands, glass balustrades (photo)"],
+    estimated: ["height, the bands' depth"] },
   { id: "f1-calendar-2026", venue: null, facility: null, season: 2026, kind: "calendar",
     page: "https://www.formula1.com/en/racing/2026", image: null, taken: null, published: "read 2026-10-13", author: "Formula 1", licence: "© Formula 1", use: "checked",
     shows: ["23 rounds; round 16 'Bahrain Grand Prix' (official name: '… BAHRAIN GRAND PRIX IN MALAYSIA 2026'); round 7 Barcelona-Catalunya, round 14 Spanish GP (Madring by the session data)"], estimated: [] },
