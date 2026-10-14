@@ -1359,7 +1359,7 @@
   new ResizeObserver((es) => { const r = es[es.length - 1]?.contentRect; if (r) { mapW = r.width; mapH = r.height; } drawMap(); }).observe(canvas);
   // A real grid: at least 10 cars, pole among them, and cars standing apart (a wet or safety-car start has them queued
   // nose to tail, and the position feed can stack cars on one spot). The feed puts the grid's cars metres off their
-  // slots, now and then two within 3 m of each other (38 races 2024–26: up to 3 such pairs in a grid of 20–22): more
+  // slots, now and then two within 3 m of each other (37 races 2024–26: up to 3 such pairs in a grid of 20–22): more
   // than that isn't a grid. Whether the cars really stand one slot apart is judged when the slots are fitted (grid.js).
   function gridOk(spots) {
     if (!Array.isArray(spots) || spots.length < 10 || !spots.some((x) => x.grid === 1)) return false;

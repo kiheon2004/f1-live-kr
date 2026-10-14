@@ -1,7 +1,7 @@
 // The starting grid in the 3D view: where the slots are, which car stands in which, and when a car is drawn in its
 // slot instead of where the position feed puts it. Pure functions (no three.js) – map3d.js feeds them.
 //
-// What the data says (measured on 38 cached races 2024–2026, position at lights out − 1.5 s, cars standing):
+// What the data says (measured on 37 cached races 2024–2026, position at lights out − 1.5 s, cars standing):
 //   - F1's position feed matches every car to one reference line: on the grid all cars are on it, in single file
 //     (sideways spread 0.02–0.10 m), although they really stand in two staggered columns.
 //   - Along the track the cars come out one slot per 7.8–8.1 m on average (fitted slope; Catalunya 7.4–7.5), but each
