@@ -1357,13 +1357,15 @@
   addEventListener("resize", applySizes);
   applySizes();
   new ResizeObserver((es) => { const r = es[es.length - 1]?.contentRect; if (r) { mapW = r.width; mapH = r.height; } drawMap(); }).observe(canvas);
-  // A real grid: at least 10 cars, pole among them, and cars standing in their own slots (a wet or
-  // safety-car start has them queued nose to tail, and the position feed can stack cars on one spot).
+  // A real grid: at least 10 cars, pole among them, and cars standing apart (a wet or safety-car start has them queued
+  // nose to tail, and the position feed can stack cars on one spot). The feed puts the grid's cars metres off their
+  // slots, now and then two within 3 m of each other (38 races 2024–26: up to 3 such pairs in a grid of 20–22): more
+  // than that isn't a grid. Whether the cars really stand one slot apart is judged when the slots are fitted (grid.js).
   function gridOk(spots) {
     if (!Array.isArray(spots) || spots.length < 10 || !spots.some((x) => x.grid === 1)) return false;
     let close = 0;
     for (let i = 0; i < spots.length; i++) for (let j = i + 1; j < spots.length; j++) if (Math.hypot(spots[i].p[0] - spots[j].p[0], spots[i].p[1] - spots[j].p[1]) < 30) close++;
-    return close <= 2;
+    return close <= Math.max(2, Math.round(spots.length * 0.15));
   }
   // When no clean lap can be cut from the loaded session (red flags, a car parked, data gaps), the circuit
   // comes from an earlier session there – the same one live mode uses.
@@ -1393,21 +1395,32 @@
       if (src.isLive) { for (const tr of Object.values(live.trail)) for (let i = 0; i < tr.length; i += 2) out.push(tr[i]); return out; }
       return replay.carPoints(150000);
     },
-    // Grid slots: where each car stood just before a race start (race replays), remembered per circuit so
-    // practice, qualifying and live sessions there can show them too. [{ grid, p: [x, y, z] }] or null.
+    // Grid slots: where each car stood just before a race start, remembered per circuit so practice, qualifying and
+    // live sessions there can show them too. [{ grid, p: [x, y, z] }] with .source: "session" (this race's grid before
+    // lights out – or, when the start was delayed, the first moment after the clock ran that the field stood still),
+    // "live" (seen standing in this live race before the start) or "saved" (an earlier race here); or null.
     gridSpots: () => {
       const loc = window.F1KR.location();
       if (!loc) return null;
       const key = "grid:" + loc;
+      const standingAt = (s, t) => {
+        const a = s.positionsAt(t), b = s.positionsAt(t - 3000), lines = s.state.TimingAppData?.Lines || {};
+        return Object.entries(a).filter(([n, p]) => b[n] && Math.hypot(p[0] - b[n][0], p[1] - b[n][1]) < 15 && +lines[n]?.GridPos > 0)
+          .map(([n, p]) => ({ grid: +lines[n].GridPos, p: p.map((v) => Math.round(v)) }));
+      };
+      const tag = (spots, source) => Object.assign(spots, { source });
       if (mode === "replay" && replay && /Race/.test(sessionType())) {
-        const t0s = replay.startTime(), a = replay.positionsAt(t0s - 1500), b = replay.positionsAt(t0s - 4500);
-        const app = replay.state.TimingAppData?.Lines || {};
-        const spots = Object.entries(a).filter(([n, p]) => b[n] && Math.hypot(p[0] - b[n][0], p[1] - b[n][1]) < 15 && +app[n]?.GridPos > 0)
-          .map(([n, p]) => ({ grid: +app[n].GridPos, p: p.map((v) => Math.round(v)) }));
-        if (gridOk(spots)) { store.set(key, spots); return spots; }
+        const t0s = replay.startTime();
+        let spots = standingAt(replay, t0s - 1500);
+        if (!gridOk(spots)) for (let t = t0s; t < t0s + 20 * 60e3 && !gridOk(spots); t += 2000) spots = standingAt(replay, t);
+        if (gridOk(spots)) { store.set(key, spots); return tag(spots, "session"); }
+      }
+      if (mode === "live" && src === live && /Race/.test(sessionType()) && !live.state.ExtrapolatedClock?.Extrapolating) {
+        const spots = standingAt(live, live.now());
+        if (gridOk(spots)) { store.set(key, spots); return tag(spots, "live"); }
       }
       const saved = store.get(key, null);
-      return gridOk(saved) ? saved : null;
+      return gridOk(saved) ? tag(saved, "saved") : null;
     },
     location: () => src?.state.SessionInfo?.Meeting?.Location || (mode === "replay" ? replayInfo?.location : null),
     // F1's circuit key of the session's venue (the Grand Prix's name says nothing certain about where it runs)

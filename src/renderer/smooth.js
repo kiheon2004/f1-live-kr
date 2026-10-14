@@ -34,7 +34,7 @@ const median5 = (v) => { const n = v.length, out = new Float64Array(n), a = new 
 
 // The lap line as a frame: project (x, z) → { s, d, dist, i } and back.
 // The line's samples aren't evenly spaced (0.5–3.7 m apart), so s is the real distance along it.
-function trackFrame(world) {
+export function trackFrame(world) {
   const S = world.samples, n = S.length, cum = new Float64Array(n + 1);
   for (let i = 0; i < n; i++) { const a = S[i].p, b = S[(i + 1) % n].p; cum[i + 1] = cum[i] + Math.hypot(b.x - a.x, b.z - a.z); }
   const L = cum[n];

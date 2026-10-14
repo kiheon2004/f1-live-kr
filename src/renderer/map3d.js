@@ -7,9 +7,10 @@
 import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
-import { smoothedTracks, steadiness, racingLine } from "./smooth.js";
+import { smoothedTracks, steadiness, racingLine, trackFrame } from "./smooth.js";
+import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor } from "./grid.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
@@ -389,7 +390,8 @@ function buildWorld(points) {
   scene.add(group);
   scene.fog.near = Math.max(size.x, size.z) * 0.6;
   scene.fog.far = Math.max(size.x, size.z) * 3.2;
-  return { group, samples, grid, center, size, box, n, lap, syn, far, kerbMark: samples.kerbMark, street: !!style.street, width: samples.reduce((a, s) => a + (s.L - s.R), 0) / samples.length, farBase: far.material.color.clone(), road, lines, kerb };
+  const frame = trackFrame({ samples, grid });
+  return { group, samples, grid, frame, center, size, box, n, lap, syn, far, kerbMark: samples.kerbMark, street: !!style.street, width: samples.reduce((a, s) => a + (s.L - s.R), 0) / samples.length, farBase: far.material.color.clone(), road, lines, kerb };
 }
 
 // Where the edges of the tarmac are, from where every car drove in the session: per ~10 m of track, the
@@ -452,6 +454,7 @@ function measureWidth(samples, grid, center) {
   }
   samples.measured = Lb.filter((v) => v != null).length / nb;
 }
+const ROAD_LIFT = 0.06;   // the asphalt over the lap line (roadMesh); cars and paint sit on it
 const edgeOf = (s, side) => (side > 0 ? s.L ?? TRACK_W / 2 : s.R ?? -TRACK_W / 2);
 
 // (cells keyed by a number, not a string: it's asked many times a frame)
@@ -544,7 +547,7 @@ function roadMesh(samples) {
     uv1.push(...lanes.flatMap((f) => [(L + (R - L) * f) / 0.5, dist / 0.5]));
     for (const f of lanes) {
       const off = L + (R - L) * f;
-      pos.push(s.p.x + s.nor.x * off, s.p.y + 0.06, s.p.z + s.nor.z * off);
+      pos.push(s.p.x + s.nor.x * off, s.p.y + ROAD_LIFT, s.p.z + s.nor.z * off);
       const rub = Math.exp(-Math.pow((off - M) / 1.6, 2)), edge = Math.min(1, Math.min(L - off, off - R) / 2.5);
       const v = 0.36 - 0.07 * rub + 0.04 * (1 - edge);
       c.setRGB(v, v * 1.01, v * 1.04); col.push(c.r, c.g, c.b);
@@ -903,6 +906,100 @@ function smoothFor(src) {
   if (smooth.tr && src.isLive) smooth.tr.update(performance.now());
   return smooth.tr;
 }
+// ---------- cars on the grid ----------
+// What the field looks like at time t from the data up to t only (cached per 250 ms, shared by every car): the raw
+// positions on the lap line (s, d), who is standing (telemetry speed ≤ 2 km/h now and a second ago; without telemetry,
+// moved < 1.5 m in 2 s), before or after the start, and who is in which slot (grid.js assignSlots).
+// Before the start: replays – the moment the race clock first runs (lights out); live – the clock not yet running
+// and no lap counted.
+const gridFields = new Map();
+let gridFieldsFor = null;
+function preStartAt(src, t) {
+  if (!src.isLive) return t < (src._startT ??= src.startTime());
+  const clk = src.state.ExtrapolatedClock, lap = +(src.state.LapCount?.CurrentLap || 0);
+  return !clk?.Extrapolating && lap <= 1 && !(src.state.TimingData?.Lines && Object.values(src.state.TimingData.Lines).some((l) => +l.NumberOfLaps > 0));
+}
+function fieldAt(src, t) {
+  const key = Math.round(t / 250);
+  if (gridFieldsFor !== src || gridFieldsFor?._w !== world) { gridFields.clear(); gridFieldsFor = src; src._w = world; }
+  let f = gridFields.get(key);
+  if (f) return f;
+  if (gridFields.size > 400) for (const k of gridFields.keys()) if (Math.abs(k - key) > 160) gridFields.delete(k);
+  const T = key * 250, F = world.frame, c0 = world.center, now = src.positionsAt(T), before = src.positionsAt(T - 2000);
+  const appLines = src.state.TimingAppData?.Lines || {}, lines = src.state.TimingData?.Lines || {};   // (the published grid doesn't change during the race; the order is the current one)
+  const cars = [];
+  for (const [num, p] of Object.entries(now)) {
+    const pr = F.project(p[0] * DM - c0.x, -(p[1] * DM - c0.z));
+    if (!pr) continue;
+    const tel = src.carAt?.(num, T), tel1 = src.carAt?.(num, T - 1000), q = before[num];
+    const standing = tel && tel1 ? tel.speed <= 2 && tel1.speed <= 2 : !!q && Math.hypot(p[0] - q[0], p[1] - q[1]) * DM < 1.5;
+    const half = Math.max(edgeOf(pr.sample, 1), -edgeOf(pr.sample, -1));
+    cars.push({ num, s: pr.s, d: pr.d, standing, onTrack: Math.abs(pr.d) <= half + 1, gridPos: +(appLines[num]?.GridPos || 0), position: +(lines[num]?.Position || 0) });
+  }
+  const preStart = preStartAt(src, T), m = world.gridModel;
+  const assign = assignSlots(cars.filter((c) => c.onTrack), { ...m, slots: m.slots.size }, F.L, preStart);
+  f = { t: T, preStart, cars: new Map(cars.map((c) => [c.num, c])), assign };
+  gridFields.set(key, f);
+  return f;
+}
+function gridContext(src, t, sm) { return { src, t, sm, field: fieldAt(src, t) }; }
+const gTmp = [0, 0, 0];
+// Car `num`, drawn at v (its place from the smoothed tracks) with heading c.yaw: moved into its slot as far as
+// gridWeight says. Standing or arriving: towards the slot itself. Leaving: the offset it had standing in the slot
+// (slot − where the tracks had it then), let go as it drives off – so it moves exactly when the data has it moving.
+function gridCar(c, num, v, ctx) {
+  const m = world.gridModel, F = world.frame, L = F.L, f = ctx.field, me = f.cars.get(num);
+  if (!me) return;
+  let a = f.assign.get(num), w = null, off = null;
+  if (a && me.onTrack && me.standing) {
+    w = gridWeight({ delta: a.delta, standing: true, preStart: f.preStart, speed: 0, driven: null });
+    if (w.state === "standing") { const sl = m.slots.get(a.g); if (sl) off = [sl.x - v.x, sl.z - v.z, sl]; }
+  }
+  // (only near the grid: from the last slot to 130 m past pole's)
+  let u1 = me.s - m.slots.get(1).s; u1 = ((u1 % L) + L * 1.5) % L - L / 2;
+  const nearGrid = u1 < 130 && u1 > -(m.pitch * m.slots.size + 10);
+  if (!off && !me.standing && nearGrid) {
+    // did it stand in its slot a moment ago? (back over up to 25 s, until it is 120 m further back than now)
+    const memo = c.gridLeave;
+    let res = memo && Math.abs(memo.t - ctx.t) < 300 ? memo.res : undefined;
+    if (res === undefined) {
+      res = null;
+      for (let tau = ctx.t - 250; tau > ctx.t - 25000; tau -= 250) {
+        const g = fieldAt(ctx.src, tau), was = g.cars.get(num);
+        if (!was) break;
+        let dr = me.s - was.s; dr = ((dr % L) + L * 1.5) % L - L / 2;
+        if (dr > 125 || dr < -5) break;
+        const at = g.assign.get(num);
+        if (was.standing && at && Math.abs(at.delta) <= ASSIGN_TOL[at.by === "gridPos" ? "gridPos" : "order"]) {
+          const sl = m.slots.get(at.g), st0 = ctx.sm?.state(num, g.t, {});
+          if (!sl || !st0) break;
+          F.at(st0.s, st0.d, gTmp);
+          res = { g: at.g, by: at.by, sStand: was.s, off: [sl.x - gTmp[0], sl.z - gTmp[2]], sl, tau: g.t };
+          break;
+        }
+      }
+      c.gridLeave = { t: ctx.t, res };
+    }
+    if (res) {
+      let driven = me.s - res.sStand; driven = ((driven % L) + L * 1.5) % L - L / 2;
+      const wl = gridWeight({ delta: NaN, standing: false, preStart: f.preStart, speed: c.speed, driven });
+      if (wl.state === "leaving") { w = wl; off = [res.off[0], res.off[1], res.sl]; a = { g: res.g, by: res.by, delta: driven }; }
+    }
+  }
+  if (!off && a && me.onTrack && f.preStart && nearGrid) {
+    // rolling up to its slot before the start
+    w = gridWeight({ delta: a.delta, standing: false, preStart: true, speed: c.speed, driven: null });
+    if (w.state === "arriving") { const sl = m.slots.get(a.g); if (sl) off = [sl.x - v.x, sl.z - v.z, sl]; }
+  }
+  if (!off || !w || w.state === "free") { c.grid = a ? { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: "free" } : null; return; }
+  const sl = off[2], da = off[0] * sl.tx + off[1] * sl.tz, dc = off[0] * sl.nx + off[1] * sl.nz;
+  v.x += sl.tx * da * w.along + sl.nx * dc * w.across;
+  v.z += sl.tz * da * w.along + sl.nz * dc * w.across;
+  // heading: the slot's (standing) or the path's turned by the sideways easing (arriving, leaving)
+  if (w.state === "standing") c.yaw = sl.yaw;
+  else c.yaw = wrap(c.yaw + (w.state === "arriving" ? wrap(sl.yaw - c.yaw) * w.across : 0) - Math.atan(dc * w.dAcross));
+  c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
+}
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 function updateCars(dt) {
   const A = app(), src = A.src;
@@ -917,6 +1014,9 @@ function updateCars(dt) {
   const k = 1 - Math.exp(-dt * 25), kSlow = 1 - Math.exp(-dt * 5);   // the heading is smooth already: only a touch of damping
   const F = sm?.frame, kBody = 1 - Math.exp(-dt * 12);
   if (F) traffic(sm, F, A.t, dt, pos);
+  // (live: the grid is looked for again every 5 s until the field has been seen standing on it)
+  if (isRace && src.isLive && world && !world.gridModel && performance.now() - (world.gridTry || 0) > 5000) { world.gridTry = performance.now(); addGrid(); }
+  const gridNow = isRace && world?.gridModel && F ? gridContext(src, A.t, sm) : null;
   for (const [num, p] of Object.entries(pos)) {
     const d = drivers[num]; if (!d || !world) continue;
     seen.add(num);
@@ -965,13 +1065,14 @@ function updateCars(dt) {
       if (!c.has) { c.pitch = pitchT; c.roll = rollT; }
       c.pitch += (pitchT - c.pitch) * kBody; c.roll += (rollT - c.roll) * kBody;
       c.speed = speed; c.acc = aLong;
-      v.y += 0.02 - 0.012 * Math.min(1, (speed / 90) ** 2);   // ride height drops with the downforce
+      // on the tarmac (drawn 6 cm over the lap line), the tyres squashed a centimetre; the body drops with the downforce
+      v.y += ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (speed / 90) ** 2);
     } else {
       // Off the track (pit lane, a trip across the run-off) and before the steadied tracks are ready: from the
       // positions, heading from the velocity.
       v.set(p[0] * DM - world.center.x, (p[2] || 0) * DM - world.center.y, -(p[1] * DM - world.center.z));
       const ground = trackPointFor(c, v.x, v.z);
-      if (ground != null) v.y = ground + 0.02;
+      if (ground != null) v.y = ground + ROAD_LIFT - 0.02;   // (the pit lane's tarmac is laid 4 cm over the ground)
       const vel = velBuf[num];                                               // dm/ms → m/s is ×100
       const mx = vel ? vel[0] * 100 : 0, mz = vel ? -vel[1] * 100 : 0;
       speed = Math.hypot(mx, mz);
@@ -1013,20 +1114,11 @@ function updateCars(dt) {
     // over a kerb the car rides its ridges: a bump pattern fixed to the kerb (so the same kerb always feels the same)
     c.bump = 0;
     if (c.onKerb && st) { c.bump = Math.sin(st.s * 5.3) * 0.6 + Math.sin(st.s * 12.1 + 1.7) * 0.4; v.y += 0.008 + 0.01 * c.bump; }
-    // On the grid: a car standing near its slot is drawn in it (the data has the whole grid in single file);
-    // once it pulls away the offset fades over ~2 s, so the field merges from the stagger as it really does.
+    // On the grid: drawn in its slot while it stands there (the feed has the whole grid in single file, metres off),
+    // eased in as it rolls up to it before the start and let go with the distance it drives off (grid.js, gridCar)
     (c.raw || (c.raw = new THREE.Vector3())).copy(v);
-    const slot = world.slots && isRace && world.slots.get(+(appLines[num]?.GridPos || 0));
-    if (!c.gridOff) c.gridOff = { x: 0, z: 0 };
-    if (slot && speed < 1 && Math.hypot(slot.x - v.x, slot.z - v.z) < 14) {
-      const kk = c.has ? 1 - Math.exp(-dt * 8) : 1;
-      c.gridOff.x += (slot.x - v.x - c.gridOff.x) * kk; c.gridOff.z += (slot.z - v.z - c.gridOff.z) * kk;
-      c.yaw = slot.yaw;
-    } else { const fade = Math.exp(-dt * 1.4); c.gridOff.x *= fade; c.gridOff.z *= fade; }
-    if (Math.abs(c.gridOff.x) + Math.abs(c.gridOff.z) > 0.01) {
-      v.x += c.gridOff.x; v.z += c.gridOff.z;
-      if (!st) { const g2 = trackPointFor(c, v.x, v.z); if (g2 != null) v.y = g2 + 0.02; }
-    }
+    c.grid = null;
+    if (gridNow && st) gridCar(c, num, v, gridNow);
     c.pos.copy(v); c.has = true;
     c.obj.position.copy(v);
     // The car the cockpit cameras ride in is steadied: its pitch and roll follow slowly (~0.4 s) and its height over
@@ -1067,7 +1159,7 @@ function updateCars(dt) {
     paintLabel(c.label, `${l.Position || ""} ${d.Tla}`.trim(), "#" + (d.TeamColour || "888"), num === A.focus);
     c.label.sp.material.opacity = out ? 0.45 : 1;
   }
-  for (const [num, c] of cars) if (!seen.has(num)) c.obj.visible = false;
+  for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; }
   separate(dt, seen);
   // F1's archive sometimes stops publishing car positions part-way through a session (e.g. Monaco 2026):
   // say so instead of showing an empty track without explanation.
@@ -1102,7 +1194,7 @@ function separate(dt, seen) {
     // (a spring, ω 6/s: the correction comes and goes without a kink, which at 60 fps read as a shake)
     if (dt > 0.5) { c.sepX = tx; c.sepZ = tz; c.sepVX = c.sepVZ = 0; } else { spring(c, "sepX", "sepVX", tx, 6, dt); spring(c, "sepZ", "sepVZ", tz, 6, dt); }
     c.pos.set(o.x + c.sepX, c.pos.y, o.z + c.sepZ);
-    if (!c.onTrack) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + 0.02; }   // (on the track the height is right already)
+    if (!c.onTrack) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + ROAD_LIFT - 0.02; }   // (on the track the height is right already)
     c.obj.position.copy(c.pos);
   }
 }
@@ -1654,63 +1746,86 @@ function disposeWorld() {
 // the session a source key belongs to (a live key also carries the outline's length, which grows)
 const sessionOf = (key) => (key || "").startsWith("live:") ? key.split(":").slice(0, 2).join(":") : key || "";
 
-// Start line, light gantry and grid boxes from where the cars stood before a race start.
-// The starting grid as it is painted: F1's position data puts every car on the lap line at uneven gaps, but
-// the real grid is a 2-by-2 staggered formation – one slot every 8 m along the track, alternately left and
-// right of the centre, pole on the side of the racing line. Built from the cars' standing positions before
-// a start: pole's spot fixes where the grid begins. Map of grid position → { x, z, y, yaw, s }.
-const GRID_GAP = 8;
-function gridSlots(spots) {
-  const n = world.n, step = world.samples[1].p.distanceTo(world.samples[0].p);
-  const onTrack = spots.map((sp) => { const v = toWorld(sp.p, world.center), [s, d] = world.grid.nearest(v.x, v.z, 1); return { ...sp, v, s, d }; })
-    .filter((o) => o.s && o.d <= Math.max(edgeOf(o.s, 1), -edgeOf(o.s, -1)) + 1)   // pit-lane starters left out
-    .sort((a, b) => a.grid - b.grid);
-  if (!onTrack.length) return null;
-  // where pole stands along the track: from the front-most car on the grid, moved up by its grid position
-  const f = onTrack[0], along0 = f.s.i * step + (f.v.x - f.s.p.x) * f.s.tan.x + (f.v.z - f.s.p.z) * f.s.tan.z + (f.grid - 1) * GRID_GAP;
-  const ps = world.samples[((Math.round(along0 / step) % n) + n) % n];
-  const centre = (edgeOf(ps, 1) + edgeOf(ps, -1)) / 2;
-  const poleSide = Math.sign((ps.M ?? centre) - centre) || 1;
-  const slots = new Map();
-  const last = Math.max(22, ...spots.map((sp) => sp.grid));
-  for (let g = 1; g <= last; g++) {
-    const along = along0 - (g - 1) * GRID_GAP, fi = along / step, i0 = Math.floor(fi), t = fi - i0;
-    const a = world.samples[((i0 % n) + n) % n], b = world.samples[(((i0 + 1) % n) + n) % n];
-    const c = (edgeOf(a, 1) + edgeOf(a, -1)) / 2, w = Math.max(2.2, Math.min(3.8, (edgeOf(a, 1) - edgeOf(a, -1)) / 4));
-    const lat = c + (g % 2 ? poleSide : -poleSide) * w;
-    const x = a.p.x + (b.p.x - a.p.x) * t + a.nor.x * lat, z = a.p.z + (b.p.z - a.p.z) * t + a.nor.z * lat;
-    slots.set(g, { x, z, y: a.p.y + (b.p.y - a.p.y) * t, yaw: Math.atan2(a.tan.x, a.tan.z), s: a });
+// ---------- the starting grid ----------
+// Slots (grid.js): fitted to where the cars stood before a race start (this session's, or the last one seen at this
+// circuit), one every 8 m along the lap line, the columns in the middle of each half of the tarmac. The painted boxes
+// and the cars standing in them use the same slots: the box's front line is half a metre ahead of the car's front
+// axle (the car model's origin is between its axles; the feed's point is taken to be the same – unverified, ±1 m).
+// world.gridModel = { s1, pitch, side, slots: Map(g → { s, lat, x, y, z, yaw, tx, tz, nx, nz }), info } or null
+function gridModelFor(spots) {
+  const F = world.frame, L = F.L, A = app();
+  const obs = [];
+  for (const sp of spots || []) {
+    const v = toWorld(sp.p, world.center), pr = F.project(v.x, v.z);
+    if (!pr) continue;
+    const half = Math.max(edgeOf(pr.sample, 1), -edgeOf(pr.sample, -1));
+    if (Math.abs(pr.d) <= half + 1) obs.push({ g: sp.grid, s: pr.s, d: pr.d });   // (pit-lane starters left out)
   }
-  return slots;
+  const fit = fitGrid(obs, L);
+  if (!fit.ok) return { info: { ok: false, reason: fit.reason, n: fit.n, rms: fit.rms, dropped: fit.dropped } };
+  const year = A.sessionYear?.() || null, venue = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() });
+  const drivers = Object.keys(A.src?.state.DriverList || {}).length;
+  const count = Math.min(26, Math.max(drivers, ...obs.map((o) => o.g), year >= 2026 ? 22 : 20));
+  const model = { s1: fit.s1, pitch: fit.pitch, slots: new Map() };
+  // pole's side: from a source where there is one; else the side the racing line takes there (an estimate)
+  const known = poleSideFor(venue?.key, year), s1 = F.sampleAt(slotS(model, 1, L));
+  const side = known ? known.side : (Math.sign((s1.M ?? 0) - (edgeOf(s1, 1) + edgeOf(s1, -1)) / 2) || 1);
+  model.side = side;
+  const P = [0, 0, 0], D = [0, 0];
+  for (let g = 1; g <= count; g++) {
+    const ss = slotS(model, g, L), smp = F.sampleAt(ss), lat = slotLat(g, edgeOf(smp, 1), edgeOf(smp, -1), side);
+    F.at(ss, lat, P, D);
+    model.slots.set(g, { g, s: ss, lat, x: P[0], y: P[1], z: P[2], yaw: Math.atan2(D[0], D[1]), tx: D[0], tz: D[1], nx: -D[1], nz: D[0] });
+  }
+  model.info = { ok: true, source: spots.source || "session", n: fit.n, dropped: fit.dropped, rms: fit.rms, maxRes: fit.maxRes, pitch: +fit.pitch.toFixed(2), pitchFrom: fit.pitchFrom, pitchData: fit.pitchData, pitchSE: fit.pitchSE,
+    poleSide: side > 0 ? "left" : "right", poleSideFrom: known ? known.src : "estimate: the racing line's side at pole", slots: count, columns: "estimate: middle of each half of the tarmac",
+    res: fit.res.map((r) => [r.g, +r.r.toFixed(1)]) };
+  return model;
 }
 function addGrid() {
   const spots = app().gridSpots?.();
-  world.slots = null;
-  if (!spots?.length) return;
-  world.slots = gridSlots(spots);
-  if (!world.slots) return;
-  const white = new THREE.MeshStandardMaterial({ color: 0xf4f4f4, roughness: 0.6 });   // lifted 12 cm instead of a depth offset, which drew them over the cars
-  const g = new THREE.Group();
-  let pole = null;
-  const flat = (cx, cy, cz, w, l, yaw) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.02, l), white); m.position.set(cx, cy + 0.12, cz); m.rotation.y = yaw; m.receiveShadow = true; g.add(m); };
-  for (const [g, sl] of world.slots) {
-    if (g > 22) break;
-    const { s, yaw } = sl, fx = s.tan.x, fz = s.tan.z, nx = s.nor.x, nz = s.nor.z, y = sl.y;
-    // the slot: a line just ahead of the car's nose and two short side marks
-    const lx = sl.x + fx * 3, lz = sl.z + fz * 3;
-    flat(lx, y, lz, 2.6, 0.22, yaw);
-    const side = (k) => flat(lx + nx * 1.25 * k - fx * 0.6, y, lz + nz * 1.25 * k - fz * 0.6, 0.18, 1.2, yaw);
-    side(1); side(-1);
-    if (g === 1) pole = { s, x: sl.x, z: sl.z, yaw };
+  world.gridModel = null; world.slots = null; world.gridInfo = null;
+  if (!spots?.length) { world.gridInfo = { ok: false, reason: "no standing grid seen at this circuit" }; return; }
+  const m = gridModelFor(spots);
+  world.gridInfo = m.info;
+  if (!m.slots) return;
+  world.gridModel = m; world.slots = m.slots;
+  paintGrid(m);
+}
+// The paint: per slot a box open at the back – a front line across (2.7 m between the side lines' outer edges) and two
+// short side lines –, the start line a metre ahead of pole's box, and the light gantry over it. Flat on the tarmac
+// (its own height, with a depth offset over the road; never over the cars).
+function paintGrid(m) {
+  const F = world.frame, fz = profileFor(app().sessionYear?.() || null).FZ, P = [0, 0, 0], D = [0, 0];
+  const pos = [], idx = [];
+  // a painted rectangle from s0 to s1 along the lap line, lat0 to lat1 across
+  const quad = (s0, s1, l0, l1) => {
+    const v = pos.length / 3;
+    for (const [s, l] of [[s0, l0], [s1, l0], [s1, l1], [s0, l1]]) { F.at(s, l, P); pos.push(P[0], P[1] + ROAD_LIFT + 0.004, P[2]); }
+    idx.push(v, v + 2, v + 1, v, v + 3, v + 2);
+  };
+  const W = GRID_RULES.boxWidth, T = 0.12, SIDE = 1.5;
+  for (const sl of m.slots.values()) {
+    const front = sl.s + fz + GRID_RULES.frontGap;
+    quad(front - T, front, sl.lat - W / 2, sl.lat + W / 2);
+    quad(front - SIDE, front - T, sl.lat + W / 2 - T, sl.lat + W / 2);
+    quad(front - SIDE, front - T, sl.lat - W / 2, sl.lat - W / 2 + T);
   }
-  if (pole) {
-    // start line ~9 m ahead of pole, across the whole track, and the gantry with its five red lights above it
-    const { s, yaw } = pole, fx = s.tan.x, fz = s.tan.z, nx = s.nor.x, nz = s.nor.z;
-    // 9 m ahead of pole, measured along the lap line (all sideways offsets below are from that line)
-    const along = (pole.x - s.p.x) * fx + (pole.z - s.p.z) * fz;
-    const sx = s.p.x + fx * (along + 9), sz = s.p.z + fz * (along + 9), y = s.p.y;
-    const wl = edgeOf(s, 1), wr = edgeOf(s, -1), mid = (wl + wr) / 2;
-    const line = new THREE.Mesh(new THREE.BoxGeometry(wl - wr, 0.02, 0.6), white); line.position.set(sx + nx * mid, y + 0.12, sz + nz * mid); line.rotation.y = yaw; g.add(line);
+  // start line across the tarmac, a metre ahead of pole's front line
+  const p1 = m.slots.get(1), startS = p1.s + fz + GRID_RULES.frontGap + GRID_RULES.startLine, smp = F.sampleAt(startS);
+  const wl = edgeOf(smp, 1), wr = edgeOf(smp, -1);
+  quad(startS, startS + 0.5, wr + 0.2, wl - 0.2);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  geo.setIndex(idx);
+  const paint = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }));
+  paint.receiveShadow = true; paint.name = "gridPaint";
+  const g = new THREE.Group(); g.name = "grid"; g.add(paint);
+  {
+    // the light gantry over the start line
+    F.at(startS, 0, P, D);
+    const fx = D[0], fzz = D[1], nx = -D[1], nz = D[0], yaw = Math.atan2(fx, fzz), sx = P[0], sz = P[2], y = P[1], mid = (wl + wr) / 2;
     const steel = new THREE.MeshStandardMaterial({ color: 0x3b4048, roughness: 0.5, metalness: 0.6 });
     const H = 7.2;
     for (const off of [wl + 1.5, wr - 1.5]) {
@@ -2216,6 +2331,19 @@ window.Map3D = {
     const sl = world?.slots; if (!sl) return "no grid";
     const p1 = sl.get(1), p12 = sl.get(12) || p1, fx = Math.sin(p1.yaw), fz = Math.cos(p1.yaw);
     return window.Map3D.look(p12.x - fx * back + fz * side, p12.y + h, p12.z - fz * back - fx * side, (p1.x + p12.x) / 2, p1.y, (p1.z + p12.z) / 2, 45);
+  },
+  // development: the grid model (where its slots came from, how well the cars fitted) and every car's grid state –
+  // its slot (g, by published grid position or by order at a restart), how far along it is from it (delta, m), whether it
+  // stands, and how far it is drawn into it (state: standing / arriving / leaving / free; along, across 0–1)
+  gridState() {
+    const cs = [...cars.values()].filter((c) => c.grid).map((c) => ({ num: c.num, ...c.grid, drawnOff: c.raw ? +Math.hypot(c.pos.x - c.raw.x, c.pos.z - c.raw.z).toFixed(2) : null })).sort((a, b) => a.g - b.g);
+    const f = gridFieldsFor && world?.gridModel ? fieldAt(app().src, app().t) : null;
+    return JSON.stringify({ model: world?.gridInfo || null, preStart: f?.preStart ?? null, cars: cs });
+  },
+  // development: look at slot g from `back` m behind it, `h` m up, `side` m to the left, towards `ahead` m in front
+  viewSlot(g = 1, back = 12, h = 4, side = 0, ahead = 6, fov = 50) {
+    const sl = world?.gridModel?.slots.get(g); if (!sl) return "no grid";
+    return window.Map3D.look(sl.x - sl.tx * back + sl.nx * side, sl.y + h, sl.z - sl.tz * back + sl.nz * side, sl.x + sl.tx * ahead, sl.y, sl.z + sl.tz * ahead, fov);
   },
   // development: where the cars stand across the track (lateral offset from the lap line, m) and along it
   gridDebug() {
