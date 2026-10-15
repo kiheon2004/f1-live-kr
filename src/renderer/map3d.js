@@ -12,6 +12,7 @@ import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlot
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN } from "./startplan.js";
 import { laneOffset, LANES } from "./pitlane.js";
+import { crewMeshes, crewAt, STOP, WAIT } from "./crew.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -217,14 +218,42 @@ function laneLine(G) {
 // A car in the pit lane in front of the garages, drawn across the lane as pitlane.js laneOffset says (the feed has every
 // car on one line): v moved out from the garages to that offset. Its team's box from the allocation (only where the
 // teams are placed); the car's place along the lane is the feed's.
-function pitLaneDraw(num, v, speed) {
+function pitLaneDraw(c, num, v, speed) {
+  c.pit = null;
   const G = pitTeams.G; if (!G) return;
   const p = G.project(v.x, v.z); if (!(p.off > -3 && p.off < 30)) return;
   const team = app().src?.state.DriverList?.[num]?.TeamName, t = pitTeams.teams?.find((x) => x.team === team);
   const want = laneOffset({ off: p.off, u: p.u, gStart: G.gStart, gEnd: G.gEnd, speed, boxU: t?.box ?? null });
+  // (for the crews: in the lane in front of the garages, how far into its box – 1: in it)
+  if (p.u > G.gStart - LANES.ends && p.u < G.gEnd + LANES.ends) c.pit = { team, u: p.u, boxU: t?.box ?? null, inBox: Math.max(0, Math.min(1, (LANES.fast - want) / (LANES.fast - LANES.box))), speed };
   if (want === p.off) return;
   const k = Math.max(0, Math.min(G.slots.length - 1, Math.round((p.u - G.gStart) / G.pitch - 0.5))), s = G.slots[k];
   v.x -= s.inward[0] * (want - p.off); v.z -= s.inward[1] * (want - p.off);
+}
+// The crews (crew.js): a team's people round its car while it stands in its box, lined up at the box while one of its
+// cars is in the pit lane on its way in (only where the box is known), in the garage otherwise (not drawn)
+function updateCrews() {
+  const G = pitTeams.G;
+  if (!G || !world) { world?.crews?.clear(); return; }
+  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
+  const drivers = app().src?.state.DriverList || {}, list = [];
+  const byTeam = new Map();
+  for (const c of cars.values()) if (c.pit && c.obj.visible) { const a = byTeam.get(c.pit.team) || []; a.push(c); byTeam.set(c.pit.team, a); }
+  for (const [team, cs] of byTeam) {
+    const colour = "#" + (Object.values(drivers).find((d) => d?.TeamName === team)?.TeamColour || "9aa0a6");
+    const k = (u) => G.slots[Math.max(0, Math.min(G.slots.length - 1, Math.round((u - G.gStart) / G.pitch - 0.5)))];
+    // (the garages on the car's left or right: the layouts are written for the left – mirrored otherwise)
+    const side = (yaw, s) => Math.sign(Math.cos(yaw) * s.inward[0] - Math.sin(yaw) * s.inward[1]) || 1;
+    const mirror = (layout, m) => (m > 0 ? layout : layout.map(([a, b, f, h]) => [a, -b, -f, h]));
+    const inBox = cs.find((c) => c.pit.inBox > 0.8 && c.pit.speed < 1);
+    if (inBox) { const s = k(inBox.pit.u); list.push(...crewAt({ x: inBox.pos.x, y: inBox.pos.y, z: inBox.pos.z, yaw: inBox.yaw }, mirror(STOP, side(inBox.yaw, s)), colour)); continue; }
+    const boxU = cs[0].pit.boxU, coming = cs.some((c) => c.pit.boxU != null && c.pit.u < c.pit.boxU - 5);
+    if (boxU == null || !coming) continue;
+    const s = k(boxU), yaw = Math.atan2(s.along[0], s.along[1]), du = boxU - s.uc;
+    const x = s.front[0] + s.along[0] * du - s.inward[0] * LANES.box, z = s.front[1] + s.along[1] * du - s.inward[1] * LANES.box;
+    list.push(...crewAt({ x, y: s.floor, z, yaw }, mirror(WAIT, side(yaw, s)), colour));
+  }
+  world.crews.place(list);
 }
 // the pit lane's direction at (x, z) if that's in front of a facility's garages (0–16 m out), else null
 function pitLaneDir(x, z) {
@@ -1195,7 +1224,7 @@ function updateCars(dt) {
     // in the pit lane in front of the garages: in the fast lane, or its box (off the lap line only – the track running
     // past the garages is the track)
     (c.feedPos || (c.feedPos = new THREE.Vector3())).copy(v);
-    if (!st && !est) pitLaneDraw(num, v, c.speed);
+    if (!st && !est) pitLaneDraw(c, num, v, c.speed); else c.pit = null;
     (c.raw || (c.raw = new THREE.Vector3())).copy(v);
     c.grid = null;
     if (gridNow && st && !est) { const g1 = performance.now(); gridCar(c, num, v, gridNow); const e = performance.now() - g1; gridCost.ms += e; }
@@ -1251,7 +1280,8 @@ function updateCars(dt) {
     c.label.sp.material.opacity = out ? 0.45 : 1;
   }
   // (a car not drawn this frame is drawn afresh when it's back: no easing from where it was before)
-  for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; c.has = false; c.est = null; c.estAt = null; c.hand = null; }
+  for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; c.has = false; c.est = null; c.estAt = null; c.hand = null; c.pit = null; }
+  updateCrews();
   separate(dt, seen);
   // F1's archive sometimes stops publishing car positions part-way through a session (e.g. Monaco 2026):
   // say so instead of showing an empty track without explanation.
