@@ -1173,7 +1173,10 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
 // line at a typical distance – built as the registry's are (garages along the lane, the pit wall, the teams' layer).
 // Its look is a plain one (glass garage fronts, a white fascia): what the real building looks like isn't known here.
 //   pit – START_DATA's measured pit lane; toScene([X, Y] feed decimetres) → [x, z]; toTrack(x, z) → [dx, dz]
-export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, registry = FACILITIES }) {
+//   trackEdge(x, z) → metres to the track's tarmac edge (negative on it): nothing is built on the track – a building met
+//   that reaches it isn't the pit building (Monaco: the lane curves between stretches of track, the "garages' side"
+//   points at the start straight in places), a made-up one that would isn't made
+export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
   const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
   if (registry.some((s) => s.kind === "pit-building" && entryAt(s, venue, location) && yearOk(s))) return null;
@@ -1188,7 +1191,9 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, r
     // building, left out of the stands (b.asPitBuilding))
     pick(buildings, gf) {
       if (this.parts) return this.parts;
-      const rings = buildings.map((b) => ({ ring: ring(b, gf), ref: b })).filter((r) => r.ring.length >= 3);
+      // (along a ring's edges every 4 m: off the track by more than a metre)
+      const clear = (rg) => !trackEdge || rg.every((a, i) => { const b = rg[(i + 1) % rg.length], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 4)); for (let k = 0; k < n; k++) if (trackEdge(a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n) < 1) return false; return true; });
+      const rings = buildings.map((b) => ({ ring: ring(b, gf), ref: b })).filter((r) => r.ring.length >= 3 && clear(r.ring));
       const g = garageLine(frame, rings, toTrack, u0, u1);
       this.found = { front: g.front == null ? null : +g.front.toFixed(1), coverage: g.coverage, parts: g.parts.length, run: [Math.round(u0), Math.round(u1)] };
       // (diagnostics: what a longer ray meets first at a few stations – development, Map3D.debug().info)
@@ -1198,9 +1203,10 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, r
       for (const b of g.parts) if (b.kind === "grandstand") { b.asPitBuilding = true; (this.found.stands ||= []).push(b.name || "(unnamed)"); }
       if (g.parts.length) return (this.parts = g.parts);
       // (none on the line: one made up, its outline back in the map's own metres – gf.xz turned round)
-      const o = gf.xz([0, 0]);
+      const o = gf.xz([0, 0]), out = genericOutline(frame, g.side, u0, u1);
+      if (!clear(out)) { this.found.madeUp = "not made: it would stand on the track"; return (this.parts = []); }
       this.found.madeUp = true;
-      return (this.parts = [{ pts: genericOutline(frame, g.side, u0, u1).map(([x, z]) => [x - o[0], o[1] - z]), h: GENERIC.height, min: 0, synthetic: true }]);
+      return (this.parts = [{ pts: out.map(([x, z]) => [x - o[0], o[1] - z]), h: GENERIC.height, min: 0, synthetic: true }]);
     },
     params: {
       // estimates (no source for any one circuit): garages 8.5 m wide, 8 m high where the map has no height
