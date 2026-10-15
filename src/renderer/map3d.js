@@ -11,6 +11,7 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN } from "./startplan.js";
+import { laneOffset, LANES } from "./pitlane.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -163,7 +164,7 @@ function updatePitTeams(force = false) {
   const session = A?.sourceKey?.()?.replace(/:\d+$/, "") || null;
   if (session !== pitTeams.session) { pitTeams.session = session; pitTeams.inf.reset(); clearPitTeams(); }
   if (!fac || !src?.tracks?.cars) { if (pitTeams.group) clearPitTeams(); pitTeams.facility = fac; pitTeamNote(null); return; }
-  if (fac !== pitTeams.facility) { clearPitTeams(); pitTeams.facility = fac; }
+  if (fac !== pitTeams.facility) { clearPitTeams(); pitTeams.facility = fac; pitTeams.teams = null; pitTeams.G = null; if (!fac.getObjectByName("laneLine")) fac.add(laneLine(fac.userData.garages)); }
   const G = fac.userData.garages, c = world.center, drivers = src.state?.DriverList || {};
   // The frame the standstills are placed in: this pit building in this world. A rebuilt building (settings, a new map)
   // or a new world is a new frame: what was seen is placed in it again (garages.js PitInference.update).
@@ -176,6 +177,10 @@ function updatePitTeams(force = false) {
   pitTeams.inf.observe(found, !!src.isLive);
   const r = pitTeams.inf.update(drivers, G.pitch, frame);
   const teams = allocatePlaces(G.slots, G.pitch, drivers, r.places, overridesFor(G.facility, A.sessionYear?.() || null, session));
+  // (a box is painted where a car stands in it – LANES.box out from the garages –, not on the feed's line, which runs
+  // anywhere across the lane: pitlane.js)
+  for (const t of teams) if (t.box != null) t.boxOff = LANES.box;
+  pitTeams.teams = teams; pitTeams.G = G;
   pitTeams.info = { evidence: r.evidence, live: !!src.isLive };
   // (how many garages a team has and which driver's is which are estimates: the data shows only where the cars stopped)
   const est = teams.filter((t) => t.estimated);
@@ -190,6 +195,36 @@ function updatePitTeams(force = false) {
   pitTeams.group.traverse((o) => { for (const m of [].concat(o.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
   warmShaders();
+}
+// The line between the working lane and the fast lane, LANES.divider out from the garages' fronts along their run
+// (and 20 m on past each end), white, flat on the lane's tarmac
+function laneLine(G) {
+  const pos = [], idx = [], sl = G.slots, W = 0.12;
+  const pt = (s, du, off) => [s.front[0] + s.along[0] * du - s.inward[0] * off, s.floor + 0.035, s.front[1] + s.along[1] * du - s.inward[1] * off];
+  const strip = [];
+  strip.push([sl[0], -sl[0].width / 2 - 20]);
+  for (const s of sl) strip.push([s, 0]);
+  strip.push([sl[sl.length - 1], sl[sl.length - 1].width / 2 + 20]);
+  for (const [s, du] of strip) { const v = pos.length / 3; pos.push(...pt(s, du, LANES.divider - W / 2), ...pt(s, du, LANES.divider + W / 2)); if (v) idx.push(v - 2, v - 1, v, v - 1, v + 1, v); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  geo.setIndex(idx);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }));
+  m.name = "laneLine"; m.receiveShadow = true;
+  return m;
+}
+// A car in the pit lane in front of the garages, drawn across the lane as pitlane.js laneOffset says (the feed has every
+// car on one line): v moved out from the garages to that offset. Its team's box from the allocation (only where the
+// teams are placed); the car's place along the lane is the feed's.
+function pitLaneDraw(num, v, speed) {
+  const G = pitTeams.G; if (!G) return;
+  const p = G.project(v.x, v.z); if (!(p.off > -3 && p.off < 30)) return;
+  const team = app().src?.state.DriverList?.[num]?.TeamName, t = pitTeams.teams?.find((x) => x.team === team);
+  const want = laneOffset({ off: p.off, u: p.u, gStart: G.gStart, gEnd: G.gEnd, speed, boxU: t?.box ?? null });
+  if (want === p.off) return;
+  const k = Math.max(0, Math.min(G.slots.length - 1, Math.round((p.u - G.gStart) / G.pitch - 0.5))), s = G.slots[k];
+  v.x -= s.inward[0] * (want - p.off); v.z -= s.inward[1] * (want - p.off);
 }
 // the pit lane's direction at (x, z) if that's in front of a facility's garages (0–16 m out), else null
 function pitLaneDir(x, z) {
@@ -1157,6 +1192,10 @@ function updateCars(dt) {
     if (c.onKerb && st) { c.bump = Math.sin(st.s * 5.3) * 0.6 + Math.sin(st.s * 12.1 + 1.7) * 0.4; v.y += 0.008 + 0.01 * c.bump; }
     // On the grid: drawn in its slot while it stands there (the feed has the whole grid in single file, metres off),
     // eased in as it rolls up to it before the start and let go with the distance it drives off (grid.js, gridCar)
+    // in the pit lane in front of the garages: in the fast lane, or its box (off the lap line only – the track running
+    // past the garages is the track)
+    (c.feedPos || (c.feedPos = new THREE.Vector3())).copy(v);
+    if (!st && !est) pitLaneDraw(num, v, c.speed);
     (c.raw || (c.raw = new THREE.Vector3())).copy(v);
     c.grid = null;
     if (gridNow && st && !est) { const g1 = performance.now(); gridCar(c, num, v, gridNow); const e = performance.now() - g1; gridCost.ms += e; }
@@ -2594,6 +2633,13 @@ window.Map3D = {
       rows.push([Math.round(u), +toEdge.toFixed(1), +Math.abs(pr.d).toFixed(1), garage, hit ? +hit.distance.toFixed(1) : null, nm]);
     }
     return JSON.stringify({ ok: true, loc: app().location(), facility: G?.facility || null, len: Math.round(P.len), rows });
+  },
+  // development: car num against the pit building's garages – along them (u), how far out it is drawn and where the
+  // feed has it, its speed, its team's box
+  pitCar(num) {
+    const G = pitTeams.G, c = cars.get(String(num)); if (!G || !c) return JSON.stringify({ G: !!G, car: !!c });
+    const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;
+    return JSON.stringify({ t: app().t, u: +p.u.toFixed(1), off: +p.off.toFixed(2), feedOff: r && +r.off.toFixed(2), speed: +c.speed.toFixed(1), box: pitTeams.teams?.find((x) => x.team === team)?.box ?? null, gStart: Math.round(G.gStart), gEnd: Math.round(G.gEnd) });
   },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
   viewPits(k = 20, back = 28, h = 9, side = 0, fov = 50) {

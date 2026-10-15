@@ -12,6 +12,8 @@
 // a second, so the newest moments are smoothed one-sidedly.
 // The result has the same interface as ReplayKit's CarTracks: all(t, into, vels) in F1 decimetres.
 
+import { onPitPath } from "./startplan.js";
+
 const DM = 0.1;
 const STEP_OUT = 125;          // ms between output samples
 
@@ -192,18 +194,38 @@ function telemetryLag(src) {
 // within a stretch), d (m across), the stretch's id (run; 0 = off the track: pit lane, run-off, under a bridge).
 // `snapped`: the positions are matched to one line (every car on it), so across the track the car is put on the
 // racing line instead, eased in and out over 1.5 s at the ends of a stretch (the pit entry and exit).
+// The measured pit lane's path as 2 m cells (within 3 m of it, 40 m clear of its ends – startplan.js onPitPath's
+// test, made once per world): (x, z) → in the lane. One lookup a sample – the precise test over every sample of a
+// session would be millions of segment tests.
+const laneCellsFor = new WeakMap();
+function laneCells(world) {
+  const lane = world.pitLane; if (!lane) return () => false;
+  let set = laneCellsFor.get(lane);
+  if (!set) {
+    set = new Set(); const C = 2, key = (i, j) => i * 100003 + j;
+    const x0 = Math.min(...lane.pts.map((p) => p.x)) - 6, x1 = Math.max(...lane.pts.map((p) => p.x)) + 6, z0 = Math.min(...lane.pts.map((p) => p.z)) - 6, z1 = Math.max(...lane.pts.map((p) => p.z)) + 6;
+    for (let i = Math.floor(x0 / C); i <= Math.ceil(x1 / C); i++) for (let j = Math.floor(z0 / C); j <= Math.ceil(z1 / C); j++)
+      if (onPitPath(lane.pts, lane.cum, (i + 0.5) * C, (j + 0.5) * C) != null) set.add(key(i, j));
+    set.C = C; set.key = key; laneCellsFor.set(lane, set);
+  }
+  return (x, z) => set.has(set.key(Math.floor(x / set.C), Math.floor(z / set.C)));
+}
 function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
   const n = c.n, c0 = world.center, T = c.t;
   const half = (s) => Math.max(s.L ?? 7, -(s.R ?? -7));
   // project every sample; on track = near the lap line (within its edges + 6 m) and at its height
   // (the height tells a bridge from the road under it; a single sample whose height is off – the elevation has
   // the odd spike of 5 m – between two that agree stays on the track: at Suzuka's crossover that cut every lap)
+  // (on the measured pit lane's path – startplan.js onPitPath –: in the pit lane, however close the track runs by it –
+  // a car in the lane isn't pulled onto the racing line (Barcelona: the lane within the track's edge + 6 m, a car
+  // leaving its box was drawn 10 m over towards the track). Tested only off the tarmac, where a pit lane can be.)
+  const inLane = laneCells(world);
   const P = [];
   let hint = null;
   for (let k = from; k < n; k++) {
     const x = c.x[k] * DM - c0.x, z = -(c.y[k] * DM - c0.z), y = (c.z[k] || 0) * DM - c0.y;
     const pr = frame.project(x, z, hint);
-    const near = !!pr && Math.abs(pr.d) <= half(pr.sample) + 6, level = !!pr && Math.abs(y - pr.sample.p.y) < 4;
+    const near = !!pr && Math.abs(pr.d) <= half(pr.sample) + 6 && !inLane(x, z), level = !!pr && Math.abs(y - pr.sample.p.y) < 4;
     if (pr) hint = pr.i;
     P.push({ t: T[k], x: c.x[k], y: c.y[k], z: c.z[k], near, level, on: near && level, s: pr?.s, d: pr?.d });
   }

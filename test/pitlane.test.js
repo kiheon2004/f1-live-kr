@@ -54,3 +54,24 @@ test("run of garages: inside the limiter lines, at most 340 m, centred; a made-u
   const o = P.genericOutline(frame, g.side, 100, 400, 11, 18, 100);
   assert.deepStrictEqual(o, [[100, 11], [200, 11], [300, 11], [400, 11], [400, 29], [300, 29], [200, 29], [100, 29]]);
 });
+
+test("across the lane: driving in the fast lane, stopped at its box in the box, back to the feed's line past the run", async () => {
+  const { laneOffset, LANES } = await import("../src/renderer/pitlane.js");
+  const base = { gStart: 100, gEnd: 400, boxU: 250 };
+  // the feed's line 1.1 m out (Silverstone) or 14.5 m (Lusail): driving → the fast lane
+  assert.strictEqual(laneOffset({ ...base, off: 1.1, u: 200, speed: 22 }), LANES.fast);
+  assert.strictEqual(laneOffset({ ...base, off: 14.5, u: 200, speed: 22 }), LANES.fast);
+  // stopped at its box → the box; at the limit past its box (a drive-through) → still the fast lane
+  assert.strictEqual(laneOffset({ ...base, off: 8.3, u: 250, speed: 0 }), LANES.box);
+  assert.strictEqual(laneOffset({ ...base, off: 8.3, u: 250, speed: 22 }), LANES.fast);
+  // slowing 12 m before it: on the way in
+  const x = laneOffset({ ...base, off: 8.3, u: 238, speed: 4 }); assert.ok(x > LANES.box && x < LANES.fast, String(x));
+  // stopped with no box of its own known yet (the race's first stops): it pulled into its box; driving: the fast lane
+  assert.strictEqual(laneOffset({ ...base, boxU: null, off: 8.3, u: 250, speed: 0 }), LANES.box);
+  assert.strictEqual(laneOffset({ ...base, boxU: null, off: 8.3, u: 250, speed: 22 }), LANES.fast);
+  // slow but far from its own box (queued behind another car): the fast lane
+  assert.strictEqual(laneOffset({ ...base, off: 8.3, u: 150, speed: 0 }), LANES.fast);
+  // past the run's end: the feed's own line; nowhere near the garages: untouched
+  assert.strictEqual(laneOffset({ ...base, off: 8.3, u: 460, speed: 22 }), 8.3);
+  assert.strictEqual(laneOffset({ ...base, off: 60, u: 200, speed: 22 }), 60);
+});

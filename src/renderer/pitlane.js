@@ -96,3 +96,28 @@ export function genericOutline(frame, side, u0, u1, front = GENERIC.front, depth
   }
   return [...near, ...far.reverse()];
 }
+
+// Across the lane in front of the garages (metres out from their fronts) – estimates on the FIA's layout of a working
+// lane by the garages and a fast lane by the pit wall (no circuit's own widths are in the data): a car stands in its
+// box 4 m out, the line between the lanes is painted 7.5 m out, the cars drive 10.5 m out.
+export const LANES = { box: 4, divider: 7.5, fast: 10.5, ends: 40, near: 25, slow: 14 };
+
+// Where a car in the pit lane is drawn across it: the feed has every car on one line, wherever that runs (1–15 m from
+// the garages). In front of the garages a car driving is put in the fast lane and one slowing at its own team's box
+// swings into the box – its place along the lane stays the feed's (a stop is where the data has it). Towards the ends
+// of the garages' run it goes back to the feed's line (the entry and exit). → the offset to draw it at (m out from the
+// garages) – the feed's own where nothing applies.
+//   off, u – the feed's place in front of the garages (G.project); gStart, gEnd – the run; speed (m/s); boxU – its box
+export function laneOffset({ off, u, gStart, gEnd, speed, boxU = null }, L = LANES) {
+  if (!(off > -3 && off < 30) || u < gStart - L.ends || u > gEnd + L.ends) return off;
+  const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // in the run (1) – back to the feed's line over `ends` m past either end (0)
+  const inRun = Math.min(ss(gStart - L.ends, gStart, u), 1 - ss(gEnd, gEnd + L.ends, u));
+  // at its box: within `near` m of it along the lane and slow (a drive-through at the limit stays in the fast lane).
+  // Its box not known yet (no stop of its team seen so far – the race's first stops): slowing well under the limit in
+  // front of the garages is a car pulling into its box (nobody else slows there)
+  const slow = 1 - ss(L.slow * 0.5, L.slow, speed);
+  const atBox = boxU == null ? slow : (1 - ss(0, L.near, Math.abs(u - boxU))) * slow;
+  const lane = L.fast + (L.box - L.fast) * atBox;
+  return off + (lane - off) * inRun;
+}
