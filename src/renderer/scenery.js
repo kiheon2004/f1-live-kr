@@ -14,6 +14,7 @@ import { buildingsMesh } from "./buildings.js";
 import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./facilities.js";
 import { START_DATA } from "./startdata.js";
+import { PIT_BOXES } from "./pitorder.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 
@@ -726,7 +727,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // the pit building mapped so, no stand
   const toTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); if (!s) return [1, 0]; const dx = s.p.x - x, dz = s.p.z - z, l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
   const edgeOfTrack = (x, z) => { const [s, d] = nearTrack(x, z); return s ? d - Math.max(s.L ?? 7, -(s.R ?? -7)) : Infinity; };
-  const generic = opts.buildings !== false ? genericPitSpec({ venue: opts.venue, location: scene.location, year: opts.year, pit: START_DATA[opts.venue?.key]?.pit, toScene: ([X, Y]) => gf.xz([X * 0.1, Y * 0.1]), toTrack, trackEdge: edgeOfTrack }) : null;
+  const generic = opts.buildings !== false ? genericPitSpec({ venue: opts.venue, location: scene.location, year: opts.year, pit: START_DATA[opts.venue?.key]?.pit, toScene: ([X, Y]) => gf.xz([X * 0.1, Y * 0.1]), toTrack, trackEdge: edgeOfTrack, boxes: PIT_BOXES[opts.venue?.key]?.boxes }) : null;
   for (const b of scene.buildings) delete b.asPitBuilding;   // (a record reused from an earlier build starts clean)
   if (generic && opts.facilities !== false) generic.pick(scene.buildings, gf);
 

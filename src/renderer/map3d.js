@@ -13,6 +13,7 @@ import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN } from "./startplan.js";
 import { laneOffset, LANES } from "./pitlane.js";
 import { crewMeshes, crewAt, STOP, WAIT } from "./crew.js";
+import { publishedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -177,7 +178,16 @@ function updatePitTeams(force = false) {
   const found = standstills(src.tracks.cars, frame.toScene, G.project, frame.span, pitIn, src.isLive ? Infinity : A.t);
   pitTeams.inf.observe(found, !!src.isLive);
   const r = pitTeams.inf.update(drivers, G.pitch, frame);
-  const teams = allocatePlaces(G.slots, G.pitch, drivers, r.places, overridesFor(G.facility, A.sessionYear?.() || null, session));
+  // The teams' boxes as allocated (pitorder.js: the previous season's constructors' order along the lane, the circuit's
+  // measured boxes – the rule held at every circuit measured): from the session's start, before any stop. The stops
+  // seen place only a team the order doesn't cover.
+  const pub = world.pitLane ? publishedBoxes(A.circuitKey?.(), A.sessionYear?.(), Object.values(drivers).map((d) => d?.TeamName).filter(Boolean)) : null;
+  let places = r.places;
+  if (pub) {
+    const o = {}, have = new Set(pub.map((b) => b.team));
+    places = [...pub.map((b) => { pitLaneAt(b.u, o); const pr = G.project(o.x, o.z); return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: true }; }), ...r.places.filter((p) => !have.has(p.team))];
+  }
+  const teams = allocatePlaces(G.slots, G.pitch, drivers, places, overridesFor(G.facility, A.sessionYear?.() || null, session));
   // (a box is painted where a car stands in it – LANES.box out from the garages –, not on the feed's line, which runs
   // anywhere across the lane: pitlane.js)
   for (const t of teams) if (t.box != null) t.boxOff = LANES.box;
@@ -185,7 +195,7 @@ function updatePitTeams(force = false) {
   pitTeams.info = { evidence: r.evidence, live: !!src.isLive };
   // (how many garages a team has and which driver's is which are estimates: the data shows only where the cars stopped)
   const est = teams.filter((t) => t.estimated);
-  pitTeamNote(!teams.length ? null : !est.length ? "팀 차고: 공개된 배치 자료" : (est.some((t) => t.from === "box") ? "팀 차고 위치: 피트 스톱 위치로 추정" : "팀 차고 위치: 반복 정차 위치로 추정") + (src.isLive ? "" : " (현재 재생 시점까지)") + " · 칸 수·배정은 추정");
+  pitTeamNote(!teams.length ? null : pub ? "팀 박스 순서: 전년도 컨스트럭터 순위(F1 배정 규칙, 실제 피트 스톱으로 확인) · 차고 칸 수는 추정" : !est.length ? "팀 차고: 공개된 배치 자료" : (est.some((t) => t.from === "box") ? "팀 차고 위치: 피트 스톱 위치로 추정" : "팀 차고 위치: 반복 정차 위치로 추정") + (src.isLive ? "" : " (현재 재생 시점까지)") + " · 칸 수·배정은 추정");
   const key = allocationKey(teams);
   if (key === pitTeams.key) return;
   clearPitTeams();

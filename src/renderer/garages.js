@@ -356,7 +356,7 @@ export function allocatePlaces(slots, pitch, drivers, places, overrides = []) {
   const fixed = new Map((overrides || []).filter((o) => o?.team && o.slots?.length).map((o) => [o.team, o]));
   const list = places.filter((p) => p.ok && !fixed.has(p.team)).map((p) => {
     const ds = members(p.team).map((m) => ({ ...m, u: q(p.from === "garage" && p.own?.[m.num] ? p.own[m.num].u : p.u), from: p.from }));
-    return { team: p.team, colour: colourOf(p.team), centre: q(p.u), box: p.from === "box" ? q(p.u) : null, boxOff: p.from === "box" ? q(p.off ?? 6) : null, from: p.from, link: p.from === "box" ? "inferred" : "own", estimated: true, drivers: ds };
+    return { team: p.team, colour: colourOf(p.team), centre: q(p.u), box: p.from === "box" ? q(p.u) : null, boxOff: p.from === "box" ? q(p.off ?? 6) : null, from: p.from, link: p.published ? "order" : p.from === "box" ? "inferred" : "own", estimated: true, drivers: ds };
   }).sort((a, b) => a.centre - b.centre);
   const used = new Set(), bySlot = new Map(slots.map((s) => [s.k, s]));
   for (const o of fixed.values()) {

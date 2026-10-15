@@ -1182,12 +1182,14 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
 //   trackEdge(x, z) → metres to the track's tarmac edge (negative on it): nothing is built on the track – a building met
 //   that reaches it isn't the pit building (Monaco: the lane curves between stretches of track, the "garages' side"
 //   points at the start straight in places), a made-up one that would isn't made
-export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, registry = FACILITIES }) {
+//   boxes – the circuit's measured pit boxes (pitorder.js PIT_BOXES: metres along the pit path): the garages run along
+//   them (15 m on past the first and last), not the limiter lines' middle
+export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, boxes = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
   const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
   if (registry.some((s) => s.kind === "pit-building" && entryAt(s, venue, location) && yearOk(s))) return null;
   const frame = pathFrame(pit.path.map(toScene));
-  const [u0, u1] = garageRun(pit.limitOn, pit.limitOff, frame.len);
+  const [u0, u1] = boxes?.length ? [Math.max(0, Math.min(...boxes) - 15), Math.min(frame.len, Math.max(...boxes) + 15)] : garageRun(pit.limitOn, pit.limitOff, frame.len);
   return {
     id: "generic-pits", name: "pit building (map / estimate)", kind: "pit-building", venue: venue ? [venue.key] : [], loc: location ? [location] : [], years: null,
     status: "trial", builder: "pitBuilding",
