@@ -644,13 +644,15 @@ export function setAero(car, open) {
   u.fwPivot.rotation.x = u.aeroOpen.fw * open; u.rwPivot.rotation.x = u.aeroOpen.rw * open;
 }
 // Wheels: roll angle (rad) and the front wheels' steer angle (rad, + = left); the steering wheel turns with them at
-// a fixed ratio (an estimate: ~5:1 – about ±90° of the wheel to lock), no more than ±90°. The steer angle is the
-// caller's estimate from the path (the feed has no steering channel): the hands' movement is a depiction.
+// a fixed ratio (STEER_RATIO, an estimate: 10:1 – about 50° of the wheel through a 130 km/h corner, the ±90° stop
+// at a hairpin), no more than ±90°. The steer angle is the caller's estimate from the path (the feed has no steering
+// channel): the hands' movement is a depiction.
+export const STEER_RATIO = 10;
 export function setWheels(car, spin, steer) {
   const u = car.userData;
   u.wheels.forEach((w, i) => { w.rotation.y = i < 2 ? steer : 0; });
   u.spins.forEach((s) => { s.rotation.x = spin; });
-  if (u.wheel) u.wheel.rotation.z = Math.max(-1.6, Math.min(1.6, -steer * 5));
+  if (u.wheel) u.wheel.rotation.z = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, -steer * STEER_RATIO));
 }
 // Level of detail: "near" (everything), "mid" (no cockpit interior, hands, steering wheel), "far" (also no wheel covers,
 // deflectors, lights). The same model at every level: only small parts come and go.

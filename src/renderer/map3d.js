@@ -1186,8 +1186,9 @@ function updateCars(dt) {
     }
     // wheels roll with the speed; front wheels steer with the turning rate (Ackermann-ish: δ ≈ L·ω / v)
     c.spin = (c.spin + (c.speed * dt) / 0.354) % (Math.PI * 2);
-    // (and a touch of opposite lock when the rear steps out)
-    const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) - (c.slide || 0) * 2)) : 0;
+    // (the front tyres' slip angle on top, growing with the cornering force: an estimate, ~0.6° per g (0.01 rad); and a
+    // touch of opposite lock when the rear steps out)
+    const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;
     // (the wheels' and steering wheel's angle eased: the turning rate from 4 Hz positions twitched them frame to frame)
     c.steer = c.steer == null ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
     setWheels(c.model, c.spin, c.steer);
@@ -1365,7 +1366,9 @@ function updateCamera(dt) {
     // Fixed to the car (its mounts, per model): the broadcast T-cam on top of the airbox, looking down the car over
     // the driver's helmet – or the driver's own eyes (first person). The car under it is steadied (updateCars), and no
     // vibration is added: a steady picture to watch the race by.
-    c.model.updateMatrixWorld(true);
+    // (the car's matrices from its parent down, as it is this frame: updateMatrixWorld on the model alone builds on the
+    // parent's from the last render – the camera then sat one frame back, a metre behind the airbox at 200 km/h)
+    c.model.updateWorldMatrix(true, true);
     const u = c.model.userData, eye = camMode === "eye";
     camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
     c.model.getWorldQuaternion(qTmp);
@@ -2731,7 +2734,7 @@ window.Map3D = {
   // is – for comparing with onboard footage. pts: { name: [x, y, z] in car metres }
   projectCar(pts) {
     const c = cars.get(app().focus || leader()); if (!c) return "no car";
-    c.model.updateMatrixWorld(true); camera.updateMatrixWorld(true);
+    c.model.updateWorldMatrix(true, true); camera.updateMatrixWorld(true);
     const out = { fov: +camera.fov.toFixed(2), aspect: +camera.aspect.toFixed(3), pitch: +(c.model.rotation.x * 57.3).toFixed(2), roll: +(c.model.rotation.z * 57.3).toFixed(2) };
     for (const [k, p] of Object.entries(pts)) { const v = new THREE.Vector3(...p).applyMatrix4(c.model.matrixWorld).project(camera); out[k] = [+((v.x + 1) / 2).toFixed(3), +((1 - v.y) / 2).toFixed(3)]; }
     return JSON.stringify(out);
