@@ -80,7 +80,7 @@ test("starts: lights out from the race clock; a red-flag restart in race control
   assert.deepStrictEqual(P.carKind(h, P.startContext(h, 1200), "5", 1200), { kind: "pit", g: 4, inPitNow: true });
   assert.deepStrictEqual(P.carKind(h, P.startContext(h, 1200), "16", 1200), { kind: "grid", g: 3, inPitNow: false });
   // racing: no start
-  assert.strictEqual(P.startContext(h, 1000 + 700000), null);
+  assert.strictEqual(P.startContext(h, 1000 + 1000000), null);
   // red flag: the restart to come, standing, in the resumption order (place in it, not the grid position)
   const rf = P.startContext(h, 7000);
   assert.ok(rf.pending);
@@ -92,6 +92,19 @@ test("starts: lights out from the race clock; a red-flag restart in race control
   assert.strictEqual(P.startContext(h, 8100).n, 2);
   // a moment before the restart doesn't know its time yet (no looking ahead)
   assert.strictEqual(P.startContext(h, 7999).t, Infinity);
+});
+
+test("restart: the cars still in the pit lane when the clock runs again are not pit-lane starters – only one in it now", async () => {
+  const { P, h } = await history([
+    grid(0, { 1: 1, 2: 2 }), clock(1000, true), rcm(5000, "RED FLAG"), clock(5000, false), line(5100, "1", { InPit: true }), line(5100, "2", { InPit: true }),
+    rcm(6000, "RESUMPTION ORDER: 2, 1"), clock(8000, true), line(8100, "1", { InPit: false }), line(8100, "2", { InPit: false }), rcm(8200, "STANDING START"),
+  ]);
+  // the clock ran at 8000 with both in the pit lane; on the grid at 8300 they are the restart's grid
+  const ctx = P.startContext(h, 8300);
+  assert.strictEqual(ctx.n, 2);
+  assert.deepStrictEqual(P.carKind(h, ctx, "2", 8300), { kind: "grid", g: 1, inPitNow: false });
+  assert.deepStrictEqual(P.carKind(h, ctx, "1", 8300), { kind: "grid", g: 2, inPitNow: false });
+  assert.strictEqual(P.carKind(h, ctx, "1", 8050).kind, "pit");
 });
 
 test("starts: a rolling start is no standing grid; retired cars are out; race control's pit-exit light", async () => {
@@ -223,4 +236,16 @@ test("Monaco 2026 (cached data): lights out, the published grid, Bortoleto from 
   const rf = P.startContext(h, t0 + 6400e3);
   assert.ok(rf?.pending);
   assert.deepStrictEqual(rf.order.slice(0, 3), ["12", "44", "6"]);
+});
+
+test("on the pit lane's path: within 3 m of it and clear of its ends (where it meets the lap line), whatever InPit says", async () => {
+  const { onPitPath } = await import("../src/renderer/startplan.js");
+  // a pit lane 500 m long, 15 m beside a straight (z = 15), bending in at both ends
+  const pts = [{ x: 0, z: 0 }, { x: 50, z: 15 }, { x: 450, z: 15 }, { x: 500, z: 0 }], cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+  assert.ok(Math.abs(onPitPath(pts, cum, 250, 14.2) - (cum[1] + 200)) < 0.01, "queued in the lane");
+  assert.strictEqual(onPitPath(pts, cum, 250, 0), null, "on the straight beside it");
+  assert.strictEqual(onPitPath(pts, cum, 250, 9), null, "6 m off it");
+  assert.strictEqual(onPitPath(pts, cum, 2, 0.5), null, "at its entry, where it joins the lap line");
+  assert.strictEqual(onPitPath([], [], 0, 0), null);
 });

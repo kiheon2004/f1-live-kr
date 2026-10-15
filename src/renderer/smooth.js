@@ -327,9 +327,16 @@ export function smoothedTracks(src, world, CarTracks) {
     }
     return tr;
   };
-  const stateOf = (tr, num, t, out) => {
+  // (hold: live – past the last sample the car stays there for up to 4 s, still, as its drawn position does
+  // (CarTracks.at) until the next batch of positions comes in)
+  const stateOf = (tr, num, t, out, hold = false) => {
     const o = tr?.coords?.[num]; if (!o) return null;
     const T = o.t, n = T.length;
+    if (n >= 2 && hold && t > T[n - 1] && t - T[n - 1] <= 4000 && o.run[n - 1]) {
+      out = out || {};
+      out.s = o.s[n - 1]; out.d = o.d[n - 1]; out.vs = 0; out.vd = 0; out.as = 0; out.run = o.run[n - 1];
+      return out;
+    }
     if (n < 2 || t < T[0] || t > T[n - 1]) return null;
     let lo = 0, hi = n - 1;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (T[m] <= t) lo = m; else hi = m; }
@@ -361,7 +368,7 @@ export function smoothedTracks(src, world, CarTracks) {
   let tr = null, last = 0;
   return {
     all(t, into, vels) { return (tr || src.tracks).all(t - 600, into, vels); },
-    state(num, t, out) { return stateOf(tr, num, t - 600, out); },
+    state(num, t, out) { return stateOf(tr, num, t - 600, out, true); },
     update(now) { if (now - last < 1000) return; last = now; const latest = Math.max(0, ...Object.values(src.tracks.cars).map((c) => (c.n ? c.t[c.n - 1] : 0))); tr = build(latest - 30000); },
     frame, get snapped() { return snapped; },
   };

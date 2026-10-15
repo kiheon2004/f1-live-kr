@@ -16,6 +16,10 @@
     set(k, v) { try { localStorage.setItem("f1kr:" + k, JSON.stringify(v)); } catch {} },
   };
 
+  // (versions before 0.23 kept the last standing grid seen at each circuit under "f1kr:grid:<location>" and showed it at
+  // the next session there – another race's grid: no longer used, cleared)
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("f1kr:grid:")) localStorage.removeItem(k); } catch {}
+
   // ---------- state ----------
   let mode = "replay", replay = null, src = null;
   let t0 = 0, t1 = 0, tStart = 0, tOpen = 0;   // replay range: session start (a race: the grid formed) → results confirmed; tStart: the clock starts

@@ -32,7 +32,53 @@ module.exports = function snapshot(win, outFile) {
     await run(`localStorage.clear()`);
     if (process.env.F1KR_SIZE) { const [w, h] = process.env.F1KR_SIZE.split("x").map(Number); win.setSize(w, h); await wait(300); }
     if (process.env.F1KR_BIGMAP) await run(`localStorage.setItem("f1kr:sideW","900"); localStorage.setItem("f1kr:mapH","640"); dispatchEvent(new Event("resize"))`);
-    if (process.env.F1KR_SWEEP) {
+    if (process.env.F1KR_GRIDSWEEP) {
+      // F1KR_GRIDSWEEP="2026:모나코 그랑프리 · 결승,…" – per race: load it (it opens at the standing grid), the 3D view with
+      // its real surroundings, Map3D.gridCheck(), the cameras on the first and last car on the grid before play, and
+      // two pictures (down the grid from behind; the last slots) next to the output file
+      await run(`document.getElementById("modeReplay").click(); localStorage.setItem("f1kr:mapView", JSON.stringify("3d"));`);
+      for (const item of process.env.F1KR_GRIDSWEEP.split(",")) {
+        const [year, pick] = item.split(":");
+        await run(`(() => { const y = document.getElementById("year"); y.value = ${+year}; y.dispatchEvent(new Event("change")); })()`);
+        // (picked by the option's text or its session path, e.g. "Monaco_Grand_Prix/2026-06-07_Race")
+        for (let i = 0; i < 60 && !(await run(`[...document.getElementById("session").options].some((o) => o.text.includes(${JSON.stringify(pick)}) || o.value.includes(${JSON.stringify(pick)}))`)); i++) await wait(500);
+        const found = await run(`(() => { const s = document.getElementById("session"); const o = [...s.options].find((x) => x.text.includes(${JSON.stringify(pick)}) || x.value.includes(${JSON.stringify(pick)})); if (!o) return false; s.value = o.value; document.getElementById("load").click(); return true; })()`);
+        if (!found) { console.log("GRIDSWEEP", JSON.stringify({ item, error: "no session" })); continue; }
+        console.log("GSTEP load", item);
+        await wait(1500);
+        for (let i = 0; i < 400 && (await run(`document.getElementById("load").disabled`)); i++) await wait(500);
+        console.log("GSTEP loaded", await run(`document.getElementById("progress").textContent`));
+        await run(`document.querySelector('.view-switch [data-view="3d"]').click(); document.querySelector('[data-cam="heli"]').click()`);
+        if (process.env.F1KR_EXPAND && !(await run(`document.getElementById("mapCard").classList.contains("expanded")`))) await run(`document.getElementById("expandMap").click()`);
+        const path = await run(`document.getElementById("session").value`);
+        let dbg = null;
+        for (let i = 0; i < 120; i++) { await wait(1000); dbg = JSON.parse(await run(`window.Map3D?.debug?.() || "{}"`)); if (dbg.real && String(dbg.key || "").includes(path)) break; }
+        console.log("GSTEP world", dbg.key, dbg.real);
+        await wait(2500);
+        const t = await run(`F1KR.t - +document.getElementById("seek").min`), lights = await run(`F1KR.src.startTime() - F1KR.t`);
+        const check = JSON.parse(await run(`window.Map3D.gridCheck()`));
+        // the cameras before play: the first and the last car on the grid, onboard and chase – is the car on screen, and what does the view say
+        const cams = [];
+        const order = await run(`JSON.stringify(Object.entries(F1KR.src.state.TimingAppData?.Lines || {}).filter(([, l]) => +l.GridPos > 0).sort((a, b) => a[1].GridPos - b[1].GridPos).map(([n]) => n))`);
+        const nums = JSON.parse(order);
+        for (const num of [nums[0], nums[nums.length - 1]].filter(Boolean)) for (const cam of ["onboard", "chase"]) {
+          await run(`F1KR.setFocus(${JSON.stringify(num)}); document.querySelector('[data-cam="${cam}"]').click()`);
+          await wait(1200);
+          const f = JSON.parse(await run(`JSON.stringify({ follow: JSON.parse(Map3D.debug()).follow, note: (document.getElementById("camNote3d")?.hidden === false ? document.getElementById("camNote3d").textContent : "") })`));
+          // (onboard: the camera rides on the car – within 2 m of it; chase: the car in the picture)
+          const ok = !!f.follow?.visible && (cam === "onboard" ? f.follow.camDist < 2 : Math.abs(f.follow.screen[0]) < 1 && Math.abs(f.follow.screen[1]) < 1 && f.follow.screen[2] < 1);
+          cams.push({ num, cam, ok, camDist: f.follow?.camDist, screen: f.follow?.screen, note: f.note });
+        }
+        await run(`document.querySelector('[data-cam="heli"]').click(); Map3D.viewGrid(30, 80, 16)`);
+        await wait(1500);
+        const tag = outFile.replace(/\.png$/, "") + "_" + item.replace(/[^A-Za-z0-9]+/g, "_").replace(/_+$/, "") + "_" + (dbg.loc || "").replace(/[^A-Za-z0-9]+/g, "_");
+        fs.writeFileSync(tag + "_grid.png", (await win.webContents.capturePage()).resize({ width: 1200 }).toPNG());
+        await run(`(() => { const n = JSON.parse(Map3D.gridCheck()).last?.g; return Map3D.viewSlot(n, 30, 12, 0, 70, 55); })()`);
+        await wait(1500);
+        fs.writeFileSync(tag + "_last.png", (await win.webContents.capturePage()).resize({ width: 1200 }).toPNG());
+        console.log("GRIDSWEEP", JSON.stringify({ item, loc: dbg.loc, key: dbg.key, t, lights, real: !!dbg.real, check, cams }));
+      }
+    } else if (process.env.F1KR_SWEEP) {
       // F1KR_SWEEP="2026:바레인 그랑프리 · 결승,2025:모나코 그랑프리 · 결승" – loads each race, builds the real 3D
       // surroundings, runs Map3D.occlusionTest() and saves a helicopter shot next to the output file.
       await run(`document.getElementById("modeReplay").click(); localStorage.setItem("f1kr:mapView", JSON.stringify("3d"));`);

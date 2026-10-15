@@ -49,7 +49,8 @@ app.whenReady().then(() => {
   archive = new Archive(cacheDir);
   setTimeout(() => archive.prune(), 5000);   // (old session recordings, past 3 GB)
   auth = new Auth(data);
-  live = new LiveClient({ getToken: () => auth.getToken() });
+  // (development only: F1KR_LIVEFILE plays a cached session's recorded messages through the live path – not packaged)
+  live = !app.isPackaged && process.env.F1KR_LIVEFILE ? new (require("./dev-livefile").LiveFile)(cacheDir, process.env.F1KR_LIVEFILE) : new LiveClient({ getToken: () => auth.getToken() });
   scenes = new Scenes(cacheDir);
   google = new GoogleTiles(data);
   // After sleep the socket is usually dead without noticing; reconnect straight away.

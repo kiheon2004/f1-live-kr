@@ -57,8 +57,12 @@ export class StartHistory {
   note(t, state) {
     this.noteClock(t, state.ExtrapolatedClock);
     const m = state.RaceControlMessages?.Messages, list = Array.isArray(m) ? m : Object.values(m || {});
-    for (let i = this.lastMsg; i < list.length; i++) this.noteMsg(t, list[i]?.Message);
-    this.lastMsg = list.length;
+    // (only messages not seen before: a fresh snapshot after a reconnect brings the whole list again)
+    if (list.length !== this.lastMsg) {
+      const seen = this.seenMsg || (this.seenMsg = new Set());
+      for (const x of list) { const k = `${x?.Utc}|${x?.Message}`; if (!seen.has(k)) { seen.add(k); this.noteMsg(t, x?.Message); } }
+      this.lastMsg = list.length;
+    }
     for (const [num, l] of Object.entries(state.TimingData?.Lines || {})) this.noteLine(t, num, l);
     for (const [num, l] of Object.entries(state.TimingAppData?.Lines || {})) if (l?.GridPos != null) this.grid.set(num, +l.GridPos || 0);
   }
@@ -98,7 +102,7 @@ export class StartHistory {
 
 // The start that matters at time t, from what is known by t (a replay never looks ahead):
 //   - before the race clock first runs: the race start to come (order: the published grid);
-//   - up to 10 minutes after a start's clock began to run (a standing start can follow laps behind the safety car:
+//   - up to 15 minutes after a start's clock began to run (a standing start can follow laps behind the safety car:
 //     Sepang 2026 lit its lights ~6 min after the clock started): that start;
 //   - the clock stopped by a red flag: the restart to come, in race control's resumption order (or the original grid);
 //   - otherwise null (racing).
@@ -117,15 +121,18 @@ export function startContext(hist, t) {
   };
   if (!last) return { t: Infinity, n: 1, pending: true, ...say(hist.rcm.filter(([tm]) => tm <= t), { standing: true, order: gridOrder(hist), orderFrom: "GridPos" }) };
   let running = false; for (const [ts, run] of hist.clock) { if (ts > t) break; running = run; }
-  if (running) return t - last.t < 600000 ? { ...last, ...say(hist.rcm.filter(([tm]) => tm <= t && tm > last.t), last) } : null;
+  if (running) return t - last.t < 900000 ? { ...last, ...say(hist.rcm.filter(([tm]) => tm <= t && tm > last.t), last) } : null;
   const msgs = hist.rcm.filter(([tm]) => tm <= t && tm > last.t);
   if (!msgs.some(([, m]) => /RED FLAG|SUSPENDED/.test(m))) return null;
   return { t: Infinity, n: done.length + 1, pending: true, ...say(msgs, { standing: null, order: null, orderFrom: null }) };
 }
 
 // A car's kind at a start, from what is known at time t (≤ lights out: now; after: as it was at lights out).
+// (the race start: in the pit lane at lights out = a pit-lane start. A restart: the race clock runs again with the cars
+// still in the pit lane behind the safety car – they reach the grid minutes later (Monaco 2026: clock +7729 s, the field
+// standing on the grid +7990–8008 s) – so only being in the pit lane now counts)
 export function carKind(hist, start, num, t) {
-  const at = Math.min(t, start.t), inPitNow = hist.flagAt(num, "InPit", t);
+  const at = start.n > 1 ? t : Math.min(t, start.t), inPitNow = hist.flagAt(num, "InPit", t);
   if (hist.flagAt(num, "Retired", t) || hist.flagAt(num, "Stopped", t)) return { kind: "out" };
   // (the published grid: the car's own grid position – a pit-lane starter's slot is left empty, not filled from behind;
   // race control's resumption order: the place in it)
@@ -166,6 +173,23 @@ export function departure(car, t, lag = 0) {
   if (i < 1 || V[i] <= PLAN.still) return null;
   while (i > 0 && V[i - 1] > PLAN.still) i--;
   return i > 0 ? T[i] - lag : null;
+}
+
+// Is (x, z) on the pit lane's path (pts [{x, z}], cum: metres along it at each point)? Within `tol` m of it and `ends` m
+// clear of its ends (where it runs into the lap line) – a car the feed places there is in the pit lane whatever its
+// InPit flag says (Sepang 2026: the field queued in the pit lane behind a suspended start, InPit cleared for every car).
+// Returns the metres along it, or null.
+export function onPitPath(pts, cum, x, z, tol = 3, ends = 40) {
+  if (!pts || pts.length < 2) return null;
+  const len = cum[cum.length - 1];
+  let best = Infinity, bu = null;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+    const f = l2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0;
+    const d = Math.hypot(a.x + dx * f - x, a.z + dz * f - z);
+    if (d < best) { best = d; bu = cum[i - 1] + (cum[i] - cum[i - 1]) * f; }
+  }
+  return best <= tol && bu >= ends && bu <= len - ends ? bu : null;
 }
 
 // Where a car with no position at time t is drawn, or null. In track coordinates { s, d, vs, vd, as, est } (est: why);

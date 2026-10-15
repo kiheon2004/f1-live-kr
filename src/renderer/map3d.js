@@ -10,7 +10,7 @@ import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
-import { StartHistory, startContext, carKind, placeWithout, arrivalBy, PLAN } from "./startplan.js";
+import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN } from "./startplan.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -934,12 +934,14 @@ function fieldAt(src, t) {
   const appLines = src.state.TimingAppData?.Lines || {}, lines = src.state.TimingData?.Lines || {};   // (the published grid doesn't change during the race; the order is the current one)
   const cars = [];
   for (const [num, p] of Object.entries(now)) {
-    const pr = F.project(p[0] * DM - c0.x, -(p[1] * DM - c0.z));
+    const x = p[0] * DM - c0.x, z = -(p[1] * DM - c0.z), pr = F.project(x, z);
     if (!pr) continue;
     const tel = src.carAt?.(num, T), tel1 = src.carAt?.(num, T - 1000), q = before[num];
+    // (on the pit lane's path – a queue there beside the grid – is not on the track, whatever its offset)
+    const inPitLane = !!world.pitLane && onPitPath(world.pitLane.pts, world.pitLane.cum, x, z) != null;
     const standing = tel && tel1 ? tel.speed <= 2 && tel1.speed <= 2 : !!q && Math.hypot(p[0] - q[0], p[1] - q[1]) * DM < 1.5;
     const half = Math.max(edgeOf(pr.sample, 1), -edgeOf(pr.sample, -1));
-    cars.push({ num, s: pr.s, d: pr.d, standing, onTrack: Math.abs(pr.d) <= half + 1, gridPos: +(appLines[num]?.GridPos || 0), position: +(lines[num]?.Position || 0) });
+    cars.push({ num, s: pr.s, d: pr.d, standing, onTrack: Math.abs(pr.d) <= half + 1 && !inPitLane, gridPos: +(appLines[num]?.GridPos || 0), position: +(lines[num]?.Position || 0) });
   }
   const preStart = preStartAt(src, T), m = world.gridModel;
   const assign = assignSlots(cars.filter((c) => c.onTrack), { ...m, slots: m.slots.size }, F.L, preStart);
@@ -1204,7 +1206,8 @@ function updateCars(dt) {
     // the T-cam sees the driver's helmet in front of it, as on TV; from the driver's own eyes it is round the camera
     c.model.userData.helmet.visible = !(camMode === "eye" && num === focusNum);
     c.label.sp.userData.own = inCockpit;
-    paintLabel(c.label, `${l.Position || ""} ${d.Tla}`.trim(), "#" + (d.TeamColour || "888"), num === A.focus);
+    // (≈: drawn where the start and its telemetry put it – the feed has no position for it now, or one far off its slot)
+    paintLabel(c.label, `${l.Position || ""} ${d.Tla}${est ? " ≈" : ""}`.trim(), "#" + (d.TeamColour || "888"), num === A.focus);
     c.label.sp.material.opacity = out ? 0.45 : 1;
   }
   // (a car not drawn this frame is drawn afresh when it's back: no easing from where it was before)
@@ -1864,7 +1867,9 @@ const sessionOf = (key) => (key || "").startsWith("live:") ? key.split(":").slic
 // come in), each car's distance from its speed telemetry, the share of the field standing still (per 250 ms).
 let startFor = null;
 function startState(src, t) {
-  if (!startFor || startFor.src !== src) startFor = { src, hist: src.isLive ? new StartHistory() : StartHistory.fromEvents(src.events || []), sv: new Map(), still: new Map(), ctx: new Map(), arr: new Map() };
+  // (a live feed is one source across sessions: a new session's key starts the history over)
+  const key = src.state.SessionInfo?.Key ?? null;
+  if (!startFor || startFor.src !== src || (src.isLive && startFor.key !== key)) startFor = { key, src, hist: src.isLive ? new StartHistory() : StartHistory.fromEvents(src.events || []), sv: new Map(), still: new Map(), ctx: new Map(), arr: new Map() };
   const S = startFor;
   if (src.isLive) S.hist.note(t, src.state);
   return S;
@@ -1901,7 +1906,11 @@ function fieldStillAt(S, src, t) {
   let v = S.still.get(key);
   if (v == null) {
     let n = 0, still = 0;
-    for (const num of Object.keys(src.car || {})) { const c = src.carAt(num, key * 250); if (!c) continue; n++; if (c.speed <= PLAN.still) still++; }
+    // (retired cars stand still for good: not counted. A car standing in the pit lane – by the feed's position, flagged
+    // or not – is no field standing on the grid: counted, not as standing)
+    const raw = world?.pitLane ? src.positionsAt(key * 250) : null, c0 = world?.center;
+    const inLane = (num) => { const r = raw?.[num]; return !!r && onPitPath(world.pitLane.pts, world.pitLane.cum, r[0] * DM - c0.x, -(r[1] * DM - c0.z)) != null; };
+    for (const num of Object.keys(src.car || {})) { if (S.hist.flagAt(num, "Retired", key * 250)) continue; const c = src.carAt(num, key * 250); if (!c) continue; n++; if (c.speed <= PLAN.still && !inLane(num)) still++; }
     v = n >= 6 ? still / n : 0;
     if (S.still.size > 600) S.still.clear();
     S.still.set(key, v);
@@ -1923,9 +1932,14 @@ function carsWithout(src, t, pos, F, lag) {
   // the pit-lane starters' queue: in grid order (their real order in the queue isn't in the data – an estimate)
   const pitters = [...kinds].filter(([, k]) => k.kind === "pit").sort((a, b) => (a[1].g || 99) - (b[1].g || 99)).map(([n]) => n);
   const field = (tt) => fieldStillAt(S, src, tt);
-  const need = PLAN.formation * (F?.L || 5000), c0 = world.center;
+  const need = PLAN.formation * (F?.L || 5000), c0 = world.center, raw = src.positionsAt(t);
   for (const num of Object.keys(drivers)) {
     const kind = kinds.get(num), slot = kind.kind === "grid" ? world.gridModel?.slots.get(kind.g) : null;
+    // (in the pit lane by the feed's own position, flagged or not – Sepang 2026: the field queued there behind a suspended
+    // start, InPit cleared –: not a car on the grid, drawn where the feed has it. The raw position: the steadied tracks
+    // leave out what is off the lap line, the pit lane with it)
+    const r = raw[num];
+    if (r && world.pitLane && onPitPath(world.pitLane.pts, world.pitLane.cum, r[0] * DM - c0.x, -(r[1] * DM - c0.z)) != null) continue;
     let feedOff = null;
     if (pos[num]) {
       // the feed has it: only a car standing on the grid by its telemetry whose position is far from its slot
@@ -2662,6 +2676,41 @@ window.Map3D = {
       start: ctx ? { t: ctx.t, n: ctx.n, pending: !!ctx.pending, standing: ctx.standing, orderFrom: ctx.orderFrom, order: ctx.order } : null, pitExit: S?.hist.pitExitAt(app().t) ?? null, preStart: f?.preStart ?? null, cars: cs,
       drawn: [...cars.values()].filter((c) => c.obj.visible).length, estimated: [...cars.values()].filter((c) => c.obj.visible && c.est).map((c) => [c.num, c.est.kind, c.est.g, c.est.est]) });
   },
+  // development: the grid as drawn – where it came from, every slot's place (first, middle, last in lat/lon and along
+  // the lap), whether its paint is really seen (a ray straight down from 30 m over the box's front line has to reach the
+  // paint before the road or anything else; and from the camera of viewGrid()), the start line, and the cars on it
+  gridCheck() {
+    const m = world?.gridModel, gf = world?.real?.geo;
+    if (!m) return JSON.stringify({ ok: false, info: world?.gridInfo || null, pit: world?.pitInfo || null });
+    const paint = world.group.getObjectByName("gridPaint"), fz = profileFor(app().sessionYear?.() || null).FZ;
+    const rc = new THREE.Raycaster(), P = [0, 0, 0], down = new THREE.Vector3(0, -1, 0), targets = [world.group];
+    rc.camera = camera;   // (labels are sprites: a raycast needs the camera to test them)
+    const hitName = (o) => { let x = o; while (x && !x.name) x = x.parent; return x?.name || o.type; };
+    const slots = [];
+    for (const sl of m.slots.values()) {
+      world.frame.at(sl.s + fz + GRID_RULES.frontGap - 0.06, sl.lat, P);
+      rc.set(new THREE.Vector3(P[0], P[1] + 30, P[2]), down); rc.far = 60;
+      const hits = rc.intersectObjects(targets, true).filter((h) => h.object.visible !== false && !h.object.isSprite);
+      const first = hits[0], roadHit = hits.find((h) => h.object !== paint);
+      slots.push({ g: sl.g, s: +sl.s.toFixed(1), lat: +sl.lat.toFixed(2), seenFromAbove: !!first && first.object === paint, firstHit: first ? hitName(first.object) : null, overRoad: first && roadHit ? +(roadHit.distance - first.distance).toFixed(3) : null, ll: gf ? gf.toLL(sl.x, sl.z).map((v) => +v.toFixed(6)) : null });
+    }
+    const p1 = m.slots.get(1), last = m.slots.get(m.slots.size), mid = m.slots.get(Math.ceil(m.slots.size / 2));
+    const L = world.frame.L, span = ((p1.s - last.s) % L + L) % L;
+    const drawn = [...cars.values()].filter((c) => c.obj.visible);
+    return JSON.stringify({ ok: true, info: world.gridInfo, pit: world.pitInfo, L: +L.toFixed(1), span: +span.toFixed(1), crossesLapStart: last.s > p1.s,
+      first: slots[0], mid: slots[mid.g - 1], last: slots[slots.length - 1], seen: slots.filter((x) => x.seenFromAbove).length, notSeen: slots.filter((x) => !x.seenFromAbove).map((x) => [x.g, x.firstHit]),
+      minOverRoad: Math.min(...slots.map((x) => x.overRoad ?? 9)), cars: { drawn: drawn.length, inSlot: drawn.filter((c) => c.grid?.state === "standing" || c.est?.est === "slot").length, estimated: drawn.filter((c) => c.est).length, pitQueue: drawn.filter((c) => c.est?.pit).length } });
+  },
+  // development: every car's raw place at time t (default now) – along the lap from pole's slot (m, + ahead), across,
+  // its telemetry speed, the slot it would take (g) and how far it is from it, standing / on the track
+  fieldAt(t = app().t) {
+    const m = world?.gridModel; if (!m) return "no grid";
+    const f = fieldAt(app().src, t), p1 = m.slots.get(1), L = world.frame.L;
+    return JSON.stringify({ t, preStart: f.preStart, cars: [...f.cars.values()].map((c) => { const a = f.assign.get(c.num); let u = c.s - p1.s; u = ((u % L) + L * 1.5) % L - L / 2;
+      // (and how far it is from the measured pit lane's path, and where along it)
+      let pit = null; if (world.pitLane) { const q = [0, 0, 0]; world.frame.at(c.s, c.d, q); let best = Infinity, bu = 0; const P = world.pitLane.pts; for (let i = 0; i < P.length; i++) { const dd = Math.hypot(P[i].x - q[0], P[i].z - q[2]); if (dd < best) { best = dd; bu = world.pitLane.cum[i]; } } pit = [+best.toFixed(1), Math.round(bu)]; }
+      return [c.num, c.gridPos, Math.round(u), +c.d.toFixed(1), Math.round(app().src.carAt?.(c.num, t)?.speed ?? -1), c.standing ? 1 : 0, c.onTrack ? 1 : 0, a ? a.g : null, a ? +a.delta.toFixed(1) : null, pit, c.position]; }).sort((x, y) => y[2] - x[2]) });
+  },
   // development: look at slot g from `back` m behind it, `h` m up, `side` m to the left, towards `ahead` m in front
   viewSlot(g = 1, back = 12, h = 4, side = 0, ahead = 6, fov = 50) {
     const sl = world?.gridModel?.slots.get(g); if (!sl) return "no grid";
@@ -2774,6 +2823,6 @@ window.Map3D = {
   debug: () => JSON.stringify({ cam: camera?.position.toArray().map(Math.round), target: controls?.target.toArray().map(Math.round), fov: camera?.fov, aspect: camera?.aspect,
     size: world && [world.size.x, world.size.y, world.size.z].map(Math.round), host: host && [host.clientWidth, host.clientHeight], cars: cars.size, mode: camMode,
     paint: (() => { const c = cars.get(app()?.focus || leader()); const m = c?.model.children[1]?.material; return m && { color: m.color.getHexString(), emissive: m.emissive.getHexString(), ei: m.emissiveIntensity }; })(),
-    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), pitchDeg: +(c.pitch * 57.3).toFixed(2), modelPitchDeg: +(c.model.rotation.x * 57.3).toFixed(2), camPitchDeg: +(new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ").x * 57.3).toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], visible: c.obj.visible, inScene: !!c.obj.parent }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, cap60: !!perf.cap, late: perf.late, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
+    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), pitchDeg: +(c.pitch * 57.3).toFixed(2), modelPitchDeg: +(c.model.rotation.x * 57.3).toFixed(2), camPitchDeg: +(new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ").x * 57.3).toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], camDist: +camera.position.distanceTo(c.pos).toFixed(2), visible: c.obj.visible, inScene: !!c.obj.parent, est: c.est?.est || null }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, cap60: !!perf.cap, late: perf.late, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
 };
 window.dispatchEvent(new Event("map3d-ready"));
