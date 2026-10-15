@@ -785,9 +785,15 @@ function pitBuilding(ctx, p) {
       if (d < 60) W.push({ u: uu, d });
     }
     if (W.length > 3) {
-      // the wall's line smoothed (a wall is straight where the edge wobbles in the data)
-      const dS = W.map((w, i) => { const near = W.filter((o) => Math.abs(o.u - w.u) <= 15); return near.reduce((a, o) => a + o.d, 0) / near.length; });
-      const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, frontV(W[i].u) + vTrack * (dS[i] - dd)); return [x, floorAt(W[i].u) + y, z]; };
+      // the wall's line smoothed (a wall is straight where the edge wobbles in the data): the median over ±30 m – a jump
+      // of the modelled edge doesn't move it –, then bending no more than 8 cm a metre (both ways along: Sakhir's wall had
+      // zigzagged in and out across the lane at the garages' end)
+      // (smoothed as a line across the lane – the building's front plus the distance –, not the distance alone: where
+      // the front steps in or out, the wall doesn't)
+      const vw = W.map((w) => frontV(w.u) + vTrack * w.d);
+      const vS = W.map((w) => { const near = W.map((o, k) => [o, vw[k]]).filter(([o]) => Math.abs(o.u - w.u) <= 30).map(([, x]) => x).sort((x, y) => x - y); return near[Math.floor(near.length / 2)]; });
+      for (const dir of [1, -1]) for (let i = dir > 0 ? 1 : W.length - 2; i >= 0 && i < W.length; i += dir) { const j = i - dir, lim = 0.08 * Math.abs(W[i].u - W[j].u); vS[i] = Math.max(vS[j] - lim, Math.min(vS[j] + lim, vS[i])); }
+      const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, vS[i] - vTrack * dd); return [x, floorAt(W[i].u) + y, z]; };
       for (let i = 0; i + 1 < W.length; i++) {
         const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
         // wall (track face, top, pit face), fence above it
@@ -1264,7 +1270,16 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     made.object.name = spec.id; made.object.userData.facility = spec.id;
     group.add(made.object);
     const anchorXZ = spec.model?.anchor ? gf.fromLL(spec.model.anchor[0], spec.model.anchor[1]) : null;
-    const gone = [...new Set([...(spec.picked || []), ...selectReplaced(spec, scene.buildings, gf, made.footprint, anchorXZ)])];
+    // (an entry that picks its own buildings – genericPitSpec – also takes every map building standing inside what it
+    // built, named or not: those are the pit complex's own parts; left, they stood in front of the garages' openings)
+    // (by area: a building a third or more of which lies inside – sampled on a 2 m grid –, as the map often has the
+    // same building twice, OSM's and Overture's outline, one reaching further out than the other)
+    const share = (r) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+      const st = Math.max(2, Math.sqrt(((x1 - x0) * (z1 - z0)) / 400)); let n = 0, k = 0;
+      for (let x = x0 + st / 2; x < x1; x += st) for (let z = z0 + st / 2; z < z1; z += st) if (inPoly(x, z, r)) { n++; if (inPoly(x, z, made.footprint)) k++; }
+      return n ? k / n : 0; };
+    const inside = spec.pick ? scene.buildings.filter((b) => b.kind !== "grandstand" && (() => { const r = ring(b, gf); return r.length >= 3 && share(r) >= 0.3; })()) : [];
+    const gone = [...new Set([...(spec.picked || []), ...inside, ...selectReplaced(spec, scene.buildings, gf, made.footprint, anchorXZ)])];
     for (const b of gone) skip.add(b);
     zones.push(made.footprint.map(([x, z]) => [x, z]), ...(made.occupancy || []));
     const c = centroid(made.footprint); spots.push([c[0], c[1], Math.max(120, Math.sqrt(Math.abs(polyArea(made.footprint))) * 1.4)]);

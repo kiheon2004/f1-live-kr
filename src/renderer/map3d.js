@@ -2671,6 +2671,13 @@ window.Map3D = {
     const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;
     return JSON.stringify({ t: app().t, u: +p.u.toFixed(1), off: +p.off.toFixed(2), feedOff: r && +r.off.toFixed(2), speed: +c.speed.toFixed(1), box: pitTeams.teams?.find((x) => x.team === team)?.box ?? null, gStart: Math.round(G.gStart), gEnd: Math.round(G.gEnd) });
   },
+  // development: what is seen at screen point (x, y: −1…1) – the first few objects a ray from the camera meets, named
+  // by their nearest named parent, with the distance and whether their material is shown
+  hitAt(x = 0, y = 0) {
+    const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x, y), camera); rc.camera = camera;
+    const name = (o) => { const out = []; let q = o; while (q && out.length < 3) { if (q.name) out.push(q.name); q = q.parent; } return out.join("<") || o.type; };
+    return JSON.stringify(rc.intersectObject(scene, true).filter((h) => !h.object.isSprite).slice(0, 5).map((h) => [name(h.object), +h.distance.toFixed(2), h.object.visible]));
+  },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
   viewPits(k = 20, back = 28, h = 9, side = 0, fov = 50) {
     let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
