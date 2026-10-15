@@ -2571,6 +2571,30 @@ window.Map3D = {
     const mesh = fg?.getObjectByProperty("isMesh", true), img = mesh?.material?.map?.image;
     return JSON.stringify({ info: r?.info, texture: img ? [img.width, img.height] : null });
   },
+  // development: the pit lane across – every 20 m between the limiter lines: the track's side and how far its edge is
+  // from the measured pit path (the feed's line, the fast lane), and (with a pit building) how far its garage fronts are
+  pitAcross() {
+    const P = world?.pitLane, F = world?.frame; if (!P) return JSON.stringify({ ok: false, info: world?.pitInfo });
+    let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
+    const o = {}, rows = [];
+    for (let u = Math.max(20, P.limitOn); u <= Math.min(P.len - 20, P.limitOff); u += 20) {
+      pitLaneAt(u, o); const fx = Math.sin(o.yaw), fz = Math.cos(o.yaw), nx = -fz, nz = fx;
+      const pr = F.project(o.x, o.z); if (!pr) continue;
+      const smp = pr.sample, side = pr.d >= 0 ? -1 : 1;   // (+1: the track lies in −n direction from the lane… sign of n towards the track)
+      const half = pr.d >= 0 ? edgeOf(smp, 1) : -edgeOf(smp, -1);
+      const toEdge = Math.abs(pr.d) - half;   // path → nearest track edge (m)
+      // which way n points relative to the track: n·(track point − lane point)
+      const tp = [0, 0, 0]; F.at(pr.s, 0, tp); const nTrack = Math.sign((tp[0] - o.x) * nx + (tp[2] - o.z) * nz);
+      let garage = null;
+      if (G) { let best = Infinity; for (const sl of G.slots) { const dx = sl.front[0] - o.x, dz = sl.front[1] - o.z, along = dx * fx + dz * fz; if (Math.abs(along) > 15) continue; const lat = (dx * nx + dz * nz) * -nTrack; if (Math.abs(along) < best) { best = Math.abs(along); garage = +lat.toFixed(1); } } }
+      // the first thing built on the garage side: a level ray 1.5 m up, out to 45 m
+      const rc = new THREE.Raycaster(new THREE.Vector3(o.x, o.y + 1.5, o.z), new THREE.Vector3(-nx * nTrack, 0, -nz * nTrack), 0.5, 45); rc.camera = camera;
+      const hit = world.real ? rc.intersectObject(world.real.group, true).find((h) => h.object.visible !== false && !h.object.isSprite) : null;
+      const nm = hit ? (() => { let x = hit.object; while (x && !x.name) x = x.parent; return x?.name || hit.object.type; })() : null;
+      rows.push([Math.round(u), +toEdge.toFixed(1), +Math.abs(pr.d).toFixed(1), garage, hit ? +hit.distance.toFixed(1) : null, nm]);
+    }
+    return JSON.stringify({ ok: true, loc: app().location(), facility: G?.facility || null, len: Math.round(P.len), rows });
+  },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
   viewPits(k = 20, back = 28, h = 9, side = 0, fov = 50) {
     let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });

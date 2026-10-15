@@ -207,7 +207,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
   const stands = [], curved = [];
   // mapped stands
   for (const b of scene.buildings) {
-    if (b.kind !== "grandstand") continue;
+    // (an outline taken for the pit building – facilities.js genericPitSpec – is no stand)
+    if (b.kind !== "grandstand" || b.asPitBuilding) continue;
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) continue;

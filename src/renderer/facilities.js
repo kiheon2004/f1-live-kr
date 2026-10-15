@@ -17,6 +17,7 @@ import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { disposeGroup } from "./dispose.js";
 import { entryAt } from "./venues.js";
+import { pathFrame, garageLine, garageRun, genericOutline, GENERIC, PICK } from "./pitlane.js";
 
 // ---------- registry ----------
 export const FACILITIES = [
@@ -1167,6 +1168,50 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
   return [...set];
 }
 
+// A pit building for a circuit the registry has none for (19 of the 26): the map's buildings met along the measured pit
+// lane on the side away from the track (pitlane.js garageLine) – or, where the map has none there, one made up on the
+// line at a typical distance – built as the registry's are (garages along the lane, the pit wall, the teams' layer).
+// Its look is a plain one (glass garage fronts, a white fascia): what the real building looks like isn't known here.
+//   pit – START_DATA's measured pit lane; toScene([X, Y] feed decimetres) → [x, z]; toTrack(x, z) → [dx, dz]
+export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, registry = FACILITIES }) {
+  if (!pit?.path?.length) return null;
+  const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
+  if (registry.some((s) => s.kind === "pit-building" && entryAt(s, venue, location) && yearOk(s))) return null;
+  const frame = pathFrame(pit.path.map(toScene));
+  const [u0, u1] = garageRun(pit.limitOn, pit.limitOff, frame.len);
+  return {
+    id: "generic-pits", name: "pit building (map / estimate)", kind: "pit-building", venue: venue ? [venue.key] : [], loc: location ? [location] : [], years: null,
+    status: "trial", builder: "pitBuilding",
+    // (picked once – before the grandstands are built: scenery.js. A "grandstand" outline met on the garages' line is
+    // the pit building mapped so – a stand can't stand where the garages are, metres from the lane (Sakhir: a 400 m
+    // unnamed one along the lane on the garages' side; the Main Grandstand is across the straight): built as the pit
+    // building, left out of the stands (b.asPitBuilding))
+    pick(buildings, gf) {
+      if (this.parts) return this.parts;
+      const rings = buildings.map((b) => ({ ring: ring(b, gf), ref: b })).filter((r) => r.ring.length >= 3);
+      const g = garageLine(frame, rings, toTrack, u0, u1);
+      this.found = { front: g.front == null ? null : +g.front.toFixed(1), coverage: g.coverage, parts: g.parts.length, run: [Math.round(u0), Math.round(u1)] };
+      // (diagnostics: what a longer ray meets first at a few stations – development, Map3D.debug().info)
+      const far = garageLine(frame, rings, toTrack, u0, u1, { ...PICK, max: 60, step: (u1 - u0) / 6 });
+      this.found.far = far.stations.map((st) => [Math.round(st.u), st.s == null ? null : +st.s.toFixed(1), st.ref ? `${st.ref.kind || "building"}:${st.ref.name || ""}` : null]);
+      this.picked = g.parts;
+      for (const b of g.parts) if (b.kind === "grandstand") { b.asPitBuilding = true; (this.found.stands ||= []).push(b.name || "(unnamed)"); }
+      if (g.parts.length) return (this.parts = g.parts);
+      // (none on the line: one made up, its outline back in the map's own metres – gf.xz turned round)
+      const o = gf.xz([0, 0]);
+      this.found.madeUp = true;
+      return (this.parts = [{ pts: genericOutline(frame, g.side, u0, u1).map(([x, z]) => [x - o[0], o[1] - z]), h: GENERIC.height, min: 0, synthetic: true }]);
+    },
+    params: {
+      // estimates (no source for any one circuit): garages 8.5 m wide, 8 m high where the map has no height
+      height: GENERIC.height, garagePitch: GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
+      facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#8e9196", fascia: "fasciaWhite",
+      // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
+      pitWall: { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 },
+    },
+  };
+}
+
 // opts: { scene, gf, groundAt, location, year, toTrack, trial (setting on), readModel(file) → bytes,
 // isCurrent() → false once the result would land in a world that's gone }. Returns the contract, plus `info`
 // (one line per facility: built how, or why not), or null when no longer current (everything made is freed).
@@ -1200,7 +1245,8 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     }
     if (!made && spec.builder) {
       try {
-        const parts = selectReplaced(spec, scene.buildings, gf);
+        // (an entry made for this session's circuit picks its own map buildings – genericPitSpec)
+        const parts = spec.pick ? spec.pick(scene.buildings, gf) : selectReplaced(spec, scene.buildings, gf);
         if (!parts.length) throw new Error("its map buildings aren't in the data");
         const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, year, trial, toTrack, alongTrack, scene }, spec.params || {});
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
@@ -1212,11 +1258,11 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     made.object.name = spec.id; made.object.userData.facility = spec.id;
     group.add(made.object);
     const anchorXZ = spec.model?.anchor ? gf.fromLL(spec.model.anchor[0], spec.model.anchor[1]) : null;
-    const gone = selectReplaced(spec, scene.buildings, gf, made.footprint, anchorXZ);
+    const gone = [...new Set([...(spec.picked || []), ...selectReplaced(spec, scene.buildings, gf, made.footprint, anchorXZ)])];
     for (const b of gone) skip.add(b);
     zones.push(made.footprint.map(([x, z]) => [x, z]), ...(made.occupancy || []));
     const c = centroid(made.footprint); spots.push([c[0], c[1], Math.max(120, Math.sqrt(Math.abs(polyArea(made.footprint))) * 1.4)]);
-    info.push({ id: spec.id, how, status: spec.status, replaced: gone.length, ...(made.info || {}), ...(reason ? { modelError: reason } : {}) });
+    info.push({ id: spec.id, how, status: spec.status, replaced: gone.length, ...(spec.found ? { found: spec.found } : {}), ...(made.info || {}), ...(reason ? { modelError: reason } : {}) });
   }
   if (!isCurrent()) return null;
   // Close-by detail by the distance to the garages themselves (their fronts, not a bounding box: a long building at an
