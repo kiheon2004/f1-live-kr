@@ -673,3 +673,10 @@ export function setCarEnvironment(car, env, intensity = 1) {
   });
 }
 export const DIMENSIONS = (season, teamName) => { const p = profileFor(season, teamName); return { FZ: p.FZ, RZ: p.RZ, FR: p.FR, RR: p.RR, FX: p.W / 2 - p.FW / 2, RX: p.W / 2 - p.RW / 2 }; };
+// The car's own wheel parts (shared template geometries – never freed by a caller) and where its wheels are, for a
+// wheel off the car (a pit crew's: crew.js): front / rear { tyre, band, lip, cover }, radii, widths and hub places.
+// The car's wheels in its userData.wheels are in this order: front left (+x), front right, rear left, rear right.
+export function wheelParts(season, teamName) {
+  const p = profileFor(season, teamName), t = template(p);
+  return { key: p.key, front: t.front, rear: t.rear, FR: p.FR, RR: p.RR, FW: p.FW, RW: p.RW, FZ: p.FZ, RZ: p.RZ, FX: p.W / 2 - p.FW / 2, RX: p.W / 2 - p.RW / 2, W: p.W };
+}

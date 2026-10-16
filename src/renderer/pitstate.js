@@ -94,19 +94,82 @@ export function laneOffsetOf(s, cs, off, u, gStart, gEnd, P = PIT) {
 // A team's crew, from its cars' states (crew.js draws it): "work" round the car in its box (not at a stop-and-go:
 // no work is allowed), "hold" standing back by the garage at a stop-and-go, "ready" at the box while a car of the team
 // comes down the lane to it (FIA 34.13: in the pit lane only just before the work), "back" walking back over the
-// first `leave` m after it left; else none (in the garage).
-//   cars: [{ num, state: pitState(...), u, boxU, lastBox }]
+// first `leave` m after it left; else none (in the garage). Working: `since` – seconds the car has stood (its stop's
+// own clock: crew.js plays the work on it); walking back: `ago` – seconds since it left.
+//   cars: [{ num, state: pitState(...), u, boxU, lastBox, stillFor }]
 export function crewPhase(cars, P = PIT) {
   const inBox = cars.find((c) => c.state.state === "in box");
-  if (inBox) return { phase: "work", num: inBox.num, f: 1 };
+  if (inBox) return { phase: "work", num: inBox.num, f: 1, since: inBox.stillFor ?? null };
   const sg = cars.find((c) => c.state.state === "stop-go");
   if (sg) return { phase: "hold", num: sg.num, f: 1 };
   const coming = cars.filter((c) => c.boxU != null && ["fast lane", "to box", "entry", "waiting (double stack)"].includes(c.state.state) && c.u != null && c.u < c.boxU + P.atBox)
     .sort((a, b) => b.u - a.u)[0];
   if (coming) return { phase: "ready", num: coming.num, f: 1 - ss(60, 160, coming.boxU - coming.u) };
   const gone = cars.find((c) => c.state.state === "leaving box" || (c.lastBox && c.lastBox.ago < 8));
-  if (gone) return { phase: "back", num: gone.num, f: 1 - ss(0, 8, gone.lastBox?.ago ?? 0) };
+  if (gone) return { phase: "back", num: gone.num, f: 1 - ss(0, 8, gone.lastBox?.ago ?? 0), ago: gone.lastBox?.ago ?? 0 };
   return { phase: "none", num: null, f: 0 };
+}
+
+// A pending time penalty (s) per car – "FIA STEWARDS: 5 SECOND TIME PENALTY FOR CAR 22 (TSU) …" – served at the car's
+// next stop: nobody may work on the car until it has stood that long (Sporting Regulations: time penalties served in
+// the pit lane). Done once race control says "PENALTY SERVED", or once the car has made a whole pit visit after it was
+// given; while it is in its box it is still pending (the crew waits). → Map num → seconds
+export function pendingTimePenalties(rcm, t, visits = null) {
+  const out = new Map(), given = new Map();
+  for (const [tm, m] of rcm) {
+    if (tm > t) break;
+    const g = /(\d+) SECOND TIME PENALTY FOR CAR (\d+)/.exec(m); if (!g) continue;
+    const car = g[2], sec = +g[1];
+    if (/PENALTY SERVED/.test(m)) { if (out.get(car) === sec) out.delete(car); }
+    else if (!/REVIEWED|NO FURTHER|WITHDRAWN|CANCELLED|REVOKED/.test(m)) { out.set(car, (out.get(car) || 0) + sec); given.set(car, tm); }
+  }
+  if (visits) for (const [car, tg] of given) if (out.has(car) && (visits(car) || []).some(([a, b]) => a >= tg && b != null && b <= t)) out.delete(car);
+  return out;
+}
+
+// The end of the standstill a car is in at t (ms, its last sample standing), from its positions after t – the record
+// (a replay's): null when the data runs out first or it isn't standing
+export function standEndPos(c, t, still = 0.6, within = 300000) {
+  let i = idxAt(c, t); if (i < 1 || !stepStill(c, i, still)) return null;
+  const n = c.n ?? c.t.length;
+  while (i + 1 < n && stepStill(c, i + 1, still) && c.t[i + 1] - t < within) i++;
+  return i + 1 < n ? c.t[i] : null;
+}
+
+// The start of the next standstill (ms) within `within` ms after t, from the positions (the record: a replay's) – a car
+// coming down the lane to its box: when it will stand there. null if it doesn't within that.
+export function nextStandPos(c, t, within = 60000, still = 0.6) {
+  let i = idxAt(c, t); if (i < 1) return null;
+  const n = c.n ?? c.t.length;
+  while (i + 1 < n && !stepStill(c, i + 1, still)) { i++; if (c.t[i] - t > within) return null; }
+  return i + 1 < n ? c.t[i] : null;
+}
+
+// What is done at a stop – what the crew is shown doing (crew.js):
+//   "tyres": a new set fitted (played: jacks, guns, wheels off and on); "work": not known – the crew round the car in
+//   the usual places, nothing played; "hold": a stop-and-go (no work allowed).
+// From: the stop (t0: ms the car stood, t1: its last standing sample when known – the record –, else null), the car's
+// new tyre stints with the time each was sent (replay.js TyreLog), the stop's stationary time if F1 sent one (D, s),
+// a penalty (stop-go) and a time penalty to serve (s), and the policy:
+//   "record"   – a replay: the session's record, also what was sent after the moment shown (a new stint sent up to
+//                90 s after the car stood is this stop's; the stop's length from its positions) – a reconstruction
+//   "observed" – only what had arrived by the moment shown and before the car left its box (live: a stint is sent ~15 s
+//                after the car left, so a live stop's work is never known while it stands; a message that comes late
+//                never lifts a car again or puts wheels back)
+//   "typical"  – as observed, and a stop with nothing known shown as a typical tyre change (an estimate, said so)
+// → { kind, from: "record" | "observed" | "typical" | null, D (s, null unknown), wait (s), compound }
+export function stopPlan({ t, t0, t1 = null, tyres = [], stopTime = null, penalty = null, timePen = 0, policy = "observed" }) {
+  if (penalty === "stop-go") return { kind: "hold", from: null, D: null, wait: 0, compound: null };
+  const wait = timePen || 0;
+  const posD = t1 != null && t1 >= t0 ? (t1 - t0) / 1000 + 0.25 : null;   // (positions ~4 a second: it left within the next quarter)
+  const known = (e) => e.ms >= t0 - 2000 && (policy === "record" ? e.ms <= t0 + 90000 : e.ms <= t && (t1 == null || e.ms <= t1));
+  const set = tyres.find((e) => known(e));
+  if (set && set.changed !== false) {
+    const D = policy === "record" ? posD ?? stopTime : null;
+    return { kind: "tyres", from: policy === "record" ? "record" : "observed", D, wait, compound: set.compound || null };
+  }
+  if (policy === "typical" && !set) return { kind: "tyres", from: "typical", D: null, wait, compound: null };
+  return { kind: "work", from: null, D: policy === "record" ? posD ?? stopTime : null, wait, compound: null };
 }
 
 // The penalties race control has given and not yet seen served, by t: Map num → "drive-through" | "stop-go".

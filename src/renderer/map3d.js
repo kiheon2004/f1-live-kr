@@ -12,11 +12,11 @@ import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlot
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN } from "./startplan.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
-import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pitVisits, posSpeed, standingForPos, lastStandPos, PIT } from "./pitstate.js";
-import { crewMeshes, crewAt, crewLayout } from "./crew.js";
+import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
+import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
@@ -108,6 +108,7 @@ function initGeoSettings() {
     document.getElementById("geoQuality").value = QUALITY[o.quality] ? o.quality : "balanced";
     paintQualityNow();
     document.getElementById("geoNight").value = o.night || "auto";
+    document.getElementById("geoPitWork").value = ["record", "observed", "typical"].includes(o.pitWork) ? o.pitWork : "record";
   };
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
@@ -134,6 +135,7 @@ function initGeoSettings() {
   document.getElementById("geoBigCars").addEventListener("change", (e) => change({ bigCars: e.target.checked }, false));
   document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); applyQuality(); paintQualityNow(); });
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
+  document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
     m.textContent = "확인하는 중…"; m.classList.remove("bad");
@@ -278,7 +280,8 @@ function pitFrame(src, t, lag, isRace) {
   const G = pitTeams.G; if (!G || !world?.pitLane) return null;
   const m = pitModelFor(G), S = startState(src, t), ctx = startCtxAt(S, t);
   if (laneTestFor?.lane !== world.pitLane) laneTestFor = { lane: world.pitLane, test: laneCells(world.pitLane.pts.map((p) => [p.x, p.z])) };
-  const pen = pendingPenalties(S.hist.rcm, t, (num) => pitVisits(S.hist.flags.get(num + ":InPit"), t)), drivers = src.state.DriverList || {}, c0 = world.center;
+  const visits = (num) => pitVisits(S.hist.flags.get(num + ":InPit"), t), timePen = pendingTimePenalties(S.hist.rcm, t, visits);
+  const pen = pendingPenalties(S.hist.rcm, t, visits), drivers = src.state.DriverList || {}, c0 = world.center;
   const raw = src.positionsAt(t), out = new Map();
   // (each team's box tolerance: half the way to the nearest other team's box)
   const boxes = (pitTeams.teams || []).filter((q) => q.box != null).map((q) => [q.team, q.box]).sort((a, b) => a[1] - b[1]), tolOf = new Map();
@@ -296,11 +299,11 @@ function pitFrame(src, t, lag, isRace) {
     const trk = src.tracks?.cars?.[num];
     const speed = trk ? posSpeed(trk, t) : (cars.get(num)?.speed ?? 0), stillFor = trk ? standingForPos(trk, t) : 0;
     const ls = trk ? lastStandPos(trk, t) : null; let lastBox = null;
-    if (ls && tm?.box != null) { const q = [0, 0, 0]; if (src.tracks?.at?.(num, ls.t1, q)) { const pu = G.project(q[0] * DM - c0.x, -(q[1] * DM - c0.z)).u; if (Math.abs(pu - tm.box) <= Math.min(PIT.atBox, tolOf.get(team) ?? PIT.atBox)) lastBox = { endU: pu, ago: (t - ls.t1) / 1000 }; } }
+    if (ls && tm?.box != null) { const q = [0, 0, 0]; if (src.tracks?.at?.(num, ls.t1, q)) { const pu = G.project(q[0] * DM - c0.x, -(q[1] * DM - c0.z)).u; if (Math.abs(pu - tm.box) <= Math.min(PIT.atBox, tolOf.get(team) ?? PIT.atBox)) lastBox = { endU: pu, ago: (t - ls.t1) / 1000, t0: ls.t0, t1: ls.t1 }; } }
     let pitStart = null;
     if (ctx && carKind(S.hist, ctx, num, t).kind === "pit") pitStart = speed <= PIT.still ? "queue" : "go";
     const inRun = pr.off > -3 && pr.off < 40;
-    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
+    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
   }
   for (const r of out.values()) r.state = pitState(r.input);
   for (const r of out.values()) if (r.state.state !== "in box" && r.input.speed <= PIT.still && [...out.values()].some((o) => o !== r && o.team === r.team && o.state.state === "in box")) { r.input.teammateInBox = true; r.state = pitState(r.input); }
@@ -315,14 +318,14 @@ function pitFrame(src, t, lag, isRace) {
   return out;
 }
 const pitCost = { ms: 0, frames: 0 };
-// the nearest point of the measured pit path to (x, z): { x, z, d }
+// the nearest point of the measured pit path to (x, z): { x, z, d, tx, tz (the way cars go along it there) }
 function nearestOnPath(x, z) {
   const P = world.pitLane?.pts; if (!P) return null;
   let best = null;
   for (let i = 1; i < P.length; i++) {
     const a = P[i - 1], b = P[i], ex = b.x - a.x, ez = b.z - a.z, l2 = ex * ex + ez * ez; if (!l2) continue;
     const f = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / l2)), px = a.x + ex * f, pz = a.z + ez * f, d = Math.hypot(x - px, z - pz);
-    if (!best || d < best.d) best = { x: px, z: pz, d };
+    if (!best || d < best.d) { const l = Math.sqrt(l2); best = { x: px, z: pz, d, tx: ex / l, tz: ez / l }; }
   }
   return best;
 }
@@ -337,7 +340,8 @@ function pitDraw(c, r, v) {
   v.y = v.y + (r.at.floor + 0.004 - v.y) * r.inRun;
   // standing, along the lane; moving across, turned by the slope of the way across
   if (c.speed < 6 || r.turn) {
-    const ax = s.along[0], az = s.along[1], fwd = Math.sin(c.yaw) * ax + Math.cos(c.yaw) * az >= 0 ? 1 : -1;
+    // (the way along: the measured pit path's – from the entry to the exit; the heading before a seek can be anything)
+    const ax = s.along[0], az = s.along[1], q = nearestOnPath(r.x, r.z), fwd = q && q.d < 25 ? (ax * q.tx + az * q.tz >= 0 ? 1 : -1) : Math.sin(c.yaw) * ax + Math.cos(c.yaw) * az >= 0 ? 1 : -1;
     const ox = -s.inward[0], oz = -s.inward[1], k = Math.sin(r.turn * fwd), cs = Math.cos(r.turn);
     const fx = ax * fwd * cs + ox * k, fz = az * fwd * cs + oz * k;
     c.yaw = Math.atan2(fx, fz);
@@ -347,27 +351,97 @@ function pitDraw(c, r, v) {
 // standing back by the garage (a stop-and-go: hold); out at the box while a car of the team comes to it (ready); walking
 // back after it left (back); else in the garage (not drawn). Positions in the box's frame: the car's own when it is
 // there, else the box's place along the lane, facing the way the cars go.
+// What the work is (pitstate.js stopPlan, by the viewer's choice – pitWorkPolicy): a tyre change the record shows (or
+// a typical one, if asked for) is played on the stop's own clock – seconds since the car stood, from its positions, so
+// a seek, a pause or another speed shows the same moment the same way – lifting the car a few centimetres (its model
+// only: the car's place, the timing and the cameras' mounts are the car's own, and the cockpit cameras ride the lifted
+// car as drawn) and taking its wheels off and on (its own wheel groups hidden while a wheel is off; the wheels in the
+// crew's hands are copies of the car's). Anything else: the crew round the car, nothing played.
+function pitWorkPolicy() {
+  const v = geoSettings().pitWork || "record", live = !!app()?.src?.isLive;
+  return live && v === "record" ? "observed" : v;
+}
+const liftedCars = new Set();
+function pitPlanFor(num, src, policy, { t0, t1 = null, input }) {
+  const tyres = src.tyreChanges?.(num) || [];
+  const stop = (policy === "record" ? src.pitStops?.(num, Infinity) : src.pitStops?.(num)) || [];
+  const rec = stop.find((x) => x.stop && x.ms >= t0 && x.ms <= t0 + 120000);
+  return stopPlan({ t: app().t, t0, t1, tyres, stopTime: rec?.stop ?? null, penalty: input?.penalty || null, timePen: input?.timePen || 0, policy });
+}
 function updateCrews(frame) {
   const G = pitTeams.G;
-  if (!G || !world || !frame) { world?.crews?.clear(); return; }
+  // (the cars lifted and their wheels taken off last frame: back as they are unless still at work)
+  const was = new Set(liftedCars); liftedCars.clear();
+  const done = () => { for (const num of was) if (!liftedCars.has(num)) { const c = cars.get(num); if (c) restoreCar(c); } };
+  if (!G || !world || !frame) { world?.crews?.clear(); done(); pitWorkNote(null); return; }
   if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
-  const m = pitModelFor(G), drivers = app().src?.state.DriverList || {}, list = [], byTeam = new Map();
-  for (const r of frame.values()) if (r.team) { const a = byTeam.get(r.team) || []; a.push({ num: r.num, state: r.state, u: r.u, boxU: r.input.boxU, lastBox: r.input.lastBox }); byTeam.set(r.team, a); }
+  const A = app(), src = A.src, m = pitModelFor(G), drivers = src?.state.DriverList || {}, list = [], loose = [], byTeam = new Map();
+  const policy = pitWorkPolicy();
+  let shown = null;
+  for (const r of frame.values()) if (r.team) { const a = byTeam.get(r.team) || []; a.push({ num: r.num, state: r.state, u: r.u, boxU: r.input.boxU, lastBox: r.input.lastBox, stillFor: r.input.stillFor, input: r.input }); byTeam.set(r.team, a); }
   for (const [team, cs] of byTeam) {
     const ph = crewPhase(cs); if (ph.phase === "none" || ph.f <= 0.01) continue;
     const tm = pitTeams.teams?.find((q) => q.team === team); if (tm?.box == null) continue;
     const colour = "#" + (Object.values(drivers).find((d) => d?.TeamName === team)?.TeamColour || "9aa0a6");
     const at = m.at(tm.box), s = at.slot, c = ph.phase === "work" ? cars.get(ph.num) : null;
-    const yaw = c ? c.yaw : Math.atan2(s.along[0], s.along[1]);
     const bx = s.front[0] + s.along[0] * (tm.box - s.uc) - s.inward[0] * at.boxC, bz = s.front[1] + s.along[1] * (tm.box - s.uc) - s.inward[1] * at.boxC;
+    // (no car there: the box's frame faces the way the cars go – along the measured pit path)
+    const q = c ? null : nearestOnPath(bx, bz), rev = q && q.d < 25 && s.along[0] * q.tx + s.along[1] * q.tz < 0;
+    const yaw = c ? c.yaw : Math.atan2(rev ? -s.along[0] : s.along[0], rev ? -s.along[1] : s.along[1]);
     const where = c ? { x: c.pos.x, y: at.floor + 0.004, z: c.pos.z, yaw } : { x: bx, y: at.floor + 0.004, z: bz, yaw };
     // (the layouts are written with the garages on the car's left: mirrored otherwise)
     const left = Math.sign(Math.cos(yaw) * s.inward[0] - Math.sin(yaw) * s.inward[1]) || 1;
-    list.push(...crewAt(where, crewLayout(ph.phase, ph.f, at.boxC, left), colour, ph.phase));
+    // the work at this stop: the car in the box (work), the one coming (ready – its stop ahead, the record only), the
+    // one gone (back)
+    const me = cs.find((x) => x.num === ph.num), trk = src?.tracks?.cars?.[ph.num];
+    let plan = null, t0 = null;
+    if (me && trk && ph.phase !== "hold") {
+      if (ph.phase === "work") { t0 = A.t - (ph.since || 0) * 1000; plan = pitPlanFor(ph.num, src, policy, { t0, t1: policy === "record" ? standEndPos(trk, A.t) : null, input: me.input }); }
+      else if (ph.phase === "back" && me.lastBox?.t0 != null) { t0 = me.lastBox.t0; plan = pitPlanFor(ph.num, src, policy, { t0, t1: me.lastBox.t1, input: me.input }); }
+      else if (ph.phase === "ready" && policy !== "observed") { t0 = policy === "record" ? nextStandPos(trk, A.t) : null; plan = t0 != null ? pitPlanFor(ph.num, src, policy, { t0, input: me.input }) : policy === "typical" ? { kind: "tyres", from: "typical", D: null, wait: 0, compound: null } : null; }
+    }
+    if (plan?.kind === "tyres") {
+      const car = cars.get(ph.num), dims = wheelParts(A.sessionYear?.() || null, team);
+      world.crews.wheels(dims);
+      const oldC = (src.stints?.(ph.num) || []).slice(-1)[0]?.Compound, bands = { old: TYRE_COLOURS[oldC] || null, new: TYRE_COLOURS[plan.compound] || null };
+      let L;
+      if (ph.phase === "work") {
+        L = stopChoreo(plan, ph.since || 0, dims, left);
+        if (car && c) { applyLift(car, L.car, dims); liftedCars.add(ph.num); if (plan.compound && L.car.off.every((o) => !o) && stopClockDone(plan, ph.since)) setCompound(car.model, plan.compound); }
+      } else L = changeWalk(ph.phase, ph.f, dims, at.boxC, left);
+      list.push(...crewAt(where, L.figures, colour));
+      loose.push(...kitAt(where, L.kits, bands));
+      shown = shown || plan.from;
+      continue;
+    }
+    list.push(...crewAt(where, crewLayout(ph.phase, ph.f, at.boxC, left), colour));
   }
-  world.crews.place(list);
+  world.crews.place(list, loose, camera.position);
+  done();
+  pitWorkNote(shown === "record" ? "타이어 교체: 경기 기록(정차 뒤 공개된 새 타이어)으로 재현 · 동작은 일반적인 피트 스톱" : shown === "typical" ? "타이어 교체: 전형적인 피트 스톱을 재현한 추정(실제 작업은 모름)" : null);
 }
-// the pit lane's direction at (x, z) if that's in front of a facility's garages (0–16 m out), else null
+// (the new set's compound shown on the car once every wheel is back on)
+function stopClockDone(plan, since) { return (since || 0) >= (plan.wait || 0) + (CHANGE.on[1] + 0.1) * (plan.D != null && plan.D - (plan.wait || 0) < CHANGE.base ? Math.max(0.6, (plan.D - (plan.wait || 0)) / CHANGE.base) : 1); }
+// The car's model lifted by the jacks (front and rear, m: the model's height and pitch over its place – the car's
+// place, timing and the camera's mounts stay the car's) and its wheels hidden while they are off (crew.js draws them)
+function applyLift(c, vis, dims) {
+  const [lf, lr] = vis.lift, u = c.model.userData;
+  c.model.position.y = (lf + lr) / 2;
+  c.model.rotation.x -= Math.atan2(lf - lr, dims.FZ - dims.RZ);
+  u.wheels.forEach((w, i) => { w.visible = !vis.off[i]; });
+  c.lifted = true;
+}
+function restoreCar(c) {
+  if (!c.lifted) return;
+  c.model.position.y = 0; c.model.userData.wheels.forEach((w) => { w.visible = true; }); c.lifted = false;
+}
+function pitWorkNote(text) {
+  let el = document.getElementById("pitWorkNote");
+  if (!el && text) { el = document.createElement("div"); el.id = "pitWorkNote"; el.style.cssText = "position:absolute;left:12px;bottom:62px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:3"; host?.appendChild(el); }
+  if (el) { if (el.textContent !== (text || "")) el.textContent = text || ""; el.hidden = !text; }
+}
+// the pit lane's direction at (x, z) – the way the cars go – if that's in front of a facility's garages (0–16 m out),
+// else null
 function pitLaneDir(x, z) {
   let out = null;
   world?.real?.group.getObjectByName("facilities")?.traverse((o) => {
@@ -375,6 +449,10 @@ function pitLaneDir(x, z) {
     const p = G.project(x, z);
     if (p.off > -1 && p.off < 16 && p.u > G.gStart - 10 && p.u < G.gEnd + 10) out = G.slots[0].along;
   });
+  // (turned the way the cars go: the measured pit path runs from the entry to the exit – a heading kept from before
+  // a seek can be the other way round)
+  const q = out && nearestOnPath(x, z);
+  if (q && q.d < 25 && out[0] * q.tx + out[1] * q.tz < 0) out = [-out[0], -out[1]];
   return out;
 }
 // a small note in the 3D view saying the team garages are an inference, and from what
@@ -1316,7 +1394,7 @@ function updateCars(dt) {
       else if (speed > 6) yaw = Math.atan2(mx, mz);
       else {
         const pl = pitLaneDir(v.x, v.z);
-        if (pl) { const a = Math.atan2(pl[0], pl[1]); yaw = Math.abs(wrap(a - c.yaw)) <= Math.PI / 2 ? a : wrap(a + Math.PI); }
+        if (pl) { const q = nearestOnPath(v.x, v.z), a = Math.atan2(pl[0], pl[1]); yaw = q && q.d < 25 ? a : Math.abs(wrap(a - c.yaw)) <= Math.PI / 2 ? a : wrap(a + Math.PI); }
         else if (!c.has && c.sample) yaw = Math.atan2(c.sample.tan.x, c.sample.tan.z);
       }
       const dy = wrap(yaw - c.yaw);
@@ -1399,7 +1477,13 @@ function updateCars(dt) {
     else wantOpen = c.speed > 68 && Math.abs(yawRate) < 0.04 ? 1 : 0;
     c.aero += (wantOpen - c.aero) * (1 - Math.exp(-dt * 6));
     setAero(c.model, c.aero);
-    if (!c.compoundAt || performance.now() - c.compoundAt > 1500) { c.compoundAt = performance.now(); const st = src.stints?.(num); setCompound(c.model, st?.[st.length - 1]?.Compound); }
+    // (the compound on the sidewalls: the stint now; a replay shown from its record has the new set on the car from the
+    // stop it went on at – the new stint is sent ~15 s after the car left; a car at work in its box: updateCrews)
+    if (!liftedCars.has(num) && (!c.compoundAt || performance.now() - c.compoundAt > 1500)) {
+      c.compoundAt = performance.now(); const st = src.stints?.(num); let cmp = st?.[st.length - 1]?.Compound;
+      if (pitWorkPolicy() === "record") { const trk = src.tracks?.cars?.[num], ls = trk && lastStandPos(trk, A.t, 40); if (ls) { const e = (src.tyreChanges?.(num) || []).find((x) => x.ms > A.t && x.ms >= ls.t0 && x.ms <= ls.t0 + 90000 && x.changed !== false); if (e) cmp = e.compound; } }
+      setCompound(c.model, cmp);
+    }
     const l = lines[num] || {};
     const out = l.Retired || l.Stopped;
     const inCockpit = (camMode === "onboard" || camMode === "eye") && num === focusNum;
@@ -1413,8 +1497,9 @@ function updateCars(dt) {
   }
   // (a car not drawn this frame is drawn afresh when it's back: no easing from where it was before)
   for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; c.has = false; c.est = null; c.estAt = null; c.hand = null; c.pit = null; }
-  { const c0 = performance.now(); updateCrews(pitNow); pitCost.ms += performance.now() - c0; }
   separate(dt, seen);
+  // (after the cars are kept apart: the crew round a car where it is drawn)
+  { const c0 = performance.now(); updateCrews(pitNow); pitCost.ms += performance.now() - c0; }
   // F1's archive sometimes stops publishing car positions part-way through a session (e.g. Monaco 2026):
   // say so instead of showing an empty track without explanation.
   const note = document.getElementById("note3d"), msg = "이 시점은 F1이 차량 위치 기록을 공개하지 않아서 차를 그릴 수 없어요. 순위·기록은 그대로 볼 수 있어요.";
@@ -1761,7 +1846,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced" };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record" };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -2798,6 +2883,14 @@ window.Map3D = {
   },
   // development: car num against the pit building's garages – along them (u), how far out it is drawn and where the
   // feed has it, its speed, its team's box
+  // development: the crews as placed this frame – a checksum of every instance's place (the same moment shows the
+  // same: compared after seeks, pauses, speeds) and the cars lifted (model height, pitch, wheels on)
+  crewState() {
+    let h = 0, n = 0;
+    for (const m of world?.crews?.group.children || []) for (let i = 0; i < m.count; i++) { const e = m.instanceMatrix.array; for (let k = 12; k < 15; k++) { h = (h * 31 + Math.round(e[i * 16 + k] * 100)) | 0; } n++; }
+    const lifted = [...cars.values()].filter((c) => c.lifted).map((c) => ({ num: c.num, y: +c.model.position.y.toFixed(3), wheels: c.model.userData.wheels.map((w) => (w.visible ? 1 : 0)).join(""), pos: c.pos.toArray().map((v) => +v.toFixed(3)), raw: c.raw?.toArray().map((v) => +v.toFixed(3)), yaw: +c.yaw.toFixed(4) }));
+    return JSON.stringify({ t: app().t, instances: n, hash: h, lifted, note: document.getElementById("pitWorkNote")?.hidden === false ? document.getElementById("pitWorkNote").textContent : null });
+  },
   pitCar(num) {
     const G = pitTeams.G, c = cars.get(String(num)); if (!G || !c) return JSON.stringify({ G: !!G, car: !!c });
     const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;

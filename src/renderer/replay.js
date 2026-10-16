@@ -101,6 +101,29 @@
     pits(num, t = Infinity) { return (this.pitList[num] || []).filter((x) => x.ms <= t); }
   }
 
+  // New tyre stints as they were created (TimingAppData: a car's next stint index first sent with its compound), each
+  // with the time it arrived: { ms, idx, compound, isNew, changed } – changed false where F1 marks the stint's tyres as
+  // not changed (TyresNotChanged "1": a red flag's restart, say). A stop's tyre change is known only from this, and it
+  // arrives some 15 s after the car has left its box (Barcelona 2026, Hamilton: standstill 4145–4149 s, stint 1 sent at
+  // 4163.9 s) – so during a stop a live feed never knows; a replay knows from the session's record.
+  class TyreLog {
+    constructor() { this.cars = {}; }
+    feed(ms, topic, data) {
+      if (topic !== "TimingAppData" || !data?.Lines) return;
+      for (const [num, line] of Object.entries(data.Lines)) {
+        const st = line?.Stints; if (!st || typeof st !== "object") continue;
+        for (const [k, v] of Array.isArray(st) ? st.entries() : Object.entries(st)) {
+          const idx = +k; if (!v || typeof v !== "object" || !v.Compound || !Number.isFinite(idx)) continue;
+          const list = this.cars[num] || (this.cars[num] = []);
+          if (list.some((x) => x.idx === idx)) continue;
+          list.push({ ms, idx, compound: v.Compound, isNew: v.New === "true" || v.New === true, changed: !(v.TyresNotChanged === "1" || v.TyresNotChanged === 1) });
+        }
+      }
+    }
+    // the stints created up to t (all of them: Infinity)
+    list(num, t = Infinity) { return (this.cars[num] || []).filter((x) => x.ms <= t); }
+  }
+
   // Pit stops gathered from two feeds: PitLaneTimeCollection (time through the pit lane, shown briefly then
   // deleted) and PitStopSeries (also the stationary time, but not sent for every stop). Keyed by car and lap.
   class PitLog {
@@ -387,10 +410,10 @@
       this.events.sort((a, b) => a.ms - b.ms);
       // Lap history is computed once for the whole session and filtered by time when read.
       this.tracker = new LapTracker();
-      this.pitLog = new PitLog(); this.statusLog = new StatusLog();
+      this.pitLog = new PitLog(); this.statusLog = new StatusLog(); this.tyreLog = new TyreLog();
       for (const e of this.events) {
         if (e.topic === "TimingData") this.tracker.feed(e.ms, e.data.Lines);
-        else { this.pitLog.feed(e.ms, e.topic, e.data); this.statusLog.feed(e.ms, e.topic, e.data); }
+        else { this.pitLog.feed(e.ms, e.topic, e.data); this.statusLog.feed(e.ms, e.topic, e.data); this.tyreLog.feed(e.ms, e.topic, e.data); }
       }
       this.heartbeats = this.events.filter((e) => e.topic === "Heartbeat" && e.data.Utc).map((e) => [e.ms, Date.parse(e.data.Utc)]);
       this.lapMarks = this.events.filter((e) => e.topic === "LapCount" && e.data.CurrentLap).map((e) => [e.ms, e.data.CurrentLap]);
@@ -435,6 +458,9 @@
     pits(num, t = this.t) { return this.tracker.pits(num, t); }
     pitStops(num, t = this.t) { return this.pitLog.list(num, t); }
     allPitStops(t = this.t) { return this.pitLog.all(t); }
+    // the session's tyre stints with the time each was created – the whole record (a replay has it all): the caller
+    // chooses whether to look past the moment shown (map3d.js pitWorkPolicy)
+    tyreChanges(num, t = Infinity) { return this.tyreLog.list(num, t); }
     neutralPeriods(t = this.t) { return this.statusLog.periods(t); }
 
     // Moment the session clock starts running (skips the pre-session wait).
@@ -697,7 +723,7 @@
       this.resetHistory(); this.t = Date.now();
     }
     resetHistory() {
-      this.tracker = new LapTracker(); this.pitLog = new PitLog(); this.statusLog = new StatusLog();
+      this.tracker = new LapTracker(); this.pitLog = new PitLog(); this.statusLog = new StatusLog(); this.tyreLog = new TyreLog();
       this.positions = []; this.lapMarks = []; this.trail = {}; this.lapShape = null; this.lapShapeAt = 0;
       this.tracks = new CarTracks();
       this.car = {};
@@ -779,7 +805,7 @@
         return;
       }
       if (topic === "TimingData") this.tracker.feed(at, data.Lines);
-      this.pitLog.feed(at, topic, data); this.statusLog.feed(at, topic, data);
+      this.pitLog.feed(at, topic, data); this.statusLog.feed(at, topic, data); this.tyreLog.feed(at, topic, data);
       if (topic === "LapCount" && data.CurrentLap) this.lapMarks.push([at, data.CurrentLap]);
       applyTo(this, topic, data);
     }
@@ -844,6 +870,8 @@
     pits(num) { return this.tracker.pits(num, this.t); }
     pitStops(num) { return this.pitLog.list(num, this.t); }
     allPitStops() { return this.pitLog.all(this.t); }
+    // (live: what has arrived – never later than the moment shown)
+    tyreChanges(num) { return this.tyreLog.list(num, this.t); }
     neutralPeriods() { return this.statusLog.periods(this.t); }
     // One clean lap from the car trails, once some car has driven a full lap (re-checked every 10 s).
     trackOutline(now = Date.now()) {
@@ -855,7 +883,7 @@
     }
   }
 
-  const API = { Replay, LiveSource, CarTracks, LapTracker, PitLog, StatusLog, merge, newMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
+  const API = { Replay, LiveSource, CarTracks, LapTracker, PitLog, StatusLog, TyreLog, merge, newMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
     pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);
