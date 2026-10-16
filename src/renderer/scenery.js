@@ -597,6 +597,7 @@ function barriersMesh(lines, gf, heightAt) {
     mesh.castShadow = !spec.fence; mesh.receiveShadow = true;
     groups.add(mesh);
   }
+  groups.name = "barriers";   // (map barriers: the pit lane's model looks for its wall among them – map3d.js pitModelFor)
   return groups.children.length ? groups : null;
 }
 
@@ -885,7 +886,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     geo: gf,   // the frame's maps (F1 metres / lat-lon ↔ scene), for placing things by their real position
     landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
     info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
-      clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped } : null,
+      clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped, raisedOver: bld.userData.overTrack } : null,
       trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,

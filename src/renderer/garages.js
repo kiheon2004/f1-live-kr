@@ -390,6 +390,9 @@ export const overridesFor = (facility, year, session = null, list = GARAGE_OVERR
 
 // ---------- the layer ----------
 // Shared geometry for the equipment (made once; never freed with a layer)
+// a small deterministic random sequence from a string (the same garage gets the same things)
+const hashStr = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
+const rng = (seed) => { let a = seed | 0 || 1; return () => ((a = Math.imul(a ^ (a >>> 15), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909), (a >>>= 0) / 4294967296)); };
 let SHARED = null;
 function shared() {
   if (SHARED) return SHARED;
@@ -411,7 +414,11 @@ function shared() {
   const jackParts = [new THREE.BoxGeometry(0.5, 0.18, 1.2), new THREE.BoxGeometry(0.08, 0.08, 1.4)]; jackParts[0].translate(0, 0.12, 0); jackParts[1].rotateX(-0.6); jackParts[1].translate(0, 0.62, -1.0);
   const jack = merge(jackParts);
   const sign = new THREE.PlaneGeometry(1, 1);
-  SHARED = { tyres: mark(tyres), blankets: mark(blankets), cabinet: mark(cabinet), jack: mark(jack), sign: mark(sign),
+  // a workbench (top and legs' box) and an engineers' desk with two screens on a stand
+  const bench = merge([Object.assign(new THREE.BoxGeometry(1.8, 0.06, 0.7)).translate(0, 0.92, 0), new THREE.BoxGeometry(1.7, 0.85, 0.6).translate(0, 0.45, 0)]);
+  const screens = merge([new THREE.BoxGeometry(1.4, 0.75, 0.7).translate(0, 0.375, 0), new THREE.BoxGeometry(0.62, 0.38, 0.04).translate(-0.33, 1.15, 0.1), new THREE.BoxGeometry(0.62, 0.38, 0.04).translate(0.33, 1.15, 0.1), new THREE.BoxGeometry(0.05, 0.3, 0.05).translate(0, 0.9, 0.1)]);
+  SHARED = { tyres: mark(tyres), blankets: mark(blankets), cabinet: mark(cabinet), jack: mark(jack), sign: mark(sign), bench: mark(bench), screens: mark(screens),
+    screen: Object.assign(new THREE.MeshStandardMaterial({ color: "#15181c", roughness: 0.3, metalness: 0.2 }), { userData: { shared: true } }),
     rubber: Object.assign(new THREE.MeshStandardMaterial({ color: "#1a1b1d", roughness: 0.85 }), { userData: { shared: true } }),
     grey: Object.assign(new THREE.MeshStandardMaterial({ color: "#7a8086", roughness: 0.5, metalness: 0.4 }), { userData: { shared: true } }) };
   return SHARED;
@@ -455,7 +462,7 @@ export function teamLayer(garages, teams, drivers) {
     const UV = uv ? [[uv[0], uv[1]], [uv[2], uv[1]], [uv[2], uv[3]], [uv[0], uv[3]]] : null;
     for (const k of [0, 1, 2, 0, 2, 3]) { store.pos.push(P[k].x, P[k].y, P[k].z); store.nor.push(n.x, n.y, n.z); if (UV) store.uv.push(...UV[k]); if (colour) store.col.push(colour.r, colour.g, colour.b); }
   };
-  const inst = { tyres: [], cabinet: [], jack: [] };
+  const inst = { tyres: [], cabinet: [], jack: [], bench: [], screens: [] };
   const col = new THREE.Color();
   for (const t of teams) {
     col.set(t.colour);
@@ -473,12 +480,21 @@ export function teamLayer(garages, teams, drivers) {
       }
       // a light rig hanging under the ceiling across the garage
       quad(panels, at(s, s.depth * 0.55, 0, s.ceil - 0.6), along.clone().multiplyScalar(s.width - 0.6), inw.clone().multiplyScalar(0.35), new THREE.Vector3(0, -1, 0), null, new THREE.Color("#2b2f33"));
-      // equipment: tyre stacks along both side walls, a cabinet at the back, the jack by the door
-      const tc = col.clone();
-      for (const side of [-1, 1]) for (const d of [2.0, 3.0, 4.0]) if (d < s.depth - 1.2) inst.tyres.push([at(s, d, side * (s.width / 2 - 0.55), 0), 0, tc]);
-      inst.cabinet.push([at(s, s.depth - 0.5, -s.width * 0.18, 0), yawIn(s), tc]);
-      inst.cabinet.push([at(s, s.depth - 0.5, s.width * 0.18, 0), yawIn(s), tc]);
-      inst.jack.push([at(s, 1.4, s.width * 0.25, 0), yawIn(s), null]);
+      // equipment, by what the garage is for – a depiction (which garage holds what isn't in the data): the team's two
+      // outer garages are its cars' (tyre stacks under blankets along the walls, a bench at the back, the jack by the
+      // door), any between them engineering and spares (cabinets, a desk of screens; no tyres). How many and where,
+      // varied a little from garage to garage by a hash of the team and the garage – the same each time it's drawn
+      const k = ss.indexOf(s), role = ss.length >= 3 && k > 0 && k < ss.length - 1 ? "engineering" : "car";
+      const r = rng(hashStr(t.team + ":" + s.k)), tc = col.clone();
+      if (role === "car") {
+        for (const side of [-1, 1]) { const n = 2 + Math.floor(r() * 3); for (let i = 0; i < n; i++) { const d = 1.8 + i * 0.85 + r() * 0.15; if (d < s.depth - 1.0) inst.tyres.push([at(s, d, side * (s.width / 2 - 0.55 - r() * 0.15), 0), r() * 3, tc]); } }
+        inst.bench.push([at(s, s.depth - 0.45, (r() - 0.5) * s.width * 0.3, 0), yawIn(s), tc]);
+        inst.jack.push([at(s, 1.2 + r() * 0.5, (r() < 0.5 ? -1 : 1) * s.width * (0.18 + r() * 0.1), 0), yawIn(s) + (r() - 0.5) * 0.4, null]);
+      } else {
+        const n = 2 + Math.floor(r() * 2); for (let i = 0; i < n; i++) inst.cabinet.push([at(s, s.depth - 0.5, (i - (n - 1) / 2) * 1.65, 0), yawIn(s), tc]);
+        inst.screens.push([at(s, s.depth * 0.5, (r() - 0.5) * s.width * 0.25, 0), yawIn(s) + Math.PI, tc]);
+        if (r() < 0.6) inst.cabinet.push([at(s, 1.6 + r(), (r() < 0.5 ? -1 : 1) * (s.width / 2 - 0.5), 0), yawIn(s) + Math.PI / 2, tc]);
+      }
     }
     // the team's name over its garages (on the front, just under the band above the openings)
     const a = ss[0], b = ss[ss.length - 1], mid = at(a, -0.06, 0, 0).add(at(b, -0.06, 0, 0)).multiplyScalar(0.5);
@@ -541,6 +557,8 @@ export function teamLayer(garages, teams, drivers) {
   instanced(S.blankets, new THREE.MeshStandardMaterial({ roughness: 0.8 }), inst.tyres, "blankets", true);
   instanced(S.cabinet, new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.3 }), inst.cabinet, "cabinets", true);
   instanced(S.jack, S.grey, inst.jack, "jacks");
+  instanced(S.bench, new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.35 }), inst.bench, "benches", true);
+  instanced(S.screens, S.screen, inst.screens, "screens");
   return group;
 }
 

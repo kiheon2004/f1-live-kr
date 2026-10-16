@@ -119,3 +119,18 @@ test("a penalty is done once the car has made a whole pit visit after it was giv
   assert.strictEqual(r.state, "retired");
   assert.strictEqual(crewPhase([{ num: "87", state: r, u: 199, boxU: 200 }]).phase, "none");
 });
+
+test("crew layouts: in the inner lane on the garages' side of the car's lane-side clearance, mirrored with the garages on the right, nobody ahead of a car that has left", async () => {
+  const { crewLayout } = await import("../src/renderer/crew.js");
+  const boxC = 5;
+  const work = crewLayout("work", 1, boxC, 1);
+  assert.strictEqual(work.length, 19);
+  // across (+ the garages' side): never more than boxC towards the garages, never more than 2.4 m towards the fast lane
+  for (const [, b] of work) assert.ok(b <= boxC && b >= -2.4, String(b));
+  const right = crewLayout("work", 1, boxC, -1);
+  right.forEach(([a, b], i) => { assert.strictEqual(a, work[i][0]); assert.strictEqual(b, -work[i][1]); });
+  // just after the car left: everyone ahead of where it stood is on the garages' side of its path
+  for (const [a, b] of crewLayout("back", 1, boxC, 1)) if (a > 2) assert.ok(b >= 1.6 * 0.5 + (boxC - 0.7) * 0.5 - 1e-9 || b >= 1.6, `${a}, ${b}`);
+  // hold (a stop-and-go): all by the garage
+  for (const [, b] of crewLayout("hold", 1, boxC, 1)) assert.strictEqual(b, boxC - 0.7);
+});

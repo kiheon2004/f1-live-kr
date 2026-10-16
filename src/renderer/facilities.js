@@ -17,7 +17,7 @@ import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { disposeGroup } from "./dispose.js";
 import { entryAt } from "./venues.js";
-import { pathFrame, garageLine, garageRun, genericOutline, fitLine, GENERIC, PICK } from "./pitlane.js";
+import { pathFrame, garageLine, garageRun, genericOutline, fitLine, rayRing, GENERIC, PICK } from "./pitlane.js";
 
 // ---------- registry ----------
 export const FACILITIES = [
@@ -1194,6 +1194,8 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
 //   points at the start straight in places), a made-up one that would isn't made
 //   boxes – the circuit's measured pit boxes (pitorder.js PIT_BOXES: metres along the pit path): the garages run along
 //   them (15 m on past the first and last), not the limiter lines' middle
+// the plain pit wall (estimates): a 1.1 m concrete wall with a 3 m catch fence, a 1.5 m step behind it for the stands
+export const PLAIN_PIT_WALL = { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 };
 export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, boxes = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
   const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
@@ -1211,9 +1213,19 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       if (this.parts) return this.parts;
       // (along a ring's edges every 4 m: off the track by more than a metre)
       const clear = (rg) => !trackEdge || rg.every((a, i) => { const b = rg[(i + 1) % rg.length], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 4)); for (let k = 0; k < n; k++) if (trackEdge(a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n) < 1) return false; return true; });
-      const rings = buildings.map((b) => ({ ring: ring(b, gf), ref: b })).filter((r) => r.ring.length >= 3 && clear(r.ring));
+      const all = buildings.map((b) => ({ ring: ring(b, gf), ref: b })).filter((r) => r.ring.length >= 3), rings = all.filter((r) => clear(r.ring));
       const g = garageLine(frame, rings, toTrack, u0, u1);
       this.found = { front: g.front == null ? null : +g.front.toFixed(1), coverage: g.coverage, parts: g.parts.length, run: [Math.round(u0), Math.round(u1)] };
+      // (diagnostics: what is beside the path on either side – the garages' side and the track's – development)
+      const both = [];
+      for (let uu = u0; uu <= u1 + 1e-6; uu += (u1 - u0) / 8) {
+        const p0 = frame.at(uu), [gx, gz] = g.side(uu);
+        for (const sgn of [1, -1]) { let best = null; for (const r of all) { const d = rayRing(p0.x, p0.z, gx * sgn, gz * sgn, r.ring); if (d < 40 && (!best || d < best.d)) best = { d, r }; } if (best) both.push([Math.round(uu), sgn > 0 ? "garage side" : "track side", +best.d.toFixed(1), best.r.ref.kind || "building", best.r.ref.name || "", best.r.ref.h ?? null, clear(best.r.ring)]); }
+      }
+      // (and how far the track's tarmac edge is from the path, towards it)
+      const toEdge = [];
+      if (trackEdge) for (let uu = u0; uu <= u1 + 1e-6; uu += (u1 - u0) / 8) { const p0 = frame.at(uu), [gx, gz] = g.side(uu); let d = null; for (let k = 0; k < 80; k++) { const x = p0.x - gx * k * 0.5, z = p0.z - gz * k * 0.5; if (trackEdge(x, z) <= 0) { d = k * 0.5; break; } } toEdge.push([Math.round(uu), d]); }
+      this.found = { ...(this.found || {}), both, toEdge };
       // (diagnostics: what a longer ray meets first at a few stations – development, Map3D.debug().info)
       const far = garageLine(frame, rings, toTrack, u0, u1, { ...PICK, max: 60, step: (u1 - u0) / 6 });
       this.found.far = far.stations.map((st) => [Math.round(st.u), st.s == null ? null : +st.s.toFixed(1), st.ref ? `${st.ref.kind || "building"}:${st.ref.name || ""}` : null]);
@@ -1233,7 +1245,7 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       height: GENERIC.height, garagePitch: GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#8e9196", fascia: "fasciaWhite",
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
-      pitWall: { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 },
+      pitWall: PLAIN_PIT_WALL,
     },
   };
 }
@@ -1274,13 +1286,16 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         // (an entry made for this session's circuit picks its own map buildings – genericPitSpec)
         const parts = spec.pick ? spec.pick(scene.buildings, gf) : selectReplaced(spec, scene.buildings, gf);
         if (!parts.length) throw new Error("its map buildings aren't in the data");
-        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, year, trial, toTrack, alongTrack, scene }, spec.params || {});
+        // (every F1 pit lane has a pit wall along the track's edge: a pit building whose entry gives none gets the plain one
+        // – its line from the measured edge, its size an estimate, said so in the info)
+        const params = spec.kind === "pit-building" && !spec.params?.pitWall ? { ...(spec.params || {}), pitWall: PLAIN_PIT_WALL, pitWallFrom: "estimate (plain wall)" } : spec.params || {};
+        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, year, trial, toTrack, alongTrack, scene }, params);
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
         made = { object: g, footprint: r.footprint, occupancy: r.occupancy, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
       } catch (e) { reason = (reason ? reason + "; " : "") + e.message; }
     }
-    if (!made) { info.push({ id: spec.id, how: "fallback", reason }); continue; }   // the map's buildings stay
+    if (!made) { info.push({ id: spec.id, how: "fallback", reason, ...(spec.found ? { found: spec.found } : {}) }); continue; }   // the map's buildings stay
     made.object.name = spec.id; made.object.userData.facility = spec.id;
     group.add(made.object);
     const anchorXZ = spec.model?.anchor ? gf.fromLL(spec.model.anchor[0], spec.model.anchor[1]) : null;

@@ -554,11 +554,14 @@ function buildWorld(points) {
   const road = roadMesh(samples), lines = edgeLines(samples), kerb = kerbs(samples);
   group.add(road, lines, kerb);
   // Generic surroundings, shown at once and replaced by the real ones when the map data arrives.
-  const syn = { walls: style.street ? streetWalls(samples, grid) : walls(samples, grid) };
+  // (the pit lane, as measured – startdata.js –, widened to the lane's width: no generated wall across it)
+  const A0 = app(), pd0 = START_DATA[venueOf({ circuitKey: A0.circuitKey?.(), location: A0.location?.() })?.key]?.pit;
+  const laneZone = pd0 ? laneCells(pd0.path.map((p) => [p[0] * DM - center.x, -(p[1] * DM - center.z)]), 8) : null;
+  const syn = { walls: style.street ? streetWalls(samples, grid) : walls(samples, grid, 12, 1.1, undefined, 0, laneZone) };
   world0Level = Math.min(...samples.map((s) => s.p.y)) - 2.5;
   syn.terrain = terrain(samples, grid, box);
   syn.trees = trees(grid, box);
-  group.add(syn.walls, syn.terrain, syn.trees);
+  syn.walls.name = "syntheticWalls"; group.add(syn.walls, syn.terrain, syn.trees);
   road.receiveShadow = true; kerb.traverse((o) => { o.receiveShadow = true; }); lines.traverse((o) => { o.receiveShadow = true; });
   syn.terrain.receiveShadow = true; syn.walls.traverse((o) => { o.castShadow = true; }); syn.trees.traverse((o) => { o.castShadow = true; });
   const lowY = Math.min(...samples.map((s) => s.p.y));
@@ -852,9 +855,13 @@ function streetWalls(samples, grid) {
 }
 
 // A barrier `extra` metres beyond each edge of the track, `h` high (from `y0` above the road), two-tone.
-function walls(samples, grid, extra = 12, h = 1.1, tones = [0x5d636b, 0xd9dde2], y0 = 0) {
+// (inLane: the circuit's pit lane – a wall whose run-off would cross it isn't drawn there: along a straight with the
+// pit lane beside it the barrier on that side is the pit wall at the track's edge, the pit building's – facilities.js;
+// 12 m out it had stood across the pit lane, in front of the boxes)
+function walls(samples, grid, extra = 12, h = 1.1, tones = [0x5d636b, 0xd9dde2], y0 = 0, inLane = null) {
   const pos = [], col = [], idx = [];
   const offOf = (s, side) => edgeOf(s, side) + side * extra;
+  const crossesLane = (s, side) => { if (!inLane) return false; for (let o = 1; o <= extra + 2; o += 1) { const d = edgeOf(s, side) + side * o; if (inLane(s.p.x + s.nor.x * d, s.p.z + s.nor.z * d)) return true; } return false; };
   // blocked when the barrier point would sit on (or right next to) a different stretch of the track
   const blocked = (x, z, s) => {
     const [near, d] = grid.nearest(x, z, 1);
@@ -863,7 +870,7 @@ function walls(samples, grid, extra = 12, h = 1.1, tones = [0x5d636b, 0xd9dde2],
     return Math.min(di, samples.length - di) > 20;
   };
   for (const side of [1, -1]) {
-    const ok = samples.map((s) => { const o = offOf(s, side); return !blocked(s.p.x + s.nor.x * o, s.p.z + s.nor.z * o, s); });
+    const ok = samples.map((s) => { const o = offOf(s, side); return !blocked(s.p.x + s.nor.x * o, s.p.z + s.nor.z * o, s) && !crossesLane(s, side); });
     const n = samples.length;
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
@@ -2826,6 +2833,22 @@ window.Map3D = {
     const pitCars = [...cars.values()].filter((c) => c.pit && c.obj.visible).map((c) => { const p = G.project(c.pos.x, c.pos.z), s = G.slots[Math.max(0, Math.min(G.slots.length - 1, Math.round((p.u - G.gStart) / G.pitch - 0.5)))]; return [c.num, Math.round(p.u), +p.off.toFixed(1), +(c.obj.position.y - s.floor).toFixed(3)]; });
     return JSON.stringify({ ok: true, facility: G.facility, n: G.slots.length, pitch: +G.pitch.toFixed(2), depth: G.slots[0].depth, rows, pitCars });
   },
+  // development: out from each `every`-th garage's front at 0.6 m over its floor, the first thing in the way (name,
+  // metres) – a wall the scenery drew between the pit lane and the track, a fence, the facility's own wall
+  pitWallSeen(every = 5) {
+    const G = pitTeams.G; if (!G) return "no garages";
+    const out = [], rc = new THREE.Raycaster(); rc.camera = camera;
+    const name = (o) => { const n = []; let q = o; while (q && n.length < 2) { if (q.name) n.push(q.name); q = q.parent; } return n.join("<") || o.type; };
+    for (let k = 0; k < G.slots.length; k += every) {
+      const s = G.slots[k]; rc.set(new THREE.Vector3(s.front[0] - s.inward[0] * 0.5, s.floor + 0.6, s.front[1] - s.inward[1] * 0.5), new THREE.Vector3(-s.inward[0], 0, -s.inward[1])); rc.far = 40;
+      // (structures only: map barriers, the facilities, the generated walls – never the instanced seats and trees, which a
+      // ray tests one by one)
+      const targets = [world.real?.group.getObjectByName("barriers"), world.real?.group.getObjectByName("facilities"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
+      const h = rc.intersectObjects(targets, true).filter((x) => x.object.visible !== false && !x.object.isSprite && !x.object.isInstancedMesh)[0];
+      out.push([k, Math.round(s.uc), h ? +(h.distance + 0.5).toFixed(1) : null, h ? name(h.object) : null, +(pitModelFor(G).st[k].cs.wall ?? -1).toFixed(1)]);
+    }
+    return JSON.stringify(out);
+  },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
   viewPits(k = 20, back = 28, h = 9, side = 0, fov = 50) {
     let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
@@ -2949,14 +2972,17 @@ window.Map3D = {
       world.frame.at(sl.s + fz + GRID_RULES.frontGap - 0.06, sl.lat, P);
       rc.set(new THREE.Vector3(P[0], P[1] + 30, P[2]), down); rc.far = 60;
       const hits = rc.intersectObjects(targets, true).filter((h) => h.object.visible !== false && !h.object.isSprite);
-      const first = hits[0], roadHit = hits.find((h) => h.object !== paint);
-      slots.push({ g: sl.g, s: +sl.s.toFixed(1), lat: +sl.lat.toFixed(2), seenFromAbove: !!first && first.object === paint, firstHit: first ? hitName(first.object) : null, overRoad: first && roadHit ? +(roadHit.distance - first.distance).toFixed(3) : null, ll: gf ? gf.toLL(sl.x, sl.z).map((v) => +v.toFixed(6)) : null });
+      const first = hits[0], roadHit = hits.find((h) => h.object !== paint), paintHit = hits.find((h) => h.object === paint);
+      // (a structure raised 4 m or more over the paint – a bridge across the track: Silverstone's Skybridge over the start
+      // line, 2022 – hides it from straight above only; from the track's own cameras it is in view)
+      const raised = !!first && first.object !== paint && !!paintHit && paintHit.distance - first.distance >= 4 && hits.filter((h) => h.distance < paintHit.distance).every((h) => paintHit.distance - h.distance >= 4);
+      slots.push({ g: sl.g, s: +sl.s.toFixed(1), lat: +sl.lat.toFixed(2), seenFromAbove: !!first && first.object === paint, underRaised: raised, firstHit: first ? hitName(first.object) : null, overRoad: first && roadHit ? +(roadHit.distance - first.distance).toFixed(3) : null, ll: gf ? gf.toLL(sl.x, sl.z).map((v) => +v.toFixed(6)) : null });
     }
     const p1 = m.slots.get(1), last = m.slots.get(m.slots.size), mid = m.slots.get(Math.ceil(m.slots.size / 2));
     const L = world.frame.L, span = ((p1.s - last.s) % L + L) % L;
     const drawn = [...cars.values()].filter((c) => c.obj.visible);
     return JSON.stringify({ ok: true, info: world.gridInfo, pit: world.pitInfo, L: +L.toFixed(1), span: +span.toFixed(1), crossesLapStart: last.s > p1.s,
-      first: slots[0], mid: slots[mid.g - 1], last: slots[slots.length - 1], seen: slots.filter((x) => x.seenFromAbove).length, notSeen: slots.filter((x) => !x.seenFromAbove).map((x) => [x.g, x.firstHit]),
+      first: slots[0], mid: slots[mid.g - 1], last: slots[slots.length - 1], seen: slots.filter((x) => x.seenFromAbove || x.underRaised).length, underRaised: slots.filter((x) => x.underRaised).map((x) => [x.g, x.firstHit]), notSeen: slots.filter((x) => !x.seenFromAbove && !x.underRaised).map((x) => [x.g, x.firstHit]),
       minOverRoad: Math.min(...slots.map((x) => x.overRoad ?? 9)), cars: { drawn: drawn.length, inSlot: drawn.filter((c) => c.grid?.state === "standing" || c.est?.est === "slot").length, estimated: drawn.filter((c) => c.est).length, pitQueue: drawn.filter((c) => c.est?.pit).length } });
   },
   // development: every car's raw place at time t (default now) – along the lap from pole's slot (m, + ahead), across,

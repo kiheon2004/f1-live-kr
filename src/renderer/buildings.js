@@ -742,7 +742,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
   const north = (() => { const [la, lo] = scene.center || [0, 0], [x0, z0] = gf.fromLL(la, lo), [x1, z1] = gf.fromLL(la + 0.001, lo), l = Math.hypot(x1 - x0, z1 - z0) || 1; return [(x1 - x0) / l, (z1 - z0) / l]; })();
   const compass = (deg) => { const r = (deg * Math.PI) / 180, E = [-north[1], north[0]]; return [north[0] * Math.cos(r) + E[0] * Math.sin(r), north[1] * Math.cos(r) + E[1] * Math.sin(r)]; };
 
-  let dropped = 0, moved = 0, count = 0;
+  let dropped = 0, moved = 0, count = 0; const overTrack = [];
   // red aircraft warning lights on the roofs of tall buildings (medium intensity: flashing, a building's in step)
   const beacons = [];
   for (const b0 of scene.buildings) {
@@ -759,7 +759,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
       const fixed = track.clearPolygon(pts);
       if (!fixed) { dropped++; continue; }
       if (fixed !== pts) { moved++; pts = fixed; }
-    }
+    } else if (track && b.min >= 5 && track.clearPolygon(pts) !== pts) overTrack.push({ name: b.name || null, min: b.min, h: b.h, kind: b.kind || null, n: pts.length });   // (raised over the track: a bridge, a canopy – kept)
     const area = Math.abs(polyArea(pts));
     if (area < 6) continue;
     let gx = 0, gz = 0; for (const [x, z] of pts) { gx += x; gz += z; } gx /= pts.length; gz /= pts.length;
@@ -846,7 +846,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
   }
-  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, region, beacons,
+  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, region, beacons, overTrack,
     update(cam) {
       for (const m of group.children) {
         const c = m.geometry.boundingSphere, d = Math.hypot(c.center.x - cam.x, c.center.y - cam.y, c.center.z - cam.z) - c.radius;

@@ -39,8 +39,11 @@ export function crewLayout(phase, f, boxC, left = 1) {
   const out = STOP.map(([a, b, face, pose, kit]) => {
     if (phase === "work") return [a, b, face, pose, kit];
     if (phase === "hold") return [a * 0.9, mouth, -Math.PI / 2, "stand", null];
-    // ready / back: from the garage's front to its place (standing ready, the kit in hand), facing the way it moves
-    const k = Math.max(0, Math.min(1, f)), y = mouth + (b - mouth) * k;
+    // ready / back: from the garage's front to its place (standing ready, the kit in hand), facing the way it moves.
+    // Walking back, the ones ahead of the car (the front jack, the wing's ends, the release) are already out of its way
+    // on the garage side: the car drove off through where they stood
+    const k = Math.max(0, Math.min(1, f)), ahead = phase === "back" && a > 2;
+    const y = ahead ? mouth + (Math.max(b, 1.6) - mouth) * k * 0.5 : mouth + (b - mouth) * k;
     const moving = k > 0.02 && k < 0.98;
     return [a, y, moving ? (phase === "back" ? Math.PI / 2 : -Math.PI / 2) : face, moving ? "walk" : pose === "kneel" ? "ready" : pose, kit === "gun" || kit === "tyre" ? kit : null];
   });
