@@ -7,6 +7,7 @@
 //   circuit   – other mapped tarmac (pit lane, other layouts) and the real barriers along the track
 // Everything is in the scene frame of map3d.js: x = F1 east (m) − centre, z = −(F1 north − centre), y = up.
 import * as THREE from "./vendor/three.module.js";
+import { auxRuns, ribbonEdges, blendHeight, onJoiningRun } from "./auxroads.js";
 import { buildStands } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
@@ -504,22 +505,15 @@ function waterMesh(scene, gf, groundAt) {
   return mesh;
 }
 
-// A strip of tarmac along a polyline (pit lanes, other layouts of the venue).
-function tarmacMesh(lines, gf, heightAt, width = 9) {
+// The strips of auxroads.js as one mesh (counter-clockwise from above: the up-facing normals are the front side).
+function auxMesh(runs, T, heightAt) {
   const pos = [], nor = [], idx = [];
-  for (const l of lines) {
-    const pts = l.map(gf.xz);
-    if (pts.length < 2) continue;
-    const v0 = pos.length / 3;
-    pts.forEach(([x, z], i) => {
-      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / len, nz = (b[0] - a[0]) / len;
-      const y = heightAt(x, z) + 0.04;
-      pos.push(x + nx * width / 2, y, z + nz * width / 2, x - nx * width / 2, y, z - nz * width / 2);
-      nor.push(0, 1, 0, 0, 1, 0);
-      // counter-clockwise seen from above, so the up-facing normals are the front side
-      if (i) { const v = v0 + i * 2; idx.push(v - 2, v, v - 1, v - 1, v, v + 1); }
-    });
+  for (const r of runs) {
+    const { left, right } = ribbonEdges(r, T), v0 = pos.length / 3;
+    for (let i = 0; i < left.length; i++) {
+      for (const [x, z] of [left[i], right[i]]) { pos.push(x, heightAt(x, z), z); nor.push(0, 1, 0); }
+      if (i) { const v = v0 + i * 2; idx.push(v - 2, v - 1, v, v - 1, v + 1, v); }
+    }
   }
   if (!idx.length) return null;
   const g = new THREE.BufferGeometry();
@@ -527,7 +521,7 @@ function tarmacMesh(lines, gf, heightAt, width = 9) {
   g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
   g.setIndex(idx);
   const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1 }));
-  m.receiveShadow = true;
+  m.name = "auxTarmac"; m.receiveShadow = true; m.userData.runs = runs.length;
   return m;
 }
 
@@ -835,23 +829,13 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const rk = rocksMesh(scene, gf, groundAt, corridor, blockedTrees, scene.center[0], opts.provider === "google" ? null : groundInfo);
     if (rk) group.add(rk);
   }
-  // Other tarmac of the venue: mapped raceways that are not on the F1 lap (pit lane, other layouts).
-  const extra = [];
-  for (const l of scene.lines) {
-    if (l.k !== "raceway") continue;
-    let run = [];
-    for (const p of l.pts) {
-      const [x, z] = gf.xz(p);
-      // clear of the F1 track's own tarmac (half its width plus half the lane's)
-      if (trackDist(x, z) > (opts.trackW || 14) / 2 + 5.5) run.push(p); else { if (run.length > 1) extra.push(run); run = []; }
-    }
-    if (run.length > 1) extra.push(run);
-  }
+  // Other tarmac of the venue: mapped raceways that are not on the F1 lap (escape roads, rejoin routes, pit lane, other
+  // layouts) and service roads that meet the track – strips at the map's width, joined to the track's edge (auxroads.js)
   const heightNear = (x, z) => { const [s, d] = nearTrack(x, z); return s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); };
-  // other tarmac lies on the terrain (never under it: a flat strip at track height let the terrain's triangles
-  // poke through in a sawtooth), sampled every 3 m
-  const tarmacY = (x, z) => Math.max(heightNear(x, z), terrainAt(x, z) + 0.06);
-  const tm = tarmacMesh(extra.map((l) => densifyF1(l, 3)), gf, tarmacY);
+  const T = { local: corridor.local, edge: (s, side) => (side > 0 ? s.L ?? 7 : s.R ?? -7) };
+  const aux = auxRuns(scene.lines.map((l) => ({ ...l, pts: l.pts.map(gf.xz) })), T, { street: !!opts.street });
+  const auxY = (x, z) => { const [s, d] = nearTrack(x, z); const ty = terrainAt(x, z); return s ? blendHeight(s.p.y, ty, d) : ty + 0.05; };
+  const tm = auxMesh(aux, T, auxY);
   if (tm) group.add(tm);
   // Real barriers within 45 m of the track.
   // Mapped barriers within 45 m of the track, cut where a mapping error puts them on the tarmac.
@@ -893,6 +877,9 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     night,
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
+    // (where the venue's other tarmac meets the track – escape roads, rejoin routes: a generated barrier leaves it open)
+    auxGap: aux.length ? onJoiningRun(aux) : null,
+    aux,       // (development: the strips – Map3D.auxNear)
     // (the camera's line-of-sight test isn't recursive: the facilities' meshes themselves)
     occluders: (bld ? bld.children : []).concat(stands ? [stands.structure] : [], (() => { const out = []; lm?.group?.getObjectByName("facilities")?.traverse((o) => { if (o.isMesh) out.push(o); }); return out; })()),
     satAt: (x, z) => { const px = groundInfo.pixels(), W = ground.canvas.width, i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); if (i < 0 || j < 0 || i >= W || j >= ground.canvas.height) return null; const o = (j * W + i) * 4; return [px[o], px[o + 1], px[o + 2]]; },
