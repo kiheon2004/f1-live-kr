@@ -10,7 +10,9 @@
 // Plain objects (groups, meshes, sprites, points) have nothing of their own to free and aren't called.
 // done: a Set shared between calls that free overlapping things (nothing is freed twice).
 export function disposeGroup(root, done = new Set()) {
-  if (!root) return done;
+  // (not a 3D object – a helper table kept beside the world's parts: nothing to free, and no error that would stop a
+  // world from being swapped for the next session's, as one did in the v0.34 work)
+  if (!root?.isObject3D) return done;
   const once = (x) => { if (x && !done.has(x) && !x.userData?.shared) { done.add(x); x.dispose(); } };
   root.traverse((o) => {
     if (typeof o.userData?.onDispose === "function" && !done.has(o.userData.onDispose)) { done.add(o.userData.onDispose); o.userData.onDispose(); }

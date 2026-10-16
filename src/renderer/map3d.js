@@ -641,7 +641,7 @@ function buildWorld(points) {
   // (the pit lane, as measured – startdata.js –, widened to the lane's width: no generated wall across it)
   const A0 = app(), pd0 = START_DATA[venueOf({ circuitKey: A0.circuitKey?.(), location: A0.location?.() })?.key]?.pit;
   const laneZone = pd0 ? laneCells(pd0.path.map((p) => [p[0] * DM - center.x, -(p[1] * DM - center.z)]), 8) : null;
-  const syn = { walls: style.street ? streetWalls(samples, grid) : walls(samples, grid, 12, 1.1, undefined, 0, laneZone), laneZone };
+  const syn = { walls: style.street ? streetWalls(samples, grid) : walls(samples, grid, 12, 1.1, undefined, 0, laneZone) };
   world0Level = Math.min(...samples.map((s) => s.p.y)) - 2.5;
   syn.terrain = terrain(samples, grid, box);
   syn.trees = trees(grid, box);
@@ -656,7 +656,7 @@ function buildWorld(points) {
   scene.fog.near = Math.max(size.x, size.z) * 0.6;
   scene.fog.far = Math.max(size.x, size.z) * 3.2;
   const frame = trackFrame({ samples, grid });
-  return { group, samples, grid, frame, center, size, box, n, lap, syn, far, kerbMark: samples.kerbMark, street: !!style.street, width: samples.reduce((a, s) => a + (s.L - s.R), 0) / samples.length, farBase: far.material.color.clone(), road, lines, kerb };
+  return { group, samples, grid, frame, center, size, box, n, lap, syn, laneZone, far, kerbMark: samples.kerbMark, street: !!style.street, width: samples.reduce((a, s) => a + (s.L - s.R), 0) / samples.length, farBase: far.material.color.clone(), road, lines, kerb };
 }
 
 // Where the edges of the tarmac are, from where every car drove in the session: per ~10 m of track, the
@@ -1903,7 +1903,7 @@ async function loadGeo(w) {
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
     else if (built.auxGap && !w.street) {
       // the generated barrier, opened where an escape road or rejoin route meets the track
-      const open = walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.syn.laneZone, built.auxGap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });
+      const open = walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.laneZone, built.auxGap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });
       w.group.remove(w.syn.walls); disposeGroup(w.syn.walls); w.syn.walls = open; w.group.add(open);
     }
     w.farBase = built.edge.clone().multiplyScalar(0.92);
@@ -2156,7 +2156,7 @@ function disposeWorld() {
     const done = disposeGroup(world.group);
     disposeReal(world.real, done);
     releaseField(world.trackField);
-    for (const o of Object.values(world.syn || {})) if (o && !o.parent) disposeGroup(o, done);
+    for (const o of Object.values(world.syn || {})) if (o?.isObject3D && !o.parent) disposeGroup(o, done);   // (3D objects only)
     world = null;
   }
   lit = null;

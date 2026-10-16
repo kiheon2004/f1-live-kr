@@ -73,3 +73,10 @@ test("night patch: standard, lambert and phong (also instanced) get the light fi
   // unlit materials are left alone
   const basic = new THREE.MeshBasicMaterial(); nightLit(basic); assert.strictEqual(basic.customProgramCacheKey(), new THREE.MeshBasicMaterial().customProgramCacheKey());
 });
+
+// v0.34 work: a world's table of generic parts held a non-3D value (the pit lane's cells); freeing it on a session
+// switch threw, and the 3D world stayed on the previous circuit for every race loaded after the first.
+test("dispose: something that isn't a 3D object is skipped, not an error", async () => {
+  const { disposeGroup } = await import("../src/renderer/dispose.js");
+  assert.doesNotThrow(() => { disposeGroup({ has: () => false }); disposeGroup(new Map()); disposeGroup(null); });
+});
