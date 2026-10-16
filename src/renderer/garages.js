@@ -13,6 +13,7 @@
 // panels, a sign with the team's name over its garages, each driver's board, and equipment inside (tyre stacks,
 // tool cabinets, a jack) – all inside the garages, nothing in the pit lane.
 import * as THREE from "./vendor/three.module.js";
+import { peopleMeshes } from "./crew.js";
 
 const STOP_MIN = 1500, STOP_MAX = 8000, LONG = 20000, STILL = 0.8;
 // (a standstill cut in two by a small move – a nudge, the data jumping a little – is one: runs that follow each other
@@ -424,6 +425,45 @@ function shared() {
   return SHARED;
 }
 
+// Seats on a team's pit wall stand, where a source gives them: { team, seasons: [from, to], seats, enclosed, src }.
+// Otherwise the usual estimate – the stands seat 3 to 8 in one row (the sources found: Haas 3 in 2023–24, 6 in 2025;
+// Ferrari 7 in 2020 – too old to stand for today's) – 6, drawn the same for every team without a source (said so).
+export const PIT_WALL_SEATS = [
+  { team: /haas/i, seasons: [2025, 2025], seats: 6, enclosed: true, src: "Haas F1 Team 2025 (pit wall back to six seats; an enclosure against the weather) – team/press articles, 2025" },
+  { team: /haas/i, seasons: [2023, 2024], seats: 3, enclosed: true, src: "Haas F1 Team 2023–24 three-seat stand (400 kg less freight) – team/press articles" },
+];
+export function pitWallSeats(team, season, list = PIT_WALL_SEATS) {
+  const r = list.find((x) => x.team.test(team || "") && season != null && season >= x.seasons[0] && season <= x.seasons[1]);
+  return r ? { seats: r.seats, enclosed: !!r.enclosed, from: r.src } : { seats: 6, enclosed: false, from: "estimate: the usual 3–8 seats, no source for this team and season" };
+}
+// The pit wall screens: one picture for all of them – the session's public timing as this app shows it (positions,
+// drivers, gaps; painted by map3d.js paintPitScreens), never a team's own data. Shared; never freed with a layer.
+let SCREEN = null;
+export function pitScreenTexture() {
+  if (SCREEN) return SCREEN.tex;
+  const cv = document.createElement("canvas"); cv.width = 256; cv.height = 168;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.userData.shared = true;
+  SCREEN = { cv, tex, key: "" }; paintPitScreens([], null);
+  return tex;
+}
+// rows: [[position, code, gap text, team colour]] (the first 10), lap: "LAP 23/66" or null
+export function paintPitScreens(rows, lap) {
+  if (!SCREEN) return;
+  const key = JSON.stringify([rows, lap]); if (key === SCREEN.key) return; SCREEN.key = key;
+  const g = SCREEN.cv.getContext("2d"), W = 256, H = 168;
+  g.fillStyle = "#0b0e13"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#1c2430"; g.fillRect(0, 0, W, 20);
+  g.fillStyle = "#e8edf3"; g.font = "700 13px Arial, sans-serif"; g.textBaseline = "middle"; g.fillText(lap || "TIMING", 8, 10);
+  rows.slice(0, 10).forEach(([pos, code, gap, colour], i) => {
+    const y = 26 + i * 14;
+    g.fillStyle = i % 2 ? "#121820" : "#0f141b"; g.fillRect(0, y - 1, W, 14);
+    g.fillStyle = colour || "#888"; g.fillRect(28, y + 1, 3, 10);
+    g.fillStyle = "#cfd6dd"; g.font = "600 11px Arial, sans-serif"; g.fillText(String(pos), 8, y + 6); g.fillText(code || "", 36, y + 6);
+    g.textAlign = "right"; g.fillText(gap || "", W - 8, y + 6); g.textAlign = "left";
+  });
+  SCREEN.tex.needsUpdate = true;
+}
+
 // The labels of one layer in one texture: a row per team (its name on its colour) and per driver (code and number).
 function atlas(rows) {
   const W = 512, R = 64, cv = document.createElement("canvas"); cv.width = W; cv.height = R * rows.length;
@@ -439,7 +479,7 @@ function atlas(rows) {
 const textOn = (hex) => { const n = parseInt(hex.slice(1), 16), l = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); return l > 150 ? "#111111" : "#ffffff"; };
 
 // The layer for one allocation: returns a THREE.Group owning its geometry, materials and label texture.
-export function teamLayer(garages, teams, drivers) {
+export function teamLayer(garages, teams, drivers, season = null) {
   const S = shared(), group = new THREE.Group(); group.name = "pitTeams";
   if (!teams.length) return group;
   const bySlot = new Map(garages.slots.map((s) => [s.k, s]));
@@ -461,6 +501,56 @@ export function teamLayer(garages, teams, drivers) {
     const P = [c.clone().addScaledVector(ax, -0.5).addScaledVector(ay, -0.5), c.clone().addScaledVector(ax, 0.5).addScaledVector(ay, -0.5), c.clone().addScaledVector(ax, 0.5).addScaledVector(ay, 0.5), c.clone().addScaledVector(ax, -0.5).addScaledVector(ay, 0.5)];
     const UV = uv ? [[uv[0], uv[1]], [uv[2], uv[1]], [uv[2], uv[3]], [uv[0], uv[3]]] : null;
     for (const k of [0, 1, 2, 0, 2, 3]) { store.pos.push(P[k].x, P[k].y, P[k].z); store.nor.push(n.x, n.y, n.z); if (UV) store.uv.push(...UV[k]); if (colour) store.col.push(colour.r, colour.g, colour.b); }
+  };
+  // A team's stand on the pit wall (wall: facilities.js wallAt – the walkway's centre opposite its box, `out` towards the
+  // pit lane): a raised deck, a console along the debris fence with the screens on it, a stool per seat, the team's
+  // people seated on them facing the track (their backs to the pit lane), a canopy on four posts with the team's name on
+  // its front, railings at the ends and a step up at one. Its size from its seats (PIT_WALL_SEATS: what a source says
+  // for that team and season, else the usual estimate) – each 0.8 m along the console.
+  const boxQ = (store, c, A, U, O, la, lu, lo, colour, faces = 63) => {
+    const n = [O.clone().negate(), O, A.clone().negate(), A, U, U.clone().negate()];
+    const ctr = [c.clone().addScaledVector(O, -lo / 2), c.clone().addScaledVector(O, lo / 2), c.clone().addScaledVector(A, -la / 2), c.clone().addScaledVector(A, la / 2), c.clone().addScaledVector(U, lu / 2), c.clone().addScaledVector(U, -lu / 2)];
+    const ax = [[A, la, U, lu], [A, la, U, lu], [O, lo, U, lu], [O, lo, U, lu], [A, la, O, lo], [A, la, O, lo]];
+    for (let f = 0; f < 6; f++) if (faces & (1 << f)) quad(store, ctr[f], ax[f][0].clone().multiplyScalar(ax[f][1]), ax[f][2].clone().multiplyScalar(ax[f][3]), n[f], null, colour);
+  };
+  const people = [], screenQuads = { pos: [], uv: [], nor: [] };
+  const pitWallStand = (w, t, season) => {
+    const seat = pitWallSeats(t.team, season), N = seat.seats, up = new THREE.Vector3(0, 1, 0);
+    const p = new THREE.Vector3(...w.p), A = new THREE.Vector3(w.along[0], 0, w.along[1]), O = new THREE.Vector3(w.out[0], 0, w.out[1]);
+    const L = N * 0.8 + 0.6, team = new THREE.Color(t.colour), dark = team.clone().multiplyScalar(0.3).lerp(new THREE.Color("#1d2024"), 0.5), steel = new THREE.Color("#8d949b"), black = new THREE.Color("#15171a");
+    const at = (a, o, y) => p.clone().addScaledVector(A, a).addScaledVector(O, o).addScaledVector(up, y);
+    const deck = 0.22;
+    boxQ(panels, at(0, 0.05, deck / 2), A, up, O, L, deck, 1.6, dark);                                   // the deck
+    boxQ(panels, at(0, -0.52, deck + 0.52), A, up, O, L - 0.2, 1.04, 0.42, dark);                        // the console
+    boxQ(panels, at(0, -0.3, deck + 0.52), A, up, O, L - 0.2, 0.9, 0.02, team, 2);                      // its front in the team's colour
+    boxQ(panels, at(0, -0.52, deck + 1.06), A, up, O, L - 0.1, 0.04, 0.5, black, 16);                    // its top
+    // screens: two to a seat, side by side on the console, tilted back a little, facing the seats (+O)
+    for (let i = 0; i < N; i++) for (const k of [-1, 1]) {
+      const a = -L / 2 + 0.3 + 0.8 * (i + 0.5) + k * 0.2, c = at(a, -0.62, deck + 1.36);
+      boxQ(panels, c, A, up, O, 0.4, 0.27, 0.035, black, 63);
+      quad(screenQuads, c.clone().addScaledVector(O, 0.019), A.clone().multiplyScalar(0.37), up.clone().multiplyScalar(0.24), O, [0, 0, 1, 1]);
+    }
+    // stools and the people on them (their seat's height the sit pose's hips over the deck)
+    for (let i = 0; i < N; i++) {
+      const a = -L / 2 + 0.3 + 0.8 * (i + 0.5);
+      boxQ(panels, at(a, 0.28, deck + 0.24), A, up, O, 0.05, 0.48, 0.05, steel);
+      boxQ(panels, at(a, 0.28, deck + 0.5), A, up, O, 0.38, 0.05, 0.36, black);
+      // (facing the track: the figures' +x along −O; crewAt's convention: yaw = atan2 of the facing, less 90°)
+      const f = O.clone().negate(), yaw = Math.atan2(f.x, f.z) - Math.PI / 2;
+      const q = at(a, 0.55, deck - 0.02);
+      people.push({ x: q.x, y: q.y, z: q.z, yaw, shirt: t.colour, pose: i % 3 === 1 ? "sitLean" : "sit", seed: hashStr(t.team + i) });
+    }
+    // canopy: posts at the corners, the roof in the team's colour, its front fascia carrying the name
+    for (const a of [-L / 2 + 0.05, L / 2 - 0.05]) for (const o of [-0.72, 0.82]) boxQ(panels, at(a, o, 1.35), A, up, O, 0.07, 2.7, 0.07, steel);
+    boxQ(panels, at(0, 0.1, 2.72), A, up, O, L + 0.3, 0.08, 2.0, team.clone().multiplyScalar(0.8));
+    boxQ(panels, at(0, 1.1, 2.55), A, up, O, L + 0.3, 0.42, 0.04, team, 3);
+    quad(labels, at(0, 1.13, 2.55), A.clone().multiplyScalar(Math.min(L, 3.6)), up.clone().multiplyScalar(Math.min(L, 3.6) / 8), O, lab.uv(t.row));
+    // railings at both ends, a step up onto the deck at the far end
+    for (const a of [-L / 2, L / 2]) { boxQ(panels, at(a, 0.05, deck + 1.0), A, up, O, 0.04, 0.04, 1.6, steel); boxQ(panels, at(a, 0.05, deck + 0.5), A, up, O, 0.04, 0.04, 1.6, steel); }
+    boxQ(panels, at(L / 2 + 0.25, 0.4, 0.06), A, up, O, 0.5, 0.12, 0.7, steel);
+    // an enclosure against the weather where the team's stand has one (Haas: a source says so)
+    if (seat.enclosed) for (const a of [-L / 2 - 0.02, L / 2 + 0.02]) boxQ(panels, at(a, 0.05, deck + 1.5), A, up, O, 0.03, 2.4, 1.7, dark, 12);
+    t.wallStand = { seats: N, from: seat.from };
   };
   const inst = { tyres: [], cabinet: [], jack: [], bench: [], screens: [] };
   const col = new THREE.Color();
@@ -525,15 +615,7 @@ export function teamLayer(garages, teams, drivers) {
       quad(marks, c, along.clone().multiplyScalar(la), out.clone().multiplyScalar(lw), up, null, yellow);
     }
     const w = garages.wallAt?.(t.box);
-    if (w) {
-      col.set(t.colour);
-      const p = new THREE.Vector3(...w.p), A = new THREE.Vector3(w.along[0], 0, w.along[1]), O = new THREE.Vector3(w.out[0], 0, w.out[1]);
-      // desk (front panel in the team's colour), the roof over it, the screens' dark band
-      quad(panels, p.clone().addScaledVector(up, 0.55).addScaledVector(O, 1.2), A.clone().multiplyScalar(4.5), up.clone().multiplyScalar(1.1), O, null, col);
-      quad(panels, p.clone().addScaledVector(up, 2.6), A.clone().multiplyScalar(4.8), O.clone().multiplyScalar(3.2), up, null, col.clone().multiplyScalar(0.55));
-      quad(panels, p.clone().addScaledVector(up, 1.5).addScaledVector(O, 0.9), A.clone().multiplyScalar(4.2), up.clone().multiplyScalar(0.6), O, null, new THREE.Color("#15181b"));
-      quad(labels, p.clone().addScaledVector(up, 2.2).addScaledVector(O, 1.62), A.clone().multiplyScalar(3.2), up.clone().multiplyScalar(0.4), O, lab.uv(t.row));
-    }
+    if (w) pitWallStand(w, t, season);
   }
   const mesh = (store, mat, name) => {
     const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(store.pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(store.nor, 3));
@@ -543,6 +625,8 @@ export function teamLayer(garages, teams, drivers) {
   };
   if (panels.pos.length) mesh(panels, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide }), "teamPanels");
   if (labels.pos.length) mesh(labels, labelMat, "teamLabels");
+  if (screenQuads.pos.length) { const sm = new THREE.MeshBasicMaterial({ map: pitScreenTexture(), toneMapped: false }); mesh(screenQuads, sm, "pitWallScreens"); }
+  if (people.length) group.add(peopleMeshes(people));
   if (marks.pos.length) mesh(marks, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }), "boxMarks");
   // instanced equipment
   const instanced = (geo, mat, list, name, coloured) => {

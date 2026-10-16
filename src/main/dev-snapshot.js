@@ -77,6 +77,8 @@ module.exports = function snapshot(win, outFile) {
         await wait(1500);
         fs.writeFileSync(tag + "_last.png", (await win.webContents.capturePage()).resize({ width: 1200 }).toPNG());
         console.log("GRIDSWEEP", JSON.stringify({ item, loc: dbg.loc, key: dbg.key, t, lights, real: !!dbg.real, check, cams }));
+        // F1KR_ITEM_JS: run on every race of the sweep (its result logged with the race)
+        if (process.env.F1KR_ITEM_JS) console.log("ITEMJS", item, await run(process.env.F1KR_ITEM_JS).catch((e) => "error " + e.message));
       }
     } else if (process.env.F1KR_SWEEP) {
       // F1KR_SWEEP="2026:바레인 그랑프리 · 결승,2025:모나코 그랑프리 · 결승" – loads each race, builds the real 3D

@@ -442,7 +442,7 @@ class Scenes {
     const sd = standsFor(location);
     const toF1m = ([lat, lon]) => localToF1(...fr.toXY(lat, lon)).map((v) => Math.round(v * 10) / 10);
     const stands = sd ? { name: sd.name, total: sd.total || null, seats: sd.seats || null, est: !!sd.est, src: sd.src || null,
-      list: (sd.stands || []).map((st) => ({ ...st, a: toF1m(st.a), b: toF1m(st.b) })) } : null;
+      list: (sd.stands || []).map((st) => ({ ...st, a: st.a ? toF1m(st.a) : null, b: st.b ? toF1m(st.b) : null })) } : null;
 
     return {
       circuit: info ? { name: info.name, length: info.length, opened: info.opened, firstgp: info.firstgp, altitude: info.altitude } : null,

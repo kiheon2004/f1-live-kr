@@ -359,3 +359,59 @@ export function kitAt(where, kits, bands = {}) {
   return kits.map((k) => ({ kind: k.kind === "gun" ? "gun" : k.axle, x: where.x + s * k.a + c * k.b, y: where.y + k.h, z: where.z + c * k.a - s * k.b,
     yaw: k.kind === "gun" ? where.yaw + k.yaw - Math.PI / 2 : where.yaw + k.yaw, flip: !!k.flip, band: k.kind === "new" ? bands.new : k.kind === "old" ? bands.old : null }));
 }
+
+// ---------- the team's people on the pit wall ----------
+// Seated on stools at the stand's console, facing the track (the screens in front of them; from the garage one sees
+// their backs – formula1.com, "The insider's guide to the pit wall"), headsets on: the same skeleton as the crews (the
+// "sit" pose), dressed in the team's shirt, dark trousers and shoes, a bare head with a headset – no helmets.
+// Static (a layer's people stand still until the layer is rebuilt): one instanced mesh per body part for all of them.
+POSES.sit = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.12, arm: [[0.95, 0.12, 0.65], [0.9, 0.14, 0.7]] };
+POSES.sitLean = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.32, arm: [[1.15, 0.1, 0.45], [1.1, 0.12, 0.5]] };
+let PEOPLE = null;
+function peopleShared() {
+  if (PEOPLE) return PEOPLE;
+  const S = shared(), cap = (r, l) => new THREE.CapsuleGeometry(r, l, 2, 6);
+  const head = new THREE.SphereGeometry(0.105, 10, 8).scale(1.05, 1.12, 0.92);
+  // the headset: a band over the head and a cup at each ear
+  const set = mergeGeo([[new THREE.TorusGeometry(0.115, 0.012, 4, 12, Math.PI).rotateY(Math.PI / 2).translate(0, 0.02, 0), [0.08, 0.08, 0.09]],
+    [new THREE.CylinderGeometry(0.045, 0.045, 0.03, 10).rotateX(Math.PI / 2).translate(0, -0.01, 0.115), [0.08, 0.08, 0.09]], [new THREE.CylinderGeometry(0.045, 0.045, 0.03, 10).rotateX(Math.PI / 2).translate(0, -0.01, -0.115), [0.08, 0.08, 0.09]]]);
+  PEOPLE = {
+    // part → [geometry, colour role: "shirt" | "legs" | "skin" | "dark", per person]
+    parts: { thigh: [cap(0.072, LIMB.thigh - 0.1), "legs"], shin: [cap(0.06, LIMB.shin - 0.1), "legs"], boot: [new THREE.BoxGeometry(0.25, 0.08, 0.1), "dark"],
+      pelvis: [S.parts.pelvis[0], "legs"], torso: [S.parts.torso[0], "shirt"], neck: [S.parts.neck[0], "skin"], helmet: [head, "skin"], visor: [set, "kit"],
+      uarm: [cap(0.052, LIMB.uarm - 0.08), "shirt"], farm: [cap(0.045, LIMB.farm - 0.08), "skin"], glove: [new THREE.SphereGeometry(0.045, 6, 5), "skin"] },
+    skin: ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"],
+    mat: new THREE.MeshStandardMaterial({ roughness: 0.7 }), kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }),
+  };
+  for (const [g] of Object.values(PEOPLE.parts)) g.userData.shared = true;
+  PEOPLE.mat.userData.shared = true; PEOPLE.kitMat.userData.shared = true;
+  return PEOPLE;
+}
+// people: [{ x, y, z, yaw (as crewAt's: the geometry's +x turned to face), shirt, pose, seed }] → a Group (its instanced
+// meshes own nothing shared: the geometries and materials are; disposeGroup leaves them)
+export function peopleMeshes(people) {
+  const P = peopleShared(), group = new THREE.Group(); group.name = "pitWallPeople";
+  if (!people.length) return group;
+  const per = { thigh: 2, shin: 2, boot: 2, uarm: 2, farm: 2, glove: 2 }, meshes = {}, counts = {};
+  for (const [k, [g, role]] of Object.entries(P.parts)) {
+    const m = new THREE.InstancedMesh(g, role === "kit" ? P.kitMat : P.mat, people.length * (per[k] || 1)); m.count = 0; m.castShadow = true; m.receiveShadow = true;
+    if (role !== "kit") m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(m.instanceMatrix.count * 3), 3);
+    meshes[k] = { m, role }; counts[k] = 0; group.add(m);
+  }
+  const mp = new THREE.Matrix4(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), qp = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), z = new THREE.Vector3(0, 0, 1), dir = new THREE.Vector3();
+  const cShirt = new THREE.Color(), cLegs = new THREE.Color("#25282d"), cSkin = new THREE.Color(), cDark = new THREE.Color("#141518");
+  for (const f of people) {
+    cShirt.set(f.shirt || "#9aa0a6"); cSkin.set(P.skin[(f.seed ?? 0) % P.skin.length]);
+    q.setFromAxisAngle(up, f.yaw); p.set(f.x, f.y, f.z); mp.compose(p, q, one);
+    skeleton(f.pose || "sit", (part, x, y, zz, ax, ay, az) => {
+      const e = meshes[part]; if (!e) return;
+      if (ay != null) { dir.set(ax, ay, az); qp.setFromUnitVectors(up, dir); } else qp.setFromAxisAngle(z, ax || 0);
+      p.set(x, part === "visor" ? y : y, zz); if (part === "visor") p.x -= 0.11;   // (the headset round the head, not at the visor's place)
+      m4.compose(p, qp, one).premultiply(mp);
+      const i = counts[part]++; e.m.setMatrixAt(i, m4);
+      if (e.role !== "kit") e.m.setColorAt(i, e.role === "shirt" ? cShirt : e.role === "legs" ? cLegs : e.role === "skin" ? cSkin : cDark);
+    });
+  }
+  for (const [k, e] of Object.entries(meshes)) { e.m.count = counts[k]; e.m.instanceMatrix.needsUpdate = true; if (e.m.instanceColor) e.m.instanceColor.needsUpdate = true; e.m.computeBoundingSphere(); }
+  return group;
+}

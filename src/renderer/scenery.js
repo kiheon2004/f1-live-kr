@@ -740,7 +740,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   let stands = null;
   if (opts.buildings !== false) {
     onStep?.("관중석 세우는 중");
-    stands = buildStands({ scene, gf, world, groundAt, corridor, street: opts.street });
+    stands = buildStands({ scene, gf, world, groundAt, corridor, street: opts.street, year: opts.year || null, corners: opts.corners || [] });
     if (stands) group.add(stands.group);
   }
   const inStand = stands ? (x, z) => stands.footprints.some((f) => inPoly(x, z, f)) : null;
@@ -898,6 +898,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     satAt: (x, z) => { const px = groundInfo.pixels(), W = ground.canvas.width, i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); if (i < 0 || j < 0 || i >= W || j >= ground.canvas.height) return null; const o = (j * W + i) * 4; return [px[o], px[o + 1], px[o + 2]]; },
     isSea: seaLevel != null ? isSea : null, landAt: seaR ? (x, z) => seaR.landAt(x, z) : null,
     geo: gf,   // the frame's maps (F1 metres / lat-lon ↔ scene), for placing things by their real position
+    scene,     // (development: the map data it was built from – Map3D.mapNear)
     landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
     info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped, raisedOver: bld.userData.overTrack } : null,

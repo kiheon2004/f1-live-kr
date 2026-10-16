@@ -15,7 +15,7 @@ import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
-import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
@@ -171,6 +171,11 @@ function updatePitTeams(force = false) {
   if (!fac || !src?.tracks?.cars) { if (pitTeams.group) clearPitTeams(); pitTeams.facility = fac; pitTeamNote(null); return; }
   if (fac !== pitTeams.facility) { clearPitTeams(); pitTeams.facility = fac; pitTeams.teams = null; pitTeams.G = null; if (!fac.getObjectByName("pitLaneSurface")) fac.add(pitLaneMeshes(pitModelFor(fac.userData.garages))); }
   const G = fac.userData.garages, c = world.center, drivers = src.state?.DriverList || {};
+  // (the pit wall's screens: the session's public timing as the app shows it – never a team's own data)
+  { const lines = src.state?.TimingData?.Lines || {}, lc = src.state?.LapCount;
+    const rows = Object.entries(lines).filter(([, l]) => +l.Position > 0).sort((a, b) => a[1].Position - b[1].Position).slice(0, 10)
+      .map(([n, l]) => [l.Position, drivers[n]?.Tla || n, l.Position === "1" ? "" : (l.IntervalToPositionAhead?.Value || l.GapToLeader || ""), "#" + (drivers[n]?.TeamColour || "888888")]);
+    paintPitScreens(rows, lc?.CurrentLap ? `LAP ${lc.CurrentLap}${lc.TotalLaps ? "/" + lc.TotalLaps : ""}` : null); }
   // The frame the standstills are placed in: this pit building in this world. A rebuilt building (settings, a new map)
   // or a new world is a new frame: what was seen is placed in it again (garages.js PitInference.update).
   if (pitTeams.frame?.G !== G || pitTeams.frame.c !== c) {
@@ -208,7 +213,7 @@ function updatePitTeams(force = false) {
   clearPitTeams();
   pitTeams.key = key;
   if (!teams.length) return;   // neutral garages
-  pitTeams.group = teamLayer(G, teams, drivers);
+  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null);
   // a layer added at night takes the light field too (its own materials only – the rest of the world has it already)
   pitTeams.group.traverse((o) => { for (const m of [].concat(o.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
@@ -1884,7 +1889,11 @@ async function loadGeo(w) {
     w.geoCenter = data.center;
     // A light map is painted when the session is (or runs into) the night: switched on and off with the sun.
     const evening = isNight() || (app().sessionHour?.() ?? 0) >= 15.5;
-    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width,
+    // (this circuit's corners – F1's numbers – for the grandstands placed by them: grandstands.json "at")
+    const circ = A.circuitKey?.() != null ? await window.api.trackCircuit(A.circuitKey(), A.sessionYear?.() || null).catch(() => null) : null;
+    if (job !== geoJob || world !== w) return;
+    const corners = (circ?.corners || []).map((k) => ({ n: k.n, x: k.x * DM - w.center.x, z: -(k.y * DM - w.center.z) }));
+    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners,
       facilities: opts.facilities, year: A.sessionYear?.() || null, venue: venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
     if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
@@ -2593,6 +2602,14 @@ function adaptResolution(now, dt) {
 // The pace is set again when the view or the camera changes (what's on screen and its cost change with them).
 function resetPace() { perf.cap = false; perf.calm = 0; perf.lateNow = 0; }
 
+// (development: this circuit's corners – F1's numbers and places – on the lap's samples)
+async function standCorners() {
+  const A = app(), key = A.circuitKey?.(), year = A.sessionYear?.();
+  const c = key != null ? await window.api.trackCircuit(key, year).catch(() => null) : null;
+  return (c?.corners || []).map((k) => { const [s] = world.grid.nearest(k.x * DM - world.center.x, -(k.y * DM - world.center.z), 3); return s ? { n: k.n, i: s.i } : null; }).filter(Boolean);
+}
+// (metres along the lap from sample i to sample j, the short way round: + j after i)
+function alongTo(i, j) { const n = world.n, step = world.samples[0].p.distanceTo(world.samples[1].p); let d = ((j - i) % n + n) % n; if (d > n / 2) d -= n; return d * step; }
 // Self-check used in development on every circuit: walks the lap every ~20 m and reports
 //  overhead – places where a building stands over the tarmac (a ray from above hits a building first)
 //  chase   – places where a building blocks the chase camera's view of a car on the racing line
@@ -2885,6 +2902,72 @@ window.Map3D = {
   // feed has it, its speed, its team's box
   // development: the crews as placed this frame – a checksum of every instance's place (the same moment shows the
   // same: compared after seeks, pauses, speeds) and the cars lifted (model height, pitch, wheels on)
+  // development: the pit states from t0 to t1 (ms) every `step` ms without drawing – the moments some car was in one of
+  // `states` (default: waiting behind a teammate in the box): [[t, num, state, u]]
+  pitScan(t0, t1, step = 500, states = ["waiting (double stack)"]) {
+    const src = app().src, out = [];
+    for (let t = t0; t <= t1; t += step) { const f = pitFrame(src, t, 0, true); if (!f) continue; for (const r of f.values()) if (states.includes(r.state.state)) out.push([t, r.num, r.state.state, r.u == null ? null : Math.round(r.u)]); }
+    return JSON.stringify(out);
+  },
+  // development: the grandstands as built – each with the nearest corner (F1's corner numbers for this circuit and
+  // season), which side of the track it is on (L/R in the race's direction), how far along from that corner (m), its
+  // front's ends (lat, lon), rows, seats, roof – and the listed ones that couldn't be built, with why
+  async standsReport() {
+    const R = world?.real, L = R?.stands?.info?.list || []; if (!R) return JSON.stringify({ real: false });
+    const corners = await standCorners();
+    const out = L.map((st) => {
+      const [cx, , cz] = st.c, [s] = world.grid.nearest(cx, cz, 3), lat = s ? (cx - s.p.x) * s.nor.x + (cz - s.p.z) * s.nor.z : null;
+      const near = s && corners.length ? corners.map((k) => ({ n: k.n, d: alongTo(k.i, s.i) })).sort((a, b) => Math.abs(a.d) - Math.abs(b.d))[0] : null;
+      return { n: st.n, kind: st.kind, rows: st.rows, seats: st.seats, len: st.len, roof: st.roof, outline: (st.outline || []).map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))), side: lat == null ? null : lat > 0 ? "L" : "R", lat: lat && Math.round(lat), turn: near?.n ?? null, along: near ? Math.round(near.d) : null, ll: R.geo.toLL(cx, cz).map((v) => +v.toFixed(6)) };
+    });
+    const track = []; for (let i = 0; i < world.n; i += 5) { const s = world.samples[i]; track.push([...R.geo.toLL(s.p.x + s.nor.x * (s.L ?? 7), s.p.z + s.nor.z * (s.L ?? 7)), ...R.geo.toLL(s.p.x + s.nor.x * (s.R ?? -7), s.p.z + s.nor.z * (s.R ?? -7))].map((v) => +v.toFixed(6))); }
+    const cl = corners.map((k) => ({ n: k.n, ll: R.geo.toLL(world.samples[k.i].p.x, world.samples[k.i].p.z).map((v) => +v.toFixed(6)) }));
+    const mapped = (R.scene?.buildings || []).filter((b) => b.kind === "grandstand").map((b) => ({ name: b.name, ll: b.pts.map(R.geo.xz).map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) }));
+    return JSON.stringify({ loc: app().location?.(), key: app().circuitKey?.(), year: app().sessionYear?.(), info: { ...R.info.stands, skipped: R.stands?.info.skipped }, stands: out, track, corners: cl, mapped });
+  },
+  // development: grandstand ends for the data file from places along the track: [{ n, turn, d0, d1, side, off }] – from
+  // corner `turn` (F1's numbering), d0 to d1 m along the track (− before it), `off` m beyond the tarmac's edge on that
+  // side (L / R in the race's direction) → [{ n, a: [lat, lon], b: [lat, lon] }]
+  async standPoints(specs) {
+    const R = world?.real; if (!R) return "no real";
+    const corners = await standCorners(), n = world.n, step = world.samples[0].p.distanceTo(world.samples[1].p);
+    return JSON.stringify(specs.map((sp) => {
+      const k = corners.find((c) => c.n === sp.turn); if (!k) return { n: sp.n, error: "no corner " + sp.turn };
+      const pt = (d) => { const s = world.samples[((k.i + Math.round(d / step)) % n + n) % n], side = sp.side === "L" ? 1 : -1, o = side > 0 ? (s.L ?? 7) + (sp.off ?? 14) : (s.R ?? -7) - (sp.off ?? 14); return R.geo.toLL(s.p.x + s.nor.x * o, s.p.z + s.nor.z * o).map((v) => +v.toFixed(7)); };
+      return { n: sp.n, a: pt(sp.d0), b: pt(sp.d1) };
+    }));
+  },
+  // development: look at a team's pit wall stand from the pit lane (side: + towards its garage) – dist m away, h up
+  viewWallStand(team, dist = 6, h = 1.8, along = 0, fov = 55) {
+    const tm = pitTeams.teams?.find((q) => q.team.toLowerCase().includes(String(team).toLowerCase())); const w = tm && pitTeams.G?.wallAt?.(tm.box);
+    if (!w) return "no stand";
+    const [x, y, z] = w.p, [ox, oz] = w.out, [ax, az] = w.along;
+    return this.look(x + ox * dist + ax * along, y + h, z + oz * dist + az * along, x, y + 1.2, z, fov) + ` seats ${tm.wallStand?.seats} (${tm.wallStand?.from})`;
+  },
+  // development: moments two cars of one team were both drawn in the box lane within `near` m of each other along it
+  // (a double stack's second car on top of the first): [[t, a, b, stateA, stateB, du]]
+  pitPairs(t0, t1, step = 500, near = 7) {
+    const src = app().src, out = [];
+    for (let t = t0; t <= t1; t += step) {
+      const f = pitFrame(src, t, 0, true); if (!f) continue;
+      const v = [...f.values()].filter((r) => r.u != null && r.state.lane === "box" && r.state.w > 0.3);
+      for (let i = 0; i < v.length; i++) for (let j = i + 1; j < v.length; j++) if (v[i].team && v[i].team === v[j].team && Math.abs(v[i].u - v[j].u) < near) out.push([t, v[i].num, v[j].num, v[i].state.state, v[j].state.state, +(v[i].u - v[j].u).toFixed(1)]);
+    }
+    return JSON.stringify(out);
+  },
+  // development: the map's buildings and stand outlines within r m of (lat, lon) or a listed stand's ends – kind, name,
+  // height, area, distance, whether the grandstands treat it as an obstacle (area > 900 m² or over 14 m)
+  mapNear(lat, lon, r = 120) {
+    const R = world?.real; if (!R?.scene) return "no map";
+    const [x, z] = R.geo.fromLL(lat, lon), out = [];
+    for (const b of R.scene.buildings) {
+      const pts = b.pts.map(R.geo.xz); let cx = 0, cz = 0; for (const [a, c] of pts) { cx += a; cz += c; } cx /= pts.length; cz /= pts.length;
+      const d = Math.hypot(cx - x, cz - z); if (d > r) continue;
+      let A = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) A += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]);
+      out.push({ kind: b.kind, name: b.name, h: b.h, area: Math.round(Math.abs(A / 2)), d: Math.round(d), blocks: b.kind !== "grandstand" && (Math.abs(A / 2) > 900 || b.h > 14), ll: R.geo.toLL(cx, cz).map((v) => +v.toFixed(6)) });
+    }
+    return JSON.stringify(out.sort((a, b) => a.d - b.d).slice(0, 25));
+  },
   crewState() {
     let h = 0, n = 0;
     for (const m of world?.crews?.group.children || []) for (let i = 0; i < m.count; i++) { const e = m.instanceMatrix.array; for (let k = 12; k < 15; k++) { h = (h * 31 + Math.round(e[i * 16 + k] * 100)) | 0; } n++; }

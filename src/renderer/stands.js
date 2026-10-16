@@ -113,7 +113,9 @@ function standMaterial(opts = {}) {
 
 // scene: the fitted scene (buildings with kind "grandstand", stands: { seats, total, list }), gf: geo frame of
 // scenery.js, world: map3d's world (samples, grid), groundAt(x, z), corridor: trackCorridor(), street: bool.
-export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
+// year: the session's season (a listed stand with yr: [from, to] is built only then); corners: this circuit's corners
+// ({ n, x, z } scene metres, F1's numbering) for the stands placed by them (at).
+export function buildStands({ scene, gf, world, groundAt, corridor, street, year = null, corners = [] }) {
   const samples = world.samples, n = samples.length;
   const step = n > 1 ? samples[0].p.distanceTo(samples[1].p) : 2;
   const edge = (s, side) => (side > 0 ? s.L ?? 7 : s.R ?? -7);
@@ -257,12 +259,30 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
     stands.push(boxStand);
   }
   // listed stands (skipped where a mapped outline already is the same stand: that one takes its name and roof)
-  const list = (scene.stands?.list || []).map((L) => ({ ...L, A: gf.xz(L.a), B: gf.xz(L.b) }));
+  // A listed stand is one seated structure on the circuit's spectator map. Not built: one for other seasons (yr), and
+  // what the map shows as standing room or a grass bank ("ga") or a hospitality terrace or suite ("hosp") – no rows of
+  // seats. Placed by its two ends (a, b: lat, lon traced from the map) or by the track (at: from corner `turn` – F1's
+  // numbering for this circuit and season –, d0 to d1 m along the lap, − before it; on `side` L / R in the race's
+  // direction): a schematic map gives the corner, the side and the stretch, not metres – so its place along the track
+  // is the map's, its distance from the tarmac the usual one (off, m).
+  const skipped = [];
+  const cornerAt = (n) => { const k = corners.find((c) => c.n === n); if (!k) return null; const [s] = world.grid.nearest(k.x, k.z, 3); return s || nearestSample(k.x, k.z)[0]; };
+  const list = [];
+  for (const L of scene.stands?.list || []) {
+    if (L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1]))) { skipped.push(`${L.n}: not in ${year}`); continue; }
+    if (L.type === "ga" || L.type === "hosp") { skipped.push(`${L.n}: ${L.type === "ga" ? "standing / grass" : "hospitality"}`); continue; }
+    if (L.at) {
+      const s0 = cornerAt(L.at.turn); if (!s0) { skipped.push(`${L.n}: no corner ${L.at.turn}`); continue; }
+      const side = L.at.side === "L" ? 1 : -1;
+      const pt = (d) => { const s = samples[((s0.i + Math.round(d / step)) % n + n) % n], o = edge(s, side) + side * 2; return [s.p.x + s.nor.x * o, s.p.z + s.nor.z * o]; };
+      list.push({ ...L, A: pt(L.at.d0), B: pt(L.at.d1), side: L.at.side, off: L.at.off ?? L.off, curve: 1 });
+    } else if (L.a && L.b) list.push({ ...L, A: gf.xz(L.a), B: gf.xz(L.b) });
+  }
   for (const L of curved.concat(list)) {
     const { A, B } = L;
     const mid = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
     const twin = stands.find((m) => (m.kind === "mapped" || m.curvedFrom) && (inPoly(mid[0], mid[1], m.outline || m.curvedFrom) || segDist(m.front, A, B) < 18));
-    if (twin && !L.outline) { twin.name = twin.name || L.n; if (L.roof) twin.roof = true; twin.listed = true; continue; }
+    if (twin && !L.outline) { twin.name = twin.name || L.n; if (L.roof) twin.roof = L.roof === "upper" ? "upper" : true; twin.listed = true; continue; }
     let [sa] = nearestSample(A[0], A[1]), [sb] = nearestSample(B[0], B[1]);
     const la = lateral(sa, A[0], A[1]), lb = lateral(sb, B[0], B[1]);
     const side = L.side ? (L.side === "L" ? 1 : -1) : Math.sign(la + lb) || 1;
@@ -299,7 +319,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
       }
     }
     if (front.length < 2) continue;
-    stands.push({ kind: "listed", name: L.n, front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: !!L.roof, perm: !!(L.roof || L.perm), own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
+    stands.push({ kind: "listed", name: L.n, front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
   }
   if (!stands.length) return null;
 
@@ -516,7 +536,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
     }
     // roof: columns along the back, a canopy reaching over most of the rows, rising slightly towards the track
     if (st.roof) {
-      const white = C("#e9ecef"), under = C("#8b9299"), reach = WALK + rows * ROW_D * 0.25;
+      // (a roof over the upper rows only – "upper": the rows below in the open)
+      const white = C("#e9ecef"), under = C("#8b9299"), reach = WALK + rows * ROW_D * (st.roof === "upper" ? 0.55 : 0.25);
       const hb = (i) => top(i) + 3.4, hf = (i) => top(i) + 4.6;
       for (let i = 0; i < F.length - 1; i++) {
         const j = i + 1;
@@ -561,7 +582,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
     flush();
     seatTotal += nSeats;
     const mi = Math.floor(F.length / 2);
-    report.push({ n: st.name, kind: st.kind, rows, max: st.maxRows, seats: nSeats, len: Math.round(len), roof: !!st.roof,
+    report.push({ n: st.name, kind: st.kind, rows, max: st.maxRows, seats: nSeats, len: Math.round(len), roof: st.roof || false, depth: +depth.toFixed(1),
+      outline: [...F.map((p) => [+p.x.toFixed(1), +p.z.toFixed(1)]), ...F.slice().reverse().map((p) => [+(p.x + p.nx * depth).toFixed(1), +(p.z + p.nz * depth).toFixed(1)])].filter((_, i, a) => a.length < 40 || i % Math.ceil(a.length / 40) === 0),
       c: [+F[mi].x.toFixed(1), +(gy[mi] + FRONT_H).toFixed(1), +F[mi].z.toFixed(1)], nrm: [+F[mi].nx.toFixed(3), +F[mi].nz.toFixed(3)] });
   }
 
@@ -614,7 +636,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street }) {
         im.visible = Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) < near;
       }
     },
-    info: { between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },
+    info: { skipped, between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },
   };
 }
 
