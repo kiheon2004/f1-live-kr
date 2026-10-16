@@ -18,6 +18,7 @@ export const PIT = {
   atBox: 10,     // m: standing within this of its box's place is standing at its box – never more than half the way to
                  // the next team's box (the caller's boxTol: boxes are 17–30 m apart); the measured place of a team's box
                  // can be a car's length off its stops of the day
+  creep: 7,      // m/s: slower than this behind its box while the teammate is in it – queueing (a double stack)
   leave: 30,     // m after its box over which a car leaving it goes back to the fast lane
   ends: 40,      // m past either end of the garages' run over which a car goes from / to the feed's line
   still: 0.8,    // m/s: standing
@@ -56,13 +57,14 @@ export function pitState(c, P = PIT) {
   // retired or stopped: nobody works on it – left standing where it stood (its box, if that is where), else the fast lane
   if (c.retired) { ev.push("retired / stopped (timing)"); return { state: "retired", lane: standing && box && Math.abs(d) <= tol ? "box" : "fast", w: 1, evidence: ev }; }
   if (standing) {
+    // behind its box while a teammate is in it (a double stack): waits in the inner lane, where it stands – even within
+    // the box's tolerance (the second car stops a car's length or two behind the first: never "in box" with it)
+    if (box && c.teammateInBox && d < -2 && d > -P.near - 10) { ev.push("teammate in the box"); return { state: "waiting (double stack)", lane: "box", w: 1, evidence: ev }; }
     if (box && Math.abs(d) <= tol) {
       if (!c.race && c.stillFor >= P.garage) { ev.push("standing long outside a race"); return { state: "garage", lane: "garage", w: ss(P.garage, P.garage + P.garageIn, c.stillFor), evidence: ev }; }
       if (c.penalty === "stop-go") { ev.push("stop-and-go given by race control"); return { state: "stop-go", lane: "box", w: 1, evidence: ev }; }
       return { state: "in box", lane: "box", w: 1, evidence: ev };
     }
-    // behind its box while a teammate is in it (a double stack): waits in the inner lane, where it stands
-    if (box && c.teammateInBox && d < -tol && d > -P.near - 10) { ev.push("teammate in the box"); return { state: "waiting (double stack)", lane: "box", w: 1, evidence: ev }; }
     return { state: box ? "queued" : "standing (no box known)", lane: "fast", w: 0, evidence: ev };
   }
   // leaving its box: back to the fast lane over `leave` m
@@ -70,6 +72,9 @@ export function pitState(c, P = PIT) {
     ev.push("left its box");
     return { state: "leaving box", lane: "box", w: 1 - ss(0, P.leave, c.u - c.lastBox.endU), evidence: ev };
   }
+  // creeping up behind its box while a teammate is in it: a double stack too – the real second car seldom stands still,
+  // it crawls up at walking pace (Canada 2026 lap 31: Leclerc at 2–5 m/s, 5–11 m behind Hamilton for 4 s)
+  if (box && c.teammateInBox && d < -2 && d > -P.near - 10 && c.speed < P.creep) { ev.push("teammate in the box", "creeping behind it"); return { state: "waiting (double stack)", lane: "box", w: 1, evidence: ev }; }
   // pulling in: before its box, slowing
   if (box && d < tol && d > -P.near && c.penalty !== "drive-through") {
     const w = (1 - ss(0, P.near, -Math.min(0, d))) * (1 - ss(P.slow[0], P.slow[1], c.speed));

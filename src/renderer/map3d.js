@@ -311,7 +311,8 @@ function pitFrame(src, t, lag, isRace) {
     out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
   }
   for (const r of out.values()) r.state = pitState(r.input);
-  for (const r of out.values()) if (r.state.state !== "in box" && r.input.speed <= PIT.still && [...out.values()].some((o) => o !== r && o.team === r.team && o.state.state === "in box")) { r.input.teammateInBox = true; r.state = pitState(r.input); }
+  // (a teammate in the box – or still pulling out of it – and this car standing or creeping up behind: a double stack)
+  for (const r of out.values()) if (r.input.speed < PIT.creep && [...out.values()].some((o) => o !== r && o.team === r.team && (o.state.state === "in box" || o.state.state === "leaving box") && o.u != null && r.u != null && o.u > r.u + 2)) { r.input.teammateInBox = true; r.state = pitState(r.input); }
   for (const r of out.values()) {
     if (r.u == null) continue;
     const at = m.at(r.u), want = laneOffsetOf(r.state, at, r.off, r.u, G.gStart, G.gEnd);

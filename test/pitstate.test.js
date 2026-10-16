@@ -134,3 +134,15 @@ test("crew layouts: in the inner lane on the garages' side of the car's lane-sid
   // hold (a stop-and-go): all by the garage
   for (const [, b] of crewLayout("hold", 1, boxC, 1)) assert.strictEqual(b, boxC - 0.7);
 });
+
+// v0.34 (Canada 2026 lap 31, Ferrari): the real second car of a double stack doesn't stand still behind the first –
+// Leclerc crept up at 2–5 m/s, 5–11 m behind Hamilton (within the box's 10 m tolerance), so no wait was ever seen in
+// 40 races; standing there it would have been a second car "in box".
+test("double stack as it really happens: creeping up behind a teammate in the box, even within the box's tolerance, is waiting – never a second car in the box", async () => {
+  const { pitState } = await S();
+  const behind = { ...base, u: 191, teammateInBox: true };
+  assert.strictEqual(pitState({ ...behind, speed: 4 }).state, "waiting (double stack)");
+  assert.strictEqual(pitState({ ...behind, speed: 0, stillFor: 2 }).state, "waiting (double stack)");
+  assert.strictEqual(pitState({ ...behind, speed: 15 }).state, "to box", "at a normal pace: still pulling in");
+  assert.strictEqual(pitState({ ...base, u: 191, speed: 0, stillFor: 2 }).state, "in box", "no teammate there: its stop");
+});
