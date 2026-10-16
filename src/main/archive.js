@@ -170,7 +170,16 @@ class Archive {
       onBytes?.(0, 0);
       throw new Error(`인터넷 연결을 확인해 주세요 (${e.cause?.code || e.name})`);
     }
-    if (!res.ok) { onBytes?.(0, 0); const err = new Error(`HTTP ${res.status} for ${rel}`); err.status = res.status; throw err; }
+    if (!res.ok) {
+      // Refused (F1 closed its public archive to anonymous requests on 2026-10-16: 401 for every file) or a server
+      // error: an old copy is better than nothing, as when offline. A missing file (404) is no reason to.
+      if ([401, 403, 429].includes(res.status) || res.status >= 500) {
+        try { const text = fs.readFileSync(file, "utf8"); onBytes?.(text.length, text.length); return text; } catch {}
+      }
+      onBytes?.(0, 0);
+      const err = new Error(res.status === 401 || res.status === 403 ? `F1 기록 서버가 접근을 막았어요 (HTTP ${res.status}). 이 컴퓨터에 받아 둔 기록만 열 수 있어요` : `HTTP ${res.status} for ${rel}`);
+      err.status = res.status; throw err;
+    }
     let text;
     if (onBytes) {
       const total = +res.headers.get("content-length") || 0, chunks = [];
