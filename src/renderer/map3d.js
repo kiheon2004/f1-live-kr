@@ -15,7 +15,7 @@ import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
-import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
 import { WheelScreens, screenModel } from "./wheelscreen.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -1542,6 +1542,12 @@ function updateWheelScreens(src, t) {
   for (const { num, tex } of have) { const c = cars.get(num); if (c) setWheelScreen(c.model, tex); }
   const lines = src?.state?.TimingData?.Lines || {}, laps = src?.state?.LapCount || null, season = app()?.sessionYear?.() || null;
   wheelScreens.update((num) => screenModel({ car: src?.carAt?.(num, t) || null, line: lines[num] || null, laps, season }));
+  // the teams' own pit wall panels: their two drivers, by team – the session's public data at the moment shown (each
+  // repainted on change, at most twice a second: ~11 small canvases)
+  if (pitTeams.group) {
+    const apps = src?.state?.TimingAppData?.Lines || {};
+    updateTeamScreens(pitTeams.group, (num) => ({ line: lines[num] || null, app: apps[num] || null, car: src?.carAt?.(num, t) || null }));
+  }
 }
 // Cars never pass through each other: overlapping pairs (position data is a metre or two off, and only
 // 4 Hz) are moved apart – sideways when side by side, along the track when nose to tail – by the smallest

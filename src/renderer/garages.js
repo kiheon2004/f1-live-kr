@@ -14,6 +14,7 @@
 // tool cabinets, a jack) – all inside the garages, nothing in the pit lane.
 import * as THREE from "./vendor/three.module.js";
 import { peopleMeshes } from "./crew.js";
+import { driverPanel, paintPanel } from "./pitscreens.js";
 
 const STOP_MIN = 1500, STOP_MAX = 8000, LONG = 20000, STILL = 0.8;
 // (a standstill cut in two by a small move – a nudge, the data jumping a little – is one: runs that follow each other
@@ -515,7 +516,7 @@ export function teamLayer(garages, teams, drivers, season = null) {
     const ax = [[A, la, U, lu], [A, la, U, lu], [O, lo, U, lu], [O, lo, U, lu], [A, la, O, lo], [A, la, O, lo]];
     for (let f = 0; f < 6; f++) if (faces & (1 << f)) quad(store, ctr[f], ax[f][0].clone().multiplyScalar(ax[f][1]), ax[f][2].clone().multiplyScalar(ax[f][3]), n[f], null, colour);
   };
-  const people = [], screenQuads = { pos: [], uv: [], nor: [] };
+  const people = [], screenQuads = { pos: [], uv: [], nor: [] }, teamQuads = new Map();
   const pitWallStand = (w, t, season) => {
     const seat = pitWallSeats(t.team, season), N = seat.seats, up = new THREE.Vector3(0, 1, 0);
     const p = new THREE.Vector3(...w.p), A = new THREE.Vector3(w.along[0], 0, w.along[1]), O = new THREE.Vector3(w.out[0], 0, w.out[1]);
@@ -526,11 +527,15 @@ export function teamLayer(garages, teams, drivers, season = null) {
     boxQ(panels, at(0, -0.52, deck + 0.52), A, up, O, L - 0.2, 1.04, 0.42, dark);                        // the console
     boxQ(panels, at(0, -0.3, deck + 0.52), A, up, O, L - 0.2, 0.9, 0.02, team, 2);                      // its front in the team's colour
     boxQ(panels, at(0, -0.52, deck + 1.06), A, up, O, L - 0.1, 0.04, 0.5, black, 16);                    // its top
-    // screens: two to a seat, side by side on the console, tilted back a little, facing the seats (+O)
+    // screens: two to a seat, side by side on the console, tilted back a little, facing the seats (+O) – the left one the
+    // session's timing (shared), the right one the team's own panel for one of its drivers (seats alternate A, B)
+    const tq = teamQuads.get(t.team) || { pos: [], uv: [], nor: [], t }; teamQuads.set(t.team, tq);
+    const two = (t.drivers || []).length > 1;
     for (let i = 0; i < N; i++) for (const k of [-1, 1]) {
       const a = -L / 2 + 0.3 + 0.8 * (i + 0.5) + k * 0.2, c = at(a, -0.62, deck + 1.36);
       boxQ(panels, c, A, up, O, 0.4, 0.27, 0.035, black, 63);
-      quad(screenQuads, c.clone().addScaledVector(O, 0.019), A.clone().multiplyScalar(0.37), up.clone().multiplyScalar(0.24), O, [0, 0, 1, 1]);
+      const half = two && i % 2 ? [0.5, 0, 1, 1] : [0, 0, 0.5, 1];
+      quad(k < 0 ? screenQuads : tq, c.clone().addScaledVector(O, 0.019), A.clone().multiplyScalar(0.37), up.clone().multiplyScalar(0.24), O, k < 0 ? [0, 0, 1, 1] : half);
     }
     // stools and the people on them (their seat's height the sit pose's hips over the deck)
     for (let i = 0; i < N; i++) {
@@ -628,6 +633,16 @@ export function teamLayer(garages, teams, drivers, season = null) {
   if (panels.pos.length) mesh(panels, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide }), "teamPanels");
   if (labels.pos.length) mesh(labels, labelMat, "teamLabels");
   if (screenQuads.pos.length) { const sm = new THREE.MeshBasicMaterial({ map: pitScreenTexture(), toneMapped: false }); mesh(screenQuads, sm, "pitWallScreens"); }
+  // each team's own panels: a texture of the layer's own (freed with it), painted by updateTeamScreens
+  const teamScreens = [];
+  for (const [team, tq] of teamQuads) {
+    if (!tq.pos.length) continue;
+    const cv = document.createElement("canvas"); cv.width = 384; cv.height = 128;
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    mesh(tq, new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }), "pitWallTeamScreens");
+    teamScreens.push({ team, colour: tq.t.colour, drivers: (tq.t.drivers || []).slice(0, 2).map((d) => ({ num: d.num, tla: d.tla })), cv, tex, key: null, at: -1e9 });
+  }
+  group.userData.teamScreens = teamScreens;
   if (people.length) group.add(peopleMeshes(people));
   if (marks.pos.length) mesh(marks, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }), "boxMarks");
   // instanced equipment
@@ -654,3 +669,20 @@ export function teamLayer(garages, teams, drivers, season = null) {
 // driver's board – its text and garage)
 export const allocationKey = (teams) => teams.map((t) => [t.team, t.colour, t.from, t.link, t.slots.join(","), t.box ?? "", t.boxOff ?? "",
   t.drivers.map((d) => `${d.num}=${d.label ?? d.tla}@${d.slot ?? ""}`).join("+")].join(":")).join("|");
+
+// The teams' own pit wall panels of a layer (teamLayer's group): get(num) → { line, app, car } for that driver now.
+// Repainted when what they show changed, at most every `every` ms; returns how many were painted.
+export function updateTeamScreens(group, get, now = performance.now(), every = 500) {
+  let n = 0;
+  for (const s of group?.userData?.teamScreens || []) {
+    if (now - s.at < every) continue;
+    const ms = s.drivers.map((d) => driverPanel({ d, colour: s.colour, ...get(d.num) }));
+    const key = ms.map((m) => m.key).join("|");
+    if (key === s.key) continue;
+    const g = s.cv.getContext("2d");
+    ms.forEach((m, i) => paintPanel(g, i * 192, m));
+    if (ms.length < 2) { g.fillStyle = "#0b0e13"; g.fillRect(192, 0, 192, 128); }
+    s.tex.needsUpdate = true; s.key = key; s.at = now; n++;
+  }
+  return n;
+}

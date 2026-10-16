@@ -54,3 +54,16 @@ test("wheel screens: a few for the nearest cars, each repainted only when its pi
   assert.strictEqual(ws.slots.length, 2, "never more textures than its size");
   assert.ok(tex1.userData.shared, "the pool's textures aren't freed with a car");
 });
+
+// v0.35: the teams' own pit wall panels – each of a team's two drivers on its own half, by team (not by place); a
+// change of the classification doesn't swap them
+test("pit wall panels: a team's two drivers each with their own data, tied to the driver, not the place", async () => {
+  const { driverPanel } = await import("../src/renderer/pitscreens.js");
+  const ham = driverPanel({ d: { num: "44", tla: "HAM" }, line: { Position: "4", NumberOfLaps: 23, IntervalToPositionAhead: { Value: "3.821" }, LastLapTime: { Value: "1:25.380" } },
+    app: { Stints: { 0: { Compound: "MEDIUM", TotalLaps: 23, New: "true" } } }, car: { speed: 318, gear: 8 } });
+  const lec = driverPanel({ d: { num: "16", tla: "LEC" }, line: { Position: "22", NumberOfLaps: 1, Retired: true }, car: null });
+  assert.deepStrictEqual([ham.num, ham.pos, ham.gap, ham.last, ham.tyre.c, ham.tyre.age, ham.speed, ham.gear, ham.state], ["44", 4, "+3.821", "1:25.380", "M", 23, 318, "8", null]);
+  assert.deepStrictEqual([lec.num, lec.pos, lec.state, lec.speed], ["16", 22, "OUT", null]);
+  const swapped = driverPanel({ d: { num: "44", tla: "HAM" }, line: { Position: "1", NumberOfLaps: 24 }, car: null });
+  assert.deepStrictEqual([swapped.num, swapped.tla, swapped.gap], ["44", "HAM", "LEADER"]);
+});
