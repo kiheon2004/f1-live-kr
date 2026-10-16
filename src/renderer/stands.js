@@ -126,6 +126,10 @@ function standMaterial(opts = {}) {
 // scenery.js, world: map3d's world (samples, grid), groundAt(x, z), corridor: trackCorridor(), street: bool.
 // year: the session's season (a listed stand with yr: [from, to] is built only then); corners: this circuit's corners
 // ({ n, x, z } scene metres, F1's numbering) for the stands placed by them (at).
+// Listed entries never built: standing / grass areas, hospitality, and the seating of something else next to the
+// circuit (a football or baseball stadium's stands facing their own pitch) that the map tags as a grandstand.
+const NOT_BUILT = new Map([["ga", "standing / grass"], ["hosp", "hospitality"], ["other", "not a circuit grandstand"]]);
+
 export function buildStands({ scene, gf, world, groundAt, corridor, street, year = null, corners = [] }) {
   const samples = world.samples, n = samples.length;
   const step = n > 1 ? samples[0].p.distanceTo(samples[1].p) : 2;
@@ -224,7 +228,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const skipped = [];   // (listed stands not built, and why)
   const dropped = [];   // (map outlines not built, and why)
   const inYear = (L) => !(L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1])));
-  const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && L.type !== "ga" && L.type !== "hosp")
+  const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && !NOT_BUILT.has(L.type))
     .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced" }));
   const seen = [], listedBy = new Map((scene.stands?.list || []).map((L) => [L.n, L]));
   // (largest first: an outline mostly inside one already taken – the west part of Spielberg's main stand mapped
@@ -244,7 +248,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     if (b.kind !== "grandstand" || b.asPitBuilding || b.underTraced) continue;
     if (b.standOf && listedBy.get(b.standOf) && !inYear(listedBy.get(b.standOf))) { skipped.push(`${b.standOf}: not in ${year}`); continue; }
     const lt = b.standOf ? listedBy.get(b.standOf)?.type : null;
-    if (lt === "ga" || lt === "hosp") { skipped.push(`${b.standOf}: ${lt === "ga" ? "standing / grass" : "hospitality"}`); continue; }
+    if (NOT_BUILT.has(lt)) { skipped.push(`${b.standOf}: ${NOT_BUILT.get(lt)}`); continue; }
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) { drop(b, "outline under 3 points"); continue; }
@@ -323,7 +327,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   for (const L of scene.stands?.list || []) {
     if (!inYear(L)) { skipped.push(`${L.n}: not in ${year}`); continue; }
     if (L.poly) continue;   // (built from its outline above)
-    if (L.type === "ga" || L.type === "hosp") { skipped.push(`${L.n}: ${L.type === "ga" ? "standing / grass" : "hospitality"}`); continue; }
+    if (NOT_BUILT.has(L.type)) { skipped.push(`${L.n}: ${NOT_BUILT.get(L.type)}`); continue; }
     if (L.at) {
       const s0 = cornerAt(L.at.turn); if (!s0) { skipped.push(`${L.n}: no corner ${L.at.turn}`); continue; }
       const side = L.at.side === "L" ? 1 : -1;
