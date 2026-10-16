@@ -1091,7 +1091,9 @@ function carFor(num, d) {
   if (c && c.key === key) return c;
   if (c) { scene.remove(c.obj); disposeGroup(c.obj); }
   const obj = new THREE.Group();
-  const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season });
+  // (the event's date: a team's car changed during the season – carshapes.js)
+  const date = /\d{4}-\d\d-\d\d/.exec(app().src?.state.SessionInfo?.Path || "")?.[0] || null;
+  const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season, date });
   if (nightNow) setCarEnvironment(model, carEnvironment(true), 0.6);
   { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false }));
     sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; model.add(sh); }

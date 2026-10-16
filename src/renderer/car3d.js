@@ -23,6 +23,7 @@
 // No sponsor or team logos are drawn (none are licensed for this app): liveries are the team's colour zones and the
 // car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
+import { shapeFor } from "./carshapes.js";
 
 // ---------- profiles ----------
 // FZ/RZ: axle positions along the car, FR/RR tyre radii, FW/RW tyre widths, W: overall width (outer tyre faces),
@@ -67,14 +68,15 @@ export const TEAM_PROFILES = [
   // McLaren (Norris, Hungary) and Mercedes (Russell, Austria): only the left half of each frame is visible in the
   // thumbnails (a portrait over the rest) – too few points for a fit; the era's numbers are used
 ];
-// Which model for a car: by season (the car of that year) and team (a checked variant where there is one); the team's
-// own profile (camera) on top.
-export function profileFor(season, teamName) {
+// Which model for a car: by season (the car of that year) and team – its shape that season (carshapes.js: the features
+// photos and technical articles agree on; the event's date for a car changed during the season) – and the team's own
+// profile (camera) on top. The template key carries the shape: one team's model is never handed to another.
+export function profileFor(season, teamName, date = null) {
   const y = +season || new Date().getFullYear();
   const era = y >= 2026 ? "2026" : "2022";
-  const variant = era === "2022" && y === 2025 && /red bull racing/i.test(teamName || "") ? "rb21" : null;
+  const shape = shapeFor(y, teamName, date);
   const team = TEAM_PROFILES.find((t) => t.season === y && t.team.test(teamName || "")) || null;
-  return { key: variant ? `${era}:${variant}` : era, era, variant, season: y, ...PROFILES[era], ...(team?.camera || {}), team: team?.id || null };
+  return { key: shape ? `${era}:${shape.id}` : era, era, variant: shape?.id || null, shape, season: y, ...PROFILES[era], ...(team?.camera || {}), team: team?.id || null };
 }
 // (kept for callers of the old single model: the current era's numbers)
 export const WHEELBASE = PROFILES[2026].FZ - PROFILES[2026].RZ;
@@ -331,6 +333,59 @@ function halo(p) {
   return merge([hoop, pillar]);
 }
 
+// ---- a team's shape on the era's sections (carshapes.js) ----
+// Body sections [z, y, half width, half height, x, roundness]; nose = the sections ahead of noseFrom. Pods likewise
+// (one side's), their first two the inlet.
+function shapeBody(sec, s, noseFrom) {
+  if (!s) return sec;
+  const tipZ = sec[0][0], n = s.nose || {};
+  const lenF = { long: 1.14, medium: 1, short: 0.84 }[n.len] ?? 1, tipDy = { high: 0.05, mid: 0, low: -0.03 }[n.tip] ?? 0, wF = { narrow: 0.82, medium: 1, wide: 1.35 }[n.w] ?? 1;
+  const box = s.airbox;
+  return sec.map((q) => {
+    const r = q.slice(); const [z] = q;
+    if (z > noseFrom) {
+      const k = (z - noseFrom) / (tipZ - noseFrom);          // 0 at the nose's root, 1 at its tip
+      r[0] = noseFrom + (z - noseFrom) * lenF; r[1] = q[1] + tipDy * k; r[2] = q[2] * (1 + (wF - 1) * k);
+    }
+    // the airbox and the cover behind the driver's head
+    if (z <= -0.35 && z >= -0.85) {
+      if (box === "oval") { r[2] = q[2] * 0.82; r[3] = q[3] * 0.96; r[5] = 2.2; }
+      else if (box === "rect") { r[2] = q[2] * 1.3; r[3] = q[3] * 1.04; r[5] = 4.5; }
+    }
+    if (s.cooling === "bulge" && z <= -1.0 && z >= -1.8) r[3] = q[3] * 1.12;
+    return r;
+  });
+}
+function shapePods(pod, s) {
+  if (!s?.pod) return pod;
+  const P = s.pod, z0 = pod[0][0], z1 = pod[pod.length - 1][0];
+  return pod.map((q, i) => {
+    const r = q.slice(), k = (z0 - q[0]) / (z0 - z1);        // 0 at the inlet, 1 at the tail
+    if (i === 0 || i === 1) {
+      const f = i === 0 ? 1 : 0.55;
+      if (P.inlet === "letterbox") { r[3] = q[3] * (1 - 0.5 * f); r[2] = q[2] * (1 + 0.15 * f); r[1] = q[1] + 0.06 * f; }
+      else if (P.inlet === "vertical") { r[2] = q[2] * (1 - 0.45 * f); r[3] = q[3] * (1 + 0.25 * f); r[4] = (q[4] ?? 0.5) - 0.06 * f; }
+      else if (P.inlet === "wide") { r[2] = q[2] * (1 + 0.15 * f); r[3] = q[3] * (1 + 0.12 * f); }
+    }
+    if (P.undercut === "deep") { r[3] *= 0.82; r[1] += 0.025; } else if (P.undercut === "shallow") { r[3] *= 1.08; r[1] -= 0.01; }
+    const ramp = P.top === "ramp" ? 1 : P.top === "halframp" ? 0.5 : 0, gully = P.top === "gully";
+    if (ramp && k > 0.2) { r[1] -= 0.07 * ramp * (k - 0.2); r[3] *= 1 - 0.25 * ramp * (k - 0.2); }
+    if (gully && k > 0.15 && k < 0.85) { r[1] += 0.025; r[3] *= 1.04; }
+    return r;
+  });
+}
+// the parts a shape adds: a cooling cannon or louvres, a serrated fin, the blades atop the front wing's endplates
+function shapeParts(s, p, fwSpan, fwZ) {
+  const out = [];
+  if (!s) return out;
+  if (s.cooling === "cannon") out.push(softBox(0.1, 0.09, 0.3, 0, 0.42, -2.0, 0.6));
+  if (s.cooling === "louvres") for (const k of [1, -1]) for (let i = 0; i < 4; i++) out.push(boxAt(0.12, 0.008, 0.02, 0.36 * k, 0.4 - i * 0.012, -0.55 - i * 0.07));
+  if (s.cooling === "split") for (const k of [1, -1]) out.push(softBox(0.06, 0.05, 0.18, 0.11 * k, 0.5, -1.55, 0.5));
+  if (s.fin === "serrated") { out.push(boxAt(0.008, 0.11, 0.55, 0, 0.82, -1.2, 0.12)); for (let i = 0; i < 6; i++) out.push(boxAt(0.008, 0.035, 0.045, 0, 0.885, -0.98 - i * 0.085, 0, 0.6)); }
+  if (s.blade) for (const k of [1, -1]) out.push(boxAt(0.12, 0.008, 0.42, (fwSpan / 2 - 0.05) * k, 0.31, fwZ));
+  return out;
+}
+
 function body2022(p) {
   const rb = p.variant === "rb21";
   // body, nose first: nose (narrow, RB's nose tip sits on the wing's main plane) → survival cell → cockpit (low, open:
@@ -341,7 +396,7 @@ function body2022(p) {
     [0.0, 0.41, 0.315, 0.13], [-0.22, 0.43, 0.32, 0.15], [-0.42, 0.53, 0.3, 0.29], [-0.75, 0.58, 0.25, 0.37],
     [-1.15, 0.52, 0.19, 0.28], [-1.6, 0.44, 0.13, 0.19], [-2.05, 0.37, 0.085, 0.12], [-2.45, 0.33, 0.05, 0.07],
   ];
-  const body = loft(smoothSections(sec, 2).reverse(), 32);
+  const body = loft(smoothSections(rb ? sec : shapeBody(sec, p.shape, 1.75), 2).reverse(), 32);
   // sidepods (left; the right is a mirror). RB21: a high, narrow letterbox inlet, a steep downwash ramp and a deep
   // undercut; the neutral shape a fuller pod.
   const podSec = rb
@@ -349,7 +404,7 @@ function body2022(p) {
       [-0.75, 0.31, 0.16, 0.11, 0.45, 2.6], [-1.2, 0.24, 0.11, 0.08, 0.34], [-1.6, 0.19, 0.06, 0.05, 0.24], [-1.85, 0.17, 0.03, 0.03, 0.18]]
     : [[0.65, 0.42, 0.12, 0.11, 0.5, 3], [0.48, 0.42, 0.18, 0.15, 0.53, 3], [0.0, 0.4, 0.2, 0.16, 0.52, 2.8], [-0.5, 0.35, 0.18, 0.15, 0.48, 2.6],
       [-1.0, 0.28, 0.13, 0.12, 0.39], [-1.45, 0.22, 0.08, 0.08, 0.28], [-1.8, 0.18, 0.04, 0.05, 0.2]];
-  const podL = loft(smoothSections(podSec, 2).reverse(), 22);
+  const podL = loft(smoothSections(rb ? podSec : shapePods(podSec, p.shape), 2).reverse(), 22);
   const pods = both(podL);
   // floor: the 2022 floor, wide to the front tyres' wake, edge wing, the diffuser's big tunnels rising at the back
   const fl = new THREE.Shape();
@@ -372,7 +427,7 @@ function body2022(p) {
   const rwPlates = merge([plate(ep, rwSpan / 2 + 0.002), plate(ep, -rwSpan / 2 - 0.014)]);
   const beam = merge([wingElement(0.86, 0.14, 0.02, 0.36, -2.3, 0.15, 0, 12), wingElement(0.82, 0.12, 0.018, 0.43, -2.42, 0.4, 0, 12)]);
   const rwPylon = merge([boxAt(0.014, 0.42, 0.12, 0, 0.6, -2.3), boxAt(0.12, 0.12, 0.36, 0, 0.3, -2.45)]);
-  const susp = suspension(p, true);
+  const susp = suspension(p, (p.shape?.fsusp ?? "pull") === "pull", p.shape?.rsusp === "pull");
   // mirrors on the cockpit sides, a T-cam pod on the airbox, a small fin
   const mirrors = [], heads = [];
   for (const k of [1, -1]) { mirrors.push(strut([0.29 * k, 0.6, 0.5], [0.45 * k, 0.665, 0.52], 0.03, 0.012)); heads.push(softBox(0.16, 0.065, 0.06, 0.5 * k, 0.68, 0.52, 0.2)); }
@@ -380,7 +435,7 @@ function body2022(p) {
   const fin = boxAt(0.008, 0.12, 0.6, 0, 0.88, -1.15, 0.12);
   return {
     body, pods,
-    carbon: metricUV(merge([floor, edge, diffuser, fw[0], fwPlates, rwPlates, rwPylon, beam, ...susp, ...mirrors, fin, tcamPod]), 0.04),
+    carbon: metricUV(merge([floor, edge, diffuser, fw[0], fwPlates, rwPlates, rwPylon, beam, ...susp, ...mirrors, fin, tcamPod, ...shapeParts(rb ? null : p.shape, p, fwSpan, 2.6)]), 0.04),
     wing: merge([rwMain, ...heads]), fwFlaps: merge([fw[1], fw[2], fw[3]]), rwFlaps: rwFlap,
     fwPivot: [0.13, 2.68], rwPivot: [0.92, -2.3], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
     lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: halo(p),
@@ -401,11 +456,11 @@ function body2026(p) {
     [0.0, 0.41, 0.315, 0.13], [-0.22, 0.43, 0.32, 0.15], [-0.42, 0.56, 0.3, 0.4], [-0.75, 0.6, 0.26, 0.4],
     [-1.2, 0.52, 0.22, 0.28], [-1.65, 0.43, 0.15, 0.19], [-2.1, 0.36, 0.085, 0.11], [-2.42, 0.32, 0.05, 0.06],
   ];
-  const body = loft(smoothSections(sec, 2).reverse(), 32);
-  const podL = loft(smoothSections([
+  const body = loft(smoothSections(shapeBody(sec, p.shape, 1.6), 2).reverse(), 32);
+  const podL = loft(smoothSections(shapePods([
     [0.62, 0.38, 0.13, 0.12, 0.5, 3], [0.45, 0.39, 0.17, 0.15, 0.52, 3], [0.0, 0.37, 0.18, 0.16, 0.5, 2.8], [-0.5, 0.33, 0.17, 0.15, 0.46, 2.6],
     [-1.0, 0.28, 0.13, 0.12, 0.38], [-1.45, 0.23, 0.08, 0.08, 0.27], [-1.7, 0.2, 0.04, 0.05, 0.2],
-  ], 2).reverse(), 22);
+  ], p.shape), 2).reverse(), 22);
   const fl = new THREE.Shape();
   [[0.22, 1.25], [0.6, 0.75], [0.74, 0.45], [0.74, -0.9], [0.66, -1.35], [0.5, -1.62], [0.5, -2.25], [-0.5, -2.25], [-0.5, -1.62], [-0.66, -1.35], [-0.74, -0.9], [-0.74, 0.45], [-0.6, 0.75], [-0.22, 1.25]]
     .forEach(([x, z], i) => (i ? fl.lineTo(x, -z) : fl.moveTo(x, -z)));
@@ -422,7 +477,7 @@ function body2026(p) {
   const rwFlaps = merge([wingElement(rwSpan - 0.02, 0.17, 0.028, 0.84, -2.2, 0.42, 0), wingElement(rwSpan - 0.04, 0.12, 0.024, 0.9, -2.3, 0.62, 0)]);   // (top under the 0.95 m limit)
   const rwPlates = merge([boxAt(0.012, 0.56, 0.62, rwSpan / 2 + 0.006, 0.66, -2.24), boxAt(0.012, 0.56, 0.62, -rwSpan / 2 - 0.006, 0.66, -2.24)]);
   const rwPylons = merge([boxAt(0.012, 0.42, 0.12, 0.05, 0.56, -2.28), boxAt(0.012, 0.42, 0.12, -0.05, 0.56, -2.28), boxAt(0.12, 0.12, 0.36, 0, 0.33, -2.42), boxAt(0.6, 0.012, 0.06, 0, 0.5, -2.32)]);
-  const susp = suspension(p, false);
+  const susp = suspension(p, p.shape?.fsusp === "pull", p.shape?.rsusp === "pull");
   const mirrors = [], heads = [];
   // mirrors (2026 footage: larger and higher than before, either side of the halo's legs)
   for (const k of [1, -1]) { mirrors.push(strut([0.28 * k, 0.62, 0.46], [0.5 * k, 0.72, 0.48], 0.03, 0.012)); heads.push(softBox(0.22, 0.085, 0.07, 0.56 * k, 0.74, 0.48, 0.2)); }
@@ -431,7 +486,7 @@ function body2026(p) {
   return {
     body, pods: both(podL),
     // (2026 halos are black carbon on every car in the footage and photos – not painted)
-    carbon: metricUV(merge([floor, diffuser, fw[0], pylons, fwPlates, boards, rwPlates, rwPylons, ...susp, ...mirrors, tcamPod, halo(p)]), 0.04),
+    carbon: metricUV(merge([floor, diffuser, fw[0], pylons, fwPlates, boards, rwPlates, rwPylons, ...susp, ...mirrors, tcamPod, halo(p), ...shapeParts(p.shape, p, fwSpan, 2.48)]), 0.04),
     wing: merge([rwMain, ...heads]), fwFlaps: merge([fw[1], fw[2]]), rwFlaps,
     fwPivot: [0.16, 2.5], rwPivot: [0.86, -2.2], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
     lights: [boxAt(0.012, 0.05, 0.36, rwSpan / 2 + 0.014, 0.78, -2.24), boxAt(0.012, 0.05, 0.36, -rwSpan / 2 - 0.014, 0.78, -2.24), boxAt(0.06, 0.05, 0.02, 0, 0.36, -2.6)],
@@ -439,15 +494,17 @@ function body2026(p) {
   };
 }
 
-// Wishbones and push/pull rods (faired blades), each corner from the chassis to the upright.
-function suspension(p, pullFront) {
+// Wishbones and push/pull rods (faired blades), each corner from the chassis to the upright – front and rear each
+// push or pull as the team's car has them (carshapes.js; the era's default without one)
+function suspension(p, pullFront, pullRear = false) {
   const out = [];
   for (const [z, wx, front] of [[p.FZ, p.W / 2 - p.FW / 2, true], [p.RZ, p.W / 2 - p.RW / 2, false]]) for (const k of [1, -1]) {
     const ox = (wx - 0.14) * k, cx = (front ? 0.2 : 0.22) * k;
     out.push(strut([cx, 0.46, z + 0.24], [ox, 0.47, z]), strut([cx, 0.46, z - 0.2], [ox, 0.47, z]));
     out.push(strut([cx, 0.22, z + 0.26], [ox, 0.2, z]), strut([cx, 0.22, z - 0.22], [ox, 0.2, z]));
     // (pull rod: from high on the upright down to the chassis; push rod: low on the upright up to the chassis)
-    out.push(front && pullFront ? strut([ox * 0.95, 0.45, z - 0.04], [cx * 0.9, 0.2, z - 0.32], 0.028, 0.014) : strut([ox * 0.95, 0.22, z + 0.02], [cx * 1.1, 0.5, z - 0.12], 0.028, 0.014));
+    const pull = front ? pullFront : pullRear;
+    out.push(pull ? strut([ox * 0.95, 0.45, z + (front ? -0.04 : 0.04)], [cx * 0.9, 0.2, z + (front ? -0.32 : 0.3)], 0.028, 0.014) : strut([ox * 0.95, 0.22, z + 0.02], [cx * 1.1, 0.5, z + (front ? -0.12 : 0.12)], 0.028, 0.014));
     // track rod (steering) in front
     if (front) out.push(strut([cx, 0.34, z + 0.1], [ox, 0.34, z + 0.08], 0.03, 0.012));
   }
@@ -590,8 +647,8 @@ export const TYRE_COLOURS = { SOFT: "#e8392f", MEDIUM: "#f2c230", HARD: "#eef0f2
 // opts: { teamName, teamColour, number, season } → a THREE.Group; userData: { profile, mounts: { tcam, eye },
 // wheels (steer groups), spins (roll groups), fwPivot, rwPivot, bandMat, near (the close-up parts), fine (wheel covers,
 // lights), helmet, wheel (steering wheel group), lod, compound, aero }.
-export function makeCar({ teamName, teamColour, number, season = null }) {
-  const prof = profileFor(season, teamName), t = template(prof), l = liveryFor(teamName, teamColour);
+export function makeCar({ teamName, teamColour, number, season = null, date = null }) {
+  const prof = profileFor(season, teamName, date), t = template(prof), l = liveryFor(teamName, teamColour);
   const matte = l.finish === "matte";
   const paint = new THREE.MeshStandardMaterial({ map: liveryTexture(l, number, prof), color: hasDom ? 0xffffff : l.base, roughness: matte ? 0.5 : 0.28, metalness: 0.05 });
   const cm = carbonMaps();

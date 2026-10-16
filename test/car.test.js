@@ -4,11 +4,13 @@
 const test = require("node:test");
 const assert = require("node:assert");
 
-test("car model: the season picks the era's car; a team variant only where its shape was checked", async () => {
+test("car model: the season picks the era's car; a team's own shape where the season's research has one", async () => {
   const C = await import("../src/renderer/car3d.js");
-  const p = (y, t) => C.profileFor(y, t);
+  const p = (y, t, d) => C.profileFor(y, t, d);
   assert.deepStrictEqual([p(2023, "Red Bull Racing").key, p(2024, "McLaren").key, p(2025, "Red Bull Racing").key, p(2025, "Ferrari").key, p(2026, "Red Bull Racing").key, p(2027, "Audi").key],
-    ["2022", "2022", "2022:rb21", "2022", "2026", "2026"]);
+    ["2022", "2022", "2022:rb21", "2022:sf25", "2026:rb22", "2026"]);
+  // a car changed during the season: by the event's date (Racing Bulls' smaller airbox from the 2026 Hungarian GP)
+  assert.deepStrictEqual([p(2026, "Racing Bulls", "2026-05-03").key, p(2026, "Racing Bulls", "2026-07-26").key], ["2026:vcarb03", "2026:vcarb03b"]);
   // what tells the models apart is season and team, not colour
   const a = C.makeCar({ teamName: "Red Bull Racing", teamColour: "3671C6", number: 1, season: 2025 });
   const b = C.makeCar({ teamName: "Red Bull Racing", teamColour: "3671C6", number: 1, season: 2026 });
@@ -77,4 +79,30 @@ test("car model: levels of detail hide only small parts; wheels steer and roll; 
   assert.ok(shared.length > 10 && disposed === 0, `${shared.length} shared geometries, ${disposed} freed`);
   const env = new THREE.Texture(); env.userData.shared = true; let envGone = 0; env.addEventListener("dispose", () => envGone++);
   C.setCarEnvironment(other, env, 1); disposeGroup(other); assert.strictEqual(envGone, 0, "the shared reflections stay");
+});
+
+// v0.35: every team its own model where its shape is known – the template cache keyed by the shape, so the first team's
+// car is never handed to another – and the model contract the same for all (wheels, hubs, mounts, width)
+test("car model: teams' shapes are their own templates; wheels, hubs and mounts stay the era's", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js");
+  const geo = (car) => car.children.find((o) => o.isMesh).geometry;   // (the painted body and sidepods: the first part added)
+  const teams = ["Ferrari", "Aston Martin", "Racing Bulls", "Mercedes", "Cadillac"];
+  const cars = teams.map((teamName) => C.makeCar({ teamName, teamColour: "888888", number: 7, season: 2026 }));
+  const keys = new Set(cars.map((c) => c.userData.profile.key));
+  assert.strictEqual(keys.size, teams.length, `one key per team: ${[...keys]}`);
+  const bodies = new Set(cars.map(geo)); assert.strictEqual(bodies.size, teams.length, "a body of their own");
+  // the same team twice: the same shared template
+  assert.strictEqual(geo(C.makeCar({ teamName: "Ferrari", teamColour: "888888", number: 16, season: 2026 })), geo(cars[0]));
+  // the contract: wheel places, tyre sizes and mounts are the era's for every team
+  const ref = C.wheelParts(2026, "Ferrari");
+  for (const t of teams) {
+    const w = C.wheelParts(2026, t);
+    assert.deepStrictEqual([w.FR, w.RR, w.FW, w.RW, w.FZ, w.RZ, w.FX, w.RX, w.W], [ref.FR, ref.RR, ref.FW, ref.RW, ref.FZ, ref.RZ, ref.FX, ref.RX, ref.W], t);
+  }
+  for (const c of cars) {
+    c.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(c);
+    assert.ok(box.max.x - box.min.x <= 1.91, `${c.userData.profile.key} within 1.9 m`);
+    assert.deepStrictEqual(c.userData.mounts.eye.toArray?.() ?? c.userData.mounts.eye, cars[0].userData.mounts.eye.toArray?.() ?? cars[0].userData.mounts.eye);
+  }
 });
