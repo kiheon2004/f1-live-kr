@@ -451,10 +451,11 @@ test("grandstand data: every stand lies at its circuit, with sane rows and capac
     const fr = geo.frame(centre);
     for (const st of c.stands) {
       // placed by its two ends, or by its outline traced from imagery (its depth from that outline), or by a corner
-      const pts = st.poly || (st.a ? [st.a, st.b] : []);
-      assert.ok(st.poly ? st.poly.length >= 3 && st.img : st.osm || st.at || (st.a && st.b), `${loc} ${st.n}: placed`);   // (osm: built from the map's outline of that name)
+      const pts = st.poly || (st.a ? [st.a, st.b] : st.osmAt ? [st.osmAt] : []);
+      // (osm: built from the map's outline of that name; osmAt: from the map's outline at that point)
+      assert.ok(st.poly ? st.poly.length >= 3 && st.img : st.osm || st.osmAt || st.at || (st.a && st.b), `${loc} ${st.n}: placed`);
       for (const p of pts) { const [x, y] = fr.toXY(p[0], p[1]); assert.ok(Math.hypot(x, y) < 3500, `${loc} ${st.n}: near the circuit`); }
-      if (!st.poly && !st.osm && st.type !== "ga" && st.type !== "hosp") assert.ok(st.rows >= 4 && st.rows <= 40, `${loc} ${st.n}: rows`);
+      if (!st.poly && !st.osm && !st.osmAt && st.type !== "ga" && st.type !== "hosp") assert.ok(st.rows >= 4 && st.rows <= 40, `${loc} ${st.n}: rows`);
       assert.ok(!st.type || st.type === "ga" || st.type === "hosp", `${loc} ${st.n}: type`);
       if (st.yr) assert.ok(st.yr[0] >= 2018 && (st.yr[1] == null || st.yr[1] >= st.yr[0]), `${loc} ${st.n}: seasons`);
     }
