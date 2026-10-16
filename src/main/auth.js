@@ -78,7 +78,17 @@ class Auth {
         finally { busy = false; }
       }, 1000);
       win.on("closed", finish);
-      win.loadURL(LOGIN_URL).catch(() => {});
+      // A clean start: F1 moved its sign-in to a new service (id.formula1.com, 2026-10) that answers a window still
+      // holding the old sign-in's cookies with {"code":"UNEXPECTED_ERROR"} at once – while a fresh one shows the form.
+      // The window's data is cleared before it opens (the saved token is a file of its own); should that error page come
+      // up anyway, it's cleared and the sign-in page loaded again, once.
+      let retried = false;
+      win.webContents.on("did-finish-load", async () => {
+        if (retried || done || win.isDestroyed()) return;
+        const text = await win.webContents.executeJavaScript("document.body ? document.body.innerText.slice(0, 400) : ''").catch(() => "");
+        if (/UNEXPECTED_ERROR/.test(text)) { retried = true; await ses.clearStorageData().catch(() => {}); if (!win.isDestroyed()) win.loadURL(LOGIN_URL).catch(() => {}); }
+      });
+      ses.clearStorageData().catch(() => {}).then(() => { if (!win.isDestroyed()) win.loadURL(LOGIN_URL).catch(() => {}); });
     });
   }
 
