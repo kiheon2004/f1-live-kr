@@ -2927,7 +2927,7 @@ window.Map3D = {
     const others = (R.scene?.buildings || []).filter((b) => b.kind !== "grandstand" && !(b.min > 3)).map((b) => ({ b, pts: b.pts.map(R.geo.xz) }))
       .filter(({ pts }) => pts.some(([x, z]) => (world.grid.nearest(x, z, 2)[1] ?? 999) < 70))
       .map(({ b, pts }) => ({ name: b.name || null, h: b.h, ll: pts.map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) }));
-    return JSON.stringify({ loc: app().location?.(), key: app().circuitKey?.(), year: app().sessionYear?.(), info: { ...R.info.stands, skipped: R.stands?.info.skipped }, stands: out, track, corners: cl, mapped, others });
+    return JSON.stringify({ loc: app().location?.(), key: app().circuitKey?.(), year: app().sessionYear?.(), info: { ...R.info.stands, skipped: R.stands?.info.skipped, unmatched: R.scene?.stands?.unmatched || [] }, stands: out, track, corners: cl, mapped, others });
   },
   // development: grandstand ends for the data file from places along the track: [{ n, turn, d0, d1, side, off }] – from
   // corner `turn` (F1's numbering), d0 to d1 m along the track (− before it), `off` m beyond the tarmac's edge on that
@@ -2968,7 +2968,7 @@ window.Map3D = {
       const pts = b.pts.map(R.geo.xz); let cx = 0, cz = 0; for (const [a, c] of pts) { cx += a; cz += c; } cx /= pts.length; cz /= pts.length;
       const d = Math.hypot(cx - x, cz - z); if (d > r) continue;
       let A = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) A += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]);
-      out.push({ kind: b.kind, name: b.name, h: b.h, area: Math.round(Math.abs(A / 2)), d: Math.round(d), blocks: b.kind !== "grandstand" && (Math.abs(A / 2) > 900 || b.h > 14), ll: R.geo.toLL(cx, cz).map((v) => +v.toFixed(6)) });
+      out.push({ kind: b.kind, name: b.name, h: b.h, area: Math.round(Math.abs(A / 2)), d: Math.round(d), blocks: b.kind !== "grandstand" && (Math.abs(A / 2) > 900 || b.h > 14), ll: R.geo.toLL(cx, cz).map((v) => +v.toFixed(6)), min: b.min || 0, ...(r <= 80 ? { pts: pts.map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(7))) } : {}) });
     }
     return JSON.stringify(out.sort((a, b) => a.d - b.d).slice(0, 25));
   },

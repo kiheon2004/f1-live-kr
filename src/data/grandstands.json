@@ -16,16 +16,21 @@
    "total": 164000,
    "seats": 103000,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – grandstand capacity 103,000 (2020)",
+   "src2": "silverstone.co.uk guide (updated for 2026), Grandstands FAQ 27 May 2026, BOXPARK 17 Mar 2026, British Grand Prix 2025 Map (PDF); GL events 3 Jul 2026 (secondary)",
+   "missing": "The Loop (inner track, from 2025), Boxpark 'Hangar' stand (inner Hangar Straight, 2026; position not published), Garage (2025), Farm Curve/George Russell (2027 only) – not placed",
    "stands": [
-    {"n":"Landostand","a":[52.0634558,-1.0153707],"b":[52.0627325,-1.019404],"rows":24},
-    {"n":"Lakeside","a":[52.067094,-1.0197428],"b":[52.0663153,-1.0187355],"rows":20},
-    {"n":"Vale","a":[52.0655094,-1.0218007],"b":[52.0645695,-1.0207479],"rows":22},
-    {"n":"Club A","a":[52.0660952,-1.0231921],"b":[52.0656767,-1.0224165],"rows":22},
-    {"n":"Club Corner","a":[52.06746,-1.0246905],"b":[52.0662433,-1.0235972],"rows":26,"roof":1},
-    {"n":"Hamilton Straight B","a":[52.06854,-1.0235649],"b":[52.0676912,-1.0245072],"rows":22},
-    {"n":"Hamilton Straight","a":[52.0702476,-1.021206],"b":[52.0694773,-1.0225413],"rows":22},
-    {"n":"Abbey B","a":[52.0717148,-1.0195631],"b":[52.0708529,-1.0203012],"rows":22},
-    {"n":"Hangar","a":[52.0706218,-1.0103622],"b":[52.0697957,-1.0110503],"rows":20}
+    {"n":"Landostand (west)","poly":[[52.0634664,-1.0198775],[52.063539,-1.019663],[52.063318,-1.019325],[52.0632191,-1.0195289]],"img":"Esri World Imagery 2025-06-18 (two weeks before the 2025 race) – outline traced for this app (checking only)","perm":0,"note":"2026: rebuilt as one semi-permanent wrap-around stand of 16,373 seats (GL events, 3 Jul 2026; Silverstone) – its shape isn't published, so the 2025 blocks (imagery 2025-06-18) stand in for it"},
+    {"n":"Landostand","poly":[[52.0632619,-1.0193572],[52.0632949,-1.019207],[52.0628893,-1.0184452],[52.0628002,-1.0185633]],"img":"Esri World Imagery 2025-06-18 (two weeks before the 2025 race) – outline traced for this app (checking only)","perm":0,"note":"2026: rebuilt as one semi-permanent wrap-around stand of 16,373 seats (GL events, 3 Jul 2026; Silverstone) – its shape isn't published, so the 2025 blocks (imagery 2025-06-18) stand in for it"},
+    {"n":"Landostand (south)","poly":[[52.062886,-1.0183648],[52.062853,-1.0173294],[52.0627079,-1.0173294],[52.062731,-1.0183755]],"img":"Esri World Imagery 2025-06-18 (two weeks before the 2025 race) – outline traced for this app (checking only)","perm":0,"note":"2026: rebuilt as one semi-permanent wrap-around stand of 16,373 seats (GL events, 3 Jul 2026; Silverstone) – its shape isn't published, so the 2025 blocks (imagery 2025-06-18) stand in for it"},
+    {"n":"Landostand (trackside)","poly":[[52.0632092,-1.0184452],[52.0630542,-1.017249],[52.0629981,-1.0172758],[52.063163,-1.018456]],"img":"Esri World Imagery 2025-06-18 (two weeks before the 2025 race) – outline traced for this app (checking only)","perm":0,"note":"low trackside rows at the gravel's edge in the 2025 imagery; 2026: rebuilt as one semi-permanent wrap-around stand of 16,373 seats (GL events, 3 Jul 2026; Silverstone) – its shape isn't published, so the 2025 blocks (imagery 2025-06-18) stand in for it"},
+    {"n":"Lakeside","osmAt":[52.0664447,-1.0209349],"roof":1,"yr":[2018,2025],"note":"inside the track by the lake (2025 map no. 59); the map's white-roofed building there; not named in any 2026 source – built up to 2025 only"},
+    {"n":"Club Corner","osmAt":[52.067,-1.0251],"roof":1,"perm":1,"note":"covered (FAQ 2026: Club Corner; guide: Club Corner B & C) – the map's outline 'Club B'"},
+    {"n":"Village A","osm":1,"note":"outside of Village (2025 map no. 11); the map's outline"},
+    {"n":"Hamilton Straight B","a":[52.0702476,-1.021206],"b":[52.0694773,-1.0225413],"rows":22,"roof":0,"note":"between Hamilton Straight A and Abbey (2025 map no. 2); sits on the structure seen in the 2025-06-18 imagery; ends estimated"},
+    {"n":"Hamilton Straight A","osm":1,"roof":1,"note":"covered, padded seats (2026 FAQ); the map's outline"},
+    {"n":"Abbey","osm":1,"roof":1,"note":"Abbey A/B (Abbey B covered, 2026 FAQ); the map's outline"},
+    {"n":"Vale","osm":1,"roof":0,"note":"outside of Vale (2025 map no. 40), not covered; the map's outline"},
+    {"n":"Club A","osm":1,"roof":0,"note":"outside of Club (2025 map no. 41), not covered; the map's outline"}
    ]
   },
   "Suzuka": {

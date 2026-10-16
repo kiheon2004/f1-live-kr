@@ -25,11 +25,15 @@ test("a map building under a listed stand's name (OSM's 'V1' at Suzuka) becomes 
   const { standBuildings } = require("../src/main/scene.js");
   const list = [{ n: "V1/V2 Main", a: [0, 30], b: [150, 30] }, { n: "Grandstand K", a: [400, -40], b: [500, -40] }];
   const b = (name, cx) => ({ kind: "block", name, h: 8, min: 0, pts: box(cx - 40, 25, cx + 40, 45) });
-  const blds = [b("V1", 60), b("V2", 100), b("V1", 900), b("K", 450), b("Hotel", 60), b("Tribuna K", 470), { ...b("V2", 120), min: 6 }];
+  const blds = [b("V1", 60), b("V2", 100), b("V1", 900), b("K", 450), b("Hotel", 300), b("Tribuna K", 470), { ...b("V2", 120), min: 6 }];
   standBuildings(blds, list);
   assert.deepStrictEqual(blds.map((x) => x.kind), ["grandstand", "grandstand", "block", "grandstand", "block", "grandstand", "block"],
     "the parts of a listed name, near it; one 800 m away, another name, or a raised part stay buildings");
   assert.strictEqual(blds[0].standOf, "V1/V2 Main");
+  // the same outline mapped twice (OSM's and another source's copy): the copy goes with the stand
+  const twin = [b("Club B", 60), { ...b("Club B", 60), name: null }];
+  standBuildings(twin, [{ n: "Club Corner", osmAt: [60, 35] }]);
+  assert.deepStrictEqual(twin.map((x) => [x.kind, x.name, !!x.underTraced]), [["grandstand", "Club Corner", false], ["grandstand", null, true]]);
 });
 
 test("grandstands: outlines are built as deep as they are; a stand in the way of a big building says which", async () => {

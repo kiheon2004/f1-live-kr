@@ -87,11 +87,20 @@ function standBuildings(buildings, list) {
     const [x, y] = L.osmAt;
     let best = null, bd = 15;
     for (const b of buildings) {
-      if (b.standOf || b.min > 3) continue;
+      if (b.standOf) continue;   // (a raised part too: a stand's roof can be mapped as one)
       const d = inside(x, y, b.pts) ? 0 : Math.min(...b.pts.map((p, i) => { const q = b.pts[(i + 1) % b.pts.length], dx = q[0] - p[0], dy = q[1] - p[1], l = dx * dx + dy * dy || 1, s = Math.max(0, Math.min(1, ((x - p[0]) * dx + (y - p[1]) * dy) / l)); return Math.hypot(p[0] + dx * s - x, p[1] + dy * s - y); }));
       if (d < bd || (d === 0 && best && bd === 0 && b.kind === "grandstand")) { bd = d; best = b; }
     }
     if (best) { best.kind = "grandstand"; best.name = L.n; best.standOf = L.n; n++; }
+    else (list.unmatched ||= []).push(`${L.n}: no map outline within 15 m of osmAt`);
+  }
+  // (a building mapped twice – OSM's and another source's copy, Silverstone's "Club B" – goes with its stand's copy)
+  const stands = buildings.filter((b) => b.kind === "grandstand" && b.standOf);
+  for (const b of buildings) {
+    if (b.kind === "grandstand" || b.min > 3) continue;
+    const c = centroidOf(b.pts), a = Math.abs(areaOf(b.pts));
+    const twin = stands.find((s) => inside(c[0], c[1], s.pts) && a > Math.abs(areaOf(s.pts)) * 0.8 && a < Math.abs(areaOf(s.pts)) * 1.25);
+    if (twin) { b.kind = "grandstand"; b.standOf = twin.standOf; b.underTraced = true; n++; }
   }
   // A building that is mostly under the stands traced from imagery (poly) is their own structure mapped as a plain
   // building (OSM's "D１～D4" at Suzuka, under two of them): the traced outlines are built instead, the building not at all.
@@ -121,6 +130,7 @@ function inside(x, y, pts) {
   return r;
 }
 
+const areaOf = (pts) => { let s = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return s / 2; };
 const centroidOf = (pts) => { let x = 0, y = 0; for (const p of pts) { x += p[0]; y += p[1]; } return [x / pts.length, y / pts.length]; };
 const bboxOf = (pts) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } return [x0, y0, x1, y1]; };
 // a lookup of polygons by 100 m cells of their bounding boxes
@@ -498,7 +508,7 @@ class Scenes {
     const stands = sd ? { name: sd.name, total: sd.total || null, seats: sd.seats || null, est: !!sd.est, src: sd.src || null,
       list: (sd.stands || []).map((st) => ({ ...st, a: st.a ? toF1m(st.a) : null, b: st.b ? toF1m(st.b) : null, poly: st.poly ? st.poly.map(toF1m) : null, osmAt: st.osmAt ? toF1m(st.osmAt) : null })) } : null;
 
-    if (stands) standBuildings(buildings, stands.list);
+    if (stands) { standBuildings(buildings, stands.list); stands.unmatched = stands.list.unmatched || []; }
 
     return {
       circuit: info ? { name: info.name, length: info.length, opened: info.opened, firstgp: info.firstgp, altitude: info.altitude } : null,

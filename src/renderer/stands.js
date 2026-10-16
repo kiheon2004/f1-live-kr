@@ -221,6 +221,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const stands = [], curved = [];
   // mapped stands – and the listed ones traced from aerial imagery (poly: their outline; img: which picture, when),
   // built from their outlines the same way, where the map has none (only in their seasons: yr)
+  const skipped = [];   // (listed stands not built, and why)
   const inYear = (L) => !(L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1])));
   const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && L.type !== "ga" && L.type !== "hosp")
     .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced" }));
@@ -229,6 +230,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // (an outline taken for the pit building – facilities.js genericPitSpec – is no stand)
     // (one under a stand traced from imagery: that stand is built from its traced outline instead – scene.js)
     if (b.kind !== "grandstand" || b.asPitBuilding || b.underTraced) continue;
+    if (b.standOf && listedBy.get(b.standOf) && !inYear(listedBy.get(b.standOf))) { skipped.push(`${b.standOf}: not in ${year}`); continue; }
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) continue;
@@ -291,7 +293,6 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // numbering for this circuit and season –, d0 to d1 m along the lap, − before it; on `side` L / R in the race's
   // direction): a schematic map gives the corner, the side and the stretch, not metres – so its place along the track
   // is the map's, its distance from the tarmac the usual one (off, m).
-  const skipped = [];
   const cornerAt = (n) => { const k = corners.find((c) => c.n === n); if (!k) return null; const [s] = world.grid.nearest(k.x, k.z, 3); return s || nearestSample(k.x, k.z)[0]; };
   const list = [];
   for (const L of scene.stands?.list || []) {
