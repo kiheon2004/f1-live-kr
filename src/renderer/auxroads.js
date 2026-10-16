@@ -16,6 +16,10 @@
 // v0.34 laid kart tracks, drag strips and old roads 12 m wide wherever the map had them)
 export function auxRuns(lines, T, { step = 2, minLen = 8, street = false, skip = null, looseLen = 300, looseNear = 30 } = {}) {
   const runs = [];
+  // (the ends of bridges and tunnels: a road reaching one there goes over or under the track – no junction – Monza's
+  // old oval crossing the lap on its bridge was drawn as a level crossing, the barrier opened for it)
+  const ramps = []; for (const l of lines) if ((l.bridge || l.tunnel) && l.pts.length > 1) ramps.push(l.pts[0], l.pts[l.pts.length - 1]);
+  const atRamp = (p) => ramps.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 3);
   const onTarmac = (q, m = 0) => q && Math.abs(q.a) < 3 && q.l < T.edge(q.s, 1) + m && q.l > T.edge(q.s, -1) - m;
   for (const l of lines) {
     // (a bridge's or a tunnel's piece isn't laid on the ground under or over it)
@@ -46,7 +50,7 @@ export function auxRuns(lines, T, { step = 2, minLen = 8, street = false, skip =
       const run = pts.slice(a, b + 1);
       let len = 0; for (let k = 1; k < run.length; k++) len += Math.hypot(run[k][0] - run[k - 1][0], run[k][1] - run[k - 1][1]);
       const touch = (p) => onTarmac(T.local(p[0], p[1]), 2);
-      const joins = [a < i || touch(run[0]), b > j || touch(run[run.length - 1])];
+      const joins = [(a < i || touch(run[0])) && !atRamp(pts[i]) && !atRamp(run[0]), (b > j || touch(run[run.length - 1])) && !atRamp(pts[j]) && !atRamp(run[run.length - 1])];
       const near = () => run.some((p) => { const q = T.local(p[0], p[1]); return q && Math.abs(q.a) < 3 && Math.abs(q.l) < looseNear; });
       if (len >= minLen && (joins[0] || joins[1] || (len <= looseLen && near()))) runs.push({ pts: run, w: l.w, k: l.k, sub: l.sub, joins });
       i = j + 1;

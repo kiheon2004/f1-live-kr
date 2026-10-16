@@ -504,7 +504,8 @@ class Scenes {
       if (t.highway === "raceway") { k = "raceway"; w = +t.width || 12; }
       else if (t.highway && ROAD_W[t.highway] != null && t.area !== "yes") { k = /^(footway|path|cycleway|track)$/.test(t.highway) ? "path" : "road"; w = +t.width || ROAD_W[t.highway]; if (t.tunnel === "yes" || t.layer < 0) continue; }
       else if (t.railway) { k = "rail"; w = 3; if (t.tunnel === "yes") continue; }
-      else if (t.waterway) { k = "river"; w = +t.width || (t.waterway === "river" ? 25 : t.waterway === "canal" ? 15 : 4); }
+      // (a stream in a culvert or tunnel isn't open water: Spielberg's under its run-offs)
+      else if (t.waterway) { if (t.tunnel || t.culvert === "yes" || +t.layer < 0) continue; k = "river"; w = +t.width || (t.waterway === "river" ? 25 : t.waterway === "canal" ? 15 : 4); }
       else if (t.barrier) { k = "barrier"; w = { wall: 0.4, retaining_wall: 0.6, fence: 0.1, guard_rail: 0.2, jersey_barrier: 0.6 }[t.barrier] || 0.3; }
       else if (t.natural === "coastline") { k = "coast"; w = 0; }
       else if (t.natural === "tree_row") { for (const p of geo.densify([l.pts], 9)) trees.push(localToF1(p[0], p[1]).map((v) => Math.round(v * 10) / 10)); continue; }

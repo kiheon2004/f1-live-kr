@@ -161,3 +161,17 @@ export const REFERENCES = [
 // Monaco 2026 – formula1.com, "Explained: why Active Aero will not be used at the Monaco Grand Prix", 4 June 2026.
 export const AERO_LOCKED = [{ venue: 22, seasons: [2026, 2026], src: "formula1.com 2026-06-04" }];
 export function aeroLocked(venueKey, season, list = AERO_LOCKED) { return list.some((x) => x.venue === venueKey && season >= x.seasons[0] && season <= x.seasons[1]); }
+
+// Where the generated walls round a street-style circuit stay open: the FIA's escape roads and paved run-off rejoin
+// routes the race directors' notes name (2025/2026), which the map has no line for – the point (lat, lon: on the run-off,
+// beside the track; its side of the track is the side opened) and `len` m along the track. From the v0.35 audit
+// (Esri imagery against the notes); lengths estimated from the imagery.
+export const WALL_OPENINGS = [
+  { venue: 23, ll: [45.49774, -73.52268], len: 120, what: "T1 run-off and rejoin route (RD notes 2025/2026: rejoin 'as shown in the drawing')" },
+  { venue: 23, ll: [45.50863, -73.52871], len: 90, what: "T9 paved run-off (keep left of the orange line, rejoin at its far end)" },
+  { venue: 23, ll: [45.50375, -73.52360], len: 140, what: "T13–T14 paved run-off (final chicane)" },
+  { venue: 22, ll: [43.73710, 7.42530], len: 110, what: "T10–T11 chicane escape road (rejoin when the marshal's lights are green)" },
+  { venue: 61, ll: [1.29450, 103.86320], len: 120, what: "T1–T3 paved run-off rejoin (keep right of the polystyrene block)" },
+  { venue: 153, ll: [40.46440, -3.61942], len: 120, what: "T1–T2 paved run-off (right of the yellow line and bollard)" },
+];
+export function wallOpeningsFor(venueKey, list = WALL_OPENINGS) { return list.filter((o) => o.venue === venueKey); }

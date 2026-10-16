@@ -22,7 +22,7 @@ import { boardsFor, boardPlaces } from "./boards.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
-import { venueOf, aeroLocked } from "./venues.js";
+import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -941,11 +941,18 @@ function kerbs(samples) {
 }
 
 // Low barriers 12 m off each edge, left out where they'd cut across another part of the track.
+// (x, z) → whether a generated wall there is in one of the openings: within len/2 along the track of the opening's
+// point, on its side
+function wallOpenings(w, geo, list) {
+  const n = w.samples.length, step = w.samples[0].p.distanceTo(w.samples[1].p);
+  const op = list.map((o) => { const [x, z] = geo.fromLL(o.ll[0], o.ll[1]), [s] = w.grid.nearest(x, z, 4); if (!s) return null; return { i: s.i, half: o.len / 2 / step, side: Math.sign((x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z) || 1 }; }).filter(Boolean);
+  return (x, z) => { const [s] = w.grid.nearest(x, z, 2); if (!s) return false; const l = Math.sign((x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z); return op.some((o) => { const d = Math.abs(((s.i - o.i) % n + n + n / 2) % n - n / 2); return d <= o.half && l === o.side; }); };
+}
 // Street circuit barriers: a concrete wall about a metre from the edge with a debris fence on top.
-function streetWalls(samples, grid) {
+function streetWalls(samples, grid, gap = null) {
   const g = new THREE.Group();
-  g.add(walls(samples, grid, 1.4, 1.2, [0xc9ccd0, 0xe4e6e8]));
-  const fence = walls(samples, grid, 1.6, 4.2, [0x8d969e, 0x8d969e], 1.2);
+  g.add(walls(samples, grid, 1.4, 1.2, [0xc9ccd0, 0xe4e6e8], 0, null, gap));
+  const fence = walls(samples, grid, 1.6, 4.2, [0x8d969e, 0x8d969e], 1.2, null, gap);
   fence.material = new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.5, metalness: 0.5, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false });
   g.add(fence);
   return g;
@@ -1949,10 +1956,14 @@ async function loadGeo(w) {
     if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
     w.group.remove(w.syn.terrain, w.syn.trees);
+    // the generated walls, opened where an escape road or rejoin route meets the track: the map's (auxroads.js) and the
+    // FIA's run-offs on street-style circuits the map has no line for (venues.js WALL_OPENINGS – they were walled off)
+    const openings = wallOpeningsFor(venueOf({ circuitKey: app().circuitKey?.(), location: app().location?.() })?.key);
+    const openAt = openings.length ? wallOpenings(w, built.geo, openings) : null;
+    const gap = built.auxGap && openAt ? (x, z) => built.auxGap(x, z) || openAt(x, z) : built.auxGap || openAt;
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
-    else if (built.auxGap && !w.street) {
-      // the generated barrier, opened where an escape road or rejoin route meets the track
-      const open = walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.laneZone, built.auxGap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });
+    else if (gap) {
+      const open = w.street ? streetWalls(w.samples, w.grid, gap) : walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.laneZone, gap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });
       w.group.remove(w.syn.walls); disposeGroup(w.syn.walls); w.syn.walls = open; w.group.add(open);
     }
     w.farBase = built.edge.clone().multiplyScalar(0.92);

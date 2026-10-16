@@ -91,3 +91,12 @@ test("other tarmac: a raceway away from the track and not meeting it isn't drawn
   const runs = auxRuns([kart, bend, pit], T, { skip: (x, z) => z < -20 && z > -40 });
   assert.deepStrictEqual(runs.map((r) => r.pts[0][1]), [20], "only the other layout's bend close beside the track");
 });
+
+// v0.35 audit (Monza): a road crossing the lap on a bridge doesn't meet it – its pieces either side of the bridge aren't
+// junctions (no barrier opened for them)
+test("other tarmac: the approach to a bridge over the track isn't a junction", async () => {
+  const { auxRuns } = await import("../src/renderer/auxroads.js");
+  const ramp = { k: "raceway", w: 12, pts: [[30, 60], [30, 10]] }, deck = { k: "raceway", w: 12, bridge: 1, pts: [[30, 10], [30, -10]] };
+  const runs = auxRuns([ramp, deck], T);
+  assert.ok(runs.every((r) => !r.joins[0] && !r.joins[1]), JSON.stringify(runs.map((r) => r.joins)));
+});
