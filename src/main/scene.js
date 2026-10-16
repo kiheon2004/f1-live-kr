@@ -509,7 +509,10 @@ class Scenes {
       else if (t.natural === "coastline") { k = "coast"; w = 0; }
       else if (t.natural === "tree_row") { for (const p of geo.densify([l.pts], 9)) trees.push(localToF1(p[0], p[1]).map((v) => Math.round(v * 10) / 10)); continue; }
       if (!k) continue;
-      lines.push({ k, w, sub: t.barrier || t.highway || t.railway || t.waterway, bridge: t.bridge === "yes" || +t.layer > 0 ? 1 : 0, pts: conv(l.pts) });
+      // (a raceway in a tunnel or below ground – Monaco's tunnel is the F1 lap itself, other layouts have them too – is
+      // kept but marked: nothing is painted or laid for it on the ground above)
+      const under = k === "raceway" && (t.tunnel === "yes" || t.tunnel === "building_passage" || +t.layer < 0) ? 1 : 0;
+      lines.push({ k, w, sub: t.barrier || t.highway || t.railway || t.waterway, bridge: t.bridge === "yes" || +t.layer > 0 ? 1 : 0, ...(under ? { tunnel: 1 } : {}), pts: conv(l.pts) });
     }
     for (const p of scenery.points) if (p.tags.natural === "tree") trees.push(localToF1(p.pt[0], p.pt[1]).map((v) => Math.round(v * 10) / 10));
 

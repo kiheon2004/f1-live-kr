@@ -196,7 +196,7 @@ export function classRaster(sat, scene, P, S, track, pavedPolys = [], grid = nul
     else if (l.k === "rail") strokeLine(R, W, H, l.pts.map(P), 2.2 / mpp, CLASS.gravel);
     else if (l.k === "river") strokeLine(R, W, H, l.pts.map(P), l.w / 2 / mpp, CLASS.water);
   }
-  for (const l of scene.lines.filter((x) => x.k === "road" || x.k === "raceway").sort((a, b) => a.w - b.w)) strokeLine(R, W, H, l.pts.map(P), Math.max(0.8, l.w / 2 / mpp), CLASS.asphalt);
+  for (const l of scene.lines.filter((x) => (x.k === "road" || x.k === "raceway") && !x.tunnel).sort((a, b) => a.w - b.w)) strokeLine(R, W, H, l.pts.map(P), Math.max(0.8, l.w / 2 / mpp), CLASS.asphalt);
   for (const b of scene.buildings) fillPolygon(R, W, H, b.pts.map(P), CLASS.concrete);
   for (const f of pavedPolys) fillPolygon(R, W, H, f.map(([x, z]) => S(x, z)), CLASS.concrete);
   // street circuits: pavements along the track (the imagery can't show them)

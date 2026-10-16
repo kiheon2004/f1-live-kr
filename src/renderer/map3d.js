@@ -2996,6 +2996,15 @@ window.Map3D = {
     }
     return JSON.stringify(out);
   },
+  // development: a test fixture – the track's samples and the map's raceway / road / path lines within r m of (lat, lon),
+  // in scene metres (for auxroads tests on a real junction)
+  auxFixture(lat, lon, r = 250) {
+    const R = world?.real; if (!R?.scene) return "no map";
+    const [x, z] = R.geo.fromLL(lat, lon), near = (p) => Math.hypot(p[0] - x, p[1] - z) < r, f = (v) => +v.toFixed(2);
+    const samples = world.samples.filter((s) => Math.hypot(s.p.x - x, s.p.z - z) < r + 60).map((s) => ({ i: s.i, p: [f(s.p.x), f(s.p.z)], tan: [f(s.tan.x), f(s.tan.z)], nor: [f(s.nor.x), f(s.nor.z)], L: f(s.L ?? 7), R: f(s.R ?? -7) }));
+    const lines = R.scene.lines.filter((l) => ["raceway", "road", "path"].includes(l.k)).map((l) => ({ k: l.k, sub: l.sub, w: l.w, bridge: l.bridge, tunnel: l.tunnel, pts: l.pts.map(R.geo.xz).map(([a, c]) => [f(a), f(c)]) })).filter((l) => l.pts.some(near));
+    return JSON.stringify({ lat, lon, samples, lines });
+  },
   // development: the venue's other tarmac strips (auxroads.js) within r m of (lat, lon): kind, width, joins, length
   auxNear(lat, lon, r = 200) {
     const R = world?.real; if (!R?.aux) return "no aux";

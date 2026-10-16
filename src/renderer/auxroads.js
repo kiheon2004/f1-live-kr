@@ -15,8 +15,10 @@ export function auxRuns(lines, T, { step = 2, minLen = 8, street = false } = {})
   const runs = [];
   const onTarmac = (q, m = 0) => q && Math.abs(q.a) < 3 && q.l < T.edge(q.s, 1) + m && q.l > T.edge(q.s, -1) - m;
   for (const l of lines) {
-    if (l.bridge) continue;
-    const isRace = l.k === "raceway", isService = !street && l.k === "road" && /^(service|track)$/.test(l.sub || "");
+    // (a bridge's or a tunnel's piece isn't laid on the ground under or over it)
+    if (l.bridge || l.tunnel) continue;
+    // (the map's highway=track – a marshal or recovery track – comes as a path with sub "track": scene.js)
+    const isRace = l.k === "raceway", isService = !street && ((l.k === "road" && l.sub === "service") || (l.k === "path" && l.sub === "track") || (l.k === "road" && l.sub === "track"));
     if (!isRace && !isService) continue;
     const pts = densify(l.pts, step);
     if (pts.length < 2) continue;
@@ -83,10 +85,16 @@ export function blendHeight(trackY, terrainY, dist, near = 20, far = 60) {
   return Math.max(y, terrainY + 0.05);
 }
 
-// Is (x, z) on one of the runs that meet the track (within its half width + pad)? – where a generated barrier mustn't stand.
-export function onJoiningRun(runs, pad = 1.5) {
+// Is (x, z) at the mouth of a run that meets the track – within its half width + pad of the first or last `mouth` metres
+// of it, at an end that joins? Only there may a generated barrier be left open: a road running long beside the track
+// opened the barrier along all of it (v0.34).
+export function onJoiningRun(runs, pad = 1.5, mouth = 30) {
   const segs = [];
-  for (const r of runs) if (r.joins[0] || r.joins[1]) for (let i = 1; i < r.pts.length; i++) segs.push([r.pts[i - 1], r.pts[i], r.w / 2 + pad]);
+  for (const r of runs) {
+    const P = r.pts, cum = [0]; for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+    const L = cum[cum.length - 1];
+    for (let i = 1; i < P.length; i++) if ((r.joins[0] && cum[i - 1] <= mouth) || (r.joins[1] && L - cum[i] <= mouth)) segs.push([P[i - 1], P[i], r.w / 2 + pad]);
+  }
   return (x, z) => segs.some(([a, b, h]) => {
     if (x < Math.min(a[0], b[0]) - h || x > Math.max(a[0], b[0]) + h || z < Math.min(a[1], b[1]) - h || z > Math.max(a[1], b[1]) + h) return false;
     const dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L));

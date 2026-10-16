@@ -49,3 +49,34 @@ test("other tarmac: service roads only where they meet the track; bends keep the
   const gap = onJoiningRun(runs);
   assert.ok(gap(0, 19) && !gap(30, 19));
 });
+
+// v0.35: on the real map at Monza's first chicane (test/fixtures/monza-t1-roads.json: the track's samples and the map's
+// lines there, scene metres, from the 2026 race's world) – the escape road beside the track is one strip joined at both
+// ends, never on the track's tarmac, and the barrier opens only at its mouths (v0.34 opened it along the whole run).
+test("other tarmac on the real map (Monza T1): one joined escape road, off the tarmac, open only at its mouths", async () => {
+  const { auxRuns, ribbonEdges, onJoiningRun } = await import("../src/renderer/auxroads.js");
+  const fx = require("./fixtures/monza-t1-roads.json");
+  const S = fx.samples.map((s) => ({ i: s.i, p: { x: s.p[0], z: s.p[1] }, tan: { x: s.tan[0], z: s.tan[1] }, nor: { x: s.nor[0], z: s.nor[1] }, L: s.L, R: s.R }));
+  const local = (x, z) => { let b = null, bd = Infinity; for (const s of S) { const d = Math.hypot(s.p.x - x, s.p.z - z); if (d < bd) { bd = d; b = s; } } if (!b || bd > 50) return null; const dx = x - b.p.x, dz = z - b.p.z; return { s: b, l: dx * b.nor.x + dz * b.nor.z, a: dx * b.tan.x + dz * b.tan.z }; };
+  const T = { local, edge: (s, side) => (side > 0 ? s.L : s.R) };
+  const runs = auxRuns(fx.lines, T);
+  const len = (r) => r.pts.reduce((a, p, i) => (i ? a + Math.hypot(p[0] - r.pts[i - 1][0], p[1] - r.pts[i - 1][1]) : 0), 0);
+  const esc = runs.filter((r) => r.k === "raceway" && r.joins[0] && r.joins[1]).sort((a, b) => len(b) - len(a))[0];
+  assert.ok(esc && len(esc) > 140, `the escape road: one run of ${esc && len(esc).toFixed(0)} m`);
+  for (const r of runs) {
+    const { left, right } = ribbonEdges(r, T);
+    for (const p of left.concat(right)) { const q = local(p[0], p[1]); if (q && Math.abs(q.a) < 3) assert.ok(!(q.l < T.edge(q.s, 1) - 0.05 && q.l > T.edge(q.s, -1) + 0.05), `a strip's edge on the track's tarmac: ${p}`); }
+  }
+  const gap = onJoiningRun(runs), mid = esc.pts[Math.floor(esc.pts.length / 2)], end = esc.pts[1];
+  assert.ok(gap(end[0], end[1]), "open at its mouth");
+  assert.ok(!gap(mid[0], mid[1]), "closed along the middle of it");
+});
+
+test("other tarmac: the map's tracks (marshal roads) meeting the track are drawn; tunnels and bridges aren't laid on the ground", async () => {
+  const { auxRuns } = await import("../src/renderer/auxroads.js");
+  const marshal = { k: "path", sub: "track", w: 3, pts: [[10, 7], [10, 40]] };
+  const tunnel = { k: "raceway", w: 12, tunnel: 1, pts: [[-50, 30], [50, 30]] };
+  const bridge = { k: "raceway", w: 12, bridge: 1, pts: [[-50, -30], [50, -30]] };
+  const footpath = { k: "path", sub: "footway", w: 2, pts: [[20, 7], [20, 40]] };
+  assert.deepStrictEqual(auxRuns([marshal, tunnel, bridge, footpath], T).map((r) => r.sub), ["track"]);
+});
