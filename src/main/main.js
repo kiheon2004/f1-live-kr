@@ -49,6 +49,8 @@ app.whenReady().then(() => {
   archive = new Archive(cacheDir);
   setTimeout(() => archive.prune(), 5000);   // (old session recordings, past 3 GB)
   auth = new Auth(data);
+  // (the archive tries the F1 TV sign-in when F1 refuses an anonymous request – archive.js fetchAuthed)
+  archive.tokenProvider = () => auth.getToken();
   // (development only: F1KR_LIVEFILE plays a cached session's recorded messages through the live path – not packaged)
   live = !app.isPackaged && process.env.F1KR_LIVEFILE ? new (require("./dev-livefile").LiveFile)(cacheDir, process.env.F1KR_LIVEFILE) : new LiveClient({ getToken: () => auth.getToken() });
   scenes = new Scenes(cacheDir);

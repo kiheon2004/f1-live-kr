@@ -477,3 +477,50 @@ test("archive: refused by F1 (401/403/429) or a server error – the cached copy
     await assert.rejects(a.getText("2024/y.jsonStream"), (e) => e.status === 404);
   } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("archive: refused anonymously, tried with the F1 TV sign-in – the form that works is kept; no sign-in or every form refused, said so", async () => {
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const { Archive } = require("../src/main/archive.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f1kr-auth-"));
+  const realFetch = global.fetch, calls = [];
+  try {
+    // the archive takes only the "ascendontoken" header
+    global.fetch = async (url, o) => { calls.push(Object.keys(o?.headers || {})); const ok = o?.headers?.ascendontoken === "T"; return { ok, status: ok ? 200 : 401, headers: new Map(), text: async () => "data" }; };
+    const a = new Archive(dir); a.tokenProvider = async () => "T";
+    assert.strictEqual(await a.getText("2026/x.jsonStream"), "data");
+    assert.strictEqual(a.authTried, "ascendontoken");
+    assert.deepStrictEqual(calls.map((c) => c.join()), ["", "Authorization", "ascendontoken"]);
+    calls.length = 0;
+    assert.strictEqual(await a.getText("2026/y.jsonStream"), "data");
+    assert.deepStrictEqual(calls.map((c) => c.join()), ["ascendontoken"], "straight away the next time");
+    // signed out: refused, with the hint
+    const b = new Archive(dir); b.tokenProvider = async () => null;
+    await assert.rejects(b.getText("2026/z.jsonStream"), (e) => e.status === 401 && /로그인하면 열릴 수도/.test(e.message));
+    // every form refused
+    global.fetch = async () => ({ ok: false, status: 401, headers: new Map() });
+    const c = new Archive(dir); c.tokenProvider = async () => "T";
+    await assert.rejects(c.getText("2026/w.jsonStream"), (e) => /로그인 토큰으로도 거부/.test(e.message));
+    assert.strictEqual(c.authTried, "refused");
+  } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("loading a cached session while F1 refuses: a topic never cached is missing (not a failure) and nothing cached is thrown away", async () => {
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const { Archive, TOPICS } = require("../src/main/archive.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f1kr-keep-"));
+  const realFetch = global.fetch;
+  try {
+    const a = new Archive(dir), P = "2026/X/Race/";
+    // cached: the core topics and a finalised status; never cached: the rest (F1 had no file for them)
+    const line = (o) => "00:00:01.000" + JSON.stringify(o) + "\n";
+    fs.writeFileSync(a.cachePath(P + "TimingData.jsonStream"), line({ Lines: { 1: { Position: "1" } } }));
+    fs.writeFileSync(a.cachePath(P + "DriverList.jsonStream"), line({ 1: { Tla: "VER" } }));
+    fs.writeFileSync(a.cachePath(P + "SessionInfo.jsonStream"), line({ Meeting: { Name: "X" } }));
+    fs.writeFileSync(a.cachePath(P + "SessionStatus.jsonStream"), line({ Status: "Finalised" }));
+    global.fetch = async () => ({ ok: false, status: 401, headers: new Map() });
+    const r = await a.loadSession(P);
+    assert.ok(r.topics.TimingData.length > 0);
+    for (const t of ["TimingData", "DriverList", "SessionInfo", "SessionStatus"]) assert.ok(fs.existsSync(a.cachePath(P + t + ".jsonStream")), t + " kept");
+    assert.ok(TOPICS.length > 4);
+  } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
+});

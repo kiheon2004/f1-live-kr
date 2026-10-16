@@ -146,6 +146,32 @@ class Archive {
     return freed;
   }
 
+  // F1 closed its archive to anonymous requests on 2026-10-16 (401 for every file). Refused, the request is tried again
+  // with the user's F1 TV sign-in (this.tokenProvider: auth.js, null signed out) in the forms F1's services take it –
+  // a bearer token, the F1 TV API's "ascendontoken" header, the sign-in cookie –; the form that works is kept for the
+  // next requests. Whether the archive takes any of them isn't published: this.authTried says what happened ("none":
+  // no token, "refused": every form refused, else the form that worked). The token goes to F1's archive only.
+  async fetchAuthed(rel) {
+    const url = BASE + rel, opt = (headers) => ({ headers, signal: AbortSignal.timeout(60000) });
+    const forms = (tok) => ({
+      bearer: { Authorization: `Bearer ${tok}` },
+      ascendontoken: { ascendontoken: tok },
+      cookie: { Cookie: `login-session=${encodeURIComponent(JSON.stringify({ data: { subscriptionToken: tok } }))}` },
+    });
+    const tok = this.authForm && this.tokenProvider ? await this.tokenProvider().catch(() => null) : null;
+    let res = await fetch(url, opt(tok ? forms(tok)[this.authForm] : {}));
+    if (res.status !== 401 && res.status !== 403) return res;
+    const token = this.tokenProvider ? await this.tokenProvider().catch(() => null) : null;
+    if (!token) { this.authTried = "none"; return res; }
+    for (const [name, h] of Object.entries(forms(token))) {
+      if (name === this.authForm && tok) continue;
+      const r = await fetch(url, opt(h));
+      if (r.ok || (r.status !== 401 && r.status !== 403)) { this.authForm = name; this.authTried = name; return r; }
+    }
+    this.authForm = null; this.authTried = "refused";
+    return res;
+  }
+
   cachePath(key) {
     return path.join(this.cacheDir, key.replace(/[^A-Za-z0-9._-]+/g, "_"));
   }
@@ -163,7 +189,7 @@ class Archive {
       }
     } catch { /* not cached */ }
     let res;
-    try { res = await fetch(BASE + rel, { signal: AbortSignal.timeout(60000) }); }
+    try { res = await this.fetchAuthed(rel); }
     catch (e) {
       // Offline: an old copy (e.g. a season index older than an hour) is better than nothing.
       try { const text = fs.readFileSync(file, "utf8"); onBytes?.(text.length, text.length); return text; } catch {}
@@ -177,7 +203,9 @@ class Archive {
         try { const text = fs.readFileSync(file, "utf8"); onBytes?.(text.length, text.length); return text; } catch {}
       }
       onBytes?.(0, 0);
-      const err = new Error(res.status === 401 || res.status === 403 ? `F1 기록 서버가 접근을 막았어요 (HTTP ${res.status}). 이 컴퓨터에 받아 둔 기록만 열 수 있어요` : `HTTP ${res.status} for ${rel}`);
+      const refused = res.status === 401 || res.status === 403;
+      const why = !refused ? "" : this.authTried === "refused" ? " 로그인 토큰으로도 거부됐어요." : this.authTried === "none" ? " F1 계정으로 로그인하면 열릴 수도 있어요." : "";
+      const err = new Error(refused ? `F1 기록 서버가 접근을 막았어요 (HTTP ${res.status}).${why} 이 컴퓨터에 받아 둔 기록만 열 수 있어요` : `HTTP ${res.status} for ${rel}`);
       err.status = res.status; throw err;
     }
     let text;
@@ -222,10 +250,18 @@ class Archive {
       for (const [r, t] of Object.values(bytes)) { received += r; total += t; }
       onProgress({ phase: "download", received, total, known: Object.keys(bytes).length, files: TOPICS.length });
     };
-    const failed = [];
+    const failed = [], fresh = new Set();
+    // (which files this load downloads, not reads from the cache: only those may be thrown away below)
+    const cachedBefore = new Set(TOPICS.filter((topic) => { try { return fs.statSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)).size > 0; } catch { return false; } }));
+    // some topics are missing for some sessions (404); one F1 refuses (401/403/429 – its archive is closed to anonymous
+    // requests since 2026-10-16) or a server error is missing too, never a failure: a failure below throws the session's
+    // cached files away, and those can't be fetched again (a cached session lost a topic it never had – the 2026 Japanese
+    // GP's race, gone from the cache that way on 2026-10-16)
+    const missing = (e) => [401, 403, 404, 429].includes(e.status) || e.status >= 500;
     const texts = await Promise.all(TOPICS.map((topic) =>
       this.getText(`${sessionPath}${topic}.jsonStream`, { onBytes: (r, t) => { bytes[topic] = [r, t]; report(); } })
-        .catch((e) => { bytes[topic] = [0, 0]; if (e.status !== 404 && e.status !== 403) failed.push(e); return ""; })));   // some topics are missing for some sessions
+        .then((text) => { if (!cachedBefore.has(topic)) fresh.add(topic); return text; })
+        .catch((e) => { bytes[topic] = [0, 0]; if (!missing(e)) failed.push(e); return ""; })));
     report(true);
     const core = TOPICS.indexOf("TimingData");
     if (!texts[core]) {
@@ -235,7 +271,8 @@ class Archive {
     // A session still running (or just finished) is published bit by bit: don't keep a half file forever.
     const status = texts[TOPICS.indexOf("SessionStatus")] || "";
     if (failed.length || !/"Status":"(?:Finalised|Ends)"/.test(status)) {
-      for (const topic of TOPICS) { try { fs.unlinkSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)); } catch {} }
+      // (only what this load downloaded: a file already in the cache stays)
+      for (const topic of fresh) { try { fs.unlinkSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)); } catch {} }
     }
     // A file with text but not one readable line is damaged (cut short or garbled on the way, or on disk). The core
     // topics are downloaded once more, then it's an error – never a replay that loads with nothing in it; a damaged
