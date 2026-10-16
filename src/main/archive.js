@@ -146,6 +146,32 @@ class Archive {
     return freed;
   }
 
+  // F1 closed its archive to anonymous requests on 2026-10-16 (401 for every file). Refused, the request is tried again
+  // with the user's F1 TV sign-in (this.tokenProvider: auth.js, null signed out) in the forms F1's services take it –
+  // a bearer token, the F1 TV API's "ascendontoken" header, the sign-in cookie –; the form that works is kept for the
+  // next requests. Whether the archive takes any of them isn't published: this.authTried says what happened ("none":
+  // no token, "refused": every form refused, else the form that worked). The token goes to F1's archive only.
+  async fetchAuthed(rel) {
+    const url = BASE + rel, opt = (headers) => ({ headers, signal: AbortSignal.timeout(60000) });
+    const forms = (tok) => ({
+      bearer: { Authorization: `Bearer ${tok}` },
+      ascendontoken: { ascendontoken: tok },
+      cookie: { Cookie: `login-session=${encodeURIComponent(JSON.stringify({ data: { subscriptionToken: tok } }))}` },
+    });
+    const tok = this.authForm && this.tokenProvider ? await this.tokenProvider().catch(() => null) : null;
+    let res = await fetch(url, opt(tok ? forms(tok)[this.authForm] : {}));
+    if (res.status !== 401 && res.status !== 403) return res;
+    const token = this.tokenProvider ? await this.tokenProvider().catch(() => null) : null;
+    if (!token) { this.authTried = "none"; return res; }
+    for (const [name, h] of Object.entries(forms(token))) {
+      if (name === this.authForm && tok) continue;
+      const r = await fetch(url, opt(h));
+      if (r.ok || (r.status !== 401 && r.status !== 403)) { this.authForm = name; this.authTried = name; return r; }
+    }
+    this.authForm = null; this.authTried = "refused";
+    return res;
+  }
+
   cachePath(key) {
     return path.join(this.cacheDir, key.replace(/[^A-Za-z0-9._-]+/g, "_"));
   }
@@ -163,7 +189,7 @@ class Archive {
       }
     } catch { /* not cached */ }
     let res;
-    try { res = await fetch(BASE + rel, { signal: AbortSignal.timeout(60000) }); }
+    try { res = await this.fetchAuthed(rel); }
     catch (e) {
       // Offline: an old copy (e.g. a season index older than an hour) is better than nothing.
       try { const text = fs.readFileSync(file, "utf8"); onBytes?.(text.length, text.length); return text; } catch {}
@@ -177,7 +203,9 @@ class Archive {
         try { const text = fs.readFileSync(file, "utf8"); onBytes?.(text.length, text.length); return text; } catch {}
       }
       onBytes?.(0, 0);
-      const err = new Error(res.status === 401 || res.status === 403 ? `F1 기록 서버가 접근을 막았어요 (HTTP ${res.status}). 이 컴퓨터에 받아 둔 기록만 열 수 있어요` : `HTTP ${res.status} for ${rel}`);
+      const refused = res.status === 401 || res.status === 403;
+      const why = !refused ? "" : this.authTried === "refused" ? " 로그인 토큰으로도 거부됐어요." : this.authTried === "none" ? " F1 계정으로 로그인하면 열릴 수도 있어요." : "";
+      const err = new Error(refused ? `F1 기록 서버가 접근을 막았어요 (HTTP ${res.status}).${why} 이 컴퓨터에 받아 둔 기록만 열 수 있어요` : `HTTP ${res.status} for ${rel}`);
       err.status = res.status; throw err;
     }
     let text;
