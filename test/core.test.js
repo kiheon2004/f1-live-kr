@@ -524,3 +524,11 @@ test("loading a cached session while F1 refuses: a topic never cached is missing
     assert.ok(TOPICS.length > 4);
   } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("the sign-in window's user agent is plain ASCII Chrome – no app name (Korean, not ASCII: F1's sign-in answered it with HTTP 500), no Electron", () => {
+  const src = require("node:fs").readFileSync(require("node:path").join(__dirname, "../src/main/auth.js"), "utf8");
+  const m = /const PLAIN_UA = `([^`]+)`/.exec(src); assert.ok(m, "PLAIN_UA defined");
+  const ua = m[1].replace("${process.versions.chrome || \"142.0.0.0\"}", "152.0.0.0");
+  assert.ok(/^[\x20-\x7e]+$/.test(ua), "ASCII only"); assert.ok(!/Electron|LiveTiming|라이브/.test(ua)); assert.ok(/Chrome\/152\.0\.0\.0 Safari/.test(ua));
+  assert.ok(/setUserAgent\(PLAIN_UA\)/.test(src));
+});
