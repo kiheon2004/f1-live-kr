@@ -77,3 +77,18 @@ test("2026 active aero: locked at Monaco 2026 only", async () => {
   assert.ok(!aeroLocked(monaco, 2025) && !aeroLocked(monaco, 2027));
   assert.ok(!aeroLocked(venueOf({ location: "Monza" })?.key, 2026));
 });
+
+// v0.35: braking boards only where a source names them, at the source's side, the distance before the corner
+test("braking boards: only the sourced ones, before their corner on their side", async () => {
+  const { boardsFor, boardPlaces } = await import("../src/renderer/boards.js");
+  assert.strictEqual(boardsFor(39, 2026).length, 3);          // Monza 2026: T1, T4, T8 (100 m)
+  assert.strictEqual(boardsFor(39, 2025).length, 0);          // not in 2025's notes: none made up
+  assert.strictEqual(boardsFor(2, 2026).length, 0);           // Silverstone: no source
+  // a straight lap along +x, 2 m apart; the corner at sample 200; the normal +z = the cars' right
+  const samples = []; for (let i = 0; i < 400; i++) samples.push({ i, p: { x: i * 2, z: 0 }, nor: { x: 0, z: 1 }, tan: { x: 1, z: 0 }, L: 7, R: -7 });
+  const [b150, b100] = boardPlaces(samples, 200, { values: [150, 100], side: "R" }, 2);
+  assert.deepStrictEqual([b150.x, b100.x], [400 - 150, 400 - 100]);
+  assert.ok(b150.z > 7 + 3, "on the right, 3 m and more off the tarmac");
+  assert.ok(boardPlaces(samples, 200, { values: [50], side: "L" }, 2)[0].z < -10);
+  assert.ok(boardPlaces(samples, 200, { values: [50], side: null }, 2)[0].sideEstimated);
+});

@@ -18,6 +18,7 @@ import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
 import { WheelScreens, screenModel } from "./wheelscreen.js";
+import { boardsFor, boardPlaces } from "./boards.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
@@ -2170,7 +2171,7 @@ function ensureWorld(now) {
   disposeWorld();
   sepMemory = {};
   world = buildWorld(pts);
-  if (world) { world.sourceKey = key; world.pts = pts.length; addCorners(); addGrid(); addPitLane(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
+  if (world) { world.sourceKey = key; world.pts = pts.length; cornerMarks(); addGrid(); addPitLane(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
   note.hidden = !!world;
 }
 function showNote(text) { const n = document.getElementById("note3d"); n.textContent = text; n.hidden = false; }
@@ -2517,6 +2518,41 @@ function paintGrid(m) {
   world.group.add(g);
 }
 
+// The braking boards a source names for this circuit and season (boards.js): a white panel with its distance on two
+// posts, 3.5 m off the tarmac, facing the cars coming; none where no source covers a corner.
+const BOARD_TEX = new Map();
+function boardTexture(v) {
+  if (BOARD_TEX.has(v)) return BOARD_TEX.get(v);
+  const c = document.createElement("canvas"); c.width = 128; c.height = 160; const g = c.getContext("2d");
+  g.fillStyle = "#f4f5f6"; g.fillRect(0, 0, 128, 160); g.strokeStyle = "#1a1c1f"; g.lineWidth = 6; g.strokeRect(3, 3, 122, 154);
+  g.fillStyle = "#15171a"; g.font = "800 64px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(String(v), 64, 84);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.userData.shared = true; BOARD_TEX.set(v, tex); return tex;
+}
+function addBoards() {
+  const circ = app().circuit, A = app(), v = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() });
+  const list = boardsFor(v?.key, A.sessionYear?.() || 0);
+  if (!list.length || !circ?.corners?.length) return;
+  const step = world.samples[0].p.distanceTo(world.samples[1].p), g = new THREE.Group(); g.name = "brakeBoards";
+  const post = new THREE.BoxGeometry(0.06, 1.3, 0.06), panel = new THREE.PlaneGeometry(0.8, 1.0), postMat = new THREE.MeshStandardMaterial({ color: 0x8a9096, roughness: 0.6 });
+  for (const b of list) {
+    const k = circ.corners.find((c) => c.n === b.turn); if (!k) continue;
+    const w = toWorld([k.x, k.y, 0], world.center), [s] = world.grid.nearest(w.x, w.z, 3); if (!s) continue;
+    for (const pl of boardPlaces(world.samples, s.i, b, step)) {
+      const y = world.samples[pl.i].p.y, yaw = Math.atan2(pl.face[0], pl.face[1]);
+      const m = new THREE.Mesh(panel, new THREE.MeshStandardMaterial({ map: boardTexture(pl.value), roughness: 0.7 }));
+      m.position.set(pl.x, y + 1.15, pl.z); m.rotation.y = yaw; g.add(m);
+      for (const dx of [-0.3, 0.3]) { const q = new THREE.Mesh(post, postMat); q.position.set(pl.x + Math.cos(yaw) * dx, y + 0.65, pl.z - Math.sin(yaw) * dx); g.add(q); }
+      m.userData.board = { turn: b.turn, value: pl.value, side: pl.side, sideEstimated: pl.sideEstimated };
+    }
+  }
+  world.group.add(g);
+}
+// The corners' numbers and the braking boards need F1's corner data, which can arrive after the world is built: added
+// once it's there (before, a world built first never got them)
+function cornerMarks() {
+  if (!world || world.cornersAdded || !app().circuit?.corners?.length) return;
+  world.cornersAdded = true; addCorners(); addBoards();
+}
 function addCorners() {
   const circ = app().circuit;
   if (!circ?.corners?.length) return;
@@ -2541,6 +2577,7 @@ function frame(now) {
   if (perf.cap && now - lastT < 1000 / 60 - 4) { requestAnimationFrame(frame); return; }
   const dt = Math.min(0.1, (now - lastT) / 1000 || 0.016); lastT = now;
   ensureWorld(now);
+  cornerMarks();
   const A = app();
   if (world && A?.src) updateCars(dt);
   if (world) updateCamera(dt);
@@ -3366,6 +3403,8 @@ window.Map3D = {
   standsShown(v) { const g = world?.real?.stands?.group; if (g) g.visible = !!v; return String(!!g); },
   // development: (lat, lon) → scene [x, ground y, z] (to aim another build's look() at the same place)
   llToScene(lat, lon) { const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon); return JSON.stringify([+x.toFixed(2), +(R.groundAt?.(x, z) ?? 0).toFixed(2), +z.toFixed(2)]); },
+  // development: the braking boards built (boards.js): turn, distance, side, lat/lon
+  boardsInfo() { const g = world?.group.getObjectByName("brakeBoards"), R = world?.real; return JSON.stringify((g?.children || []).filter((m) => m.userData.board).map((m) => ({ ...m.userData.board, ll: R ? R.geo.toLL(m.position.x, m.position.z).map((v) => +v.toFixed(6)) : null, y: +m.position.y.toFixed(1) }))); },
   // development: from (lat, lon) h m above the ground towards (lat2, lon2) h2 m above it
   lookLLAt(lat, lon, h, lat2, lon2, h2 = 0, fov = 60) {
     const R = world?.real; if (!R) return "no real";
