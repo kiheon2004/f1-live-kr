@@ -93,7 +93,8 @@ function flattenTracks(lines) {
 }
 
 // Car telemetry, per car, as compact typed arrays (stream ms; speed km/h, rpm, gear, throttle %, brake 0/1, DRS code).
-// F1 channels: 0 RPM, 2 speed, 3 gear, 4 throttle, 5 brake, 45 DRS (8+ = open, gone in 2026).
+// F1 channels: 0 RPM, 2 speed, 3 gear, 4 throttle, 5 brake, 45 DRS (10+ = open). 2026 cars send no channel 45 at all (no
+// DRS; nothing about active aero, overtake or energy either): kept as 255 = not sent, never as a "closed" 0.
 function flattenCarData(lines) {
   const per = {};
   for (const [ms, body] of lines) {
@@ -104,7 +105,7 @@ function flattenCarData(lines) {
       const t = ms - (last - Date.parse(e.Utc));
       for (const [num, car] of Object.entries(e.Cars || {})) {
         const c = car.Channels || {};
-        (per[num] || (per[num] = [])).push([t, c[2] || 0, c[0] || 0, c[3] || 0, c[4] || 0, c[5] ? 1 : 0, c[45] || 0]);
+        (per[num] || (per[num] = [])).push([t, c[2] || 0, c[0] || 0, c[3] || 0, c[4] || 0, c[5] ? 1 : 0, c[45] == null ? 255 : c[45]]);
       }
     }
   }

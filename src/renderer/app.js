@@ -1012,7 +1012,9 @@
   function gauge(num, color) {
     const c = src.carAt?.(num, src.now()), d = src.state.DriverList?.[num];
     if (!c || !d) return "";
-    const drsOpen = c.drs >= 10;
+    // (DRS: up to 2025 only, from its channel; 2026 cars have none and the feed sends nothing about active aero,
+    // overtake or the battery – nothing is shown rather than a made-up state)
+    const drsOpen = c.drs != null && c.drs >= 10;
     return `<div class="gauge"><span class="who" style="border-color:${color}">${esc(d.Tla)}</span>
       <b class="spd">${Math.round(c.speed)}<small>km/h</small></b><b class="gear">${c.gear || "N"}<small>단</small></b>
       <span class="bars"><i class="rpm" style="width:${Math.min(100, (c.rpm / 13000) * 100)}%"></i><i class="thr" style="width:${Math.min(100, c.thr)}%"></i><i class="brk" style="width:${c.brk ? 100 : 0}%"></i></span>

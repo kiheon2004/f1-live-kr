@@ -275,19 +275,27 @@ function carbonMaps() {
     }),
   };
 }
-// The steering wheel's display: gear, speed bar, shift lights (a stylised screen – no real team UI)
+// The steering wheel's display when no driver's own data is on it (wheelscreen.js paints those): a neutral face – lights
+// off, no gear, no made-up lap or delta
 function wheelScreen() {
   return sharedTex("screen", () => {
     const c = canvas(256, 128), g = c.getContext("2d");
     g.fillStyle = "#050607"; g.fillRect(0, 0, 256, 128);
-    const cols = ["#23d160", "#23d160", "#23d160", "#23d160", "#ff3b30", "#ff3b30", "#ff3b30", "#4aa3ff", "#4aa3ff", "#4aa3ff"];
-    cols.forEach((col, i) => { g.fillStyle = col; g.beginPath(); g.arc(28 + i * 22, 14, 7, 0, Math.PI * 2); g.fill(); });
-    g.fillStyle = "#e9edf2"; g.font = "700 64px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("7", 128, 74);
-    g.fillStyle = "#1d2f45"; g.fillRect(14, 40, 70, 70); g.fillRect(172, 40, 70, 70);
-    g.fillStyle = "#9fb3c8"; g.font = "600 18px Arial, sans-serif"; g.fillText("DELTA", 49, 60); g.fillText("-0.12", 49, 88); g.fillText("LAP", 207, 60); g.fillText("23", 207, 88);
+    for (let i = 0; i < 10; i++) { g.fillStyle = "#16191c"; g.beginPath(); g.arc(28 + i * 22, 13, 7, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = "#1d2f45"; g.fillRect(10, 34, 66, 70); g.fillRect(180, 34, 66, 70);
+    g.fillStyle = "#3a434d"; g.font = "700 60px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("–", 128, 72);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
     return t;
   });
+}
+// A driver's own screen on this car's wheel (wheelscreen.js's texture – not the car's: never freed with it), or back to
+// the neutral face (tex null)
+export function setWheelScreen(car, tex) {
+  const u = car.userData, mesh = u.screen; if (!mesh) return;
+  if (!tex) { if (mesh.material !== u.screenShared) mesh.material = u.screenShared; return; }
+  if (!u.screenOwn) u.screenOwn = new THREE.MeshBasicMaterial({ toneMapped: false });
+  if (u.screenOwn.map !== tex) { u.screenOwn.map = tex; u.screenOwn.needsUpdate = true; }
+  mesh.material = u.screenOwn;
 }
 
 // ---------- the template per profile (shared by every car of that profile) ----------
@@ -615,7 +623,7 @@ export function makeCar({ teamName, teamColour, number, season = null }) {
   const near = new THREE.Group(); near.name = "near"; g.add(near);
   add(t.headrest, pad, near);
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
-  add(t.wheel.body, carbon, wheel); add(t.wheel.grips, pad, wheel); add(t.wheel.screen, screenMat, wheel); add(t.wheel.buttons, buttonMat, wheel); add(t.wheel.gloves, gloveMat, wheel);
+  add(t.wheel.body, carbon, wheel); add(t.wheel.grips, pad, wheel); const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen"); add(t.wheel.buttons, buttonMat, wheel); add(t.wheel.gloves, gloveMat, wheel);
   add(t.wheel.arms, gloveMat, near);
   const wheels = [], spins = [];
   const FX = prof.W / 2 - prof.FW / 2, RX = prof.W / 2 - prof.RW / 2;
@@ -628,7 +636,7 @@ export function makeCar({ teamName, teamColour, number, season = null }) {
     g.add(w); wheels.push(w); spins.push(s);
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
-  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
+  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
     paintMats: [paint, wingPaint, helmetMat, gloveMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   return g;
 }

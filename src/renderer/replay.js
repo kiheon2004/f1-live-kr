@@ -310,13 +310,14 @@
     while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (c.t[mid] <= t) lo = mid; else hi = mid - 1; }
     return lo;
   }
-  // Values at time t (speed and rpm interpolated); null when there's nothing within 3 s.
+  // Values at time t (speed and rpm interpolated); null when there's nothing within 3 s. drs: the DRS code, or null when
+// the feed doesn't send it (2026: no DRS – and no active-aero, overtake or energy channel in its place).
   function carAt(c, t) {
     if (!c) return null;
     const i = sampleAt(c, t);
     if (i < 0 || t - c.t[i] > 3000) return null;
     const j = Math.min(i + 1, c.t.length - 1), f = c.t[j] > c.t[i] ? Math.min(1, (t - c.t[i]) / (c.t[j] - c.t[i])) : 0;
-    return { speed: c.v[i] + (c.v[j] - c.v[i]) * f, rpm: c.rpm[i] + (c.rpm[j] - c.rpm[i]) * f, gear: c.gear[i], thr: c.thr[i], brk: c.brk[i], drs: c.drs[i] };
+    return { speed: c.v[i] + (c.v[j] - c.v[i]) * f, rpm: c.rpm[i] + (c.rpm[j] - c.rpm[i]) * f, gear: c.gear[i], thr: c.thr[i], brk: c.brk[i], drs: c.drs[i] === 255 ? null : c.drs[i] };
   }
   // Samples between t0 and t1 with distance (m) from t0, integrated from speed.
   function carTrace(c, t0, t1) {
@@ -798,7 +799,7 @@
           for (const [n, car] of Object.entries(e.Cars || {})) {
             const ch = car.Channels || {}, c = this.car[n] || (this.car[n] = { t: [], v: [], rpm: [], gear: [], thr: [], brk: [], drs: [] });
             if (c.t.length && t <= c.t[c.t.length - 1]) continue;
-            c.t.push(t); c.v.push(ch[2] || 0); c.rpm.push(ch[0] || 0); c.gear.push(ch[3] || 0); c.thr.push(ch[4] || 0); c.brk.push(ch[5] ? 1 : 0); c.drs.push(ch[45] || 0);
+            c.t.push(t); c.v.push(ch[2] || 0); c.rpm.push(ch[0] || 0); c.gear.push(ch[3] || 0); c.thr.push(ch[4] || 0); c.brk.push(ch[5] ? 1 : 0); c.drs.push(ch[45] == null ? 255 : ch[45]);   // (255: the channel isn't sent – 2026)
             if (c.t.length > 1400) for (const k of Object.keys(c)) c[k].splice(0, 200);
           }
         }

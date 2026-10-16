@@ -156,3 +156,8 @@ export const REFERENCES = [
         : ["the 2026 car in profile: airbox and T-cam pod over the helmet, halo, sidepods, wheels"],
       estimated: ["proportions from photos taken at an angle (perspective): heights relative to the tyres only"] })),
 ];
+
+// Events where the FIA locked the 2026 cars' active aero in corner mode for the weekend (no straight mode at all):
+// Monaco 2026 – formula1.com, "Explained: why Active Aero will not be used at the Monaco Grand Prix", 4 June 2026.
+export const AERO_LOCKED = [{ venue: 22, seasons: [2026, 2026], src: "formula1.com 2026-06-04" }];
+export function aeroLocked(venueKey, season, list = AERO_LOCKED) { return list.some((x) => x.venue === venueKey && season >= x.seasons[0] && season <= x.seasons[1]); }

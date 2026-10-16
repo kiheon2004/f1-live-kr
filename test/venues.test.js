@@ -66,3 +66,14 @@ test("venues: the facilities chosen by venue and year – Hungaroring's 2025 bui
   // 2026's 'Bahrain Grand Prix' at Sepang picks nothing registered for Sakhir or anywhere else
   assert.deepStrictEqual(await run(2026, venueOf({ circuitKey: 12, location: "Kuala Lumpur" }), "Kuala Lumpur"), []);
 });
+
+// v0.35: 2026 active aero is an estimate (the feed has no channel for it) and never opens where the FIA locked the cars
+// in corner mode for the weekend – Monaco 2026; other circuits and other seasons aren't locked by this list.
+test("2026 active aero: locked at Monaco 2026 only", async () => {
+  const { aeroLocked, venueOf } = await import("../src/renderer/venues.js");
+  const monaco = venueOf({ location: "Monte Carlo" })?.key;
+  assert.strictEqual(monaco, 22);
+  assert.ok(aeroLocked(monaco, 2026));
+  assert.ok(!aeroLocked(monaco, 2025) && !aeroLocked(monaco, 2027));
+  assert.ok(!aeroLocked(venueOf({ location: "Monza" })?.key, 2026));
+});

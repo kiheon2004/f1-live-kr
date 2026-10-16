@@ -16,11 +16,12 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
+import { WheelScreens, screenModel } from "./wheelscreen.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
-import { venueOf } from "./venues.js";
+import { venueOf, aeroLocked } from "./venues.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -109,6 +110,7 @@ function initGeoSettings() {
     paintQualityNow();
     document.getElementById("geoNight").value = o.night || "auto";
     document.getElementById("geoPitWork").value = ["record", "observed", "typical"].includes(o.pitWork) ? o.pitWork : "record";
+    document.getElementById("geoAero").value = o.aero === "off" ? "off" : "estimate";
   };
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
@@ -136,6 +138,7 @@ function initGeoSettings() {
   document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); applyQuality(); paintQualityNow(); });
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
   document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
+  document.getElementById("geoAero").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), aero: e.target.value }));
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
     m.textContent = "확인하는 중…"; m.classList.remove("bad");
@@ -363,6 +366,15 @@ function pitDraw(c, r, v) {
 // only: the car's place, the timing and the cameras' mounts are the car's own, and the cockpit cameras ride the lifted
 // car as drawn) and taking its wheels off and on (its own wheel groups hidden while a wheel is off; the wheels in the
 // crew's hands are copies of the car's). Anything else: the crew round the car, nothing played.
+// 2026 active aero, estimated (the feed has nothing about it): only if the viewer leaves it on, and never where the FIA
+// locked the cars in corner mode for the weekend – Monaco 2026 (formula1.com, 4 June 2026: "effectively locked in
+// Corner Mode for the entire Monte Carlo weekend"). The real straight-mode zones are set circuit by circuit and not
+// in the data, so the flaps open on any fast straight: a look, not the car's state.
+function aero2026Allowed() {
+  if (geoSettings().aero === "off") return false;
+  const A = app(), v = venueOf({ circuitKey: A?.circuitKey?.(), location: A?.location?.() });
+  return !aeroLocked(v?.key, A?.sessionYear?.() || 0);
+}
 function pitWorkPolicy() {
   const v = geoSettings().pitWork || "record", live = !!app()?.src?.isLive;
   return live && v === "record" ? "observed" : v;
@@ -1480,8 +1492,8 @@ function updateCars(dt) {
     // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
     // (straight mode at speed on straights, corner mode otherwise: the feed has no channel for it)
     let wantOpen;
-    if (c.model.userData.profile.era === "2022") { const cd = src.carAt?.(num, A.t); wantOpen = cd ? (cd.drs >= 10 ? 1 : 0) : 0; }
-    else wantOpen = c.speed > 68 && Math.abs(yawRate) < 0.04 ? 1 : 0;
+    if (c.model.userData.profile.era === "2022") { const cd = src.carAt?.(num, A.t); wantOpen = cd && cd.drs != null ? (cd.drs >= 10 ? 1 : 0) : 0; }
+    else wantOpen = aero2026Allowed() && c.speed > 68 && Math.abs(yawRate) < 0.04 ? 1 : 0;
     c.aero += (wantOpen - c.aero) * (1 - Math.exp(-dt * 6));
     setAero(c.model, c.aero);
     // (the compound on the sidewalls: the stint now; a replay shown from its record has the new set on the car from the
@@ -1513,6 +1525,23 @@ function updateCars(dt) {
   if (!seen.size && Object.keys(drivers).length) { if (note.textContent !== msg) note.textContent = msg; note.hidden = false; }
   else if (note.textContent === msg) note.hidden = true;
   scaleForView();
+  updateWheelScreens(src, A.t);
+}
+// The steering wheels' screens: each driver's own data at the moment shown (wheelscreen.js) on the cars drawn close up –
+// the cockpit car first, then the nearest – four at most; the others show the neutral face. A new session starts clean.
+const wheelScreens = new WheelScreens({ size: 4, every: 125 });
+let wheelScreensFor = null;
+function updateWheelScreens(src, t) {
+  const key = app()?.sourceKey?.()?.replace(/:\d+$/, "") || null;
+  if (key !== wheelScreensFor) { wheelScreens.reset(); for (const c of cars.values()) setWheelScreen(c.model, null); wheelScreensFor = key; }
+  const focusNum = app().focus || leader(), cockpit = camMode === "onboard" || camMode === "eye";
+  const list = [...cars.values()].filter((c) => c.obj.visible && c.model.userData.lod === "near")
+    .map((c) => ({ num: c.num, c, d: cockpit && c.num === focusNum ? -1 : camera.position.distanceTo(c.obj.position) })).sort((a, b) => a.d - b.d);
+  const { have, lost } = wheelScreens.assign(list);
+  for (const num of lost) { const c = cars.get(num); if (c) setWheelScreen(c.model, null); }
+  for (const { num, tex } of have) { const c = cars.get(num); if (c) setWheelScreen(c.model, tex); }
+  const lines = src?.state?.TimingData?.Lines || {}, laps = src?.state?.LapCount || null, season = app()?.sessionYear?.() || null;
+  wheelScreens.update((num) => screenModel({ car: src?.carAt?.(num, t) || null, line: lines[num] || null, laps, season }));
 }
 // Cars never pass through each other: overlapping pairs (position data is a metre or two off, and only
 // 4 Hz) are moved apart – sideways when side by side, along the track when nose to tail – by the smallest
@@ -2161,6 +2190,7 @@ function disposeWorld() {
   }
   lit = null;
   forgetPitTeams();
+  wheelScreens.reset(); wheelScreensFor = null;
   for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
   cars.clear();
 }
