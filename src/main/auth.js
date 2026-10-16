@@ -57,6 +57,10 @@ class Auth {
       const win = new BrowserWindow({ width: 520, height: 760, parent, modal: false, title: "F1 계정 로그인",
         webPreferences: { partition: PARTITION, contextIsolation: true, sandbox: true } });
       const ses = session.fromPartition(PARTITION);
+      // (the window presents itself as the Chrome it is built on – without the app's and Electron's names, which some
+      // sign-in services turn away: F1's answered the app's window with "UNEXPECTED_ERROR" on 2026-10-16)
+      const ua = (win.webContents.getUserAgent() || "").replace(/\s+(LiveTimingKR|f1-live-kr|Electron)\/\S+/gi, "");
+      win.webContents.setUserAgent(ua); ses.setUserAgent(ua);
       let done = false, busy = false;
       const finish = async () => {
         if (done) return; done = true; clearInterval(timer);
