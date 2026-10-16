@@ -3317,6 +3317,8 @@ window.Map3D = {
   },
   // development: show or hide the built grandstands (to compare the satellite picture under them)
   standsShown(v) { const g = world?.real?.stands?.group; if (g) g.visible = !!v; return String(!!g); },
+  // development: (lat, lon) → scene [x, ground y, z] (to aim another build's look() at the same place)
+  llToScene(lat, lon) { const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon); return JSON.stringify([+x.toFixed(2), +(R.groundAt?.(x, z) ?? 0).toFixed(2), +z.toFixed(2)]); },
   // development: from (lat, lon) h m above the ground towards (lat2, lon2) h2 m above it
   lookLLAt(lat, lon, h, lat2, lon2, h2 = 0, fov = 60) {
     const R = world?.real; if (!R) return "no real";
