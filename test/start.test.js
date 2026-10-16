@@ -249,3 +249,16 @@ test("on the pit lane's path: within 3 m of it and clear of its ends (where it m
   assert.strictEqual(onPitPath(pts, cum, 2, 0.5), null, "at its entry, where it joins the lap line");
   assert.strictEqual(onPitPath([], [], 0, 0), null);
 });
+
+// v0.35: the start lights – five reds a second apart before a standing start (the data has lights out only: a replay's
+// estimate, said so), all out at the start; none before a rolling start; live shows none ahead of the start
+test("start lights: one red a second before a standing start, out at the start; none live or before a rolling start", async () => {
+  const { startLights } = await import("../src/renderer/startplan.js");
+  const starts = [{ t: 100000, standing: true }, { t: 900000, standing: false }];
+  const at = (t, o) => startLights(starts, t, o).lit;
+  assert.deepStrictEqual([94000, 94500, 95000, 96000, 97000, 98000, 99900, 100000].map((t) => at(t)), [1, 1, 2, 3, 4, 5, 5, 0]);
+  assert.strictEqual(at(93900), 0);
+  assert.ok(startLights(starts, 97000).est);
+  assert.strictEqual(at(897000), 0, "rolling start: no reds");
+  assert.strictEqual(at(97000, { live: true }), 0, "live: nothing ahead of the start");
+});

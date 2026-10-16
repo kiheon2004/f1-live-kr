@@ -10,7 +10,7 @@ import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
-import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN } from "./startplan.js";
+import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights } from "./startplan.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE } from "./crew.js";
@@ -1529,6 +1529,17 @@ function updateCars(dt) {
   else if (note.textContent === msg) note.hidden = true;
   scaleForView();
   updateWheelScreens(src, A.t);
+  updateStartLights(src, A.t);
+}
+// the gantry's reds before a standing start (startplan.js startLights: a replay's estimate – the data has lights out only)
+function updateStartLights(src, t) {
+  const lamps = world?.group.getObjectByName("grid")?.userData.lamps; if (!lamps || !src) return;
+  const S = startState(src, t), L = startLights(S.hist.starts(src.isLive ? t : Infinity), t, { live: !!src.isLive });
+  lamps.forEach((m, i) => { const on = i < L.lit; if ((m.emissiveIntensity > 0.5) !== on) { m.emissiveIntensity = on ? 1.1 : 0.04; m.color.set(on ? 0x500000 : 0x180505); m.emissive.set(on ? 0xff0a00 : 0xff2a1a); } });
+  const note = L.est ? "출발 신호: 데이터에는 소등 시각만 있어요 – 빨간불이 켜지는 시점은 추정(1초 간격, 소등 2초 전 5개 점등)" : null;
+  let el = document.getElementById("startLightNote");
+  if (!el && note) { el = document.createElement("div"); el.id = "startLightNote"; el.style.cssText = "position:absolute;left:12px;bottom:84px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:3"; host?.appendChild(el); }
+  if (el) { el.hidden = !note; if (note && el.textContent !== note) el.textContent = note; }
 }
 // The steering wheels' screens: each driver's own data at the moment shown (wheelscreen.js) on the cars drawn close up –
 // the cockpit car first, then the nearest – four at most; the others show the neutral face. A new session starts clean.
@@ -2509,11 +2520,14 @@ function paintGrid(m) {
     }
     const beam = new THREE.Mesh(new THREE.BoxGeometry(wl - wr + 3.5, 1.1, 0.6), steel);
     beam.position.set(sx + nx * mid, y + H, sz + nz * mid); beam.rotation.y = yaw; beam.castShadow = true; g.add(beam);
-    const lamp = new THREE.MeshStandardMaterial({ color: 0x220606, emissive: 0xff2a1a, emissiveIntensity: 0.25 });
+    // (each column its own lamp material: lit one after another before a standing start – updateStartLights)
+    const lamps = [];
     for (let i = -2; i <= 2; i++) {
+      const lamp = new THREE.MeshStandardMaterial({ color: 0x180505, emissive: 0xff2a1a, emissiveIntensity: 0.04 }); lamps.push(lamp);
       const pod = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.35), lamp);
       pod.position.set(sx + nx * (mid + i * 1.4) - fx * 0.45, y + H - 0.9, sz + nz * (mid + i * 1.4) - fz * 0.45); pod.rotation.y = yaw; g.add(pod);
     }
+    g.userData.lamps = lamps;
   }
   world.group.add(g);
 }
@@ -3239,6 +3253,12 @@ window.Map3D = {
   },
   setLook(yaw = 0, pitch = 0, dist = 10.5) { look.yaw = yaw; look.pitch = pitch; look.dist = dist; return "ok"; },
   // development: a look down the grid from behind and above (pole at the far end)
+  // development: look at the start-light gantry from the grid (back m behind pole, h up)
+  viewGantry(back = 22, h = 3, fov = 40) {
+    const sl = world?.slots, p1 = sl?.get(1); if (!p1) return "no grid";
+    const fx = Math.sin(p1.yaw), fz = Math.cos(p1.yaw);
+    return this.look(p1.x - fx * back, p1.y + h, p1.z - fz * back, p1.x + fx * 6, p1.y + 6.4, p1.z + fz * 6, fov);
+  },
   viewGrid(h = 22, back = 60, side = 14) {
     const sl = world?.slots; if (!sl) return "no grid";
     const p1 = sl.get(1), p12 = sl.get(12) || p1, fx = Math.sin(p1.yaw), fz = Math.cos(p1.yaw);

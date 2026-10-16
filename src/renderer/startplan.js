@@ -241,3 +241,19 @@ export function placeWithout({ start, kind, slot, car, lag = 0, Sv, t, line, L, 
   }
   return null;
 }
+
+// The start lights at time t (FIA 2026 Sporting Regulations B5.7.2 / 2025 Art. 44.10: five red lights come on one
+// after another a second apart, then all go out at the starter's discretion – the start). The data has only the start's
+// moment (the race clock running: lights out); when the reds came on isn't in it. A replay shows them lit one per second
+// before lights out with an assumed hold of `hold` s on all five – an estimate, said so (est); live never knows the start
+// before it happens, so no red is shown ahead of it (nothing made up). Standing starts only (a rolling start has none).
+// starts: StartHistory.starts() – a replay's whole list; → { lit: 0–5, est, start (its t) | null }
+export function startLights(starts, t, { hold = 2, live = false } = {}) {
+  if (live) return { lit: 0, est: false, start: null };
+  for (const s of starts) {
+    if (s.standing === false) continue;
+    const on = s.t - hold * 1000 - 4000;
+    if (t >= on && t < s.t) return { lit: Math.min(5, Math.floor((t - on) / 1000) + 1), est: true, start: s.t };
+  }
+  return { lit: 0, est: false, start: null };
+}
