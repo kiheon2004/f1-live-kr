@@ -118,3 +118,9 @@ test("other tarmac: the strips' mesh faces up – every triangle's normal points
   assert.ok(I.length / 3 > 100, "strips built");
   assert.strictEqual(down, 0, `${down} of ${I.length / 3} triangles face down`);
 });
+
+test("other tarmac: a way mapped twice is one strip", async () => {
+  const { auxRuns } = await import("../src/renderer/auxroads.js");
+  const a = { k: "raceway", w: 10, pts: [[-120, 0], [-100, 11], [100, 11], [120, 0]] };
+  assert.strictEqual(auxRuns([a, { ...a, pts: a.pts.map(([x, z]) => [x + 0.5, z]) }], T).length, 1);
+});

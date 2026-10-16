@@ -56,7 +56,13 @@ export function auxRuns(lines, T, { step = 2, minLen = 8, street = false, skip =
       i = j + 1;
     }
   }
-  return runs;
+  // (a way the map has twice – Austin: the same strip drawn two times over: kept once)
+  const out = [];
+  for (const r of runs) {
+    const dup = out.some((o) => { let n = 0; for (const p of r.pts) if (o.pts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 2.5)) n++; return n > r.pts.length * 0.8; });
+    if (!dup) out.push(r);
+  }
+  return out;
 }
 
 // The strip's two edges for a run: mitred offsets (limited to twice the half width at sharp bends), each edge point that
