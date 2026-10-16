@@ -452,3 +452,25 @@ test("pit wall at the track's edge; the estimated paddock only for its year and 
   assert.strictEqual((await run(2025, true)).info[0].paddock, null, "not seen that year");
   assert.strictEqual((await run(2026, false)).info[0].paddock, null, "an estimate: trial setting off, no paddock");
 });
+
+// v0.35: Monaco's pit building – its own layout (facilities.js PIT_LAYOUTS): garages on the straight's side of the
+// lane all along it (the general "away from the nearest track" rule flipped sides along this lane, so none was built)
+test("Monaco pit layout: the garages' side fixed along the whole lane; none for a venue without a layout", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  // a lane along +x; the "straight" 27 m to the cars' right (−z here: the frame's normal is its left, +z)
+  const pit = { path: [[0, 0], [1000, 0], [2000, 0], [3000, 0]], limitOn: 0, limitOff: 300 };
+  const toScene = ([X, Y]) => [X / 10, Y / 10];
+  // the nearest track flips: the left side (pool) nearer in the middle, the right (straight) elsewhere
+  const toTrack = (x, z) => (x > 100 && x < 200 ? [0, 1] : [0, -1]);
+  const edge = (x, z) => Math.min(Math.abs(z + 27), Math.abs(z - 9)) - 0.5;
+  const spec = F.genericPitSpec({ venue: { key: 22 }, location: "Monte Carlo", year: 2026, pit, toScene, toTrack, trackEdge: edge, registry: [] });
+  const gf = { xz: ([x, y]) => [x, -y] };
+  const parts = spec.pick([], gf);
+  assert.strictEqual(parts.length, 1, "a building made on the layout");
+  const zs = parts[0].pts.map(([, y]) => -y);
+  assert.ok(zs.every((z) => z < -7), `all on the straight's side: ${Math.max(...zs).toFixed(1)}`);
+  assert.ok(zs.every((z) => z > -25.5), "short of the straight's tarmac");
+  assert.strictEqual(spec.params.height, 12);
+  const other = F.genericPitSpec({ venue: { key: 2 }, location: "Silverstone", year: 2026, pit, toScene, toTrack, trackEdge: edge, registry: [] });
+  assert.notStrictEqual(other.params.height, 12);
+});

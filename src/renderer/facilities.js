@@ -786,9 +786,10 @@ function pitBuilding(ctx, p) {
       // out from the garages towards the track until the tarmac's edge – or a wall the map has before it (that is the
       // pit wall: Suzuka's mapped wall stands 2.5 m short of the edge; a second one drawn at the edge had stood behind it)
       let d = 4;
-      while (d < 60) { const [x, z] = P(uu, frontV(uu) + vTrack * d); if (ctx.trackEdge(x, z) <= 0.3) break; d += 0.5; }
-      if (d >= 60) continue;
-      const [x0, z0] = P(uu, frontV(uu)), [x1, z1] = P(uu, frontV(uu) + vTrack), db = ctx.barrierRay ? ctx.barrierRay(x0, z0, x1 - x0, z1 - z0, d) : Infinity;
+      // (a layout's own wall: along the fast lane's far side, `at` m out – Monaco – not at the track)
+      if (pw.at) d = pw.at;
+      else { while (d < 60) { const [x, z] = P(uu, frontV(uu) + vTrack * d); if (ctx.trackEdge(x, z) <= 0.3) break; d += 0.5; } if (d >= 60) continue; }
+      const [x0, z0] = P(uu, frontV(uu)), [x1, z1] = P(uu, frontV(uu) + vTrack), db = ctx.barrierRay && !pw.at ? ctx.barrierRay(x0, z0, x1 - x0, z1 - z0, d) : Infinity;
       W.push(db > 5 && db < d - 0.5 ? { u: uu, d: db - pw.thick / 2, mapped: true, edge: d } : { u: uu, d, edge: d });
     }
     // (mapped along most of the run: the map's wall is the pit wall – none is drawn over it; the lane's model and the
@@ -825,7 +826,12 @@ function pitBuilding(ctx, p) {
         const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - vTrack * (pw.thick + (mappedWall ? 0 : pw.walk)) - frontV(W[k].u)) * vTrack;
         return at(i) + (at(i + 1) - at(i)) * f;
       };
-      wallAt = (uu) => {
+      wallAt = pw.stands === "upper" ? (uu) => {
+        // (the teams' stands upstairs: a gantry on the first floor over the garages, out over the boxes, its people facing
+        // the lane – Monaco)
+        const [x, z] = P(uu, frontV(uu) + vTrack * 0.9);
+        return { p: [x, floorAt(uu) + 3.4, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]], upper: true };
+      } : (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
         // (a mapped wall: the stand behind it, on its track side, where 2.4 m are left before the tarmac – else none)
         if (mappedWall) { const room = Math.min(W[i].edge - W[i].d, W[i + 1].edge - W[i + 1].d); if (!(room >= 2.4)) return null; }
@@ -1208,11 +1214,26 @@ export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ =
 //   them (15 m on past the first and last), not the limiter lines' middle
 // the plain pit wall (estimates): a 1.1 m concrete wall with a 3 m catch fence, a 1.5 m step behind it for the stands
 export const PLAIN_PIT_WALL = { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 };
+// Monaco (venue 22): the temporary pit building stands between the start/finish straight and the pit lane – the garages
+// face the harbour side (Williams 2023: they "sit between the pit straight and pit lane"; FIA pit lane drawings 2025 V2,
+// 2026 V1: the lane on the inside of the straight, pit entry between T17 and T18, the exit road along the straight to
+// T1). The general rule – garages on the side away from the nearest track – flips along this lane (the Piscine section
+// on the other side comes nearer and goes): here the side is the data's, to the right of the cars' way down the lane
+// (the straight's side, checked against the measured path). Several storeys (Williams: ground floor, a first floor with
+// the pit wall gantry, a top floor for guests): 12 m high, an estimate. No pit wall at the track (there is none): a
+// wall along the fast lane's far side, 11 m out from the garages (the F2 sheet's 6.8 m working area and equipment strip
+// plus a fast lane – estimate), garages about half the usual width (Williams: "roughly half the width" – 5.5 m, an
+// estimate), and the teams' stands on the first floor over their garages (Horner, Autosport 2016:
+// "the pitwall is upstairs"). Widths and heights are estimates; no FIA drawing gives them.
+export const PIT_LAYOUTS = { 22: { side: "right", front: 8, depth: 14, keepOff: 2, height: 12, pitch: 5.5, pitWall: { height: 1.2, thick: 0.6, fence: 2.6, walk: 0, deck: 0, at: 11, stands: "upper" },
+  src: "FIA Monaco GP pit lane drawings 2025 V2 / 2026 V1; Williams 2023-05-23; Autosport 2016-05-29 – sizes estimated" } };
 export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, boxes = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
   const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
   if (registry.some((s) => s.kind === "pit-building" && entryAt(s, venue, location) && yearOk(s))) return null;
-  const frame = pathFrame(pit.path.map(toScene));
+  const frame = pathFrame(pit.path.map(toScene)), lay = venue ? PIT_LAYOUTS[venue.key] : null;
+  // (a venue with its own layout: the garages' side fixed – right or left of the cars' way down the lane)
+  if (lay) toTrack = ((sg) => (x, z) => { const p = nearestOn(frame, x, z); return [p.nx * sg, p.nz * sg]; })(lay.side === "right" ? 1 : -1);   // (the frame's normal is its left: "away" from the garages)
   const [u0, u1] = boxes?.length ? [Math.max(0, Math.min(...boxes) - 15), Math.min(frame.len, Math.max(...boxes) + 15)] : garageRun(pit.limitOn, pit.limitOff, frame.len);
   return {
     id: "generic-pits", name: "pit building (map / estimate)", kind: "pit-building", venue: venue ? [venue.key] : [], loc: location ? [location] : [], years: null,
@@ -1245,21 +1266,38 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       for (const b of g.parts) if (b.kind === "grandstand") { b.asPitBuilding = true; (this.found.stands ||= []).push(b.name || "(unnamed)"); }
       if (g.parts.length) return (this.parts = g.parts);
       // (none on the line: one made up, its outline back in the map's own metres – gf.xz turned round)
-      const o = gf.xz([0, 0]), out = genericOutline(frame, g.side, u0, u1);
+      const o = gf.xz([0, 0]), out = lay ? layoutOutline(frame, g.side, u0, u1, lay, trackEdge) : genericOutline(frame, g.side, u0, u1);
       if (!clear(out)) { this.found.madeUp = "not made: it would stand on the track"; return (this.parts = []); }
       this.found.madeUp = true;
-      return (this.parts = [{ pts: out.map(([x, z]) => [x - o[0], o[1] - z]), h: GENERIC.height, min: 0, synthetic: true }]);
+      return (this.parts = [{ pts: out.map(([x, z]) => [x - o[0], o[1] - z]), h: lay?.height ?? GENERIC.height, min: 0, synthetic: true }]);
     },
     params: {
       // the garages along the run where the boxes are (the path's points at its ends)
       garageRange: [[frame.at(u0).x, frame.at(u0).z], [frame.at(u1).x, frame.at(u1).z]],
       // estimates (no source for any one circuit): garages 8.5 m wide, 8 m high where the map has no height
-      height: GENERIC.height, garagePitch: GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
+      height: lay?.height ?? GENERIC.height, garagePitch: lay?.pitch ?? GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#8e9196", fascia: "fasciaWhite",
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
-      pitWall: PLAIN_PIT_WALL,
+      pitWall: lay?.pitWall || PLAIN_PIT_WALL, ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : {}),
     },
+    ...(lay ? { layout: lay.src } : {}),
   };
+}
+// the nearest point of a path frame (its normal there)
+function nearestOn(frame, x, z) { let best = null, bd = Infinity; for (let u = 0; u <= frame.len; u += 2) { const p = frame.at(u), d = (p.x - x) ** 2 + (p.z - z) ** 2; if (d < bd) { bd = d; best = p; } } return best; }
+// a building of a venue's own layout along the lane: `front` m from the path, as deep as `depth` or up to `keepOff` m short
+// of the track's tarmac behind it (the straight), every 5 m
+function layoutOutline(frame, side, u0, u1, lay, trackEdge) {
+  const near = [], far = [];
+  for (let u = u0; ; u = Math.min(u1, u + 5)) {
+    const p = frame.at(u), [gx, gz] = side(u);
+    let d = lay.front + lay.depth;
+    if (trackEdge) for (let k = lay.front; k <= lay.front + lay.depth; k += 0.5) if (trackEdge(p.x + gx * k, p.z + gz * k) < lay.keepOff) { d = k - 0.5; break; }
+    // (where the track comes too near for a garage 5 m deep – the lane's ends by the straight – the building stops)
+    if (d >= lay.front + 5) { near.push([p.x + gx * lay.front, p.z + gz * lay.front]); far.push([p.x + gx * d, p.z + gz * d]); }
+    if (u >= u1) break;
+  }
+  return [...near, ...far.reverse()];
 }
 
 // opts: { scene, gf, groundAt, location, year, toTrack, trial (setting on), readModel(file) → bytes,

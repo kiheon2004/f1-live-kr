@@ -3403,6 +3403,20 @@ window.Map3D = {
   standsShown(v) { const g = world?.real?.stands?.group; if (g) g.visible = !!v; return String(!!g); },
   // development: (lat, lon) → scene [x, ground y, z] (to aim another build's look() at the same place)
   llToScene(lat, lon) { const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon); return JSON.stringify([+x.toFixed(2), +(R.groundAt?.(x, z) ?? 0).toFixed(2), +z.toFixed(2)]); },
+  // development: the measured pit path (startdata.js) every `every` m – lat/lon, and how far the track's tarmac is from it on
+  // each side (left / right of the path's direction, m; null beyond 60 m) and which lap sample that is
+  pitPathProbe(every = 20) {
+    const A = app(), pd = START_DATA[venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key]?.pit, R = world?.real;
+    if (!pd || !R) return "no pit / map";
+    const pts = pd.path.map((p) => [p[0] * DM - world.center.x, -(p[1] * DM - world.center.z)]), out = [];
+    let acc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, az] = pts[i - 1], [bx, bz] = pts[i], l = Math.hypot(bx - ax, bz - az); acc += l; if (acc < every) continue; acc = 0;
+      const tx = (bx - ax) / l, tz = (bz - az) / l, side = (sg) => { for (let d = 1; d <= 60; d += 0.5) { const x = bx - tz * sg * d, z = bz + tx * sg * d, [s, dd] = world.grid.nearest(x, z, 2); if (s && dd < (sg > 0 ? -(s.R ?? -7) : (s.L ?? 7)) + 0.5 && Math.abs(((x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z)) <= Math.max(s.L ?? 7, -(s.R ?? -7))) return [d, s.i]; } return null; };
+      out.push({ ll: R.geo.toLL(bx, bz).map((v) => +v.toFixed(6)), left: side(1), right: side(-1) });
+    }
+    return JSON.stringify({ n: world.n, limitOn: pd.limitOn, limitOff: pd.limitOff, len: Math.round(pts.reduce((a, p, i) => (i ? a + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0)), out });
+  },
   // development: the braking boards built (boards.js): turn, distance, side, lat/lon
   boardsInfo() { const g = world?.group.getObjectByName("brakeBoards"), R = world?.real; return JSON.stringify((g?.children || []).filter((m) => m.userData.board).map((m) => ({ ...m.userData.board, ll: R ? R.geo.toLL(m.position.x, m.position.z).map((v) => +v.toFixed(6)) : null, y: +m.position.y.toFixed(1) }))); },
   // development: from (lat, lon) h m above the ground towards (lat2, lon2) h2 m above it
