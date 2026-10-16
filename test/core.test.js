@@ -503,3 +503,24 @@ test("archive: refused anonymously, tried with the F1 TV sign-in – the form th
     assert.strictEqual(c.authTried, "refused");
   } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("loading a cached session while F1 refuses: a topic never cached is missing (not a failure) and nothing cached is thrown away", async () => {
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const { Archive, TOPICS } = require("../src/main/archive.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f1kr-keep-"));
+  const realFetch = global.fetch;
+  try {
+    const a = new Archive(dir), P = "2026/X/Race/";
+    // cached: the core topics and a finalised status; never cached: the rest (F1 had no file for them)
+    const line = (o) => "00:00:01.000" + JSON.stringify(o) + "\n";
+    fs.writeFileSync(a.cachePath(P + "TimingData.jsonStream"), line({ Lines: { 1: { Position: "1" } } }));
+    fs.writeFileSync(a.cachePath(P + "DriverList.jsonStream"), line({ 1: { Tla: "VER" } }));
+    fs.writeFileSync(a.cachePath(P + "SessionInfo.jsonStream"), line({ Meeting: { Name: "X" } }));
+    fs.writeFileSync(a.cachePath(P + "SessionStatus.jsonStream"), line({ Status: "Finalised" }));
+    global.fetch = async () => ({ ok: false, status: 401, headers: new Map() });
+    const r = await a.loadSession(P);
+    assert.ok(r.topics.TimingData.length > 0);
+    for (const t of ["TimingData", "DriverList", "SessionInfo", "SessionStatus"]) assert.ok(fs.existsSync(a.cachePath(P + t + ".jsonStream")), t + " kept");
+    assert.ok(TOPICS.length > 4);
+  } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -250,10 +250,18 @@ class Archive {
       for (const [r, t] of Object.values(bytes)) { received += r; total += t; }
       onProgress({ phase: "download", received, total, known: Object.keys(bytes).length, files: TOPICS.length });
     };
-    const failed = [];
+    const failed = [], fresh = new Set();
+    // (which files this load downloads, not reads from the cache: only those may be thrown away below)
+    const cachedBefore = new Set(TOPICS.filter((topic) => { try { return fs.statSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)).size > 0; } catch { return false; } }));
+    // some topics are missing for some sessions (404); one F1 refuses (401/403/429 – its archive is closed to anonymous
+    // requests since 2026-10-16) or a server error is missing too, never a failure: a failure below throws the session's
+    // cached files away, and those can't be fetched again (a cached session lost a topic it never had – the 2026 Japanese
+    // GP's race, gone from the cache that way on 2026-10-16)
+    const missing = (e) => [401, 403, 404, 429].includes(e.status) || e.status >= 500;
     const texts = await Promise.all(TOPICS.map((topic) =>
       this.getText(`${sessionPath}${topic}.jsonStream`, { onBytes: (r, t) => { bytes[topic] = [r, t]; report(); } })
-        .catch((e) => { bytes[topic] = [0, 0]; if (e.status !== 404 && e.status !== 403) failed.push(e); return ""; })));   // some topics are missing for some sessions
+        .then((text) => { if (!cachedBefore.has(topic)) fresh.add(topic); return text; })
+        .catch((e) => { bytes[topic] = [0, 0]; if (!missing(e)) failed.push(e); return ""; })));
     report(true);
     const core = TOPICS.indexOf("TimingData");
     if (!texts[core]) {
@@ -263,7 +271,8 @@ class Archive {
     // A session still running (or just finished) is published bit by bit: don't keep a half file forever.
     const status = texts[TOPICS.indexOf("SessionStatus")] || "";
     if (failed.length || !/"Status":"(?:Finalised|Ends)"/.test(status)) {
-      for (const topic of TOPICS) { try { fs.unlinkSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)); } catch {} }
+      // (only what this load downloaded: a file already in the cache stays)
+      for (const topic of fresh) { try { fs.unlinkSync(this.cachePath(`${sessionPath}${topic}.jsonStream`)); } catch {} }
     }
     // A file with text but not one readable line is damaged (cut short or garbled on the way, or on disk). The core
     // topics are downloaded once more, then it's an error – never a replay that loads with nothing in it; a damaged
