@@ -14,31 +14,38 @@ test("team names across seasons and spellings", async () => {
 });
 
 test("boxes: the champions' at the entry end (Silverstone 2026) or the exit end (Suzuka), down the order", async () => {
-  const { publishedBoxes } = await import("../src/renderer/pitorder.js");
+  const { orderedBoxes } = await import("../src/renderer/pitorder.js");
   const teams = ["Cadillac", "McLaren", "Mercedes", "Audi", "Ferrari", "Red Bull Racing"];
-  const at = (key) => Object.fromEntries(publishedBoxes(key, 2026, teams).map((b) => [b.team, b]));
+  const at = (key) => Object.fromEntries(orderedBoxes(key, 2026, teams).map((b) => [b.team, b]));
   const sil = at(2);
   assert.ok(sil.McLaren.u < sil.Mercedes.u && sil.Mercedes.u < sil["Red Bull Racing"].u && sil.Ferrari.u < sil.Audi.u && sil.Audi.u < sil.Cadillac.u);
   assert.deepStrictEqual([sil.McLaren.rank, sil.Audi.rank, sil.Cadillac.rank], [1, 9, 11]);
   const suz = at(46);
   assert.ok(suz.McLaren.u > suz.Mercedes.u && suz.Mercedes.u > suz.Cadillac.u, "Suzuka: the other way round");
   // 2025: Sauber in Audi's place; 2024: RB
-  const s25 = Object.fromEntries(publishedBoxes(2, 2025, ["Kick Sauber", "McLaren"]).map((b) => [b.team, b.rank]));
+  const s25 = Object.fromEntries(orderedBoxes(2, 2025, ["Kick Sauber", "McLaren"]).map((b) => [b.team, b.rank]));
   assert.deepStrictEqual(s25, { "Kick Sauber": 10, McLaren: 1 });
-  assert.strictEqual(publishedBoxes(2, 2024, ["RB"])[0].rank, 8);
+  assert.strictEqual(orderedBoxes(2, 2024, ["RB"])[0].rank, 8);
+  // the season's own measurement where there is one, else the nearest season's – said so; how each place is known
+  const b25 = orderedBoxes(15, 2025, ["McLaren"])[0], b26 = orderedBoxes(15, 2026, ["McLaren"])[0];
+  assert.deepStrictEqual([b25.u, b25.season, b25.sameSeason, b25.how], [339, 2025, true, "measured"]);
+  assert.deepStrictEqual([b26.u, b26.season], [327, 2026]);
+  const b24 = orderedBoxes(15, 2024, ["Red Bull Racing"])[0]; assert.deepStrictEqual([b24.season, b24.sameSeason], [2025, false]);
   // nothing known: no boxes
-  assert.strictEqual(publishedBoxes(999, 2026, teams), null);
-  assert.strictEqual(publishedBoxes(2, 2019, teams), null);
+  assert.strictEqual(orderedBoxes(999, 2026, teams), null);
+  assert.strictEqual(orderedBoxes(2, 2019, teams), null);
 });
 
 test("every circuit with a measured pit lane has its boxes, in the pit lane, evenly enough spaced", async () => {
   const { PIT_BOXES } = await import("../src/renderer/pitorder.js");
   const { START_DATA } = await import("../src/renderer/startdata.js");
   for (const key of Object.keys(START_DATA)) {
-    const b = PIT_BOXES[key]; assert.ok(b, `circuit ${key}`);
-    assert.strictEqual(b.boxes.length, 11);
+    const seasons = PIT_BOXES[key]; assert.ok(seasons, `circuit ${key}`);
+    for (const [season, b] of Object.entries(seasons)) {
+    assert.strictEqual(b.boxes.length, season >= 2026 ? 11 : 10); assert.strictEqual(b.how.length, b.boxes.length);
     const pit = START_DATA[key].pit, lo = Math.min(...b.boxes), hi = Math.max(...b.boxes);
     assert.ok(lo > Math.max(0, pit.limitOn - 30) && hi < pit.limitOff + 30, `circuit ${key}: boxes ${lo}–${hi} inside the limiter lines ${pit.limitOn}–${pit.limitOff}`);
-    for (let i = 1; i < 11; i++) assert.ok((b.boxes[i] - b.boxes[i - 1]) * b.dir > 0, `circuit ${key}: in order`);
+    for (let i = 1; i < b.boxes.length; i++) assert.ok((b.boxes[i] - b.boxes[i - 1]) * b.dir > 0, `circuit ${key}: in order`);
+    }
   }
 });

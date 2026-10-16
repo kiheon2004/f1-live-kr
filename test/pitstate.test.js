@@ -85,3 +85,37 @@ test("standing time and the last standstill from telemetry, the same at any mome
   assert.strictEqual(lastStand(car, 40000), null, "too long ago");
   assert.strictEqual(lastStand(car, 11000), null, "still standing: not a last standstill yet");
 });
+
+test("at its box: a car's length off the box's measured place still counts, never half the way to the next team's", async () => {
+  const { pitState } = await S();
+  assert.strictEqual(pitState({ ...base, u: 212, speed: 0, stillFor: 2 }).state, "queued", "12 m off: not its box");
+  assert.strictEqual(pitState({ ...base, u: 209, speed: 0, stillFor: 2 }).state, "in box");
+  assert.strictEqual(pitState({ ...base, u: 209, speed: 0, stillFor: 2, boxTol: 8 }).state, "queued", "the next box 16 m on");
+});
+
+test("standing from positions: a stop with centimetre jitter is one standstill; speed from them", async () => {
+  const { standingForPos, lastStandPos, posSpeed } = await S();
+  // 4 Hz along x: 20 m/s to 10 s, standing 10–14 s (±3 cm jitter), 20 m/s after; decimetres
+  const t = [], x = [], y = []; let X = 0;
+  for (let ms = 0; ms <= 20000; ms += 250) { const mv = ms < 10000 || ms > 14000; if (mv && ms > 0) X += 20 * 0.25 * 10; t.push(ms); x.push(X + (mv ? 0 : (((ms / 250) % 3) - 1) * 0.3)); y.push(0); }
+  const c = { t: Float64Array.from(t), x: Float64Array.from(x), y: Float64Array.from(y), n: t.length };
+  assert.ok(Math.abs(posSpeed(c, 5000) - 20) < 0.5);
+  assert.ok(posSpeed(c, 12000) < 0.5);
+  assert.ok(Math.abs(standingForPos(c, 13000) - 3) < 0.3, String(standingForPos(c, 13000)));
+  assert.strictEqual(standingForPos(c, 16000), 0);
+  const ls = lastStandPos(c, 16000); assert.ok(ls && Math.abs(ls.t0 - 10000) <= 250 && Math.abs(ls.t1 - 14000) <= 250, JSON.stringify(ls));
+  assert.strictEqual(lastStandPos(c, 12000), null, "still standing");
+});
+
+test("a penalty is done once the car has made a whole pit visit after it was given, even before race control says so; a retired car gets no crew", async () => {
+  const { pendingPenalties, pitVisits, pitState, crewPhase } = await S();
+  const rcm = [[7103, "FIA STEWARDS: 10 SECOND STOP/GO PENALTY FOR CAR 87 (BEA) - UNSAFE CONDITION"], [7627, "FIA STEWARDS: PENALTY SERVED - 10 SECOND STOP/GO PENALTY FOR CAR 87 (BEA)"]];
+  const flags = [[7231, true], [7268, false], [7351, true]];
+  const at = (t) => pendingPenalties(rcm, t, () => pitVisits(flags, t)).get("87") || null;
+  assert.strictEqual(at(7240), "stop-go", "the visit serving it");
+  assert.strictEqual(at(7360), null, "the next visit: done");
+  assert.deepStrictEqual(pitVisits(flags, 7400), [[7231, 7268], [7351, null]]);
+  const r = pitState({ ...base, u: 199, speed: 0, stillFor: 120, retired: true });
+  assert.strictEqual(r.state, "retired");
+  assert.strictEqual(crewPhase([{ num: "87", state: r, u: 199, boxU: 200 }]).phase, "none");
+});

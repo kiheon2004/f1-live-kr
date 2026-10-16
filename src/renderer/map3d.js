@@ -12,9 +12,9 @@ import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlot
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN } from "./startplan.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
-import { pitState, laneOffsetOf, crewPhase, pendingPenalties, standingFor, lastStand, PIT } from "./pitstate.js";
+import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pitVisits, posSpeed, standingForPos, lastStandPos, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout } from "./crew.js";
-import { publishedBoxes } from "./pitorder.js";
+import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor } from "./car3d.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -182,12 +182,16 @@ function updatePitTeams(force = false) {
   // The teams' boxes as allocated (pitorder.js: the previous season's constructors' order along the lane, the circuit's
   // measured boxes – the rule held at every circuit measured): from the session's start, before any stop. The stops
   // seen place only a team the order doesn't cover.
-  const pub = world.pitLane ? publishedBoxes(A.circuitKey?.(), A.sessionYear?.(), Object.values(drivers).map((d) => d?.TeamName).filter(Boolean)) : null;
+  // A team whose stops this session have been seen (garages.js: trusted places) has its box where they were – the
+  // order's place is the prior until then (it may be a season's measurement other than this one's, or between measured
+  // boxes: pitorder.js says how each is known).
+  const pub = world.pitLane ? orderedBoxes(A.circuitKey?.(), A.sessionYear?.(), Object.values(drivers).map((d) => d?.TeamName).filter(Boolean)) : null;
   let places = r.places;
   if (pub) {
-    const o = {}, have = new Set(pub.map((b) => b.team));
-    places = [...pub.map((b) => { pitLaneAt(b.u, o); const pr = G.project(o.x, o.z); return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: true }; }), ...r.places.filter((p) => !have.has(p.team))];
+    const o = {}, seen = new Set(r.places.filter((p) => p.ok && p.from === "box").map((p) => p.team));
+    places = [...pub.filter((b) => !seen.has(b.team)).map((b) => { pitLaneAt(b.u, o); const pr = G.project(o.x, o.z); return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: true, how: b.how, season: b.season }; }), ...r.places.filter((p) => !pub.some((b) => b.team === p.team) || seen.has(p.team))];
   }
+  pitTeams.order = pub;
   const teams = allocatePlaces(G.slots, G.pitch, drivers, places, overridesFor(G.facility, A.sessionYear?.() || null, session));
   // (a box is painted where a car stands in it – LANES.box out from the garages –, not on the feed's line, which runs
   // anywhere across the lane: pitlane.js)
@@ -274,20 +278,29 @@ function pitFrame(src, t, lag, isRace) {
   const G = pitTeams.G; if (!G || !world?.pitLane) return null;
   const m = pitModelFor(G), S = startState(src, t), ctx = startCtxAt(S, t);
   if (laneTestFor?.lane !== world.pitLane) laneTestFor = { lane: world.pitLane, test: laneCells(world.pitLane.pts.map((p) => [p.x, p.z])) };
-  const pen = pendingPenalties(S.hist.rcm, t), drivers = src.state.DriverList || {}, c0 = world.center;
+  const pen = pendingPenalties(S.hist.rcm, t, (num) => pitVisits(S.hist.flags.get(num + ":InPit"), t)), drivers = src.state.DriverList || {}, c0 = world.center;
   const raw = src.positionsAt(t), out = new Map();
+  // (each team's box tolerance: half the way to the nearest other team's box)
+  const boxes = (pitTeams.teams || []).filter((q) => q.box != null).map((q) => [q.team, q.box]).sort((a, b) => a[1] - b[1]), tolOf = new Map();
+  boxes.forEach(([tm, u], i) => tolOf.set(tm, Math.min(i > 0 ? u - boxes[i - 1][1] : Infinity, i + 1 < boxes.length ? boxes[i + 1][1] - u : Infinity) / 2));
   for (const [num, p] of Object.entries(raw)) {
-    const x = p[0] * DM - c0.x, z = -(p[1] * DM - c0.z), onLane = laneTestFor.test(x, z), inPit = S.hist.flagAt(num, "InPit", t);
+    let x = p[0] * DM - c0.x, z = -(p[1] * DM - c0.z);
+    const onLane = laneTestFor.test(x, z), inPit = S.hist.flagAt(num, "InPit", t);
     if (!onLane && !inPit) continue;
+    // (in the pit lane the feed has every car on the measured path's line: a position more than 3 m off it is the data
+    // jumping – Barcelona 2025, Norris, one sample 13 m out towards the track – and taken back onto the line, its place
+    // along the lane kept)
+    if (inPit) { const q = nearestOnPath(x, z); if (q && q.d > 3 && q.d < 25) { x = q.x; z = q.z; } }
     const pr = G.project(x, z), team = drivers[num]?.TeamName, tm = pitTeams.teams?.find((q) => q.team === team);
-    const tel = src.carAt?.(num, t), car = src.car?.[num];
-    const speed = tel ? tel.speed / 3.6 : (cars.get(num)?.speed ?? 0), stillFor = standingFor(car, t, lag);
-    const ls = lastStand(car, t, lag); let lastBox = null;
-    if (ls && tm?.box != null) { const q = [0, 0, 0]; if (src.tracks?.at?.(num, ls.t1, q)) { const pu = G.project(q[0] * DM - c0.x, -(q[1] * DM - c0.z)).u; if (Math.abs(pu - tm.box) <= PIT.atBox) lastBox = { endU: pu, ago: (t - ls.t1) / 1000 }; } }
+    // (standing and speed from its positions: in the box the telemetry's wheel speed jumps while the car is jacked up)
+    const trk = src.tracks?.cars?.[num];
+    const speed = trk ? posSpeed(trk, t) : (cars.get(num)?.speed ?? 0), stillFor = trk ? standingForPos(trk, t) : 0;
+    const ls = trk ? lastStandPos(trk, t) : null; let lastBox = null;
+    if (ls && tm?.box != null) { const q = [0, 0, 0]; if (src.tracks?.at?.(num, ls.t1, q)) { const pu = G.project(q[0] * DM - c0.x, -(q[1] * DM - c0.z)).u; if (Math.abs(pu - tm.box) <= Math.min(PIT.atBox, tolOf.get(team) ?? PIT.atBox)) lastBox = { endU: pu, ago: (t - ls.t1) / 1000 }; } }
     let pitStart = null;
     if (ctx && carKind(S.hist, ctx, num, t).kind === "pit") pitStart = speed <= PIT.still ? "queue" : "go";
     const inRun = pr.off > -3 && pr.off < 40;
-    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, pitStart, race: isRace, teammateInBox: false, lastBox } });
+    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
   }
   for (const r of out.values()) r.state = pitState(r.input);
   for (const r of out.values()) if (r.state.state !== "in box" && r.input.speed <= PIT.still && [...out.values()].some((o) => o !== r && o.team === r.team && o.state.state === "in box")) { r.input.teammateInBox = true; r.state = pitState(r.input); }
@@ -302,12 +315,24 @@ function pitFrame(src, t, lag, isRace) {
   return out;
 }
 const pitCost = { ms: 0, frames: 0 };
+// the nearest point of the measured pit path to (x, z): { x, z, d }
+function nearestOnPath(x, z) {
+  const P = world.pitLane?.pts; if (!P) return null;
+  let best = null;
+  for (let i = 1; i < P.length; i++) {
+    const a = P[i - 1], b = P[i], ex = b.x - a.x, ez = b.z - a.z, l2 = ex * ex + ez * ez; if (!l2) continue;
+    const f = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / l2)), px = a.x + ex * f, pz = a.z + ez * f, d = Math.hypot(x - px, z - pz);
+    if (!best || d < best.d) best = { x: px, z: pz, d };
+  }
+  return best;
+}
 const ss01 = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 // Draws car c (at v, heading c.yaw) as its pit state says: across the lane, on the lane's surface, turned along it
 function pitDraw(c, r, v) {
   c.pit = r; if (r.u == null || r.want == null) return;
   const G = pitTeams.G, s = r.at.slot, d = r.want - r.off;
-  v.x -= s.inward[0] * d; v.z -= s.inward[1] * d;
+  // from the raw position (r.x, r.z: the feed's, where r.off was measured), moved across to where its state puts it
+  v.x = r.x - s.inward[0] * d; v.z = r.z - s.inward[1] * d;
   // on the lane's surface in front of the garages, easing to the ground the entry / exit roads lie on
   v.y = v.y + (r.at.floor + 0.004 - v.y) * r.inRun;
   // standing, along the lane; moving across, turned by the slope of the way across
@@ -1321,7 +1346,10 @@ function updateCars(dt) {
     // in the pit lane in front of the garages: in the fast lane, or its box (off the lap line only – the track running
     // past the garages is the track)
     (c.feedPos || (c.feedPos = new THREE.Vector3())).copy(v);
-    if (!st && !est && pitNow?.has(num)) pitDraw(c, pitNow.get(num), v); else c.pit = null;
+    // (a car the data puts in the pit lane – its InPit flag or its raw position on the pit path – is drawn from its raw
+    // position and the lane's model, whatever the track's smoothing made of it: a pit-entry sample 3 m off the measured
+    // path had been pulled 13 m out onto the racing line – Barcelona 2025, Norris)
+    if (!est && pitNow?.has(num)) pitDraw(c, pitNow.get(num), v); else c.pit = null;
     (c.raw || (c.raw = new THREE.Vector3())).copy(v);
     c.grid = null;
     if (gridNow && st && !est) { const g1 = performance.now(); gridCar(c, num, v, gridNow); const e = performance.now() - g1; gridCost.ms += e; }
@@ -2768,6 +2796,7 @@ window.Map3D = {
     const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;
     return JSON.stringify({ t: app().t, u: +p.u.toFixed(1), off: +p.off.toFixed(2), feedOff: r && +r.off.toFixed(2), speed: +c.speed.toFixed(1), box: pitTeams.teams?.find((x) => x.team === team)?.box ?? null, gStart: Math.round(G.gStart), gEnd: Math.round(G.gEnd),
       state: c.pit?.state?.state || null, lane: c.pit?.state?.lane || null, w: c.pit?.state ? +c.pit.state.w.toFixed(2) : null, evidence: c.pit?.state?.evidence || null, fastC: c.pit?.at ? +c.pit.at.fastC.toFixed(2) : null, boxC: c.pit?.at ? +c.pit.at.boxC.toFixed(2) : null,
+      lastBox: c.pit?.input?.lastBox || null, stillFor: c.pit?.input ? +c.pit.input.stillFor.toFixed(1) : null, tel: app().src?.carAt?.(String(num), app().t)?.speed ?? null,
       yOverFloor: c.pit?.at ? +(c.obj.position.y - c.pit.at.floor).toFixed(3) : null, yawDeg: +(c.yaw * 57.3).toFixed(1), crews: world.crews ? world.crews.group.children.reduce((a, m) => a + m.count, 0) : 0 });
   },
   // development: what is seen at screen point (x, y: −1…1) – the first few objects a ray from the camera meets, named
