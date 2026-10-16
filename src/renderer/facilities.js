@@ -778,16 +778,24 @@ function pitBuilding(ctx, p) {
   // point to the edge of the tarmac) – a concrete wall with the catch fence over it on the track side, and behind it a
   // raised walkway with a railing on the pit lane side (the mapped footway band; photo). Stands for the teams on it are
   // added with the teams (garages.js: wallAt).
-  let wallAt = null, wallDbg = null, wallFace = null;
+  let wallAt = null, wallDbg = null, wallFace = null, wallFrom = null;
   const occupancy = [];   // what the wall and the paddock stand on (scene x, z): trees keep off it – it isn't the building replaced
   if (p.pitWall && ctx.trackEdge && G > 0) {
     const pw = p.pitWall, W = [];
     for (let uu = gStart; uu <= gEnd + 1e-6; uu += 3) {
-      // out from the garages towards the track until the tarmac's edge
+      // out from the garages towards the track until the tarmac's edge – or a wall the map has before it (that is the
+      // pit wall: Suzuka's mapped wall stands 2.5 m short of the edge; a second one drawn at the edge had stood behind it)
       let d = 4;
       while (d < 60) { const [x, z] = P(uu, frontV(uu) + vTrack * d); if (ctx.trackEdge(x, z) <= 0.3) break; d += 0.5; }
-      if (d < 60) W.push({ u: uu, d });
+      if (d >= 60) continue;
+      const [x0, z0] = P(uu, frontV(uu)), [x1, z1] = P(uu, frontV(uu) + vTrack), db = ctx.barrierRay ? ctx.barrierRay(x0, z0, x1 - x0, z1 - z0, d) : Infinity;
+      W.push(db > 5 && db < d - 0.5 ? { u: uu, d: db - pw.thick / 2, mapped: true, edge: d } : { u: uu, d, edge: d });
     }
+    // (mapped along most of the run: the map's wall is the pit wall – none is drawn over it; the lane's model and the
+    // teams' stands use it)
+    const mappedWall = W.length > 3 && W.filter((w) => w.mapped).length >= W.length * 0.6;
+    if (mappedWall) for (const w of W) if (!w.mapped) w.d = NaN;
+    if (mappedWall) { const keep = W.filter((w) => Number.isFinite(w.d)); W.length = 0; W.push(...keep); }
     if (W.length > 3) {
       // the wall's line smoothed (a wall is straight where the edge wobbles in the data), as a line across the lane – the
       // building's front plus the distance –, not the distance alone: where the front steps in or out, the wall doesn't
@@ -796,7 +804,7 @@ function pitBuilding(ctx, p) {
       const vS = fitLine(W.map((w) => [w.u, frontV(w.u) + vTrack * w.d]));
       const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, vS[i] - vTrack * dd); return [x, floorAt(W[i].u) + y, z]; };
       wallDbg = W.filter((_, i) => i % 8 === 0).map((w, k) => { const i = k * 8; return [Math.round(w.u), w.d, +((vS[i] - frontV(w.u)) * vTrack).toFixed(1)]; });
-      for (let i = 0; i + 1 < W.length; i++) {
+      for (let i = 0; i + 1 < W.length && !mappedWall; i++) {
         const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
         // wall (track face, top, pit face), fence above it
         F.poly("pitWall", [ptAt(i, 0, 0), ptAt(i + 1, 0, 0), ptAt(i + 1, 0, pw.height), ptAt(i, 0, pw.height)], null, o);
@@ -813,17 +821,21 @@ function pitBuilding(ctx, p) {
       // (the face to the pit lane: thick + walk in from the track side)
       wallFace = (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
-        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - vTrack * (pw.thick + pw.walk) - frontV(W[k].u)) * vTrack;
+        // (a mapped wall: its own thickness only – no walkway of ours behind it)
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - vTrack * (pw.thick + (mappedWall ? 0 : pw.walk)) - frontV(W[k].u)) * vTrack;
         return at(i) + (at(i + 1) - at(i)) * f;
       };
       wallAt = (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
-        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, pw.thick + pw.walk / 2, pw.deck), b = ptAt(i + 1, pw.thick + pw.walk / 2, pw.deck);
+        // (a mapped wall: the stand behind it, on its track side, where 2.4 m are left before the tarmac – else none)
+        if (mappedWall) { const room = Math.min(W[i].edge - W[i].d, W[i + 1].edge - W[i + 1].d); if (!(room >= 2.4)) return null; }
+        const back = mappedWall ? -1.3 : pw.thick + pw.walk / 2, deck = mappedWall ? 0 : pw.deck;
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, back, deck), b = ptAt(i + 1, back, deck);
         return { p: a.map((x, k) => x + (b[k] - x) * f), out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]] };
       };
       // (what the wall and its walkway stand on)
-      const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, pw.thick + pw.walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]);
-      occupancy.push(strip);
+      if (!mappedWall) { const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, pw.thick + pw.walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]); occupancy.push(strip); }
+      wallFrom = mappedWall ? "the map's wall" : p.pitWallFrom || "drawn at the track's edge";
     }
   }
   // The paddock behind the garages (p.paddock, for the years it was seen): awnings along the garages' back and a row
@@ -929,7 +941,7 @@ function pitBuilding(ctx, p) {
   return { meshes, footprint, occupancy, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
-      paddock: paddockInfo, pitWall: !!wallAt, wallStations: wallDbg,
+      paddock: paddockInfo, pitWall: !!wallAt, wallFrom, wallStations: wallDbg,
       heightFrom: parts.some((q) => q.guessed) ? "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
 }
 
@@ -1260,7 +1272,7 @@ export async function buildFacilities(opts) {
   try { const r = await facilitiesFor(opts, own, free); if (!r) free(); return r; }
   catch (e) { free(); throw e; }
 }
-async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge = null, location, venue = null, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }, own) {
+async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge = null, barrierRay = null, location, venue = null, year, toTrack, alongTrack = null, trial = true, readModel = null, isCurrent = () => true, registry = FACILITIES }, own) {
   const group = own.group; group.name = "facilities";
   const skip = new Set(), zones = [], spots = [], info = [];
   for (const spec of registry) {
@@ -1289,7 +1301,7 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         // (every F1 pit lane has a pit wall along the track's edge: a pit building whose entry gives none gets the plain one
         // – its line from the measured edge, its size an estimate, said so in the info)
         const params = spec.kind === "pit-building" && !spec.params?.pitWall ? { ...(spec.params || {}), pitWall: PLAIN_PIT_WALL, pitWallFrom: "estimate (plain wall)" } : spec.params || {};
-        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, year, trial, toTrack, alongTrack, scene }, params);
+        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, barrierRay, year, trial, toTrack, alongTrack, scene }, params);
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
         made = { object: g, footprint: r.footprint, occupancy: r.occupancy, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";

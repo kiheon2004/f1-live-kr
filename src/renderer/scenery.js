@@ -803,7 +803,21 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const surfaceAt = (x, z) => { const [s, d] = nearTrack(x, z); const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06); };
     // metres from a point to the edge of the track's tarmac (the measured half width), negative on it
     const trackEdge = sideEdge;
-    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false, registry: generic ? [...FACILITIES, generic] : FACILITIES,
+    // the map's solid barriers (walls, jersey barriers, retaining walls, guard rails – not fences) as segments, and the
+    // distance along a ray to the first of them: a pit building's wall is the mapped one where the map has it
+    const barrierSegs = [];
+    for (const l of scene.lines) if (l.k === "barrier" && /^(wall|retaining_wall|jersey_barrier|guard_rail)$/.test(l.sub || "")) { const q = l.pts.map(gf.xz); for (let i = 1; i < q.length; i++) barrierSegs.push([q[i - 1][0], q[i - 1][1], q[i][0], q[i][1]]); }
+    const barrierRay = (x, z, dx, dz, max = 60) => {
+      let best = Infinity;
+      for (const [ax, az, bx, bz] of barrierSegs) {
+        if (Math.min(ax, bx) > x + max || Math.max(ax, bx) < x - max || Math.min(az, bz) > z + max || Math.max(az, bz) < z - max) continue;
+        const ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex; if (Math.abs(den) < 1e-9) continue;
+        const sx = ((ax - x) * ez - (az - z) * ex) / den, tx = ((ax - x) * dz - (az - z) * dx) / den;
+        if (sx > 0 && tx >= 0 && tx <= 1 && sx < best) best = sx;
+      }
+      return best <= max ? best : Infinity;
+    };
+    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, barrierRay, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false, registry: generic ? [...FACILITIES, generic] : FACILITIES,
       readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
     lm = combine(lm, fac);

@@ -2850,6 +2850,13 @@ window.Map3D = {
     return JSON.stringify(out);
   },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
+  // development: from inside garage k (`inside` m behind its front, `h` m up), looking out across the pit lane
+  viewLane(k = 20, inside = 2, h = 2.5, side = 0, fov = 75) {
+    let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
+    if (!G) return "no garages";
+    const s = G.slots[Math.max(0, Math.min(G.slots.length - 1, k))], [ix, iz] = s.inward;
+    return this.look(s.front[0] + ix * inside + s.along[0] * side, s.floor + h, s.front[1] + iz * inside + s.along[1] * side, s.front[0] - ix * 20 + s.along[0] * side, s.floor + 0.5, s.front[1] - iz * 20 + s.along[1] * side, fov);
+  },
   viewPits(k = 20, back = 28, h = 9, side = 0, fov = 50) {
     let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
     if (!G) return "no garages";
