@@ -275,7 +275,15 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const tx = s.p.x - o.c[0], tz = s.p.z - o.c[1];
     if (Math.abs(tx * o.u[0] + tz * o.u[1]) > Math.abs(tx * o.v[0] + tz * o.v[1])) { du = o.v; dv = o.u; a0 = o.v0; a1 = o.v1; b0 = o.u0; b1 = o.u1; }
     if (tx * dv[0] + tz * dv[1] > 0) { dv = [-dv[0], -dv[1]]; [b0, b1] = [-b1, -b0]; }
-    const len = a1 - a0, depth = b1 - b0;
+    let len = a1 - a0, depth = b1 - b0;
+    // (a short, deep box read from a stretch of track it doesn't face – Monza's Seconda Variante, its nearest sample on
+    // the straight 53 m off: turned the other way, its front the long side nearest the track)
+    if (len < 12 && depth >= 12) {
+      [du, dv, a0, a1, b0, b1] = [dv, du, b0, b1, a0, a1];
+      const edgeD = (b) => { let m = Infinity; for (let k = 0; k <= 4; k++) { const a = a0 + ((a1 - a0) * k) / 4; m = Math.min(m, nearestSample(o.c[0] + du[0] * a + dv[0] * b, o.c[1] + du[1] * a + dv[1] * b)[1]); } return m; };
+      if (edgeD(b1) < edgeD(b0)) { dv = [-dv[0], -dv[1]]; [b0, b1] = [-b1, -b0]; }
+      len = a1 - a0; depth = b1 - b0;
+    }
     if (len < 12 || depth < 3) { drop(b, `a sliver (${len.toFixed(0)} × ${depth.toFixed(0)} m)`); continue; }   // (a sliver of an outline – a stair tower, a corner of a roof – is no stand)
     // A curved outline (a stand around a corner) is far from its box: it is built like a listed stand instead,
     // following the track between its two ends, as deep as the outline is on average.
