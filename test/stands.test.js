@@ -23,7 +23,7 @@ const box = (x0, z0, x1, z1) => [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
 
 test("a map building under a listed stand's name (OSM's 'V1' at Suzuka) becomes that stand – only near it", () => {
   const { standBuildings } = require("../src/main/scene.js");
-  const list = [{ n: "V1/V2 Main", a: [0, 30], b: [150, 30] }, { n: "Grandstand K", a: [400, -40], b: [500, -40] }];
+  const list = [{ n: "V1/V2 Main", a: [0, 30], b: [150, 30] }, { n: "Grandstand K", a: [400, 10], b: [500, 10] }];
   const b = (name, cx) => ({ kind: "block", name, h: 8, min: 0, pts: box(cx - 40, 25, cx + 40, 45) });
   const blds = [b("V1", 60), b("V2", 100), b("V1", 900), b("K", 450), b("Hotel", 300), b("Tribuna K", 470), { ...b("V2", 120), min: 6 }];
   standBuildings(blds, list);
@@ -56,4 +56,20 @@ test("grandstands: outlines are built as deep as they are; a stand in the way of
   assert.ok(r.info.dead.some((d) => d.startsWith("Blocked") && d.includes("Media centre")), `the obstacle named: ${r.info.dead}`);
   assert.ok(r.info.skipped.includes("Lawn: standing / grass") && r.info.skipped.includes("Old: not in 2026"));
   assert.ok(!r.info.list.some((s) => s.n === "Lawn" || s.n === "Old"));
+});
+
+// v0.34: the data's side is the race direction's – the track's normal points to the cars' right (scene x east, z
+// south: running east, the right is +z). Up to v0.33 "L" was built on the right (Imola's, Monaco's, Las Vegas' stands
+// on the wrong side, or saved by the other-side retry).
+test("grandstands: a listed stand's side L / R is left / right in the race's direction", async () => {
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const w = world(), groundAt = () => 0;
+  const scene = { areas: [], lines: [], buildings: [], stands: { list: [
+    { n: "Right", a: [-150, 20], b: [-60, 20], side: "R", rows: 10 },
+    { n: "Left", a: [60, -20], b: [150, -20], side: "L", rows: 10 },
+  ] } };
+  const r = buildStands({ scene, gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
+  const zOf = (n) => { const s = r.info.list.find((x) => x.n === n); return s.outline.reduce((a, p) => a + p[1], 0) / s.outline.length; };
+  assert.ok(zOf("Right") > 7, "R: on the cars' right (+z running east)");
+  assert.ok(zOf("Left") < -7, "L: on their left");
 });

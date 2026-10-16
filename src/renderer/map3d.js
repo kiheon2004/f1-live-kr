@@ -616,7 +616,7 @@ function buildWorld(points) {
   const samples = pts.map((p, i) => {
     const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n];
     const tan = tmp.copy(b).sub(a).setY(0).normalize().clone();
-    const nor = new THREE.Vector3(-tan.z, 0, tan.x);          // left of travel
+    const nor = new THREE.Vector3(-tan.z, 0, tan.x);          // right of travel (x east, z south)
     return { p, tan, nor, i };
   });
   // Turning rate (rad per metre) → where kerbs go and which side is the inside.
@@ -2918,7 +2918,7 @@ window.Map3D = {
     const out = L.map((st) => {
       const [cx, , cz] = st.c, [s] = world.grid.nearest(cx, cz, 3), lat = s ? (cx - s.p.x) * s.nor.x + (cz - s.p.z) * s.nor.z : null;
       const near = s && corners.length ? corners.map((k) => ({ n: k.n, d: alongTo(k.i, s.i) })).sort((a, b) => Math.abs(a.d) - Math.abs(b.d))[0] : null;
-      return { n: st.n, kind: st.kind, rows: st.rows, seats: st.seats, len: st.len, roof: st.roof, outline: (st.outline || []).map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))), side: lat == null ? null : lat > 0 ? "L" : "R", lat: lat && Math.round(lat), turn: near?.n ?? null, along: near ? Math.round(near.d) : null, ll: R.geo.toLL(cx, cz).map((v) => +v.toFixed(6)) };
+      return { n: st.n, kind: st.kind, rows: st.rows, seats: st.seats, len: st.len, roof: st.roof, outline: (st.outline || []).map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))), side: lat == null ? null : lat > 0 ? "R" : "L", lat: lat && Math.round(lat), turn: near?.n ?? null, along: near ? Math.round(near.d) : null, ll: R.geo.toLL(cx, cz).map((v) => +v.toFixed(6)) };
     });
     const track = []; for (let i = 0; i < world.n; i += 5) { const s = world.samples[i]; track.push([...R.geo.toLL(s.p.x + s.nor.x * (s.L ?? 7), s.p.z + s.nor.z * (s.L ?? 7)), ...R.geo.toLL(s.p.x + s.nor.x * (s.R ?? -7), s.p.z + s.nor.z * (s.R ?? -7))].map((v) => +v.toFixed(6))); }
     const cl = corners.map((k) => ({ n: k.n, ll: R.geo.toLL(world.samples[k.i].p.x, world.samples[k.i].p.z).map((v) => +v.toFixed(6)) }));
@@ -2937,7 +2937,7 @@ window.Map3D = {
     const corners = await standCorners(), n = world.n, step = world.samples[0].p.distanceTo(world.samples[1].p);
     return JSON.stringify(specs.map((sp) => {
       const k = corners.find((c) => c.n === sp.turn); if (!k) return { n: sp.n, error: "no corner " + sp.turn };
-      const pt = (d) => { const s = world.samples[((k.i + Math.round(d / step)) % n + n) % n], side = sp.side === "L" ? 1 : -1, o = side > 0 ? (s.L ?? 7) + (sp.off ?? 14) : (s.R ?? -7) - (sp.off ?? 14); return R.geo.toLL(s.p.x + s.nor.x * o, s.p.z + s.nor.z * o).map((v) => +v.toFixed(7)); };
+      const pt = (d) => { const s = world.samples[((k.i + Math.round(d / step)) % n + n) % n], side = sp.side === "R" ? 1 : -1, o = side > 0 ? (s.L ?? 7) + (sp.off ?? 14) : (s.R ?? -7) - (sp.off ?? 14); return R.geo.toLL(s.p.x + s.nor.x * o, s.p.z + s.nor.z * o).map((v) => +v.toFixed(7)); };
       return { n: sp.n, a: pt(sp.d0), b: pt(sp.d1) };
     }));
   },

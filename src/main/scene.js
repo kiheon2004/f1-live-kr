@@ -79,7 +79,8 @@ function standBuildings(buildings, list) {
     if (Math.abs(areaOf(b.pts)) > 15000) continue;
     const k = standKey(b.name); if (!k) continue;
     const c = centroidOf(b.pts);
-    const hit = keyed.find(({ L, keys }) => keys.has(k) && (L.a && L.b ? segD(c, L.a, L.b) < 200 : standKey(L.n) === k));
+    // (a one- or two-letter name – "E" – only right by the listed stand: Monaco's casino annexes C, D, E aren't stands)
+    const hit = keyed.find(({ L, keys }) => keys.has(k) && (L.a && L.b ? segD(c, L.a, L.b) < (k.length <= 2 ? 60 : 200) : standKey(L.n) === k));
     if (hit) { b.kind = "grandstand"; b.standOf = hit.L.n; n++; }
   }
   // (a map grandstand already under a listed name – Spielberg's Red Bull Tribüne – takes the listed entry's roof,

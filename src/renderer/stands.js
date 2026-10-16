@@ -128,6 +128,10 @@ function standMaterial(opts = {}) {
 // ({ n, x, z } scene metres, F1's numbering) for the stands placed by them (at).
 // Listed entries never built: standing / grass areas, hospitality, and the seating of something else next to the
 // circuit (a football or baseball stadium's stands facing their own pitch) that the map tags as a grandstand.
+// A listed stand's side ("L" / "R") is the side in the race's direction: the track samples' normal (s.nor) points to
+// the cars' right, so "R" is + along it. (Up to v0.33 "L" was taken as + – the stands came out on the other side, or
+// were saved by the other-side retry; the data's sides were flipped with this change, so every stand stays put.)
+const sideSign = (s) => (s === "R" ? 1 : -1);
 const NOT_BUILT = new Map([["ga", "standing / grass"], ["hosp", "hospitality"], ["other", "not a circuit grandstand"]]);
 
 export function buildStands({ scene, gf, world, groundAt, corridor, street, year = null, corners = [] }) {
@@ -310,7 +314,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
       const ends = [0, 1].map((e) => pts.reduce((best, p) => { const a = (p[0] - o.c[0]) * du[0] + (p[1] - o.c[1]) * du[1]; return (e ? a > best[0] : a < best[0]) ? [a, p] : best; }, [e ? -Infinity : Infinity, null])[1]);
       let off = Infinity, side = 0;
       for (const [x, z] of pts) { const [q] = nearestSample(x, z); const l = lateral(q, x, z); side += Math.sign(l); off = Math.min(off, l > 0 ? l - (q.L ?? 7) : (q.R ?? -7) - l); }
-      curved.push({ n: b.name || null, standOf: b.standOf || null, A: ends[0], B: ends[1], side: side >= 0 ? "L" : "R", off: Math.max(street ? 2 : 3, off), rows: Math.max(6, Math.min(45, Math.round(area / len / ROW_D))), roof: roofOf, perm: permOf, curve: 1, outline: pts, fallback: boxStand, traced: b.traced || null, maxLen: len * 1.4 });
+      curved.push({ n: b.name || null, standOf: b.standOf || null, A: ends[0], B: ends[1], side: side >= 0 ? "R" : "L", off: Math.max(street ? 2 : 3, off), rows: Math.max(6, Math.min(45, Math.round(area / len / ROW_D))), roof: roofOf, perm: permOf, curve: 1, outline: pts, fallback: boxStand, traced: b.traced || null, maxLen: len * 1.4 });
       continue;
     }
     stands.push(boxStand);
@@ -330,7 +334,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     if (NOT_BUILT.has(L.type)) { skipped.push(`${L.n}: ${NOT_BUILT.get(L.type)}`); continue; }
     if (L.at) {
       const s0 = cornerAt(L.at.turn); if (!s0) { skipped.push(`${L.n}: no corner ${L.at.turn}`); continue; }
-      const side = L.at.side === "L" ? 1 : -1;
+      const side = sideSign(L.at.side);
       const pt = (d) => { const s = samples[((s0.i + Math.round(d / step)) % n + n) % n], o = edge(s, side) + side * 2; return [s.p.x + s.nor.x * o, s.p.z + s.nor.z * o]; };
       list.push({ ...L, A: pt(L.at.d0), B: pt(L.at.d1), side: L.at.side, off: L.at.off ?? L.off, curve: 1 });
     } else if (L.a && L.b) list.push({ ...L, A: gf.xz(L.a), B: gf.xz(L.b) });
@@ -343,11 +347,14 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const { A, B } = L;
     const mid = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
     // (its twin: a mapped outline where its middle is, or within 25 m of it, or whose front runs along it)
-    const twin = stands.find((m) => (m.kind === "mapped" || m.curvedFrom) && (inPoly(mid[0], mid[1], m.outline || m.curvedFrom) || edgeDist(mid[0], mid[1], m.outline || m.curvedFrom) < 25 || segDist(m.front, A, B) < 18));
-    if (twin && !L.outline) { twin.name = twin.name || L.n; if (L.roof) twin.roof = L.roof === "upper" ? "upper" : true; twin.listed = true; continue; }
+    // – on the same side of the track: across it is another stand (Monaco's P had merged into L, Barcelona's S into N)
+    const [sm0] = nearestSample(mid[0], mid[1]), lm = lateral(sm0, mid[0], mid[1]);
+    const sameSide = (m) => { const q = (m.outline || m.curvedFrom).reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]).map((v) => v / (m.outline || m.curvedFrom).length); return Math.sign(lateral(sm0, q[0], q[1])) === Math.sign(lm); };
+    const twin = stands.find((m) => (m.kind === "mapped" || m.curvedFrom) && (inPoly(mid[0], mid[1], m.outline || m.curvedFrom) || ((edgeDist(mid[0], mid[1], m.outline || m.curvedFrom) < 25 || segDist(m.front, A, B) < 18) && sameSide(m))));
+    if (twin && !L.outline) { skipped.push(`${L.n}: built as the map outline ${twin.name || "(unnamed)"}`); twin.name = twin.name || L.n; if (L.roof) twin.roof = L.roof === "upper" ? "upper" : true; twin.listed = true; continue; }
     let [sa] = nearestSample(A[0], A[1]), [sb] = nearestSample(B[0], B[1]);
     const la = lateral(sa, A[0], A[1]), lb = lateral(sb, B[0], B[1]);
-    const side = L.side ? (L.side === "L" ? 1 : -1) : Math.sign(la + lb) || 1;
+    const side = L.side ? sideSign(L.side) : Math.sign(la + lb) || 1;
     const off = L.off ?? (street ? 3 : 14);
     let d = (sb.i - sa.i + n) % n;
     if (d > n / 2) { [sa, sb] = [sb, sa]; d = n - d; }
