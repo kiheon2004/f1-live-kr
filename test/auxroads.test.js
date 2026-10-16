@@ -100,3 +100,21 @@ test("other tarmac: the approach to a bridge over the track isn't a junction", a
   const runs = auxRuns([ramp, deck], T);
   assert.ok(runs.every((r) => !r.joins[0] && !r.joins[1]), JSON.stringify(runs.map((r) => r.joins)));
 });
+
+// v0.35 audit: the strips' triangles face up (v0.34's faced down – back-face culled, never seen)
+test("other tarmac: the strips' mesh faces up – every triangle's normal points to the sky", async () => {
+  const { auxRuns } = await import("../src/renderer/auxroads.js"), { auxMesh } = await import("../src/renderer/scenery.js");
+  const fx = require("./fixtures/monza-t1-roads.json");
+  const S = fx.samples.map((s) => ({ i: s.i, p: { x: s.p[0], z: s.p[1] }, tan: { x: s.tan[0], z: s.tan[1] }, nor: { x: s.nor[0], z: s.nor[1] }, L: s.L, R: s.R }));
+  const local = (x, z) => { let b = null, bd = Infinity; for (const s of S) { const d = Math.hypot(s.p.x - x, s.p.z - z); if (d < bd) { bd = d; b = s; } } if (!b || bd > 50) return null; const dx = x - b.p.x, dz = z - b.p.z; return { s: b, l: dx * b.nor.x + dz * b.nor.z, a: dx * b.tan.x + dz * b.tan.z }; };
+  const TT = { local, edge: (s, side) => (side > 0 ? s.L : s.R) };
+  const m = auxMesh(auxRuns(fx.lines, TT), TT, () => 0), P = m.geometry.attributes.position.array, I = m.geometry.index.array;
+  let down = 0;
+  for (let k = 0; k < I.length; k += 3) {
+    const [a, b, c] = [I[k] * 3, I[k + 1] * 3, I[k + 2] * 3];
+    const ny = (P[b + 2] - P[a + 2]) * (P[c] - P[a]) - (P[b] - P[a]) * (P[c + 2] - P[a + 2]);   // (cross(B−A, C−A).y: > 0 faces up)
+    if (ny < 0) down++;
+  }
+  assert.ok(I.length / 3 > 100, "strips built");
+  assert.strictEqual(down, 0, `${down} of ${I.length / 3} triangles face down`);
+});

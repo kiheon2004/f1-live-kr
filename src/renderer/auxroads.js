@@ -91,19 +91,24 @@ export function ribbonEdges(run, T, { miterLimit = 2 } = {}) {
 // `near` and `far` metres from the track's centre line – never under the terrain.
 export function blendHeight(trackY, terrainY, dist, near = 20, far = 60) {
   const t = Math.min(1, Math.max(0, (dist - near) / (far - near))), k = t * t * (3 - 2 * t);
-  const y = (trackY - 0.03) * (1 - k) + terrainY * k;
-  return Math.max(y, terrainY + 0.05);
+  const y = (trackY - 0.03) * (1 - k) + (terrainY + 0.08) * k;
+  return Math.max(y, terrainY + 0.08);   // (8 cm: the terrain between a strip's points doesn't poke through)
 }
 
 // Is (x, z) at the mouth of a run that meets the track – within its half width + pad of the first or last `mouth` metres
 // of it, at an end that joins? Only there may a generated barrier be left open: a road running long beside the track
 // opened the barrier along all of it (v0.34).
-export function onJoiningRun(runs, pad = 1.5, mouth = 30) {
+// T (optional): the track (auxRuns' T) – a road leaving at a shallow angle stays within the barrier's reach (`reach` m
+// off the tarmac) further than `mouth`: open as far as it does (Barcelona's T1–T2 rejoin route, audit)
+export function onJoiningRun(runs, pad = 1.5, mouth = 30, T = null, reach = 16) {
   const segs = [];
+  const close = (p) => { if (!T) return false; const q = T.local(p[0], p[1]); if (!q || Math.abs(q.a) >= 3) return false; return q.l > 0 ? q.l - T.edge(q.s, 1) < reach : T.edge(q.s, -1) - q.l < reach; };
   for (const r of runs) {
     const P = r.pts, cum = [0]; for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
     const L = cum[cum.length - 1];
-    for (let i = 1; i < P.length; i++) if ((r.joins[0] && cum[i - 1] <= mouth) || (r.joins[1] && L - cum[i] <= mouth)) segs.push([P[i - 1], P[i], r.w / 2 + pad]);
+    let a = 0; if (r.joins[0]) while (a < P.length - 1 && (cum[a] <= mouth || close(P[a]))) a++;
+    let b = P.length - 1; if (r.joins[1]) while (b > 0 && (L - cum[b] <= mouth || close(P[b]))) b--;
+    for (let i = 1; i < P.length; i++) if ((r.joins[0] && i <= a) || (r.joins[1] && i - 1 >= b)) segs.push([P[i - 1], P[i], r.w / 2 + pad]);
   }
   return (x, z) => segs.some(([a, b, h]) => {
     if (x < Math.min(a[0], b[0]) - h || x > Math.max(a[0], b[0]) + h || z < Math.min(a[1], b[1]) - h || z > Math.max(a[1], b[1]) + h) return false;

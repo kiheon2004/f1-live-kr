@@ -506,13 +506,22 @@ function waterMesh(scene, gf, groundAt) {
 }
 
 // The strips of auxroads.js as one mesh (counter-clockwise from above: the up-facing normals are the front side).
-function auxMesh(runs, T, heightAt) {
+export function auxMesh(runs, T, heightAt) {
   const pos = [], nor = [], idx = [];
   for (const r of runs) {
     const { left, right } = ribbonEdges(r, T), v0 = pos.length / 3;
     for (let i = 0; i < left.length; i++) {
       for (const [x, z] of [left[i], right[i]]) { pos.push(x, heightAt(x, z), z); nor.push(0, 1, 0); }
-      if (i) { const v = v0 + i * 2; idx.push(v - 2, v - 1, v, v - 1, v + 1, v); }
+      if (i) {
+        // each triangle turned to face up (v0.34 wound them face down: back-face culled, the strips never showed – audit)
+        const v = v0 + i * 2;
+        for (const [a, b, c] of [[v - 2, v - 1, v], [v - 1, v + 1, v]]) {
+          const ax = pos[a * 3], az = pos[a * 3 + 2], bx = pos[b * 3], bz = pos[b * 3 + 2], cx = pos[c * 3], cz = pos[c * 3 + 2];
+          const up = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);   // the face normal's y (counter-clockwise seen from above: > 0)
+          if (Math.abs(up) < 1e-6) continue;
+          idx.push(...(up > 0 ? [a, b, c] : [a, c, b]));
+        }
+      }
     }
   }
   if (!idx.length) return null;
@@ -834,7 +843,9 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   const heightNear = (x, z) => { const [s, d] = nearTrack(x, z); return s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); };
   const T = { local: corridor.local, edge: (s, side) => (side > 0 ? s.L ?? 7 : s.R ?? -7) };
   const aux = auxRuns(scene.lines.map((l) => ({ ...l, pts: l.pts.map(gf.xz) })), T, { street: !!opts.street, skip: world.laneZone || null });
-  const auxY = (x, z) => { const [s, d] = nearTrack(x, z); const ty = terrainAt(x, z); return s ? blendHeight(s.p.y, ty, d) : ty + 0.05; };
+  // (the track's height only right by it, the terrain's from 10–25 m out: held at the track's height to 60 m, strips
+  // floated up to 2.3 m over lower ground beside it – Spa, audit)
+  const auxY = (x, z) => { const [s, d] = nearTrack(x, z); const ty = terrainAt(x, z); return s ? blendHeight(s.p.y, ty, d, 10, 25) : ty + 0.05; };
   const tm = auxMesh(aux, T, auxY);
   if (tm) group.add(tm);
   // Real barriers within 45 m of the track.
@@ -878,7 +889,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
     // (where the venue's other tarmac meets the track – escape roads, rejoin routes: a generated barrier leaves it open)
-    auxGap: aux.length ? onJoiningRun(aux) : null,
+    auxGap: aux.length ? onJoiningRun(aux, 1.5, 30, T) : null,
     aux,       // (development: the strips – Map3D.auxNear)
     // (the camera's line-of-sight test isn't recursive: the facilities' meshes themselves)
     occluders: (bld ? bld.children : []).concat(stands ? [stands.structure] : [], (() => { const out = []; lm?.group?.getObjectByName("facilities")?.traverse((o) => { if (o.isMesh) out.push(o); }); return out; })()),
