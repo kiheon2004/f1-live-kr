@@ -52,7 +52,9 @@ function areaKind(t) {
 // Each circuit's grandstands as its spectator map shows them, with the circuit's capacity (src/data/grandstands.json).
 let _stands;
 function standsFor(location) {
-  if (_stands === undefined) { try { _stands = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "data", "grandstands.json"), "utf8")).circuits; } catch { _stands = null; } }
+  // (development, unpackaged only: F1KR_STANDS_FILE – another copy of the data, to try changes to it side by side)
+  const file = process.env.F1KR_STANDS_FILE && !require("electron").app?.isPackaged ? process.env.F1KR_STANDS_FILE : path.join(__dirname, "..", "data", "grandstands.json");
+  if (_stands === undefined) { try { _stands = JSON.parse(fs.readFileSync(file, "utf8")).circuits; } catch { _stands = null; } }
   if (!_stands) return null;
   return _stands[location] || Object.values(_stands).find((c) => c.aliases?.includes(location)) || null;
 }
@@ -77,6 +79,19 @@ function standBuildings(buildings, list) {
     const c = centroidOf(b.pts);
     const hit = keyed.find(({ L, keys }) => keys.has(k) && (L.a && L.b ? segD(c, L.a, L.b) < 200 : standKey(L.n) === k));
     if (hit) { b.kind = "grandstand"; b.standOf = hit.L.n; n++; }
+  }
+  // osmAt: [lat, lon] (F1 metres here) – the map's outline at that point is this listed stand (an unnamed or otherwise
+  // named one: COTA's main grandstand, its Turn 12 bleachers), a grandstand under the listed name
+  for (const L of list) {
+    if (!L.osmAt) continue;
+    const [x, y] = L.osmAt;
+    let best = null, bd = 15;
+    for (const b of buildings) {
+      if (b.standOf || b.min > 3) continue;
+      const d = inside(x, y, b.pts) ? 0 : Math.min(...b.pts.map((p, i) => { const q = b.pts[(i + 1) % b.pts.length], dx = q[0] - p[0], dy = q[1] - p[1], l = dx * dx + dy * dy || 1, s = Math.max(0, Math.min(1, ((x - p[0]) * dx + (y - p[1]) * dy) / l)); return Math.hypot(p[0] + dx * s - x, p[1] + dy * s - y); }));
+      if (d < bd || (d === 0 && best && bd === 0 && b.kind === "grandstand")) { bd = d; best = b; }
+    }
+    if (best) { best.kind = "grandstand"; best.name = L.n; best.standOf = L.n; n++; }
   }
   // A building that is mostly under the stands traced from imagery (poly) is their own structure mapped as a plain
   // building (OSM's "D１～D4" at Suzuka, under two of them): the traced outlines are built instead, the building not at all.
@@ -481,7 +496,7 @@ class Scenes {
     const sd = standsFor(location);
     const toF1m = ([lat, lon]) => localToF1(...fr.toXY(lat, lon)).map((v) => Math.round(v * 10) / 10);
     const stands = sd ? { name: sd.name, total: sd.total || null, seats: sd.seats || null, est: !!sd.est, src: sd.src || null,
-      list: (sd.stands || []).map((st) => ({ ...st, a: st.a ? toF1m(st.a) : null, b: st.b ? toF1m(st.b) : null, poly: st.poly ? st.poly.map(toF1m) : null })) } : null;
+      list: (sd.stands || []).map((st) => ({ ...st, a: st.a ? toF1m(st.a) : null, b: st.b ? toF1m(st.b) : null, poly: st.poly ? st.poly.map(toF1m) : null, osmAt: st.osmAt ? toF1m(st.osmAt) : null })) } : null;
 
     if (stands) standBuildings(buildings, stands.list);
 

@@ -65,11 +65,16 @@
    "seats": 70000,
    "est": 1,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – total ~150,000; grandstand share estimated",
+   "src2": "help.thecircuit.com Grandstand Seating (2025-08-06; 3 permanent: Main, Turn 1, Turn 15; 4 temporary: Turn 4, 9, 12, 19) + circuitoftheamericas.com 2026 grandstands page",
    "stands": [
-    {"n":"Turn 12","a":[30.13797,-97.6364286],"b":[30.1380786,-97.6351974],"rows":26},
-    {"n":"Turn 3","a":[30.1340249,-97.6337562],"b":[30.13512,-97.632736],"rows":24,"straight":1},
-    {"n":"Turn 9","a":[30.1359845,-97.6281939],"b":[30.1361922,-97.6268667],"rows":22},
-    {"n":"Turn 19","a":[30.1357874,-97.6401544],"b":[30.1352279,-97.639432],"rows":22}
+    {"n":"Main Grandstand","osmAt":[30.132573,-97.641179],"perm":1,"roof":"upper","note":"permanent; mezzanine covered (club/mezzanine levels); the map's outline"},
+    {"n":"Turn 1 Grandstand","osmAt":[30.129413,-97.637033],"perm":1,"roof":0,"note":"permanent, rows 1–30; the map's outline; no roof in the imagery"},
+    {"n":"Turn 15 Grandstands","osm":1,"perm":1,"note":"permanent; two structures (sections 1–7 over the back straight, 8–25 by the Tower)"},
+    {"n":"Turn 15 (sections 1–7)","osmAt":[30.13759,-97.637722],"perm":1,"note":"which of the map's outlines is which section: not certain"},
+    {"n":"Turn 12","osmAt":[30.137748,-97.63581],"perm":0,"roof":0,"note":"Turn 12 bleachers (temporary, rows 1–37); the map's outline, matches the structure in the 2025-01-19 imagery"},
+    {"n":"Turn 9","poly":[[30.1357361,-97.6287433],[30.1360702,-97.6270803],[30.1358057,-97.6270159],[30.1355042,-97.6287004]],"img":"Esri World Imagery 2025-01-19 – outline traced for this app (checking only; the picture isn't in the app)","perm":0,"roof":0,"note":"Turn 9 bleachers (temporary, rows 1–35, no backs)"},
+    {"n":"Turn 19","osmAt":[30.135978,-97.641752],"perm":0,"roof":"upper","note":"temporary, rows 1–21, upper rows 15–21 covered; the map's outline north of T19 (by the Grand Plaza)"},
+    {"n":"Turn 4","a":[30.1340249,-97.6337562],"b":[30.13512,-97.632736],"rows":21,"straight":1,"perm":0,"roof":"upper","note":"temporary (was listed as 'Turn 3'), rows 1–21, upper rows 15–21 covered; not in the January imagery – placed by the map's esses, estimate"}
    ]
   },
   "Mexico City": {

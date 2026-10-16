@@ -259,7 +259,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     if (Math.abs(tx * o.u[0] + tz * o.u[1]) > Math.abs(tx * o.v[0] + tz * o.v[1])) { du = o.v; dv = o.u; a0 = o.v0; a1 = o.v1; b0 = o.u0; b1 = o.u1; }
     if (tx * dv[0] + tz * dv[1] > 0) { dv = [-dv[0], -dv[1]]; [b0, b1] = [-b1, -b0]; }
     const len = a1 - a0, depth = b1 - b0;
-    if (len < 4 || depth < 3) continue;
+    if (len < 12 || depth < 3) continue;   // (a sliver of an outline – a stair tower, a corner of a roof – is no stand)
     // A curved outline (a stand around a corner) is far from its box: it is built like a listed stand instead,
     // following the track between its two ends, as deep as the outline is on average.
     const k = Math.max(2, Math.ceil(len / 6)), front = [];
@@ -312,7 +312,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     if (!L.outline && ofName.has(L.n)) { skipped.push(`${L.n}: mapped outline`); continue; }
     const { A, B } = L;
     const mid = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
-    const twin = stands.find((m) => (m.kind === "mapped" || m.curvedFrom) && (inPoly(mid[0], mid[1], m.outline || m.curvedFrom) || segDist(m.front, A, B) < 18));
+    // (its twin: a mapped outline where its middle is, or within 25 m of it, or whose front runs along it)
+    const twin = stands.find((m) => (m.kind === "mapped" || m.curvedFrom) && (inPoly(mid[0], mid[1], m.outline || m.curvedFrom) || edgeDist(mid[0], mid[1], m.outline || m.curvedFrom) < 25 || segDist(m.front, A, B) < 18));
     if (twin && !L.outline) { twin.name = twin.name || L.n; if (L.roof) twin.roof = L.roof === "upper" ? "upper" : true; twin.listed = true; continue; }
     let [sa] = nearestSample(A[0], A[1]), [sb] = nearestSample(B[0], B[1]);
     const la = lateral(sa, A[0], A[1]), lb = lateral(sb, B[0], B[1]);
@@ -423,8 +424,10 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     }
     if (deep > st.maxRows) { st.maxRows = deep; polyBlocker(footprint(st, deep), "s", st); }
   }
-  const alive = stands.filter((s) => !s.dead);
   const frontLen = (st) => { let L = 0; for (let i = 1; i < st.front.length; i++) L += Math.hypot(st.front[i].x - st.front[i - 1].x, st.front[i].z - st.front[i - 1].z); return L; };
+  // (what's left of an outline after the track and its neighbours had their room: under 12 m is no stand)
+  for (const st of stands) if (!st.dead && frontLen(st) < 12) st.dead = `too short (${frontLen(st).toFixed(0)} m)`;
+  const alive = stands.filter((s) => !s.dead);
   const seatsOf = (st, rows) => Math.floor((frontLen(st) * (1 - AISLE_W / AISLE_EVERY)) / SEAT_W) * rows;
   // ---- the circuit's grandstand capacity: listed stands get the seats the mapped ones don't have ----
   const target = scene.stands?.seats || 0;
