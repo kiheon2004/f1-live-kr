@@ -89,6 +89,7 @@ function standBuildings(buildings, list) {
     const L = list.find((x) => x.osm && standKey(x.n) === standKey(b.name)) || list.find((x) => x.n === b.name);
     if (L) b.standOf = L.n;
   }
+  for (const L of list) if (L.osm && !buildings.some((b) => b.standOf === L.n)) (list.unmatched ||= []).push(`${L.n}: no map outline under that name`);
   // osmAt: [lat, lon] (F1 metres here) – the map's outline at that point is this listed stand (an unnamed or otherwise
   // named one: COTA's main grandstand, its Turn 12 bleachers), a grandstand under the listed name
   for (const L of list) {
