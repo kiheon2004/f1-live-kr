@@ -833,7 +833,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // layouts) and service roads that meet the track – strips at the map's width, joined to the track's edge (auxroads.js)
   const heightNear = (x, z) => { const [s, d] = nearTrack(x, z); return s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); };
   const T = { local: corridor.local, edge: (s, side) => (side > 0 ? s.L ?? 7 : s.R ?? -7) };
-  const aux = auxRuns(scene.lines.map((l) => ({ ...l, pts: l.pts.map(gf.xz) })), T, { street: !!opts.street });
+  const aux = auxRuns(scene.lines.map((l) => ({ ...l, pts: l.pts.map(gf.xz) })), T, { street: !!opts.street, skip: world.laneZone || null });
   const auxY = (x, z) => { const [s, d] = nearTrack(x, z); const ty = terrainAt(x, z); return s ? blendHeight(s.p.y, ty, d) : ty + 0.05; };
   const tm = auxMesh(aux, T, auxY);
   if (tm) group.add(tm);

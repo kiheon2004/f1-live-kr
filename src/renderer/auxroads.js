@@ -11,7 +11,10 @@
 // lateral and along offsets), edge(s, side) → lateral of that side's tarmac edge (+ left) }.
 // Returns runs: [{ pts: [[x, z]…] (every ≤ 2 m), w, k, sub, joins: [start, end] (meets the track there) }].
 // (street: a street circuit – its service roads are the town's streets, already in the ground's paint: not drawn again)
-export function auxRuns(lines, T, { step = 2, minLen = 8, street = false } = {}) {
+// (skip(x, z): ground already drawn otherwise – the app's own pit lane: a raceway mapped there isn't laid again.
+// A run that doesn't meet the track is kept only if short and close to it (another layout's bend beside the F1 one) –
+// v0.34 laid kart tracks, drag strips and old roads 12 m wide wherever the map had them)
+export function auxRuns(lines, T, { step = 2, minLen = 8, street = false, skip = null, looseLen = 300, looseNear = 30 } = {}) {
   const runs = [];
   const onTarmac = (q, m = 0) => q && Math.abs(q.a) < 3 && q.l < T.edge(q.s, 1) + m && q.l > T.edge(q.s, -1) - m;
   for (const l of lines) {
@@ -24,6 +27,7 @@ export function auxRuns(lines, T, { step = 2, minLen = 8, street = false } = {})
     if (pts.length < 2) continue;
     // a point on the F1 lap itself: on its tarmac (a metre's slack) and running along it
     const lap = pts.map((p, i) => {
+      if (skip?.(p[0], p[1])) return true;
       const q = T.local(p[0], p[1]);
       if (!onTarmac(q, 1)) return false;
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1;
@@ -42,7 +46,9 @@ export function auxRuns(lines, T, { step = 2, minLen = 8, street = false } = {})
       const run = pts.slice(a, b + 1);
       let len = 0; for (let k = 1; k < run.length; k++) len += Math.hypot(run[k][0] - run[k - 1][0], run[k][1] - run[k - 1][1]);
       const touch = (p) => onTarmac(T.local(p[0], p[1]), 2);
-      if (len >= minLen) runs.push({ pts: run, w: l.w, k: l.k, sub: l.sub, joins: [a < i || touch(run[0]), b > j || touch(run[run.length - 1])] });
+      const joins = [a < i || touch(run[0]), b > j || touch(run[run.length - 1])];
+      const near = () => run.some((p) => { const q = T.local(p[0], p[1]); return q && Math.abs(q.a) < 3 && Math.abs(q.l) < looseNear; });
+      if (len >= minLen && (joins[0] || joins[1] || (len <= looseLen && near()))) runs.push({ pts: run, w: l.w, k: l.k, sub: l.sub, joins });
       i = j + 1;
     }
   }

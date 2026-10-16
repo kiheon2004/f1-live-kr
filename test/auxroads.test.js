@@ -80,3 +80,14 @@ test("other tarmac: the map's tracks (marshal roads) meeting the track are drawn
   const footpath = { k: "path", sub: "footway", w: 2, pts: [[20, 7], [20, 40]] };
   assert.deepStrictEqual(auxRuns([marshal, tunnel, bridge, footpath], T).map((r) => r.sub), ["track"]);
 });
+
+// v0.35 audit (São Paulo, Jeddah, Sakhir, Lusail, Yas, Sepang): raceways that never meet the track – kart tracks, drag
+// strips, old roads – were laid 12 m wide anywhere; a raceway over the app's own pit lane was laid twice
+test("other tarmac: a raceway away from the track and not meeting it isn't drawn; one over the pit lane isn't laid again", async () => {
+  const { auxRuns } = await import("../src/renderer/auxroads.js");
+  const kart = { k: "raceway", w: 12, pts: [[0, 120], [200, 120], [200, 200]] };
+  const bend = { k: "raceway", w: 12, pts: [[-60, 20], [0, 26], [60, 20]] };
+  const pit = { k: "raceway", w: 12, pts: [[-100, -30], [100, -30]] };
+  const runs = auxRuns([kart, bend, pit], T, { skip: (x, z) => z < -20 && z > -40 });
+  assert.deepStrictEqual(runs.map((r) => r.pts[0][1]), [20], "only the other layout's bend close beside the track");
+});
