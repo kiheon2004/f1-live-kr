@@ -1413,7 +1413,7 @@ function updateCars(dt) {
   }
   // (a car not drawn this frame is drawn afresh when it's back: no easing from where it was before)
   for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; c.has = false; c.est = null; c.estAt = null; c.hand = null; c.pit = null; }
-  updateCrews(pitNow);
+  { const c0 = performance.now(); updateCrews(pitNow); pitCost.ms += performance.now() - c0; }
   separate(dt, seen);
   // F1's archive sometimes stops publishing car positions part-way through a session (e.g. Monaco 2026):
   // say so instead of showing an empty track without explanation.
@@ -2849,6 +2849,8 @@ window.Map3D = {
     }
     return JSON.stringify(out);
   },
+  // development: the pit lane's per-frame cost (pitFrame: every pit car's state; the crews), average over the frames
+  pitCostMs(reset = false) { const r = { avgMs: +(pitCost.ms / Math.max(1, pitCost.frames)).toFixed(3), frames: pitCost.frames }; if (reset) { pitCost.ms = 0; pitCost.frames = 0; } return JSON.stringify(r); },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
   // development: from inside garage k (`inside` m behind its front, `h` m up), looking out across the pit lane
   viewLane(k = 20, inside = 2, h = 2.5, side = 0, fov = 75) {
