@@ -121,3 +121,71 @@ export function laneOffset({ off, u, gStart, gEnd, speed, boxU = null }, L = LAN
   const lane = L.fast + (L.box - L.fast) * atBox;
   return off + (lane - off) * inRun;
 }
+
+// The pit lane's path (points [x, z], scene metres) as 2 m cells: within `tol` m of it, `ends` m clear of its ends
+// (where it runs into the lap line) – (x, z) → on the pit lane. Made once; one lookup a test (the precise segment test
+// over every position of a session would be millions of tests).
+export function laneCells(pts, tol = 3, ends = 40, C = 2) {
+  if (!pts || pts.length < 2) return () => false;
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const len = cum[cum.length - 1], set = new Set(), key = (i, j) => i * 100003 + j;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], l = cum[i] - cum[i - 1];
+    for (let t = 0; t <= l; t += C / 2) {
+      const u = cum[i - 1] + t; if (u < ends || u > len - ends) continue;
+      const x = a[0] + ((b[0] - a[0]) * t) / (l || 1), z = a[1] + ((b[1] - a[1]) * t) / (l || 1);
+      // every cell whose centre lies within tol of this point
+      for (let ci = Math.floor((x - tol) / C); ci <= Math.floor((x + tol) / C); ci++) for (let cj = Math.floor((z - tol) / C); cj <= Math.floor((z + tol) / C); cj++)
+        if (Math.hypot((ci + 0.5) * C - x, (cj + 0.5) * C - z) <= tol) set.add(key(ci, cj));
+    }
+  }
+  return (x, z) => set.has(key(Math.floor(x / C), Math.floor(z / C)));
+}
+
+// A wall's line across, smoothed: at each station a straight line fitted to its neighbours within ±`half` m (least
+// squares), the points more than `tol` m off it dropped and the line fitted again – a wall follows a slope exactly (the
+// track running at an angle to a building's axis: Barcelona) and ignores a jump of the measured edge (Sakhir's zigzag).
+//   pts: [[u, v]] sorted by u → [v] smoothed
+export function fitLine(pts, half = 30, tol = 1) {
+  const fit = (sel) => {
+    const n = sel.length; let su = 0, sv = 0, suu = 0, suv = 0;
+    for (const [u, v] of sel) { su += u; sv += v; suu += u * u; suv += u * v; }
+    const den = n * suu - su * su;
+    const b = Math.abs(den) < 1e-9 ? 0 : (n * suv - su * sv) / den, a = (sv - b * su) / n;
+    return (u) => a + b * u;
+  };
+  return pts.map(([u]) => {
+    const sel = pts.filter(([w]) => Math.abs(w - u) <= half);
+    if (sel.length < 2) return pts.find(([w]) => w === u)[1];
+    // (first the points near the window's median – a jump can't tilt the start –, then every point near that line)
+    const vs = sel.map(([, v]) => v).sort((a, b) => a - b), med = vs[Math.floor(vs.length / 2)];
+    const core = sel.filter(([, v]) => Math.abs(v - med) <= 2 * tol);
+    let f = fit(core.length >= 2 ? core : sel);
+    const keep = sel.filter(([w, v]) => Math.abs(v - f(w)) <= tol);
+    if (keep.length >= 2) f = fit(keep);
+    return f(u);
+  });
+}
+
+// ---------- the pit lane across, from what is measured at a place along it ----------
+// The FIA's rules (2025 Sporting Regulations, Art. 34.4, 34.12; Appendix O): the lane by the pit wall is the fast lane,
+// no more than 3.5 m wide; the lane by the garages is the inner lane, the only place work is done on a car; no equipment
+// is left in the fast lane; a pit lane is at least 12 m wide. What isn't in the rules or the data – estimates: a car is
+// 2 m wide, its crew needs 1.6 m between it and the garages and 1.4 m on the lane side, all inside the inner lane.
+export const FIA = { fastMax: 3.5, laneMin: 12 };
+export const CREW_ROOM = { carHalf: 1, garageSide: 1.6, laneSide: 1.4, wallThick: 0.5 };
+
+// st: { wall – the pit wall's face to the lane, metres out from the garages' fronts (null: no wall known), edge – the
+// track's tarmac edge, same metres (a wall assumed there, its thickness in: an estimate), path – the feed's pit line }
+// → { ok (room for a car in a box and the fast lane), wall, wallFrom, fast: [a, b], fastC, inner, boxC, narrow }
+export function crossSection(st, R = CREW_ROOM) {
+  const wall = st.wall != null ? st.wall : st.edge != null ? st.edge - R.wallThick : null;
+  const wallFrom = st.wall != null ? "facility wall" : st.edge != null ? "track edge (wall assumed there)" : null;
+  if (wall == null || !(wall > 0)) return { ok: false, wall: null, wallFrom, why: "no wall or track edge" };
+  const fastW = Math.min(FIA.fastMax, wall / 2), inner = wall - fastW;
+  const lo = R.carHalf + R.garageSide, hi = inner - R.carHalf - R.laneSide;
+  const narrow = hi < lo;
+  const boxC = narrow ? inner / 2 : Math.max(lo, Math.min(hi, inner / 2));
+  return { ok: !narrow, wall, wallFrom, fast: [inner, wall], fastC: inner + fastW / 2, inner, boxC, narrow, lane: wall };
+}

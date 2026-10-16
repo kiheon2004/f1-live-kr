@@ -17,7 +17,7 @@ import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { disposeGroup } from "./dispose.js";
 import { entryAt } from "./venues.js";
-import { pathFrame, garageLine, garageRun, genericOutline, GENERIC, PICK } from "./pitlane.js";
+import { pathFrame, garageLine, garageRun, genericOutline, fitLine, GENERIC, PICK } from "./pitlane.js";
 
 // ---------- registry ----------
 export const FACILITIES = [
@@ -597,7 +597,11 @@ function pitBuilding(ctx, p) {
   // else the facility's pitch). Each has a real opening – pillars, a lintel, the rolled-up shutter – and an inside as
   // deep as can be seen from the pit lane (floor, walls, ceiling and its lights), its floor level with the pit lane
   // (ctx.surfaceAt: the tarmac's height there), so a car stopping at its box stands on the same surface.
-  const gStart = Math.max(uMin, uRoot), gEnd = uMax, G = p.garageBay !== false ? (GARAGE_TOP[p.facade.pit] || 4.8) : 0;
+  // (p.garageRange: two scene points – the run's ends where the teams' boxes are, genericPitSpec –: garages only between
+  // them; the rest of a long outline is building without openings (Sakhir: a 400 m outline curving away from the lane))
+  let gStart = Math.max(uMin, uRoot), gEnd = uMax;
+  if (p.garageRange) { const [ra, rb] = p.garageRange.map(([x, z]) => toUV([x, z])[0]); gStart = Math.max(gStart, Math.min(ra, rb)); gEnd = Math.min(gEnd, Math.max(ra, rb)); if (gEnd - gStart < 20) { gStart = Math.max(uMin, uRoot); gEnd = uMax; } }
+  const G = p.garageBay !== false ? (GARAGE_TOP[p.facade.pit] || 4.8) : 0;
   const nGar = Math.max(1, Math.round((gEnd - gStart) / pitch)), gp = (gEnd - gStart) / nGar;
   const stationAt = (uu) => { let i = 0; while (i + 1 < stations.length && stations[i + 1].u < uu) i++; const a = stations[i], b = stations[Math.min(i + 1, stations.length - 1)]; const f = b.u > a.u ? Math.max(0, Math.min(1, (uu - a.u) / (b.u - a.u))) : 0; return [a, b, f]; };
   const frontV = (uu) => { const [a, b, f] = stationAt(uu); return sideV(a, 1) + (sideV(b, 1) - sideV(a, 1)) * f; };
@@ -774,7 +778,7 @@ function pitBuilding(ctx, p) {
   // point to the edge of the tarmac) – a concrete wall with the catch fence over it on the track side, and behind it a
   // raised walkway with a railing on the pit lane side (the mapped footway band; photo). Stands for the teams on it are
   // added with the teams (garages.js: wallAt).
-  let wallAt = null;
+  let wallAt = null, wallDbg = null, wallFace = null;
   const occupancy = [];   // what the wall and the paddock stand on (scene x, z): trees keep off it – it isn't the building replaced
   if (p.pitWall && ctx.trackEdge && G > 0) {
     const pw = p.pitWall, W = [];
@@ -785,15 +789,13 @@ function pitBuilding(ctx, p) {
       if (d < 60) W.push({ u: uu, d });
     }
     if (W.length > 3) {
-      // the wall's line smoothed (a wall is straight where the edge wobbles in the data): the median over ±30 m – a jump
-      // of the modelled edge doesn't move it –, then bending no more than 8 cm a metre (both ways along: Sakhir's wall had
-      // zigzagged in and out across the lane at the garages' end)
-      // (smoothed as a line across the lane – the building's front plus the distance –, not the distance alone: where
-      // the front steps in or out, the wall doesn't)
-      const vw = W.map((w) => frontV(w.u) + vTrack * w.d);
-      const vS = W.map((w) => { const near = W.map((o, k) => [o, vw[k]]).filter(([o]) => Math.abs(o.u - w.u) <= 30).map(([, x]) => x).sort((x, y) => x - y); return near[Math.floor(near.length / 2)]; });
-      for (const dir of [1, -1]) for (let i = dir > 0 ? 1 : W.length - 2; i >= 0 && i < W.length; i += dir) { const j = i - dir, lim = 0.08 * Math.abs(W[i].u - W[j].u); vS[i] = Math.max(vS[j] - lim, Math.min(vS[j] + lim, vS[i])); }
+      // the wall's line smoothed (a wall is straight where the edge wobbles in the data), as a line across the lane – the
+      // building's front plus the distance –, not the distance alone: where the front steps in or out, the wall doesn't
+      // (a local straight-line fit, outliers dropped – pitlane.js fitLine: an earlier median with a bend limit dragged the
+      // wall 6 m into the lane where the track runs at an angle to the building – Barcelona)
+      const vS = fitLine(W.map((w) => [w.u, frontV(w.u) + vTrack * w.d]));
       const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, vS[i] - vTrack * dd); return [x, floorAt(W[i].u) + y, z]; };
+      wallDbg = W.filter((_, i) => i % 8 === 0).map((w, k) => { const i = k * 8; return [Math.round(w.u), w.d, +((vS[i] - frontV(w.u)) * vTrack).toFixed(1)]; });
       for (let i = 0; i + 1 < W.length; i++) {
         const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
         // wall (track face, top, pit face), fence above it
@@ -808,6 +810,12 @@ function pitBuilding(ctx, p) {
       }
       // the walkway's centre at u (for the teams' stands): [x, y, z], facing the pit lane – between two samples, between
       // their points (a team's box is anywhere along the wall, not only every 3 m)
+      // (the face to the pit lane: thick + walk in from the track side)
+      wallFace = (uu) => {
+        let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - vTrack * (pw.thick + pw.walk) - frontV(W[k].u)) * vTrack;
+        return at(i) + (at(i + 1) - at(i)) * f;
+      };
       wallAt = (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
         const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, pw.thick + pw.walk / 2, pw.deck), b = ptAt(i + 1, pw.thick + pw.walk / 2, pw.deck);
@@ -915,11 +923,13 @@ function pitBuilding(ctx, p) {
   const ground = stations.map((st) => st.g);
   // where a point is along the garages (u) and how far out in front of them (off: towards the track)
   const project = (x, z) => { const uu = (x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], vv = (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]; return { u: uu, off: (vv - frontV(Math.max(gStart, Math.min(gEnd, uu)))) * vTrack }; };
-  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt } : null;
+  // (for the pit lane across – map3d.js pitModel: the wall's face to the lane, metres out from the garages' front, and
+  // the garages' floor height, both along the garages)
+  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt, wallFace, floorAt } : null;
   return { meshes, footprint, occupancy, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
-      paddock: paddockInfo, pitWall: !!wallAt,
+      paddock: paddockInfo, pitWall: !!wallAt, wallStations: wallDbg,
       heightFrom: parts.some((q) => q.guessed) ? "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
 }
 
@@ -1217,6 +1227,8 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       return (this.parts = [{ pts: out.map(([x, z]) => [x - o[0], o[1] - z]), h: GENERIC.height, min: 0, synthetic: true }]);
     },
     params: {
+      // the garages along the run where the boxes are (the path's points at its ends)
+      garageRange: [[frame.at(u0).x, frame.at(u0).z], [frame.at(u1).x, frame.at(u1).z]],
       // estimates (no source for any one circuit): garages 8.5 m wide, 8 m high where the map has no height
       height: GENERIC.height, garagePitch: GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#8e9196", fascia: "fasciaWhite",

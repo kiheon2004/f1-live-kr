@@ -1,0 +1,87 @@
+// What a car in the pit lane is doing (pitstate.js), from the data up to the moment shown.
+const test = require("node:test");
+const assert = require("node:assert");
+
+const base = { u: 100, gStart: 0, gEnd: 300, inPit: true, onLane: true, speed: 20, stillFor: 0, boxU: 200, boxFrom: "order", penalty: null, pitStart: null, race: true, teammateInBox: false, lastBox: null };
+const S = async () => (await import("../src/renderer/pitstate.js"));
+
+test("a car standing where it isn't its box stays in the fast lane – slow alone never makes a box", async () => {
+  const { pitState } = await S();
+  const q = pitState({ ...base, u: 120, speed: 0, stillFor: 9 });
+  assert.strictEqual(q.state, "queued"); assert.strictEqual(q.lane, "fast");
+  const nb = pitState({ ...base, boxU: null, boxFrom: null, u: 200, speed: 0, stillFor: 3 });
+  assert.strictEqual(nb.state, "standing (no box known)"); assert.strictEqual(nb.lane, "fast");
+  // slow with no box known: the fast lane too
+  assert.strictEqual(pitState({ ...base, boxU: null, u: 190, speed: 5 }).lane, "fast");
+});
+
+test("pulling into its box, standing in it, leaving – the way across grows with nearness and slowness, then shrinks with the distance gone", async () => {
+  const { pitState } = await S();
+  assert.strictEqual(pitState({ ...base, u: 150, speed: 22 }).state, "fast lane");
+  const w = [180, 186, 192, 198].map((u, i) => pitState({ ...base, u, speed: [12, 9, 5, 2][i] }).w);
+  for (let i = 1; i < w.length; i++) assert.ok(w[i] > w[i - 1], `growing: ${w}`);
+  const box = pitState({ ...base, u: 201, speed: 0, stillFor: 2.4 });
+  assert.strictEqual(box.state, "in box"); assert.strictEqual(box.w, 1);
+  assert.ok(box.evidence.includes("InPit flag") && box.evidence.some((e) => /box \(order\)/.test(e)));
+  const out = [203, 212, 222, 233].map((u) => pitState({ ...base, u, speed: 10, lastBox: { endU: 201, ago: 2 } }).w);
+  for (let i = 1; i < out.length; i++) assert.ok(out[i] < out[i - 1], `shrinking: ${out}`);
+  assert.strictEqual(out[3], 0);
+  // a drive-through at the limit past its box: never across
+  assert.strictEqual(pitState({ ...base, u: 199, speed: 21, penalty: "drive-through" }).lane, "fast");
+  assert.strictEqual(pitState({ ...base, u: 199, speed: 4, penalty: "drive-through" }).state, "drive-through");
+});
+
+test("stop-and-go: in its box, the crew holding back; double stack: the second car waits behind the box in the inner lane", async () => {
+  const { pitState, crewPhase } = await S();
+  const sg = pitState({ ...base, u: 199, speed: 0, stillFor: 5, penalty: "stop-go" });
+  assert.strictEqual(sg.state, "stop-go"); assert.strictEqual(sg.lane, "box");
+  assert.deepStrictEqual(crewPhase([{ num: "1", state: sg, u: 199, boxU: 200 }]).phase, "hold");
+  const first = pitState({ ...base, u: 200, speed: 0, stillFor: 1 });
+  const second = pitState({ ...base, u: 188, speed: 0, stillFor: 1, teammateInBox: true });
+  assert.strictEqual(second.state, "waiting (double stack)");
+  const cp = crewPhase([{ num: "1", state: first, u: 200, boxU: 200 }, { num: "2", state: second, u: 188, boxU: 200 }]);
+  assert.deepStrictEqual([cp.phase, cp.num], ["work", "1"], "one crew, at the car in the box");
+});
+
+test("pit-lane start and the exit road: the fast lane / the feed's line, no box; practice: a long stand at its box goes into the garage", async () => {
+  const { pitState } = await S();
+  assert.strictEqual(pitState({ ...base, u: 250, speed: 0, stillFor: 60, pitStart: "queue" }).lane, "fast");
+  assert.strictEqual(pitState({ ...base, u: 360, speed: 0, stillFor: 60, pitStart: "queue" }).lane, "feed");
+  assert.strictEqual(pitState({ ...base, u: 400, speed: 20 }).state, "exit");
+  assert.strictEqual(pitState({ ...base, inPit: false, onLane: false }).state, "track");
+  const g = pitState({ ...base, u: 200, speed: 0, stillFor: 22, race: false });
+  assert.strictEqual(g.state, "garage"); assert.ok(g.w > 0 && g.w < 1);
+  assert.strictEqual(pitState({ ...base, u: 200, speed: 0, stillFor: 22, race: true }).state, "in box", "a race: no garage");
+});
+
+test("across: the fast lane's centre, the box, the feed's line past the run's ends", async () => {
+  const { pitState, laneOffsetOf } = await S();
+  const cs = { ok: true, fastC: 10.75, boxC: 4.5 };
+  assert.strictEqual(laneOffsetOf(pitState({ ...base, u: 150 }), cs, 8.2, 150, 0, 300), 10.75);
+  assert.strictEqual(laneOffsetOf(pitState({ ...base, u: 200, speed: 0, stillFor: 2 }), cs, 8.2, 200, 0, 300), 4.5);
+  assert.strictEqual(laneOffsetOf(pitState({ ...base, u: 350 }), cs, 8.2, 350, 0, 300), 8.2);
+  // a narrow place: no box there – the fast lane
+  assert.strictEqual(laneOffsetOf(pitState({ ...base, u: 200, speed: 0, stillFor: 2 }), { ok: false, fastC: 4.5, boxC: 3 }, 8, 200, 0, 300), 4.5);
+});
+
+test("penalties pending: given, then served; a stop-and-go in either wording", async () => {
+  const { pendingPenalties } = await S();
+  const rcm = [[100, "FIA STEWARDS: DRIVE THROUGH PENALTY FOR CAR 63 (RUS) - LEAVING THE TRACK"], [200, "FIA STEWARDS: 10 SECOND STOP/GO PENALTY FOR CAR 87 (BEA) - UNSAFE CONDITION"],
+    [300, "FIA STEWARDS: PENALTY SERVED - DRIVE THROUGH PENALTY FOR CAR 63 (RUS) - LEAVING THE TRACK"], [350, "FIA STEWARDS: 5 SECOND TIME PENALTY FOR CAR 1 (NOR)"]];
+  assert.deepStrictEqual([...pendingPenalties(rcm, 50)], []);
+  assert.deepStrictEqual([...pendingPenalties(rcm, 250)], [["63", "drive-through"], ["87", "stop-go"]]);
+  assert.deepStrictEqual([...pendingPenalties(rcm, 400)], [["87", "stop-go"]], "served; a time penalty is no pit penalty");
+});
+
+test("standing time and the last standstill from telemetry, the same at any moment asked", async () => {
+  const { standingFor, lastStand } = await S();
+  // 10 Hz: moving to 10 s, standing 10–12.5 s, moving after
+  const T = [], V = []; for (let ms = 0; ms <= 20000; ms += 100) { T.push(ms); V.push(ms >= 10000 && ms <= 12500 ? 0 : 80); }
+  const car = { t: T, v: V };
+  assert.strictEqual(standingFor(car, 9000), 0);
+  assert.ok(Math.abs(standingFor(car, 11500) - 1.5) < 0.11);
+  assert.strictEqual(standingFor(car, 14000), 0);
+  assert.deepStrictEqual(lastStand(car, 14000), { t0: 10000, t1: 12500 });
+  assert.strictEqual(lastStand(car, 40000), null, "too long ago");
+  assert.strictEqual(lastStand(car, 11000), null, "still standing: not a last standstill yet");
+});

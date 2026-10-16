@@ -455,3 +455,25 @@ test("grandstand data: every stand lies at its circuit, with sane rows and capac
     }
   }
 });
+
+test("archive: refused by F1 (401/403/429) or a server error – the cached copy, even an old index; nothing cached – a clear error; 404 – no fallback", async () => {
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const { Archive } = require("../src/main/archive.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f1kr-arch-"));
+  const a = new Archive(dir);
+  fs.writeFileSync(a.cachePath("2026/Index.json"), '{"Meetings":[]}');
+  const old = new Date(Date.now() - 3 * 3600e3); fs.utimesSync(a.cachePath("2026/Index.json"), old, old);   // older than an hour: refetched
+  const realFetch = global.fetch;
+  try {
+    for (const status of [401, 403, 429, 503]) {
+      global.fetch = async () => ({ ok: false, status, headers: new Map() });
+      assert.deepStrictEqual(await a.listSessions(2026), [], `HTTP ${status}: the cached index`);
+    }
+    global.fetch = async () => ({ ok: false, status: 401, headers: new Map() });
+    await assert.rejects(a.getText("2025/Index.json", { maxAgeMs: 3600e3 }), (e) => e.status === 401 && /접근을 막았어요/.test(e.message));
+    fs.writeFileSync(a.cachePath("2024/x.jsonStream"), "cached");
+    const t = Date.now() - 1; fs.utimesSync(a.cachePath("2024/x.jsonStream"), new Date(t - 9e9), new Date(t - 9e9));
+    global.fetch = async () => ({ ok: false, status: 404, headers: new Map() });
+    await assert.rejects(a.getText("2024/y.jsonStream"), (e) => e.status === 404);
+  } finally { global.fetch = realFetch; fs.rmSync(dir, { recursive: true, force: true }); }
+});

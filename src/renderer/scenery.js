@@ -630,6 +630,10 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     if (diffs.length > 20) { offset = diffs[Math.floor(diffs.length / 2)]; demOk = true; }
   }
   const nearTrack = (x, z) => world.grid.nearest(x, z, 6);
+  // metres from (x, z) to the edge of the track's tarmac on its own side (negative on it): the measured edge of that
+  // side (s.L left, s.R right) – not the wider half, which put a pit wall metres short of the edge where the tarmac
+  // sits off the lap line
+  const sideEdge = (x, z) => { const [s] = nearTrack(x, z); if (!s) return Infinity; const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; return l >= 0 ? l - (s.L ?? 7) : -l + (s.R ?? -7); };
   // The elevation tiles include the sea floor. Where OSM maps a coastline, points on its sea side (OSM draws
   // coastlines with the land on the left) sit under a sea surface at the local sea level, and land is kept
   // just above it – so harbours look like water instead of a hole, and polders don't flood.
@@ -726,7 +730,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // (facilities.js genericPitSpec) – picked before the grandstands, as a "grandstand" outline on the garages' line is
   // the pit building mapped so, no stand
   const toTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); if (!s) return [1, 0]; const dx = s.p.x - x, dz = s.p.z - z, l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
-  const edgeOfTrack = (x, z) => { const [s, d] = nearTrack(x, z); return s ? d - Math.max(s.L ?? 7, -(s.R ?? -7)) : Infinity; };
+  const edgeOfTrack = sideEdge;
   const generic = opts.buildings !== false ? genericPitSpec({ venue: opts.venue, location: scene.location, year: opts.year, pit: START_DATA[opts.venue?.key]?.pit, toScene: ([X, Y]) => gf.xz([X * 0.1, Y * 0.1]), toTrack, trackEdge: edgeOfTrack, boxes: PIT_BOXES[opts.venue?.key]?.boxes }) : null;
   for (const b of scene.buildings) delete b.asPitBuilding;   // (a record reused from an earlier build starts clean)
   if (generic && opts.facilities !== false) generic.pick(scene.buildings, gf);
@@ -797,7 +801,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // track's height near it)
     const surfaceAt = (x, z) => { const [s, d] = nearTrack(x, z); const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06); };
     // metres from a point to the edge of the track's tarmac (the measured half width), negative on it
-    const trackEdge = (x, z) => { const [s, d] = nearTrack(x, z); return s ? d - Math.max(s.L ?? 7, -(s.R ?? -7)) : Infinity; };
+    const trackEdge = sideEdge;
     const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false, registry: generic ? [...FACILITIES, generic] : FACILITIES,
       readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)

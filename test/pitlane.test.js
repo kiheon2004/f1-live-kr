@@ -75,3 +75,39 @@ test("across the lane: driving in the fast lane, stopped at its box in the box, 
   assert.strictEqual(laneOffset({ ...base, off: 8.3, u: 460, speed: 22 }), 8.3);
   assert.strictEqual(laneOffset({ ...base, off: 60, u: 200, speed: 22 }), 60);
 });
+
+test("pit lane cells: points within 3 m of the path count, its 40 m ends (where it meets the lap line) and points off it don't", async () => {
+  const { laneCells } = await import("../src/renderer/pitlane.js");
+  const on = laneCells([[0, 0], [300, 0]]);
+  assert.ok(on(150, 0) && on(150, 2.2) && on(60, -2));
+  assert.ok(!on(150, 5), "5 m off the path");
+  assert.ok(!on(20, 0) && !on(290, 0), "within 40 m of its ends");
+  assert.ok(!laneCells([])(0, 0));
+});
+
+test("wall line fit: follows a slope exactly, ignores a jump of the measured edge, keeps a real step that lasts", async () => {
+  const { fitLine } = await import("../src/renderer/pitlane.js");
+  // a wall running at an angle to the building's axis: 18 → 24 m over 300 m
+  const slope = Array.from({ length: 101 }, (_, i) => [i * 3, 18 + i * 0.06]);
+  fitLine(slope).forEach((v, i) => assert.ok(Math.abs(v - slope[i][1]) < 1e-6));
+  // the edge jumping 6 m in at three stations (Sakhir): the wall stays straight
+  const jump = Array.from({ length: 60 }, (_, i) => [i * 3, i >= 30 && i < 33 ? 8 : 14]);
+  for (const v of fitLine(jump)) assert.ok(Math.abs(v - 14) < 0.01, String(v));
+});
+
+test("cross-section: fast lane the last 3.5 m before the wall, the box in the inner lane with room for its crew, a lane too narrow said so", async () => {
+  const { crossSection } = await import("../src/renderer/pitlane.js");
+  // Bahrain-like: the wall's face 12.5 m out
+  const a = crossSection({ wall: 12.5, edge: 14.5, path: 8.2 });
+  assert.ok(a.ok); assert.deepStrictEqual(a.fast, [9, 12.5]); assert.strictEqual(a.fastC, 10.75); assert.strictEqual(a.boxC, 4.5);
+  assert.strictEqual(a.wallFrom, "facility wall");
+  // no wall known: one assumed at the track's edge
+  const b = crossSection({ wall: null, edge: 18.25, path: 10.1 });
+  assert.strictEqual(b.wall, 17.75); assert.ok(/assumed/.test(b.wallFrom));
+  // a wide lane: the box isn't put far out in it (crew room on the lane side kept inside the inner lane)
+  const c = crossSection({ wall: 30 }); assert.ok(c.boxC <= c.inner - 2.4 && c.boxC >= 2.6);
+  // too narrow for a box and its crew
+  const d = crossSection({ wall: 6 }); assert.ok(d.narrow && !d.ok); assert.ok(d.fast[1] === 6 && d.fast[0] === 3);
+  // nothing known
+  assert.strictEqual(crossSection({ wall: null, edge: null }).ok, false);
+});
