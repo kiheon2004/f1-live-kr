@@ -32,6 +32,7 @@ function inPoly(x, y, pts) {
   return r;
 }
 const polyArea = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return a / 2; };
+const perimeter = (pts) => pts.reduce((s, p, i) => s + Math.hypot(p[0] - pts[(i + 1) % pts.length][0], p[1] - pts[(i + 1) % pts.length][1]), 0);
 // The first and last crossings of the ray (x, z) + t (dx, dz), t > 0, with a polygon's edges: [near, far] in metres, or null.
 export function rayCross(x, z, dx, dz, pts) {
   let near = Infinity, far = -Infinity;
@@ -308,13 +309,13 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const lst = b.standOf ? listedBy.get(b.standOf) : null, rf = b.standRoof ?? lst?.roof, pm = b.standPerm ?? lst?.perm;
     const roofOf = rf != null ? (rf === "upper" ? "upper" : !!rf) : b.traced ? false : depth > 14 && area > 1500, permOf = pm != null ? !!pm : true;
     const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s };
-    // (a traced outline: as traced – a box – unless the data says it bends along the track (curve); an irregular
-    // trace taken round the curved route came out twisted at Montréal's hairpin and Spielberg's T8)
-    if (b.traced ? !!lst?.curve : area / (len * depth) < 0.72 && len > 30) {
+    // (a curved outline follows the track; the data can say so (curve) or keep a traced one a box (box) – Montréal's
+    // 34, between the hairpin's two legs, came out twisted round the curved route)
+    if (lst?.box ? false : lst?.curve || (area / (len * depth) < 0.72 && len > 30)) {
       const ends = [0, 1].map((e) => pts.reduce((best, p) => { const a = (p[0] - o.c[0]) * du[0] + (p[1] - o.c[1]) * du[1]; return (e ? a > best[0] : a < best[0]) ? [a, p] : best; }, [e ? -Infinity : Infinity, null])[1]);
       let off = Infinity, side = 0;
       for (const [x, z] of pts) { const [q] = nearestSample(x, z); const l = lateral(q, x, z); side += Math.sign(l); off = Math.min(off, l > 0 ? l - (q.L ?? 7) : (q.R ?? -7) - l); }
-      curved.push({ n: b.name || null, standOf: b.standOf || null, A: ends[0], B: ends[1], side: side >= 0 ? "R" : "L", off: Math.max(street ? 2 : 3, off), rows: Math.max(6, Math.min(45, Math.round(area / len / ROW_D))), roof: roofOf, perm: permOf, curve: 1, outline: pts, fallback: boxStand, traced: b.traced || null, maxLen: len * 1.4 });
+      curved.push({ n: b.name || null, standOf: b.standOf || null, A: ends[0], B: ends[1], side: side >= 0 ? "R" : "L", off: Math.max(street ? 2 : 3, off), rows: Math.max(6, Math.min(45, Math.round(area / len / ROW_D))), roof: roofOf, perm: permOf, curve: 1, outline: pts, fallback: boxStand, traced: b.traced || null, maxLen: perimeter(pts) * 0.6 });
       continue;
     }
     stands.push(boxStand);
@@ -400,7 +401,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     }
     if (front.length < 2) continue;
     // (a curved outline's front follows the track between its ends – at a hairpin that can run far longer than the
-    // outline itself, Sepang's K1 530 m for 170: then it's built as its box)
+    // outline itself, Sepang's K1 530 m for 170 (over 0.6 of its perimeter; Yas Marina's U round the hairpin is not): then
+    // it's built as its box)
     if (L.maxLen && L.fallback) { let fl = 0; for (let i = 1; i < front.length; i++) fl += Math.hypot(front[i].x - front[i - 1].x, front[i].z - front[i - 1].z); if (fl > L.maxLen) { stands.push(L.fallback); continue; } }
     stands.push({ kind: "listed", name: L.n, traced: L.traced || (L.outline ? "map outline" : null), front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
   }
