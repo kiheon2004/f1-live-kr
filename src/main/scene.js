@@ -57,6 +57,45 @@ function standsFor(location) {
   return _stands[location] || Object.values(_stands).find((c) => c.aliases?.includes(location)) || null;
 }
 
+// A building mapped under a listed grandstand's own name (OSM's "V1" at Suzuka, as a plain building) is that stand:
+// it becomes a grandstand outline (stands.js builds its seats from it, and the listed stand takes it as its twin)
+// instead of an obstacle that keeps the listed stand from being built at all. Matched by name – the listed name, or a
+// part of it ("V1/V2 Main": V1, V2 Main), the words grandstand / tribune / stand aside – and, where the listed stand
+// has its ends, within 200 m of them. list: the listed stands with a, b in F1 metres (or null).
+const standKey = (s) => String(s || "").normalize("NFKC").toLowerCase().replace(/\b(grandstands?|tribunes?|tribuna|tribüne|stand|main)\b/g, " ").replace(/[\s\-_.]+/g, "");
+function standBuildings(buildings, list) {
+  const keyed = [];
+  for (const L of list) {
+    const keys = new Set([standKey(L.n), ...String(L.n || "").split(/[\/+,]/).map(standKey)].filter((k) => k.length));
+    keyed.push({ L, keys });
+  }
+  const segD = ([x, y], a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l)); return Math.hypot(a[0] + dx * t - x, a[1] + dy * t - y); };
+  let n = 0;
+  for (const b of buildings) {
+    if (b.kind === "grandstand" || !b.name || b.min > 3) continue;
+    const k = standKey(b.name); if (!k) continue;
+    const c = centroidOf(b.pts);
+    const hit = keyed.find(({ L, keys }) => keys.has(k) && (L.a && L.b ? segD(c, L.a, L.b) < 200 : standKey(L.n) === k));
+    if (hit) { b.kind = "grandstand"; b.standOf = hit.L.n; n++; }
+  }
+  // A building that is mostly under the stands traced from imagery (poly) is their own structure mapped as a plain
+  // building (OSM's "D１～D4" at Suzuka, under two of them): the traced outlines are built instead, the building not at all.
+  const traced = list.filter((L) => L.poly).map((L) => ({ L, bb: bboxOf(L.poly) }));
+  if (traced.length) for (const b of buildings) {
+    if (b.standOf || b.min > 3) continue;
+    const bb = bboxOf(b.pts), near = traced.filter(({ bb: q }) => !(bb[0] > q[2] || bb[2] < q[0] || bb[1] > q[3] || bb[3] < q[1]));
+    if (!near.length) continue;
+    let all = 0, under = 0; const cnt = new Map();
+    const st = Math.max(1, Math.sqrt(((bb[2] - bb[0]) * (bb[3] - bb[1])) / 400));
+    for (let x = bb[0] + st / 2; x < bb[2]; x += st) for (let y = bb[1] + st / 2; y < bb[3]; y += st) {
+      if (!inside(x, y, b.pts)) continue;
+      all++; const h = near.find(({ L }) => inside(x, y, L.poly)); if (h) { under++; cnt.set(h.L, (cnt.get(h.L) || 0) + 1); }
+    }
+    if (all && under / all >= 0.4) { b.kind = "grandstand"; b.standOf = [...cnt].sort((p, q) => q[1] - p[1])[0][0].n; b.underTraced = true; n++; }
+  }
+  return n;
+}
+
 // Point in polygon (even-odd).
 function inside(x, y, pts) {
   let r = false;
@@ -442,7 +481,9 @@ class Scenes {
     const sd = standsFor(location);
     const toF1m = ([lat, lon]) => localToF1(...fr.toXY(lat, lon)).map((v) => Math.round(v * 10) / 10);
     const stands = sd ? { name: sd.name, total: sd.total || null, seats: sd.seats || null, est: !!sd.est, src: sd.src || null,
-      list: (sd.stands || []).map((st) => ({ ...st, a: st.a ? toF1m(st.a) : null, b: st.b ? toF1m(st.b) : null })) } : null;
+      list: (sd.stands || []).map((st) => ({ ...st, a: st.a ? toF1m(st.a) : null, b: st.b ? toF1m(st.b) : null, poly: st.poly ? st.poly.map(toF1m) : null })) } : null;
+
+    if (stands) standBuildings(buildings, stands.list);
 
     return {
       circuit: info ? { name: info.name, length: info.length, opened: info.opened, firstgp: info.firstgp, altitude: info.altitude } : null,
@@ -455,4 +496,4 @@ class Scenes {
   }
 }
 
-module.exports = { Scenes, buildingHeight, buildingOf, wallsUnder, areaKind, mergeBuildings, resolveParts };
+module.exports = { Scenes, standBuildings, buildingHeight, buildingOf, wallsUnder, areaKind, mergeBuildings, resolveParts };

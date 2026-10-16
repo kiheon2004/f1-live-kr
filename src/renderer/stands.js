@@ -32,6 +32,17 @@ function inPoly(x, y, pts) {
   return r;
 }
 const polyArea = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return a / 2; };
+// The first and last crossings of the ray (x, z) + t (dx, dz), t > 0, with a polygon's edges: [near, far] in metres, or null.
+export function rayCross(x, z, dx, dz, pts) {
+  let near = Infinity, far = -Infinity;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [ax, az] = pts[j], [bx, bz] = pts[i], ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = ((ax - x) * ez - (az - z) * ex) / den, u = ((ax - x) * dz - (az - z) * dx) / den;
+    if (t > 0 && u >= 0 && u <= 1) { near = Math.min(near, t); far = Math.max(far, t); }
+  }
+  return near < far ? [near, far] : null;
+}
 function obb(pts) {
   let cx = 0, cz = 0;
   for (const [x, z] of pts) { cx += x; cz += z; }
@@ -135,10 +146,10 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     for (let i = Math.floor(b.box[0] / CELL); i <= Math.floor(b.box[2] / CELL); i++)
       for (let j = Math.floor(b.box[1] / CELL); j <= Math.floor(b.box[3] / CELL); j++) { const k = `${i},${j}`; if (!cells.has(k)) cells.set(k, []); cells.get(k).push(b); }
   };
-  const polyBlocker = (pts, why = "b", owner = null) => {
+  const polyBlocker = (pts, why = "b", owner = null, ref = null) => {
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-    addBlocker({ why, owner, box: [x0, z0, x1, z1], test: (x, z) => x >= x0 && x <= x1 && z >= z0 && z <= z1 && inPoly(x, z, pts) });
+    addBlocker({ why, owner, ref, box: [x0, z0, x1, z1], test: (x, z) => x >= x0 && x <= x1 && z >= z0 && z <= z1 && inPoly(x, z, pts) });
   };
   const lineBlocker = (pts, half, why = "r") => {
     for (let i = 1; i < pts.length; i++) {
@@ -151,7 +162,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   for (const b of scene.buildings) {
     if (b.kind === "grandstand") continue;
     const pts = b.pts.map(gf.xz);
-    if (Math.abs(polyArea(pts)) > 900 || b.h > 14) polyBlocker(pts);   // small huts and kiosks may sit under a stand
+    if (Math.abs(polyArea(pts)) > 900 || b.h > 14) polyBlocker(pts, "b", null, b);   // small huts and kiosks may sit under a stand
   }
   // Roads and other tarmac block, except the circuit's own: the mapped raceway under the F1 track, and on a
   // street circuit the closed roads alongside it (the other carriageway, service roads), where the temporary
@@ -185,6 +196,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     return best;
   };
   const inBetween = (x, z) => between.some((pts) => inPoly(x, z, pts) || edgeDist(x, z, pts) < 25);
+  let lastHit = null;   // (the obstacle last met: a dead stand's report names the buildings in its way)
   const blocked = (x, z, own, self = null) => {
     if (corridor.on(x, z, street ? 1.2 : 4)) {
       const q = corridor.local(x, z);
@@ -195,7 +207,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
       if (cd > own.span + 25) return "t";
     }
     const free = between.length && inBetween(x, z);
-    for (const b of cells.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`) || []) if ((!free || b.why === "s") && (!self || b.owner !== self) && b.test(x, z)) return b.why;
+    for (const b of cells.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`) || []) if ((!free || b.why === "s") && (!self || b.owner !== self) && b.test(x, z)) { lastHit = b; return b.why; }
     return null;
   };
 
@@ -207,13 +219,23 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
 
   // ---- stand outlines: a front line (scene x, z) with outward normals, rows going back from it ----
   const stands = [], curved = [];
-  // mapped stands
-  for (const b of scene.buildings) {
+  // mapped stands – and the listed ones traced from aerial imagery (poly: their outline; img: which picture, when),
+  // built from their outlines the same way, where the map has none (only in their seasons: yr)
+  const inYear = (L) => !(L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1])));
+  const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && L.type !== "ga" && L.type !== "hosp")
+    .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced" }));
+  const seen = [], listedBy = new Map((scene.stands?.list || []).map((L) => [L.n, L]));
+  for (const b of scene.buildings.concat(traced)) {
     // (an outline taken for the pit building – facilities.js genericPitSpec – is no stand)
-    if (b.kind !== "grandstand" || b.asPitBuilding) continue;
+    // (one under a stand traced from imagery: that stand is built from its traced outline instead – scene.js)
+    if (b.kind !== "grandstand" || b.asPitBuilding || b.underTraced) continue;
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) continue;
+    // (the same outline mapped twice – OSM has Suzuka's E so: one stand)
+    const cen = pts.reduce((s, p) => [s[0] + p[0] / pts.length, s[1] + p[1] / pts.length], [0, 0]), ar = Math.abs(polyArea(pts));
+    if (seen.some((q) => inPoly(cen[0], cen[1], q.pts) && ar > q.ar * 0.8 && ar < q.ar * 1.25)) continue;
+    seen.push({ pts, ar });
     // an outline mapped across the track (a stand drawn together with the pit building, say) is no use:
     // a listed stand takes its place
     // An outline facing two different stretches of the track (both sides of a stand between two straights,
@@ -245,15 +267,19 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
       const a = a0 + (len * i) / k;
       front.push({ x: o.c[0] + du[0] * a + dv[0] * b0, z: o.c[1] + du[1] * a + dv[1] * b0, nx: dv[0], nz: dv[1] });
     }
-    const rows = Math.max(3, Math.min(40, Math.floor((depth - WALK) / ROW_D)));
+    // (a traced outline that bends: as deep as it is on average – its area over its length – not its box)
+    const rows = Math.max(3, Math.min(40, Math.floor(((b.traced ? Math.min(depth, area / len) : depth) - WALK) / ROW_D)));
     // a tagged height sets the rake; otherwise a usual 0.45 m per row
     const rise = b.est ? 0.45 : Math.max(0.3, Math.min(0.62, (b.h - FRONT_H - 3) / rows));
-    const boxStand = { kind: "mapped", name: b.name || null, front, rows, rise, maxRows: rows, roof: depth > 14 && area > 1500, perm: true, outline: pts, s };
+    // (roof and permanence: the listed stand's where it says – for its traced outline or its map outline –, else a guess)
+    const lst = b.standOf ? listedBy.get(b.standOf) : null, rf = b.standRoof ?? lst?.roof, pm = b.standPerm ?? lst?.perm;
+    const roofOf = rf != null ? (rf === "upper" ? "upper" : !!rf) : b.traced ? false : depth > 14 && area > 1500, permOf = pm != null ? !!pm : true;
+    const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s };
     if (area / (len * depth) < 0.72 && len > 30) {
       const ends = [0, 1].map((e) => pts.reduce((best, p) => { const a = (p[0] - o.c[0]) * du[0] + (p[1] - o.c[1]) * du[1]; return (e ? a > best[0] : a < best[0]) ? [a, p] : best; }, [e ? -Infinity : Infinity, null])[1]);
       let off = Infinity, side = 0;
       for (const [x, z] of pts) { const [q] = nearestSample(x, z); const l = lateral(q, x, z); side += Math.sign(l); off = Math.min(off, l > 0 ? l - (q.L ?? 7) : (q.R ?? -7) - l); }
-      curved.push({ n: b.name || null, A: ends[0], B: ends[1], side: side >= 0 ? "L" : "R", off: Math.max(street ? 2 : 3, off), rows: Math.max(6, Math.min(45, Math.round(area / len / ROW_D))), roof: depth > 14 && area > 1500, perm: true, curve: 1, outline: pts, fallback: boxStand });
+      curved.push({ n: b.name || null, standOf: b.standOf || null, A: ends[0], B: ends[1], side: side >= 0 ? "L" : "R", off: Math.max(street ? 2 : 3, off), rows: Math.max(6, Math.min(45, Math.round(area / len / ROW_D))), roof: roofOf, perm: permOf, curve: 1, outline: pts, fallback: boxStand, traced: b.traced || null });
       continue;
     }
     stands.push(boxStand);
@@ -269,7 +295,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const cornerAt = (n) => { const k = corners.find((c) => c.n === n); if (!k) return null; const [s] = world.grid.nearest(k.x, k.z, 3); return s || nearestSample(k.x, k.z)[0]; };
   const list = [];
   for (const L of scene.stands?.list || []) {
-    if (L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1]))) { skipped.push(`${L.n}: not in ${year}`); continue; }
+    if (!inYear(L)) { skipped.push(`${L.n}: not in ${year}`); continue; }
+    if (L.poly) continue;   // (built from its outline above)
     if (L.type === "ga" || L.type === "hosp") { skipped.push(`${L.n}: ${L.type === "ga" ? "standing / grass" : "hospitality"}`); continue; }
     if (L.at) {
       const s0 = cornerAt(L.at.turn); if (!s0) { skipped.push(`${L.n}: no corner ${L.at.turn}`); continue; }
@@ -278,7 +305,11 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
       list.push({ ...L, A: pt(L.at.d0), B: pt(L.at.d1), side: L.at.side, off: L.at.off ?? L.off, curve: 1 });
     } else if (L.a && L.b) list.push({ ...L, A: gf.xz(L.a), B: gf.xz(L.b) });
   }
+  // (a listed stand whose own outline is mapped – a building under its name, scene.js standBuildings – is built from
+  // that outline: the listed one is its twin)
+  const ofName = new Set([...stands, ...curved].map((m) => m.standOf).filter(Boolean));
   for (const L of curved.concat(list)) {
+    if (!L.outline && ofName.has(L.n)) { skipped.push(`${L.n}: mapped outline`); continue; }
     const { A, B } = L;
     const mid = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
     const twin = stands.find((m) => (m.kind === "mapped" || m.curvedFrom) && (inPoly(mid[0], mid[1], m.outline || m.curvedFrom) || segDist(m.front, A, B) < 18));
@@ -300,11 +331,21 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
       for (let i = 0; i <= k; i++) front.push({ x: A[0] + ((B[0] - A[0]) * i) / k, z: A[1] + ((B[1] - A[1]) * i) / k, nx, nz });
       own = { i: sm.i, span: chord / step / 2 + 20 };
     } else {
-      // along the track at `off` metres beyond its edge, every other sample
+      // along the track at `off` metres beyond its edge, every other sample – or, for a mapped outline, where the
+      // outline itself begins on that sample's normal (a stand set back further at one end than at the other: the
+      // outline's own front, not its nearest point carried along the whole corner), as deep as it is there
+      const depths = [];
       for (let k = 0; k <= d; k += 2) {
-        const s = samples[(sa.i + k) % n], o = edge(s, side) + side * off;
+        const s = samples[(sa.i + k) % n];
+        let o = edge(s, side) + side * off;
+        if (L.outline) {
+          const hit = rayCross(s.p.x, s.p.z, s.nor.x * side, s.nor.z * side, L.outline);
+          if (!hit) continue;
+          o = side * hit[0]; depths.push(hit[1] - hit[0]);
+        }
         front.push({ x: s.p.x + s.nor.x * o, z: s.p.z + s.nor.z * o, nx: s.nor.x * side, nz: s.nor.z * side });
       }
+      if (depths.length > 2) { const m = depths.sort((x, y) => x - y)[Math.floor(depths.length / 2)]; L.rows = Math.max(6, Math.min(45, Math.round((m - WALK) / ROW_D))); }
       own = { i: samples[(sa.i + Math.floor(d / 2)) % n].i, span: d / 2 };
       front = smoothNormals(front);
       // the same stretch on the other side of the track: tried when this side turns out to be taken (the side
@@ -319,7 +360,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
       }
     }
     if (front.length < 2) continue;
-    stands.push({ kind: "listed", name: L.n, front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
+    stands.push({ kind: "listed", name: L.n, traced: L.traced || (L.outline ? "map outline" : null), front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
   }
   if (!stands.length) return null;
 
@@ -328,23 +369,18 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const d = WALK + rows * ROW_D + 0.8;
     return st.front.map((p) => [p.x - p.nx * 0.8, p.z - p.nz * 0.8]).concat(st.front.slice().reverse().map((p) => [p.x + p.nx * d, p.z + p.nz * d]));
   };
-  // how deep a mapped stand could go (before the outlines themselves become obstacles): room to grow when the
-  // circuit's seats aren't reached, up to 1.6× its mapped depth
-  for (const st of stands) {
-    if (st.kind !== "mapped") continue;
-    let deep = Math.min(40, Math.round(st.rows * 1.6));
-    for (const p of st.front) for (let k = st.rows + 1; k <= deep; k++) { const b = WALK + k * ROW_D; if (blocked(p.x + p.nx * b, p.z + p.nz * b, null)) { deep = k - 1; break; } }
-    st.maxRows = Math.max(st.rows, deep);
-  }
+  // A mapped outline – OSM's, or one traced from imagery – is the stand's real extent: it is built no deeper than it
+  // is (growing into the room behind it to reach an estimated seat total made stands deeper than the real ones).
+  for (const st of stands) if (st.kind === "mapped") st.maxRows = st.rows;
   for (const st of stands) if (st.kind === "mapped") polyBlocker(st.outline, "s");
   const fitListed = (st) => {
     // how deep each column of the stand can go before it meets something (in rows; -1 = the front itself is blocked)
     const cap = st.perm ? 40 : 32;   // temporary stands rarely go past ~32 rows, permanent ones ~40
-    const why = [];
+    const why = [], hits = new Set();
     const colRows = st.front.map((p) => {
       const w = blocked(p.x, p.z, st.own) || blocked(p.x + p.nx * WALK, p.z + p.nz * WALK, st.own);
-      if (w) { why.push(w); return -1; }
-      for (let k = 1; k <= cap; k++) { const b = WALK + k * ROW_D; if (blocked(p.x + p.nx * b, p.z + p.nz * b, st.own)) return k - 1; }
+      if (w) { why.push(w); if (lastHit?.ref) hits.add(lastHit.ref); return -1; }
+      for (let k = 1; k <= cap; k++) { const b = WALK + k * ROW_D; if (blocked(p.x + p.nx * b, p.z + p.nz * b, st.own)) { if (lastHit?.ref && k < 6) hits.add(lastHit.ref); return k - 1; } }
       return cap;
     });
     // trim ends that are blocked or much shallower than the rest; the stand is as deep as its shallowest column
@@ -353,11 +389,11 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     while (i0 < i1 && colRows[i0] < Math.max(4, med * 0.6)) i0++;
     while (i1 > i0 && colRows[i1] < Math.max(4, med * 0.6)) i1--;
     const kept = colRows.slice(i0, i1 + 1);
-    if (i1 - i0 < 1 || kept.length < colRows.length * 0.4 || Math.min(...kept) < 4) return `blocked (${[...new Set(why)].join("")}): ${colRows.map((v) => (v < 0 ? "x" : v)).join(" ")}`;
+    if (i1 - i0 < 1 || kept.length < colRows.length * 0.4 || Math.min(...kept) < 4) return `blocked (${[...new Set(why)].join("")}): ${colRows.map((v) => (v < 0 ? "x" : v)).join(" ")}${[...hits].map((r) => ` [${r.kind} ${r.name || "unnamed"} h${Math.round(r.h)} ${Math.round(Math.abs(polyArea(r.pts.map(gf.xz))))} m²]`).join("")}`;
     st.front = st.front.slice(i0, i1 + 1);
     // no deeper than its listed rows: the room behind it may belong to another stand (two stands back to back
     // between two straights)
-    st.maxRows = Math.min(...kept, Math.max(st.rows, 8));
+    st.maxRows = st.traced ? Math.min(...kept, st.rows) : Math.min(...kept, Math.max(st.rows, 8));
     return null;
   };
   for (const st of stands) {
@@ -378,7 +414,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // With every stand's listed depth reserved, each may grow deeper into the room that is left (up to the usual
   // depth of such a stand), so the circuit's seats can be reached where there is space.
   for (const st of stands) {
-    if (st.kind !== "listed" || st.dead) continue;
+    if (st.kind !== "listed" || st.dead || st.traced) continue;
     const cap = st.perm ? 40 : 32;
     let deep = cap;
     for (const p of st.front) {
@@ -394,14 +430,14 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const target = scene.stands?.seats || 0;
   if (target) {
     const mapped = alive.filter((s) => s.kind === "mapped").reduce((a, s) => a + seatsOf(s, s.rows), 0);
-    const listed = alive.filter((s) => s.kind === "listed");
+    const listed = alive.filter((s) => s.kind === "listed" && !s.traced);
     // a few passes: stands that can't grow (obstacles behind) leave the rest to the others
     // outlines mapped deeper than the circuit's seats allow (a stand drawn with its concourse) lose rows
     if (mapped > target * 1.1) {
       const f = (target * (listed.length ? 0.85 : 1)) / mapped;
-      for (const s of alive) if (s.kind === "mapped") s.rows = Math.max(6, Math.round(s.rows * f));
+      for (const s of alive) if (s.kind === "mapped" && !s.traced) s.rows = Math.max(6, Math.round(s.rows * f));
     }
-    const mappedNow = alive.filter((s) => s.kind === "mapped").reduce((a, s) => a + seatsOf(s, s.rows), 0);
+    const mappedNow = alive.filter((s) => s.kind === "mapped" || s.traced).reduce((a, s) => a + seatsOf(s, s.rows), 0);
     let need = target - mappedNow;
     for (let pass = 0; pass < 4 && listed.length && need > 0; pass++) {
       const over = listed.reduce((a, s) => a + seatsOf(s, s.rows), 0) > need;   // too many: every stand can shrink

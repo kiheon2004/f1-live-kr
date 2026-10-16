@@ -425,10 +425,12 @@ function shared() {
   return SHARED;
 }
 
+// (which way they face: the track in front, the garages behind – mclaren.com 2026, above)
 // Seats on a team's pit wall stand, where a source gives them: { team, seasons: [from, to], seats, enclosed, src }.
 // Otherwise the usual estimate – the stands seat 3 to 8 in one row (the sources found: Haas 3 in 2023–24, 6 in 2025;
 // Ferrari 7 in 2020 – too old to stand for today's) – 6, drawn the same for every team without a source (said so).
 export const PIT_WALL_SEATS = [
+  { team: /mclaren/i, seasons: [2026, 2026], seats: 7, enclosed: false, src: "McLaren, \"Who sits on McLaren's pit wall\" (mclaren.com, 2026): seven seats, a window over the track at each, the garages behind" },
   { team: /haas/i, seasons: [2025, 2025], seats: 6, enclosed: true, src: "Haas F1 Team 2025 (pit wall back to six seats; an enclosure against the weather) – team/press articles, 2025" },
   { team: /haas/i, seasons: [2023, 2024], seats: 3, enclosed: true, src: "Haas F1 Team 2023–24 three-seat stand (400 kg less freight) – team/press articles" },
 ];

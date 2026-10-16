@@ -34,25 +34,29 @@
    "seats": 95000,
    "est": 1,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – total 155,000; grandstand share estimated",
+   "src2": "suzukacircuit.jp/eng/f1/ticket 2026 (WB 20260107045901) + seat pages (Permanent/Temporary)",
+   "missing": "H (110R, temporary), P (chicane entrance, temporary 2026), J (West Area, GA) – no outline in the 2025-07-31 imagery, not placed",
    "stands": [
     {"n":"A1","a":[34.8412959,136.5437199],"b":[34.84184,136.5429918],"rows":22},
-    {"n":"A2","a":[34.8424921,136.5422907],"b":[34.8431536,136.5415244],"rows":22},
+    {"n":"A2","a":[34.8424921,136.5422907],"b":[34.8431536,136.5415244],"rows":22,"note":"A2 / Temporary (T1 end of the main straight); position estimated"},
     {"n":"V1/V2 Main","a":[34.8434027,136.5413141],"b":[34.8450927,136.5397047],"rows":30,"roof":1},
-    {"n":"B","a":[34.8390867,136.5433715],"b":[34.8387337,136.5425609],"rows":24},
     {"n":"C","a":[34.8386188,136.542909],"b":[34.8405582,136.5401928],"rows":26},
-    {"n":"D","a":[34.8415002,136.5391988],"b":[34.8422301,136.5385155],"rows":22},
-    {"n":"E1","a":[34.8422301,136.5385155],"b":[34.8431141,136.536284],"rows":22},
-    {"n":"E2","a":[34.8435161,136.5363987],"b":[34.844021,136.5368937],"rows":18},
-    {"n":"E3","a":[34.8440895,136.5369743],"b":[34.8444791,136.5362164],"rows":18},
-    {"n":"Q","a":[34.8458029,136.5364615],"b":[34.8459006,136.5354529],"rows":20},
-    {"n":"R","a":[34.8460356,136.5378789],"b":[34.8460974,136.5370365],"rows":18},
     {"n":"S","a":[34.8456041,136.5387231],"b":[34.8459249,136.5382708],"rows":16},
     {"n":"G","a":[34.843816,136.5311138],"b":[34.8451296,136.5305436],"rows":20},
-    {"n":"I","a":[34.8463527,136.5295881],"b":[34.8472198,136.5302793],"rows":18},
-    {"n":"O","a":[34.8437695,136.5278278],"b":[34.8444407,136.5263409],"side":"R","rows":18},
-    {"n":"L","a":[34.8468648,136.524088],"b":[34.8473264,136.5236152],"rows":18},
-    {"n":"M","a":[34.8470516,136.5215928],"b":[34.8476871,136.521931],"rows":18},
-    {"n":"N","a":[34.8460839,136.5213541],"b":[34.8463983,136.520965],"rows":18}
+    {"n":"O","a":[34.8437695,136.5278278],"b":[34.8444407,136.5263409],"side":"R","rows":18,"note":"Temporary; reserved seats only in 2026 (free West Area 2025); not in the 2025-07-31 imagery – placed by the map's corner, estimate"},
+    {"n":"L","a":[34.8468648,136.524088],"b":[34.8473264,136.5236152],"rows":18,"type":"ga","note":"West Area free seating – 'stands or grass areas' (tickets.formula1.com Japan 2026); not a reserved seated stand"},
+    {"n":"M","a":[34.8470516,136.5215928],"b":[34.8476871,136.521931],"rows":18,"note":"Temporary; reserved seats only in 2026 (free West Area 2025); not in the 2025-07-31 imagery – placed by the map's corner, estimate"},
+    {"n":"N","a":[34.8460839,136.5213541],"b":[34.8463983,136.520965],"rows":18,"type":"ga","note":"West Area free seating – 'stands or grass areas' (tickets.formula1.com Japan 2026); not a reserved seated stand"},
+    {"n":"B1 (T2)","poly":[[34.8383303,136.5425646],[34.8387706,136.5436214],[34.8386825,136.5437286],[34.8382114,136.5425914]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","note":"B1/B2 are two stands on the official map (2026); which of the two traced structures carries which name is not certain"},
+    {"n":"B2 (T1)","poly":[[34.8388058,136.5435784],[34.8399726,136.543675],[34.8399506,136.5438359],[34.8387618,136.5437555]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","note":"see B1"},
+    {"n":"D S-curve","poly":[[34.8416147,136.5385852],[34.8416499,136.5387247],[34.8410688,136.539009],[34.8410336,136.5388481]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","perm":1,"note":"D-4/5 (S-Curve) / Permanent"},
+    {"n":"D Reverse Bank","poly":[[34.8420638,136.5372817],[34.8420374,136.5383921],[34.841782,136.5386872],[34.841694,136.538553],[34.8418701,136.5383385],[34.8418701,136.5373729]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","perm":1,"note":"D-1,2,3 (Reverse Bank) / Permanent"},
+    {"n":"E T6-7","poly":[[34.8431689,136.5364609],[34.8431777,136.5365789],[34.8422311,136.5366755],[34.8422135,136.5365575]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","note":"bench rows between T6 and Dunlop; ticket zone not certain (E temporary or D)"},
+    {"n":"Q1/Q2 west","poly":[[34.8461186,136.5348074],[34.8462287,136.5352634],[34.8462947,136.535773],[34.846484,136.535773],[34.8464268,136.5352902],[34.8463167,136.5348074]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","perm":1,"note":"Q1 and Q2 (chicane); the traced blocks are not matched to the two names"},
+    {"n":"Q1/Q2 east","poly":[[34.8462947,136.535773],[34.8463608,136.5362022],[34.8464048,136.5365777],[34.8465148,136.5365777],[34.8465501,136.5362022],[34.846484,136.535773]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","perm":1,"note":"see Q1/Q2 west"},
+    {"n":"R","poly":[[34.8462947,136.5367386],[34.8462727,136.5374092],[34.8461406,136.5378383],[34.8462727,136.5378383],[34.8464268,136.5375165],[34.8465148,136.5367386]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","perm":1,"note":"R / Permanent, final corner"},
+    {"n":"I","poly":[[34.8464884,136.5294608],[34.8470608,136.5298631],[34.847162,136.5296754],[34.8466337,136.529273]],"img":"Esri World Imagery (Vantor, 0.34 m) 2025-07-31 – outline traced for this app (checking only; the picture isn't in the app)","note":"I / Permanent + I-1..5 / Temporary at the hairpin; the permanent rows traced"},
+    {"n":"E","osm":1,"perm":1,"note":"E-1, E-2 / Permanent at NIPPO (Dunlop) corner: built from the map's outline named E (checked against Esri imagery 2025-07-31)","roof":0}
    ]
   },
   "Austin": {
@@ -92,7 +96,8 @@
    "seats": 85000,
    "est": 1,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – Principal (D) 10,000 and G 10,000 stated; the rest estimated",
-   "stands": []
+   "stands": [
+   ]
   },
   "Madrid": {
    "name": "Madring",
@@ -180,9 +185,7 @@
   },
   "Montréal": {
    "name": "Circuit Gilles Villeneuve",
-   "aliases": [
-    "Montreal"
-   ],
+   "aliases": ["Montreal"],
    "total": 115000,
    "seats": 55000,
    "est": 1,
@@ -243,9 +246,7 @@
   },
   "Miami Gardens": {
    "name": "Miami International Autodrome",
-   "aliases": [
-    "Miami"
-   ],
+   "aliases": ["Miami"],
    "total": 100000,
    "seats": 56000,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – grandstand capacity 56,000",
@@ -298,9 +299,7 @@
   },
   "São Paulo": {
    "name": "Interlagos",
-   "aliases": [
-    "Sao Paulo"
-   ],
+   "aliases": ["Sao Paulo"],
    "total": 97000,
    "seats": 65000,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – 65,000 in the grandstands",
@@ -319,9 +318,7 @@
   },
   "Marina Bay": {
    "name": "Marina Bay Street Circuit",
-   "aliases": [
-    "Singapore"
-   ],
+   "aliases": ["Singapore"],
    "total": 90000,
    "seats": 40000,
    "est": 1,
@@ -346,24 +343,21 @@
    "total": 80000,
    "seats": 34419,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – 34,419 grandstand seats (autodromoimola.it)",
-   "stands": []
+   "stands": [
+   ]
   },
   "Sakhir": {
    "name": "Bahrain International Circuit",
-   "aliases": [
-    "Bahrain"
-   ],
+   "aliases": ["Bahrain"],
    "total": 70000,
    "seats": 50000,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – ~50,000 grandstand seats, main straight 10,500",
-   "stands": []
+   "stands": [
+   ]
   },
   "Yas Island": {
    "name": "Yas Marina Circuit",
-   "aliases": [
-    "Yas Marina",
-    "Abu Dhabi"
-   ],
+   "aliases": ["Yas Marina", "Abu Dhabi"],
    "total": 65000,
    "seats": 50000,
    "est": 1,
@@ -404,9 +398,7 @@
   },
   "Monte Carlo": {
    "name": "Circuit de Monaco",
-   "aliases": [
-    "Monaco"
-   ],
+   "aliases": ["Monaco"],
    "total": 37000,
    "seats": 22000,
    "src": "gpdestinations.com/resources/formula-1-circuit-capacity-ranking – 22,000 grandstand seats",
@@ -444,9 +436,7 @@
   },
   "Kuala Lumpur": {
    "name": "Sepang International Circuit",
-   "aliases": [
-    "Sepang"
-   ],
+   "aliases": ["Sepang"],
    "total": 130000,
    "seats": 60000,
    "est": 1,

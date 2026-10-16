@@ -2923,7 +2923,11 @@ window.Map3D = {
     const track = []; for (let i = 0; i < world.n; i += 5) { const s = world.samples[i]; track.push([...R.geo.toLL(s.p.x + s.nor.x * (s.L ?? 7), s.p.z + s.nor.z * (s.L ?? 7)), ...R.geo.toLL(s.p.x + s.nor.x * (s.R ?? -7), s.p.z + s.nor.z * (s.R ?? -7))].map((v) => +v.toFixed(6))); }
     const cl = corners.map((k) => ({ n: k.n, ll: R.geo.toLL(world.samples[k.i].p.x, world.samples[k.i].p.z).map((v) => +v.toFixed(6)) }));
     const mapped = (R.scene?.buildings || []).filter((b) => b.kind === "grandstand").map((b) => ({ name: b.name, ll: b.pts.map(R.geo.xz).map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) }));
-    return JSON.stringify({ loc: app().location?.(), key: app().circuitKey?.(), year: app().sessionYear?.(), info: { ...R.info.stands, skipped: R.stands?.info.skipped }, stands: out, track, corners: cl, mapped });
+    // (the map's other buildings near the track – what a stand may be mapped as, or blocked by)
+    const others = (R.scene?.buildings || []).filter((b) => b.kind !== "grandstand" && !(b.min > 3)).map((b) => ({ b, pts: b.pts.map(R.geo.xz) }))
+      .filter(({ pts }) => pts.some(([x, z]) => (world.grid.nearest(x, z, 2)[1] ?? 999) < 70))
+      .map(({ b, pts }) => ({ name: b.name || null, h: b.h, ll: pts.map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) }));
+    return JSON.stringify({ loc: app().location?.(), key: app().circuitKey?.(), year: app().sessionYear?.(), info: { ...R.info.stands, skipped: R.stands?.info.skipped }, stands: out, track, corners: cl, mapped, others });
   },
   // development: grandstand ends for the data file from places along the track: [{ n, turn, d0, d1, side, off }] – from
   // corner `turn` (F1's numbering), d0 to d1 m along the track (− before it), `off` m beyond the tarmac's edge on that
@@ -3283,6 +3287,16 @@ window.Map3D = {
     if (!world) return "no world";
     const s = world.samples[Math.floor((((f % 1) + 1) % 1) * world.n)];
     return this.look(s.p.x - s.tan.x * back + s.nor.x * side, s.p.y + h, s.p.z - s.tan.z * back + s.nor.z * side, s.p.x, s.p.y, s.p.z, fov);
+  },
+  // development: show or hide the built grandstands (to compare the satellite picture under them)
+  standsShown(v) { const g = world?.real?.stands?.group; if (g) g.visible = !!v; return String(!!g); },
+  // development: straight down on (lat, lon) from h m up (north at the top) – the satellite ground and what stands on it
+  lookLL(lat, lon, h = 300, fov = 50) {
+    const R = world?.real; if (!R) return "no real";
+    const [x, z] = R.geo.fromLL(lat, lon), y = R.groundAt?.(x, z) ?? 0;
+    setCam("heli"); controls.enabled = false; camMode = "inspect";
+    camera.position.set(x, y + h, z); camera.up.set(0, 0, -1); camera.near = 1; camera.far = Math.max(camera.far, h * 4); camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(x, y, z); camera.up.set(0, 1, 0);
+    return "ok";
   },
   look(px, py, pz, tx, ty, tz, fov = 50) {
     setCam("heli"); controls.enabled = false; camMode = "inspect";
