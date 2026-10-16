@@ -75,10 +75,19 @@ function standBuildings(buildings, list) {
   let n = 0;
   for (const b of buildings) {
     if (b.kind === "grandstand" || !b.name || b.min > 3) continue;
+    // (no stand is a building of 15,000 m² – Las Vegas' pit building carried a listed stand's name)
+    if (Math.abs(areaOf(b.pts)) > 15000) continue;
     const k = standKey(b.name); if (!k) continue;
     const c = centroidOf(b.pts);
     const hit = keyed.find(({ L, keys }) => keys.has(k) && (L.a && L.b ? segD(c, L.a, L.b) < 200 : standKey(L.n) === k));
     if (hit) { b.kind = "grandstand"; b.standOf = hit.L.n; n++; }
+  }
+  // (a map grandstand already under a listed name – Spielberg's Red Bull Tribüne – takes the listed entry's roof,
+  // seasons and kind as well)
+  for (const b of buildings) {
+    if (b.kind !== "grandstand" || b.standOf || !b.name) continue;
+    const L = list.find((x) => x.osm && standKey(x.n) === standKey(b.name)) || list.find((x) => x.n === b.name);
+    if (L) b.standOf = L.n;
   }
   // osmAt: [lat, lon] (F1 metres here) – the map's outline at that point is this listed stand (an unnamed or otherwise
   // named one: COTA's main grandstand, its Turn 12 bleachers), a grandstand under the listed name

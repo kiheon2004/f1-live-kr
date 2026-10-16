@@ -2927,7 +2927,7 @@ window.Map3D = {
     const others = (R.scene?.buildings || []).filter((b) => b.kind !== "grandstand" && !(b.min > 3)).map((b) => ({ b, pts: b.pts.map(R.geo.xz) }))
       .filter(({ pts }) => pts.some(([x, z]) => (world.grid.nearest(x, z, 2)[1] ?? 999) < 70))
       .map(({ b, pts }) => ({ name: b.name || null, h: b.h, ll: pts.map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) }));
-    return JSON.stringify({ loc: app().location?.(), key: app().circuitKey?.(), year: app().sessionYear?.(), info: { ...R.info.stands, skipped: R.stands?.info.skipped, unmatched: R.scene?.stands?.unmatched || [] }, stands: out, track, corners: cl, mapped, others });
+    return JSON.stringify({ loc: app().location?.(), key: app().circuitKey?.(), year: app().sessionYear?.(), info: { ...R.info.stands, skipped: R.stands?.info.skipped, dropped: R.stands?.info.dropped, unmatched: R.scene?.stands?.unmatched || [] }, stands: out, track, corners: cl, mapped, others });
   },
   // development: grandstand ends for the data file from places along the track: [{ n, turn, d0, d1, side, off }] – from
   // corner `turn` (F1's numbering), d0 to d1 m along the track (− before it), `off` m beyond the tarmac's edge on that

@@ -222,21 +222,36 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // mapped stands – and the listed ones traced from aerial imagery (poly: their outline; img: which picture, when),
   // built from their outlines the same way, where the map has none (only in their seasons: yr)
   const skipped = [];   // (listed stands not built, and why)
+  const dropped = [];   // (map outlines not built, and why)
   const inYear = (L) => !(L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1])));
   const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && L.type !== "ga" && L.type !== "hosp")
     .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced" }));
   const seen = [], listedBy = new Map((scene.stands?.list || []).map((L) => [L.n, L]));
-  for (const b of scene.buildings.concat(traced)) {
+  // (largest first: an outline mostly inside one already taken – the west part of Spielberg's main stand mapped
+  // again on its own, Shanghai's B2 twice – is that stand, not another one)
+  const areaOf = (b) => Math.abs(polyArea(b.pts.map(gf.xz)));
+  const cands = scene.buildings.concat(traced).filter((b) => b.kind === "grandstand").sort((p, q) => areaOf(q) - areaOf(p));
+  const insideShare = (pts, others) => {
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const st = Math.max(0.5, Math.sqrt(((x1 - x0) * (z1 - z0)) / 300)); let all = 0, inn = 0;
+    for (let x = x0 + st / 2; x < x1; x += st) for (let z = z0 + st / 2; z < z1; z += st) if (inPoly(x, z, pts)) { all++; if (others.some((q) => inPoly(x, z, q))) inn++; }
+    return all ? inn / all : 0;
+  };
+  const drop = (b, why) => dropped.push(`${b.standOf || b.name || "unnamed outline"}: ${why}`);
+  for (const b of cands) {
     // (an outline taken for the pit building – facilities.js genericPitSpec – is no stand)
     // (one under a stand traced from imagery: that stand is built from its traced outline instead – scene.js)
     if (b.kind !== "grandstand" || b.asPitBuilding || b.underTraced) continue;
     if (b.standOf && listedBy.get(b.standOf) && !inYear(listedBy.get(b.standOf))) { skipped.push(`${b.standOf}: not in ${year}`); continue; }
+    const lt = b.standOf ? listedBy.get(b.standOf)?.type : null;
+    if (lt === "ga" || lt === "hosp") { skipped.push(`${b.standOf}: ${lt === "ga" ? "standing / grass" : "hospitality"}`); continue; }
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
-    if (pts.length < 3) continue;
+    if (pts.length < 3) { drop(b, "outline under 3 points"); continue; }
     // (the same outline mapped twice – OSM has Suzuka's E so: one stand)
     const cen = pts.reduce((s, p) => [s[0] + p[0] / pts.length, s[1] + p[1] / pts.length], [0, 0]), ar = Math.abs(polyArea(pts));
     if (seen.some((q) => inPoly(cen[0], cen[1], q.pts) && ar > q.ar * 0.8 && ar < q.ar * 1.25)) continue;
+    if (seen.length && insideShare(pts, seen.map((q) => q.pts)) > 0.6) { drop(b, "mostly inside a larger outline already built"); continue; }
     seen.push({ pts, ar });
     // an outline mapped across the track (a stand drawn together with the pit building, say) is no use:
     // a listed stand takes its place
@@ -246,22 +261,22 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const near = [];
     for (const [x, z] of pts) { const [q, d] = nearestSample(x, z); if (d > 80) continue; near.push(q.i); const l = lateral(q, x, z); if (l > (q.L ?? 7) + 2) left++; else if (l < (q.R ?? -7) - 2) right++; }
     const apart = near.some((i) => near.some((j) => Math.abs(((i - j) % n + n + n / 2) % n - n / 2) * step > 600));
-    if ((left && right) || (apart && Math.abs(polyArea(pts)) > 8000)) { between.push(pts); continue; }
+    if ((left && right) || (apart && Math.abs(polyArea(pts)) > 8000)) { between.push(pts); drop(b, "faces two stretches of track: free room for listed stands instead"); continue; }
     const fixed = corridor.clearPolygon(pts);
-    if (!fixed) continue;
+    if (!fixed) { drop(b, "on the track (can't be kept clear of it)"); continue; }
     pts = fixed;
     const area = Math.abs(polyArea(pts));
-    if (area < 40) continue;
+    if (area < 40) { drop(b, "under 40 m²"); continue; }
     const o = obb(pts);
     const [s, sd] = nearestSample(o.c[0], o.c[1]);
-    if (sd > 150 + Math.max(o.u1 - o.u0, o.v1 - o.v0) / 2) continue;   // a stadium nearby, not a stand for the circuit
+    if (sd > 150 + Math.max(o.u1 - o.u0, o.v1 - o.v0) / 2) { drop(b, "too far from the track"); continue; }   // a stadium nearby, not a stand for the circuit
     // the depth axis is the box axis pointing most towards the track; the front is the side nearer to it
     let du = o.u, dv = o.v, a0 = o.u0, a1 = o.u1, b0 = o.v0, b1 = o.v1;
     const tx = s.p.x - o.c[0], tz = s.p.z - o.c[1];
     if (Math.abs(tx * o.u[0] + tz * o.u[1]) > Math.abs(tx * o.v[0] + tz * o.v[1])) { du = o.v; dv = o.u; a0 = o.v0; a1 = o.v1; b0 = o.u0; b1 = o.u1; }
     if (tx * dv[0] + tz * dv[1] > 0) { dv = [-dv[0], -dv[1]]; [b0, b1] = [-b1, -b0]; }
     const len = a1 - a0, depth = b1 - b0;
-    if (len < 12 || depth < 3) continue;   // (a sliver of an outline – a stair tower, a corner of a roof – is no stand)
+    if (len < 12 || depth < 3) { drop(b, `a sliver (${len.toFixed(0)} × ${depth.toFixed(0)} m)`); continue; }   // (a sliver of an outline – a stair tower, a corner of a roof – is no stand)
     // A curved outline (a stand around a corner) is far from its box: it is built like a listed stand instead,
     // following the track between its two ends, as deep as the outline is on average.
     const k = Math.max(2, Math.ceil(len / 6)), front = [];
@@ -277,7 +292,9 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const lst = b.standOf ? listedBy.get(b.standOf) : null, rf = b.standRoof ?? lst?.roof, pm = b.standPerm ?? lst?.perm;
     const roofOf = rf != null ? (rf === "upper" ? "upper" : !!rf) : b.traced ? false : depth > 14 && area > 1500, permOf = pm != null ? !!pm : true;
     const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s };
-    if (area / (len * depth) < 0.72 && len > 30) {
+    // (a traced outline: as traced – a box – unless the data says it bends along the track (curve); an irregular
+    // trace taken round the curved route came out twisted at Montréal's hairpin and Spielberg's T8)
+    if (b.traced ? !!lst?.curve : area / (len * depth) < 0.72 && len > 30) {
       const ends = [0, 1].map((e) => pts.reduce((best, p) => { const a = (p[0] - o.c[0]) * du[0] + (p[1] - o.c[1]) * du[1]; return (e ? a > best[0] : a < best[0]) ? [a, p] : best; }, [e ? -Infinity : Infinity, null])[1]);
       let off = Infinity, side = 0;
       for (const [x, z] of pts) { const [q] = nearestSample(x, z); const l = lateral(q, x, z); side += Math.sign(l); off = Math.min(off, l > 0 ? l - (q.L ?? 7) : (q.R ?? -7) - l); }
@@ -347,7 +364,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
         }
         front.push({ x: s.p.x + s.nor.x * o, z: s.p.z + s.nor.z * o, nx: s.nor.x * side, nz: s.nor.z * side });
       }
-      if (depths.length > 2) { const m = depths.sort((x, y) => x - y)[Math.floor(depths.length / 2)]; L.rows = Math.max(6, Math.min(45, Math.round((m - WALK) / ROW_D))); }
+      // (no deeper than the outline is on average: at a corner the rays cross it obliquely – São Paulo's D)
+      if (depths.length > 2) { const m = depths.sort((x, y) => x - y)[Math.floor(depths.length / 2)]; L.rows = Math.max(6, Math.min(L.rows || 45, 45, Math.round((m - WALK) / ROW_D))); }
       own = { i: samples[(sa.i + Math.floor(d / 2)) % n].i, span: d / 2 };
       front = smoothNormals(front);
       // the same stretch on the other side of the track: tried when this side turns out to be taken (the side
@@ -417,7 +435,9 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // depth of such a stand), so the circuit's seats can be reached where there is space.
   for (const st of stands) {
     if (st.kind !== "listed" || st.dead || st.traced) continue;
-    const cap = st.perm ? 40 : 32;
+    // (an estimate grows a quarter past its listed rows at most: chasing an estimated seat total made Lusail's North
+    // stand 32 rows instead of 20)
+    const cap = Math.min(st.perm ? 40 : 32, Math.round(st.rows * 1.25));
     let deep = cap;
     for (const p of st.front) {
       for (let k = st.maxRows + 1; k <= deep; k++) { const b = WALK + k * ROW_D; if (blocked(p.x + p.nx * b, p.z + p.nz * b, st.own, st)) { deep = k - 1; break; } }
@@ -676,7 +696,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
         im.visible = Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) < near;
       }
     },
-    info: { skipped, between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },
+    info: { skipped, dropped, between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },
   };
 }
 
