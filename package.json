@@ -1,6 +1,6 @@
 {
   "name": "f1-live-kr",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "description": "한국어 라이브 타이밍 데스크톱 앱 (비공식, 개인용)",
   "main": "src/main/main.js",
   "private": true,
