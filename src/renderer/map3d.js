@@ -640,7 +640,7 @@ function buildWorld(points) {
   // (the pit lane, as measured – startdata.js –, widened to the lane's width: no generated wall across it)
   const A0 = app(), pd0 = START_DATA[venueOf({ circuitKey: A0.circuitKey?.(), location: A0.location?.() })?.key]?.pit;
   const laneZone = pd0 ? laneCells(pd0.path.map((p) => [p[0] * DM - center.x, -(p[1] * DM - center.z)]), 8) : null;
-  const syn = { walls: style.street ? streetWalls(samples, grid) : walls(samples, grid, 12, 1.1, undefined, 0, laneZone) };
+  const syn = { walls: style.street ? streetWalls(samples, grid) : walls(samples, grid, 12, 1.1, undefined, 0, laneZone), laneZone };
   world0Level = Math.min(...samples.map((s) => s.p.y)) - 2.5;
   syn.terrain = terrain(samples, grid, box);
   syn.trees = trees(grid, box);
@@ -941,7 +941,8 @@ function streetWalls(samples, grid) {
 // (inLane: the circuit's pit lane – a wall whose run-off would cross it isn't drawn there: along a straight with the
 // pit lane beside it the barrier on that side is the pit wall at the track's edge, the pit building's – facilities.js;
 // 12 m out it had stood across the pit lane, in front of the boxes)
-function walls(samples, grid, extra = 12, h = 1.1, tones = [0x5d636b, 0xd9dde2], y0 = 0, inLane = null) {
+// (gap: where the venue's other tarmac meets the track – an escape road's mouth: no barrier across it, only there)
+function walls(samples, grid, extra = 12, h = 1.1, tones = [0x5d636b, 0xd9dde2], y0 = 0, inLane = null, gap = null) {
   const pos = [], col = [], idx = [];
   const offOf = (s, side) => edgeOf(s, side) + side * extra;
   const crossesLane = (s, side) => { if (!inLane) return false; for (let o = 1; o <= extra + 2; o += 1) { const d = edgeOf(s, side) + side * o; if (inLane(s.p.x + s.nor.x * d, s.p.z + s.nor.z * d)) return true; } return false; };
@@ -953,7 +954,7 @@ function walls(samples, grid, extra = 12, h = 1.1, tones = [0x5d636b, 0xd9dde2],
     return Math.min(di, samples.length - di) > 20;
   };
   for (const side of [1, -1]) {
-    const ok = samples.map((s) => { const o = offOf(s, side); return !blocked(s.p.x + s.nor.x * o, s.p.z + s.nor.z * o, s) && !crossesLane(s, side); });
+    const ok = samples.map((s) => { const o = offOf(s, side), x = s.p.x + s.nor.x * o, z = s.p.z + s.nor.z * o; return !blocked(x, z, s) && !crossesLane(s, side) && !gap?.(x, z); });
     const n = samples.length;
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
@@ -1899,6 +1900,11 @@ async function loadGeo(w) {
     // swap the generic surroundings for the real ones
     w.group.remove(w.syn.terrain, w.syn.trees);
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
+    else if (built.auxGap && !w.street) {
+      // the generated barrier, opened where an escape road or rejoin route meets the track
+      const open = walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.syn.laneZone, built.auxGap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });
+      w.group.remove(w.syn.walls); disposeGroup(w.syn.walls); w.syn.walls = open; w.group.add(open);
+    }
     w.farBase = built.edge.clone().multiplyScalar(0.92);
     w.far.position.y = Math.min(w.far.position.y, (built.terrainLevel ?? w.far.position.y) - 40);
     w.group.add(built.group);
@@ -2959,6 +2965,26 @@ window.Map3D = {
     }
     return JSON.stringify(out);
   },
+  // development: the venue's other tarmac strips (auxroads.js) within r m of (lat, lon): kind, width, joins, length
+  auxNear(lat, lon, r = 200) {
+    const R = world?.real; if (!R?.aux) return "no aux";
+    const [x, z] = R.geo.fromLL(lat, lon);
+    return JSON.stringify(R.aux.filter((a) => a.pts.some(([p, q]) => Math.hypot(p - x, q - z) < r)).map((a) => ({ k: a.k, sub: a.sub, w: a.w, joins: a.joins, n: a.pts.length, ll: a.pts.map(([p, q]) => R.geo.toLL(p, q).map((v) => +v.toFixed(6))) })));
+  },
+  // development: the map's lines (roads, raceways, paths, barriers) within r m of (lat, lon): kind, sub-kind, width,
+  // bridge, the distance of each end from the track's centre line, and the line (lat, lon)
+  linesNear(lat, lon, r = 150, kinds = ["raceway", "road", "path"]) {
+    const R = world?.real; if (!R?.scene) return "no map";
+    const [x, z] = R.geo.fromLL(lat, lon), out = [];
+    for (const l of R.scene.lines) {
+      if (!kinds.includes(l.k)) continue;
+      const pts = l.pts.map(R.geo.xz);
+      if (!pts.some(([a, c]) => Math.hypot(a - x, c - z) < r)) continue;
+      const td = ([a, c]) => Math.round(world.grid.nearest(a, c, 3)[1] ?? 999);
+      out.push({ k: l.k, sub: l.sub, w: l.w, bridge: l.bridge, n: pts.length, d0: td(pts[0]), d1: td(pts[pts.length - 1]), dmin: Math.min(...pts.map(td)), dmax: Math.max(...pts.map(td)), ll: pts.map(([a, c]) => R.geo.toLL(a, c).map((v) => +v.toFixed(6))) });
+    }
+    return JSON.stringify(out);
+  },
   // development: the map's buildings and stand outlines within r m of (lat, lon) or a listed stand's ends – kind, name,
   // height, area, distance, whether the grandstands treat it as an obstacle (area > 900 m² or over 14 m)
   mapNear(lat, lon, r = 120) {
@@ -3290,6 +3316,12 @@ window.Map3D = {
   },
   // development: show or hide the built grandstands (to compare the satellite picture under them)
   standsShown(v) { const g = world?.real?.stands?.group; if (g) g.visible = !!v; return String(!!g); },
+  // development: from (lat, lon) h m above the ground towards (lat2, lon2) h2 m above it
+  lookLLAt(lat, lon, h, lat2, lon2, h2 = 0, fov = 60) {
+    const R = world?.real; if (!R) return "no real";
+    const [x, z] = R.geo.fromLL(lat, lon), [x2, z2] = R.geo.fromLL(lat2, lon2), g = (a, c) => Math.max(R.groundAt?.(a, c) ?? 0, world.grid.nearest(a, c, 2)[1] < 12 ? world.grid.nearest(a, c, 2)[0].p.y : -1e9);
+    return this.look(x, g(x, z) + h, z, x2, g(x2, z2) + h2, z2, fov);
+  },
   // development: straight down on (lat, lon) from h m up (north at the top) – the satellite ground and what stands on it
   lookLL(lat, lon, h = 300, fov = 50) {
     const R = world?.real; if (!R) return "no real";
