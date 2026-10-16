@@ -106,3 +106,22 @@ test("car model: teams' shapes are their own templates; wheels, hubs and mounts 
     assert.deepStrictEqual(c.userData.mounts.eye.toArray?.() ?? c.userData.mounts.eye, cars[0].userData.mounts.eye.toArray?.() ?? cars[0].userData.mounts.eye);
   }
 });
+
+// v0.35: the hands stay on the arms when the wheel turns – each forearm runs from its glove (which turns with the
+// wheel) back towards the elbow (v0.34: the arms stayed put while the gloves went round with the wheel)
+test("car model: turning the wheel, each forearm still starts at its glove", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js");
+  const car = C.makeCar({ teamName: "Ferrari", teamColour: "e8002d", number: 16, season: 2026 }), u = car.userData;
+  for (const steer of [0, 0.08, -0.12]) {
+    C.setWheels(car, 0, steer); car.updateMatrixWorld(true);
+    for (const m of u.arms) {
+      const k = m.userData.k, glove = new THREE.Vector3(0.145 * k, -0.005, 0.004).applyMatrix4(u.wheel.matrixWorld);
+      // the arm's end nearer the wheel: its centre less half its length along its axis
+      const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(m.getWorldQuaternion(new THREE.Quaternion()));
+      const len = m.scale.y + 0.066, c = m.getWorldPosition(new THREE.Vector3());
+      const ends = [c.clone().addScaledVector(axis, len / 2), c.clone().addScaledVector(axis, -len / 2)];
+      const d = Math.min(...ends.map((e) => e.distanceTo(glove)));
+      assert.ok(d < 0.02, `steer ${steer}, arm ${k}: ${d.toFixed(3)} m from the glove`);
+    }
+  }
+});

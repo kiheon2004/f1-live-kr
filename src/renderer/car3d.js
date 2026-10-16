@@ -529,11 +529,25 @@ function cockpit(p) {
   // the steering wheel: a rounded rectangle, its face (screen, buttons: −z, towards the driver) tilted up to the
   // driver's eyes, grips and paddles behind
   const wz = 0.36, wy = 0.61, tilt = 0.42;
-  const wheelBody = softBox(0.25, 0.14, 0.035, 0, 0, 0, 0.25);
+  // (the team's wheel where a source shows it – carshapes.js wheel: a sculpted top and slimmer lower section (Ferrari
+  // 2026), a top row of shift LEDs, its count of rotaries and buttons; else the neutral wheel)
+  const W = p.shape?.wheel || null, ww = 0.25, wh = W?.ratio ? ww / W.ratio : 0.14;
+  const wheelBody = W?.style === "sculpted"
+    ? merge([softBox(ww, 0.085, 0.035, 0, 0.025, 0, 0.3), softBox(0.15, 0.06, 0.032, 0, -0.04, 0, 0.3), ...[-0.08, 0, 0.08].map((x) => softBox(0.05, 0.02, 0.03, x, 0.07, 0, 0.45))])
+    : softBox(ww, wh, 0.035, 0, 0, 0, 0.25);
   const grips = merge([softBox(0.055, 0.13, 0.055, 0.14, -0.005, 0.0, 0.45), softBox(0.055, 0.13, 0.055, -0.14, -0.005, 0.0, 0.45)]);
   const paddles = merge([boxAt(0.07, 0.07, 0.006, 0.08, 0.0, 0.03), boxAt(0.07, 0.07, 0.006, -0.08, 0.0, 0.03)]);
   const screen = new THREE.PlaneGeometry(0.11, 0.055); screen.rotateY(Math.PI); screen.translate(0, 0.02, -0.0185);
-  const buttons = []; for (const [bx, by] of [[-0.1, 0.04], [0.1, 0.04], [-0.1, -0.03], [0.1, -0.03], [-0.07, -0.055], [0.07, -0.055], [-0.03, -0.055], [0.03, -0.055]]) { const b = new THREE.CylinderGeometry(0.008, 0.008, 0.01, 10); b.rotateX(Math.PI / 2); b.translate(bx, by, -0.02); buttons.push(b); }
+  const buttons = [], btn = (bx, by, r = 0.008, d = 0.01) => { const b = new THREE.CylinderGeometry(r, r, d, 10); b.rotateX(Math.PI / 2); b.translate(bx, by, -0.02); buttons.push(b); };
+  if (!W) for (const [bx, by] of [[-0.1, 0.04], [0.1, 0.04], [-0.1, -0.03], [0.1, -0.03], [-0.07, -0.055], [0.07, -0.055], [-0.03, -0.055], [0.03, -0.055]]) btn(bx, by);
+  else {
+    // buttons in two columns either side of the screen, rotaries along the bottom (bigger), LEDs in a row on top
+    const nb = W.buttons || 8, per = Math.ceil(nb / 2);
+    for (let i = 0; i < nb; i++) { const k = i < per ? -1 : 1, j = i < per ? i : i - per; btn(0.088 * k + (j % 2) * 0.016 * k, 0.045 - Math.floor(j / 2) * 0.026, 0.0075); }
+    const nr = W.rotaries || 0, lowY = W.style === "sculpted" ? -0.05 : -wh / 2 + 0.018;
+    for (let i = 0; i < nr; i++) btn(nr === 1 ? 0 : -0.07 + (0.14 * i) / (nr - 1), lowY, 0.0115, 0.014);
+    for (let i = 0; i < (W.leds || 0); i++) btn(-0.07 + (0.14 * i) / Math.max(1, W.leds - 1), (W.style === "sculpted" ? 0.06 : wh / 2) - 0.012, 0.0035, 0.006);
+  }
   const column = rod([0, -0.02, 0.02], [0, -0.02, 0.2], 0.018, 10);
   // gloves on the grips; forearms back to the elbows, hidden lower in the cockpit; shoulders under the headrest
   // a fist round the grip: the fingers wrapped over its front, the thumb on the wheel's face
@@ -542,7 +556,9 @@ function cockpit(p) {
   const forearm = (k) => { const g = new THREE.CapsuleGeometry(0.033, 0.26, 4, 12); const A = new THREE.Vector3(0.15 * k, wy - 0.02, wz - 0.03), B = new THREE.Vector3(0.22 * k, 0.5, wz - 0.32); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize())); g.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2); return g; };
   return {
     rim, headrest: merge([headrest, tub]), helmet, visor,
-    wheel: { body: metricUV(merge([wheelBody, column, paddles]), 0.04), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), arms: merge([forearm(1), forearm(-1)]), at: [0, wy, wz], tilt },
+    // (the forearms: one unit capsule – placed per car each frame from the turning grip to the elbow, setWheels)
+    wheel: { body: metricUV(merge([wheelBody, column, paddles]), 0.04), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), arm: new THREE.CapsuleGeometry(0.033, 1, 4, 12), at: [0, wy, wz], tilt,
+      grip: [0.145, -0.005, 0.004], elbow: [0.22, 0.5, wz - 0.32] },
   };
 }
 
@@ -681,7 +697,9 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   add(t.headrest, pad, near);
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
   add(t.wheel.body, carbon, wheel); add(t.wheel.grips, pad, wheel); const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen"); add(t.wheel.buttons, buttonMat, wheel); add(t.wheel.gloves, gloveMat, wheel);
-  add(t.wheel.arms, gloveMat, near);
+  // forearms: from each glove (it turns with the wheel) back to its elbow – placed by setWheels so the hands never leave
+  // the arms when the wheel turns (v0.34: the arms were fixed while the gloves turned)
+  const arms = [1, -1].map((k) => { const m = add(t.wheel.arm, gloveMat, near); m.userData.k = k; return m; });
   const wheels = [], spins = [];
   const FX = prof.W / 2 - prof.FW / 2, RX = prof.W / 2 - prof.RW / 2;
   for (const [x, z, kind] of [[FX, prof.FZ, "front"], [-FX, prof.FZ, "front"], [RX, prof.RZ, "rear"], [-RX, prof.RZ, "rear"]]) {
@@ -693,8 +711,9 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     g.add(w); wheels.push(w); spins.push(s);
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
-  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
+  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armGeo: { grip: t.wheel.grip, elbow: t.wheel.elbow }, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
     paintMats: [paint, wingPaint, helmetMat, gloveMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
+  placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
 }
 // Tyre sidewall colour for the compound on the car now.
@@ -718,6 +737,24 @@ export function setWheels(car, spin, steer) {
   u.wheels.forEach((w, i) => { w.rotation.y = i < 2 ? steer : 0; });
   u.spins.forEach((s) => { s.rotation.x = spin; });
   if (u.wheel) u.wheel.rotation.z = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, -steer * STEER_RATIO));
+  if (u.arms && u.near.visible) placeArms(u);
+}
+// each forearm from its glove (where the turned wheel has it) to its elbow, the elbow following the hand a little (a
+// driver's arm bends with the wheel – an approximation: no joint model)
+const _A = new THREE.Vector3(), _B = new THREE.Vector3(), _D = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion();
+function placeArms(u) {
+  u.wheel.updateMatrix();
+  for (const m of u.arms) {
+    const k = m.userData.k, [gx, gy, gz] = u.armGeo.grip, [ex, ey, ez] = u.armGeo.elbow;
+    _A.set(gx * k, gy, gz).applyMatrix4(u.wheel.matrix);
+    // (the grip's place with the wheel straight: worked out once)
+    const rest = m.userData.rest || (m.userData.rest = new THREE.Vector3(gx * k, gy, gz).applyMatrix4(new THREE.Matrix4().compose(u.wheel.position, new THREE.Quaternion().setFromEuler(new THREE.Euler(u.wheel.rotation.x, 0, 0)), new THREE.Vector3(1, 1, 1))));
+    _B.set(ex * k, ey, ez); _D.copy(_A).sub(rest); _B.addScaledVector(_D, 0.45);
+    _D.copy(_B).sub(_A); const len = _D.length();
+    m.position.copy(_A).addScaledVector(_D, 0.5);
+    m.quaternion.copy(_q.setFromUnitVectors(_Y, _D.normalize()));
+    m.scale.set(1, Math.max(0.05, len - 0.066), 1);
+  }
 }
 // Level of detail: "near" (everything), "mid" (no cockpit interior, hands, steering wheel), "far" (also no wheel covers,
 // deflectors, lights). The same model at every level: only small parts come and go.

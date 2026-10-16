@@ -11,6 +11,9 @@
 //        undercut deep | medium | shallow · top ramp (downwash ramp) | halframp | gully (waterslide / bathtub)
 // airbox: triangle | oval | rect (big, boxy) · cooling: cannon | louvres | bulge | split
 // fsusp / rsusp: push | pull (rods) · blade: the horizontal blade atop the front wing's endplates (2026 Cadillac, Haas)
+// wheel: the steering wheel where a source shows it – style rect | sculpted, ratio (width / height), leds (top-row
+//   shift lights), rotaries, buttons; else the era's neutral wheel (the 4.3" FIA-standard Motion Applied display in
+//   the middle, as every team has)
 // from / until: ISO dates of the events between which the entry applies (a car's upgrade), else the whole season
 export const CAR_SHAPES = [
   // ---- 2025 (FIA 2025 Technical Regulations Issue 03; the research's H/M items) ----
@@ -26,7 +29,7 @@ export const CAR_SHAPES = [
     src: "Mercedes W16: wide vertical inlet, long nose, push-rod front and rear (F1.com tech 2025)" },
   { season: 2025, team: /aston martin/i, id: "amr25", nose: { len: "medium", tip: "mid", w: "wide" }, pod: { inlet: "p", undercut: "medium", top: "gully" }, cooling: "split", fsusp: "push", rsusp: "push",
     src: "AMR25: wide boxy nose, P-shaped inlet, gully top (F1.com tech 2025)" },
-  { season: 2025, team: /alpine/i, id: "a525", nose: { len: "medium", tip: "mid", w: "medium" }, pod: { inlet: "p", undercut: "medium", top: "ramp" }, fsusp: "push", rsusp: "push",
+  { season: 2025, team: /alpine/i, id: "a525", wheel: { style: "rect", ratio: 1.5, leds: 15, rotaries: 8, buttons: 12, src: "Alpine 2025: replica from the team's CAD (284 × 190 mm, TPE grips, 12 buttons, 4 + 4 rotaries, 15 top LEDs) – may differ from the race wheel" }, nose: { len: "medium", tip: "mid", w: "medium" }, pod: { inlet: "p", undercut: "medium", top: "ramp" }, fsusp: "push", rsusp: "push",
     src: "A525: push-rod front (Mercedes-like for 2025), P-shaped inlet, downwash ramp" },
   { season: 2025, team: /haas/i, id: "vf25", nose: { len: "long", tip: "mid", w: "wide" }, pod: { inlet: "wide", undercut: "deep", top: "ramp" }, fsusp: "push", rsusp: "pull",
     src: "VF-25: Ferrari-supplied rear (pull-rod), push-rod front, long nose, hooped inlet" },
@@ -39,7 +42,7 @@ export const CAR_SHAPES = [
     src: "AMR26: wide 'pelican' nose on the second element, tiny letterbox inlet, tube-like down-ramped pods (F1.com Hughes/Piola 9 Feb 2026; The Race 30 Jan 2026)" },
   { season: 2026, team: /audi|sauber/i, id: "audi26", nose: { len: "medium", tip: "low" }, pod: { inlet: "vertical", undercut: "shallow", top: "ramp" }, airbox: "oval", fsusp: "push", rsusp: "push",
     src: "Audi R26: narrow vertical inlet by the chassis, oval airbox (race spec from Bahrain)" },
-  { season: 2026, team: /ferrari/i, id: "sf26", pod: { inlet: "p", undercut: "medium", top: "halframp" }, airbox: "triangle", cooling: "bulge", fin: "serrated", fsusp: "push", rsusp: "push",
+  { season: 2026, team: /ferrari/i, id: "sf26", wheel: { style: "sculpted", leds: 0, rotaries: 3, buttons: 10, src: "Ferrari 2026 wheel (Abu Dhabi FP1 2025-12-08 prototype; italpassion 2026-01-02): slimmer, wavy sculpted top, smaller lower section, lower rotaries 6 → 3" }, pod: { inlet: "p", undercut: "medium", top: "halframp" }, airbox: "triangle", cooling: "bulge", fin: "serrated", fsusp: "push", rsusp: "push",
     src: "SF-26: triangular airbox, serrated shark fin (The Race 23 Jan 2026), P-shaped inlet" },
   { season: 2026, team: /mercedes/i, id: "w17", nose: { len: "short", w: "narrow" }, pod: { inlet: "wide", undercut: "medium", top: "ramp" }, fsusp: "push", rsusp: "push",
     src: "W17: nose on the second front-wing element (F1.com tech 2026)" },
@@ -51,9 +54,9 @@ export const CAR_SHAPES = [
     src: "VCARB 03: huge boxy 'shoebox' airbox – made much smaller from Spa (one car) and Hungary 2026 (both cars)" },
   { season: 2026, team: /racing bulls|visa/i, id: "vcarb03b", nose: { len: "short", tip: "high" }, pod: { inlet: "vertical", top: "halframp" }, airbox: "oval", fsusp: "push", rsusp: "push", from: "2026-07-25",
     src: "VCARB 03 from the Hungarian GP 2026: the smaller airbox (its shape an estimate)" },
-  { season: 2026, team: /haas/i, id: "vf26", nose: { len: "long", tip: "low" }, pod: { inlet: "wide", undercut: "deep", top: "ramp" }, blade: true, fsusp: "push", rsusp: "push",
+  { season: 2026, team: /haas/i, id: "vf26", wheel: { style: "sculpted", leds: 0, rotaries: 3, buttons: 10, src: "Haas: Ferrari-supplied wheel – the SF-26's shape assumed (inference, not sourced)" }, nose: { len: "long", tip: "low" }, pod: { inlet: "wide", undercut: "deep", top: "ramp" }, blade: true, fsusp: "push", rsusp: "push",
     src: "VF-26: blade atop the front wing's endplate; long nose from renders only (low confidence)" },
-  { season: 2026, team: /cadillac/i, id: "cad26", pod: { inlet: "letterbox", undercut: "deep", top: "ramp" }, blade: true, fsusp: "pull", rsusp: "push",
+  { season: 2026, team: /cadillac/i, id: "cad26", wheel: { style: "rect", leds: 15, rotaries: 3, buttons: 12, src: "Cadillac 2026: a refaced Motion Applied TSW-700 – 12 buttons, 3 rotaries, 15 RGB shift LEDs in a top row" }, pod: { inlet: "letterbox", undercut: "deep", top: "ramp" }, blade: true, fsusp: "pull", rsusp: "push",
     src: "Cadillac 2026: pull-rod front, blade atop the front wing's endplate" },
   { season: 2026, team: /alpine/i, id: "a526", pod: { inlet: "wide", undercut: "deep", top: "gully" }, fsusp: "pull", rsusp: "push",
     src: "A526: pull-rod front (high confidence), wide inlet, gully top" },
