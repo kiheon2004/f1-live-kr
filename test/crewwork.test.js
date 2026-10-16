@@ -66,3 +66,16 @@ test("the stop's own clock: the same seconds since the car stood give the same p
   const after = stopChoreo({ wait: 5, D: 7.4 }, 6.0, D26, 1);
   assert.ok(after.car.lift[0] > 0.06, "then the work");
 });
+
+// v0.34 check in the app (Barcelona 2026, Hamilton's first stop): leaving, the car turned out through a wing man and
+// the release controller still standing ahead of it on the fast lane's side.
+test("the car leaves through a clear way: once the jacks drop, nobody stays ahead of the car on the fast lane's side", async () => {
+  const { stopChoreo, stopClock } = await C();
+  for (const left of [1, -1]) {
+    const plan = { wait: 0, D: 2.6 }, { dropAt } = stopClock(plan, 0);
+    const L = stopChoreo(plan, dropAt + 0.4, D26, left);
+    // the way out: ahead of the nose's hub line, from the car's middle out to 2.6 m on the fast lane's side
+    const inWay = L.figures.filter(([a, b]) => a > D26.FZ + 0.3 && -left * b > -0.95 && -left * b < 2.6);
+    assert.deepStrictEqual(inWay.map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)]), [], `garages on the ${left > 0 ? "left" : "right"}`);
+  }
+});

@@ -123,7 +123,8 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
     }
     // the new wheel: held ready ahead of the gun, onto the hub from `on`, fitted at its end; its carrier steps back
     const fit = ss(C.on[0], C.on[1], t), back = ss(C.back[0], C.back[1], t), nFace = inward - sd * 0.4;
-    const na = h.a + lerp(lerp(0.65, 0.3, fit), 0.85, back), nb = sd * (fb + lerp(lerp(0.65, 0.4, fit), 1.0, back));
+    // (stepping back: ahead of the wheel, except on the fast lane's side – the car leaves that way – where it's behind)
+    const na = h.a + lerp(lerp(0.65, 0.3, fit), sd === -left ? -0.7 : 0.85, back), nb = sd * (fb + lerp(lerp(0.65, 0.4, fit), sd === -left ? 1.65 : 1.0, back));   // (and out past the old wheel's man)
     figures.push([na, nb, nFace, back > 0 ? blendPose("reach", "stand", back) : blendPose("carry", "reach", fit), null]);
     if (t < C.on[1]) {
       const ha = na + Math.cos(nFace) * 0.42, hb = nb - Math.sin(nFace) * 0.42;
@@ -138,9 +139,12 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   figures.push([rear, 0, 0, blendPose("jack", "jackDown", liftR / C.lift), "rearJack"]);
   // the front wing's ends, steadying at the sides (hands on the car while it is up), the release controller
   const steady = (liftF + liftR) / (2 * C.lift);
-  figures.push([2.75, 1.25, Math.PI * 0.85, "ready", null], [2.75, -1.25, -Math.PI * 0.85, "ready", null]);
+  // (as the jacks drop, the ones on the fast lane's side ahead of the car – a wing man, the release controller – step
+  // back beside it: the car turns out through where they stood)
+  const wing = (sd) => (sd === -left ? [2.75 - 2.2 * aside, sd * (1.25 + 0.45 * aside)] : [2.75, sd * 1.25]);
+  figures.push([...wing(1), Math.PI * 0.85, "ready", null], [...wing(-1), -Math.PI * 0.85, "ready", null]);
   figures.push([0.15, 1.35, -Math.PI / 2, blendPose("ready", "reach", steady * 0.6), null], [0.15, -1.35, Math.PI / 2, blendPose("ready", "reach", steady * 0.6), null]);
-  figures.push([3.6, -left * 2.15, left > 0 ? Math.PI * 0.75 : -Math.PI * 0.75, s >= dropAt ? "signal" : "stand", null]);
+  figures.push([3.6 - 3.0 * aside, -left * (2.15 + 0.15 * aside), left > 0 ? Math.PI * 0.75 : -Math.PI * 0.75, s >= dropAt ? "signal" : "stand", null]);
   return { figures, kits, car: { lift: [liftF, liftR], off } };
 }
 

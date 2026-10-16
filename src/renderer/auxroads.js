@@ -10,12 +10,13 @@
 // lines: scene lines (pts in scene x, z already); T: { local(x, z) → { s, l, a } | null (the track's nearest sample,
 // lateral and along offsets), edge(s, side) → lateral of that side's tarmac edge (+ left) }.
 // Returns runs: [{ pts: [[x, z]…] (every ≤ 2 m), w, k, sub, joins: [start, end] (meets the track there) }].
-export function auxRuns(lines, T, { step = 2, minLen = 8 } = {}) {
+// (street: a street circuit – its service roads are the town's streets, already in the ground's paint: not drawn again)
+export function auxRuns(lines, T, { step = 2, minLen = 8, street = false } = {}) {
   const runs = [];
   const onTarmac = (q, m = 0) => q && Math.abs(q.a) < 3 && q.l < T.edge(q.s, 1) + m && q.l > T.edge(q.s, -1) - m;
   for (const l of lines) {
     if (l.bridge) continue;
-    const isRace = l.k === "raceway", isService = l.k === "road" && /^(service|track)$/.test(l.sub || "");
+    const isRace = l.k === "raceway", isService = !street && l.k === "road" && /^(service|track)$/.test(l.sub || "");
     if (!isRace && !isService) continue;
     const pts = densify(l.pts, step);
     if (pts.length < 2) continue;
