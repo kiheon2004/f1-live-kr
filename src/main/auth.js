@@ -3,7 +3,7 @@
 // The token is stored encrypted with the macOS keychain (safeStorage) and never leaves this machine; where
 // encryption isn't available it's kept in memory for this run only (src/main/secret.js).
 const path = require("node:path");
-const { BrowserWindow, safeStorage, session } = require("electron");
+const { app, BrowserWindow, safeStorage, session } = require("electron");
 const { saveSecret, loadSecret, removeSecret } = require("./secret");
 
 const LOGIN_URL = "https://account.formula1.com/#/en/login?redirect=https%3A%2F%2Fwww.formula1.com%2Fen";
@@ -57,6 +57,19 @@ class Auth {
       const win = new BrowserWindow({ width: 520, height: 760, parent, modal: false, title: "F1 계정 로그인",
         webPreferences: { partition: PARTITION, contextIsolation: true, sandbox: true } });
       const ses = session.fromPartition(PARTITION);
+      // A record of the window's pages and F1's sign-in requests, for finding where a sign-in fails (signin-log.txt in the
+      // app's data folder, the last attempt only): addresses with every value that could carry a code, a token or an
+      // address blanked, the response codes, the error page's text – never what is typed, never a cookie or a header
+      const logFile = path.join(path.dirname(this.file), "signin-log.txt"), lines = [], t0 = Date.now();
+      const clean = (u) => String(u || "").replace(/([?&#](code|state|nonce|code_challenge|id_token|access_token|token|session|email|username|login_hint|sid|flowId|interactionId)=)[^&#]*/gi, "$1…").slice(0, 300);
+      const log = (...a) => { lines.push(`${((Date.now() - t0) / 1000).toFixed(1)}s ${a.join(" ")}`); try { require("node:fs").writeFileSync(logFile, lines.join("\n") + "\n"); } catch {} };
+      log("open", app.getVersion(), "locale", app.getLocale(), "ua", win.webContents.getUserAgent());
+      const onDone = (d) => { if (d.resourceType === "mainFrame" || /formula1\.com\/(as|davinci)\/|pingone|authorize|subscriber|authenticate|\/v\d\/account/i.test(d.url)) log("req", d.statusCode ?? d.error, d.method, d.resourceType, clean(d.url)); };
+      ses.webRequest.onCompleted({ urls: ["*://*/*"] }, onDone);
+      ses.webRequest.onErrorOccurred({ urls: ["*://*/*"] }, (d) => { if (d.resourceType === "mainFrame") onDone(d); });
+      win.webContents.on("did-navigate", (_e, url, code) => log("page", code, clean(url)));
+      win.webContents.on("did-fail-load", (_e, code, desc, url) => log("fail", code, desc, clean(url)));
+      win.webContents.on("did-finish-load", async () => { const t = await win.webContents.executeJavaScript("document.body ? document.body.innerText.slice(0, 300) : ''").catch(() => ""); if (/UNEXPECTED_ERROR|error/i.test(t) && t.length < 300) log("errorpage", clean(win.webContents.getURL()), JSON.stringify(t.replace(/\s+/g, " "))); });
       // (the window presents itself as the Chrome it is built on – without the app's and Electron's names, which some
       // sign-in services turn away: F1's answered the app's window with "UNEXPECTED_ERROR" on 2026-10-16)
       const ua = (win.webContents.getUserAgent() || "").replace(/\s+(LiveTimingKR|f1-live-kr|Electron)\/\S+/gi, "");
