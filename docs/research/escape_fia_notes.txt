@@ -1,0 +1,102 @@
+Monza | 2025 | 2025 Italian Grand Prix | T1-T2 (first chicane) | escape road | Escape road at the first chicane (cars missing T1) | End of the escape road | Four rows of polystyrene blocks; grass only if unavoidable | Go around the end of each row of blocks
+Monza | 2025 | 2025 Italian Grand Prix | T4-T5 (Variante della Roggia) | escape road | Going straight at T4, passing to the right of the gravel trap | Far end of the asphalt run-off area after the exit of T5 | Yellow line, yellow bollard, gravel trap | Stay to the RIGHT of the yellow line and the yellow bollard
+Monza | 2025 | 2025 Italian Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at Safety Car Line 1 | - | Bollard | Passing to the RIGHT of the bollard = entering the pit lane
+Monza | 2025 | 2025 Italian Grand Prix | Pit exit (after SC line 2) | pit exit | Pit exit road | Track after the continuous white line | Continuous white line after SC line 2 | Cars leaving the pits stay to the RIGHT of the line
+Monza | 2025 | 2025 Italian Grand Prix | Pit exit road / track edge | track limits | Pit exit road | - | Dotted white line | Dotted white line intersecting pit exit road = track edge
+Monza | 2025 | 2025 Italian Grand Prix | Pit exit (recon laps) | pit exit | Pit exit road during reconnaissance laps | Practice-start cars join from the pit exit road; others cross onto racing line before the dashed line | White line pit exit road/circuit; dashed line where track edge intersects pit exit road; queue on RHS | Non
+Monza | 2025 | 2025 Italian Grand Prix | T11 (Parabolica) exit | track limits | Exit of T11 | - | - | -
+Monza | 2026 | 2026 Italian Grand Prix | T1-T2 (first chicane) | escape road | Escape road at the first chicane | End of the escape road | Four rows of polystyrene blocks; grass only if unavoidable | Go around the end of each row
+Monza | 2026 | 2026 Italian Grand Prix | T4-T5 | escape road | Going straight at T4, passing right of the gravel trap | Far end of the asphalt run-off after exit of T5 | Yellow line, yellow bollard | Stay to the RIGHT of yellow line and yellow bollard
+Monza | 2026 | 2026 Italian Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC Line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Monza | 2026 | 2026 Italian Grand Prix | Pit exit | pit exit | Pit exit road | SC line 2 | Pit exit white line (shortened to finish at SC line 2); dotted white line = track edge | -
+Monza | 2026 | 2026 Italian Grand Prix | Pit exit (recon laps) | pit exit | Pit exit road during reconnaissance laps | Join from pit exit road (practice start) / racing line before dashed line (others) | White line; dashed line; queue on RHS | Non-practice-start cars must NOT cross back
+Monza | 2026 | 2026 Italian Grand Prix | T11 | track limits | T11 | - | - | -
+Monaco | 2025 | 2025 Monaco Grand Prix | T10-T11 (Nouvelle Chicane) | escape road | Escape road at the chicane | Track, only when marshal-operated lights turn green | Marshal-operated lights | -
+Monaco | 2025 | 2025 Monaco Grand Prix | T10-T11 cut | corner bypass | Cutting the chicane | Position must be returned before T12 | - | -
+Monaco | 2025 | 2025 Monaco Grand Prix | Pit exit / T1 | pit exit | Pit exit road | Practice-start cars rejoin after T1 via pit exit road; others cross line on LHS early | White line separating pit exit road from track | Non-practice-start cars cross on the LHS at earliest opportunity
+Monaco | 2025 | 2025 Monaco Grand Prix | Pit exit (recon laps) | pit exit | Pit exit road | - | White line | Crossing allowed only during recon laps
+Monaco | 2026 | 2026 Monaco Grand Prix | T10-T11 (Chicane) | escape road | Escape road at the chicane | Track, only when marshal-operated lights are green | Marshal-operated lights | -
+Monaco | 2026 | 2026 Monaco Grand Prix | T10-T11 cut | corner bypass | Cutting the chicane | Position returned before T12 | - | -
+Monaco | 2026 | 2026 Monaco Grand Prix | Pit exit / T1 | pit exit | Pit exit road | Practice-start cars rejoin after T1; others cross on LHS early | Pit exit white line | LHS
+Baku | 2025 | 2025 Azerbaijan Grand Prix | Pit entry | pit entry | Pit entry road, junction of dashed and solid white lines | - | Dashed white line meeting solid white line | Passing on the LEFT of the junction = entering pit lane
+Baku | 2025 | 2025 Azerbaijan Grand Prix | Pit exit | pit exit | Pit exit road | - | Black line painted in the pit exit road | No part of a tyre may cross it
+Baku | 2026 | 2026 Azerbaijan Grand Prix | Pit entry | pit entry | Intersection of dashed line with continuous line | - | Dashed line / continuous line | LEFT-hand side (corrected from "right" in V1)
+Baku | 2026 | 2026 Azerbaijan Grand Prix | Pit exit | pit exit | Pit exit road | - | Line painted in pit exit road | No part of a tyre may cross
+Baku | 2026 | 2026 Azerbaijan Grand Prix | Pit exit (recon laps) | pit exit | Pit exit road LHS practice-start boxes | Racing line | White line pit exit road/circuit | Non-practice-start cars must not cross back
+Melbourne | 2025 | 2025 Australian Grand Prix | Pit entry (SC line 1) | pit entry | SC line 1 | - | Solid white line separating pit entry road from track | Crossing SC1 to the RIGHT of the line = entering pit lane
+Melbourne | 2025 | 2025 Australian Grand Prix | Pit exit | pit exit | Pit exit road | - | Continuous and dotted white line across pit exit | Marks track edge; recon-lap crossing only after the dotted line
+Melbourne | 2026 | 2026 Australian Grand Prix | Pit entry (SC line 1) | pit entry | SC line 1 | - | Solid white line | RIGHT of the line = entering pit lane
+Melbourne | 2026 | 2026 Australian Grand Prix | Pit exit | pit exit | Pit exit road | - | Pit exit white line and SC line 2 (widened) | -
+Shanghai | 2025 | 2025 Chinese Grand Prix | Pit entry | pit entry | Pit entry road | - | Solid white line (stay right), dotted white line on left (may cross), SC line 1 | Stay RIGHT of solid line; no overtaking in dotted-line area
+Shanghai | 2025 | 2025 Chinese Grand Prix | Pit entry (SC line 1) | pit entry | Dotted line after SC line 1 | - | Dotted line; solid white line | -
+Shanghai | 2025 | 2025 Chinese Grand Prix | Pit exit | pit exit | Pit exit | - | Pit exit line incl. line continuing after SC2; continuous+dotted white line = track edge | -
+Shanghai | 2026 | 2026 Chinese Grand Prix | Pit entry | pit entry | Pit entry road | - | Solid white line; dotted line; SC line 1 | Stay RIGHT of solid line
+Shanghai | 2026 | 2026 Chinese Grand Prix | Pit entry road LH turn | track limits | Pit entry road left-hand turn | - | Area with Qatar advertisement | -
+Shanghai | 2026 | 2026 Chinese Grand Prix | Pit exit | pit exit | Pit exit road | - | White line on LH side of pit exit road; continuous+dotted line = track edge | Practice-start cars must not cross LH white line
+Suzuka | 2025 | 2025 Japanese Grand Prix | Pit entry | pit entry | Bollard at pit entry | - | Bollard | RIGHT of bollard = entering pit lane
+Suzuka | 2025 | 2025 Japanese Grand Prix | Pit exit | pit exit | Pit exit road | - | Dotted white line across pit exit = track edge | -
+Suzuka | 2026 | 2026 Japanese Grand Prix | Pit entry | pit entry | Bollard at pit entry | - | Bollard | RIGHT of bollard = entering pit lane
+Suzuka | 2026 | 2026 Japanese Grand Prix | Pit exit | pit exit | Pit exit | - | Pit exit line incl. line after SC2; dotted line = track edge | -
+Sakhir | 2025 | 2025 Bahrain Grand Prix | Pit entry | pit entry | Bollard at pit entry | - | Bollard | RIGHT of bollard = entering pit lane
+Sakhir | 2025 | 2025 Bahrain Grand Prix | Pit exit | pit exit | Pit exit road | - | Dotted white line across pit exit = track edge | Recon-lap crossing after the dotted line
+Jeddah | 2025 | 2025 Saudi Arabian Grand Prix | Pit entry | pit entry | White line starting ~1.5 m after DRS Activation 3 line | - | White line; painted area between pit entry and track | Keep LEFT of the white line; no tyre may cross the painted area in any direction
+Jeddah | 2025 | 2025 Saudi Arabian Grand Prix | Pit entry (SC line 1) | pit entry | After SC line 1 | - | - | LEFT-hand side = entering pit lane
+Miami | 2025 | 2025 Miami Grand Prix | Pit entry (SC line 1) | pit entry | SC line 1 | - | White line separating track from pit entry road | RIGHT of the line = entering pit lane
+Miami | 2026 | 2026 Miami Grand Prix | Pit entry | pit entry | Bollard at pit entry; then two bollards in pit entry road | - | 1st and 2nd bollard | RIGHT of 1st bollard, LEFT of 2nd bollard (driver's view)
+Miami | 2026 | 2026 Miami Grand Prix | Pit exit | pit exit | Pit exit road | - | Pit exit white line (realigned) | -
+Imola | 2025 | 2025 Emilia Romagna Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Barcelona | 2025 | 2025 Spanish Grand Prix | T1-T2 (LHS) to T3 | designated rejoin route | Exceeding track limits on the LHS at T1 or T2 | T3 | Two bollards | Pass to the LEFT (LHS) of the two bollards
+Barcelona | 2025 | 2025 Spanish Grand Prix | Pit entry | pit entry | Bollard at pit entry | - | Bollard | RIGHT of bollard = entering pit lane
+Barcelona | 2026 | 2026 Barcelona-Catalunya Grand Prix | T1 escape road | escape road (change) | T1 escape road | - | Bollards removed at end of T1 escape road | -
+Barcelona | 2026 | 2026 Barcelona-Catalunya Grand Prix | Pit entry | pit entry | Bollard at pit entry | - | Bollard | RIGHT of bollard = entering pit lane
+Barcelona | 2026 | 2026 Barcelona-Catalunya Grand Prix | Pit exit / T1 | pit exit | Pit exit road | Practice-start cars rejoin after T1; others cross on LHS early | Pit exit white line | LHS
+Montreal | 2025 | 2025 Canadian Grand Prix | T1 | designated rejoin route | Going straight into the T1 run-off | As shown in drawing (V1: far end of asphalt run-off at entry of T2) | PZero ground branding (V1) | V1: entering run-off right of the PZero branding
+Montreal | 2025 | 2025 Canadian Grand Prix | T9 | paved run-off rejoin | Passing completely left of the orange apex kerb | Far end of the asphalt run-off | Orange apex kerb, orange line | Keep completely LEFT of the orange line
+Montreal | 2025 | 2025 Canadian Grand Prix | T13-T14 (final chicane) | paved run-off rejoin | Passing completely left of the orange apex kerb at T13 | Far end of the asphalt run-off (after T14) | Orange apex kerb, orange line | Keep completely LEFT of the orange line
+Montreal | 2025 | 2025 Canadian Grand Prix | Pit entry / pit exit | pit entry | Pit entry road; pit exit road | - | Blue-highlighted white line (pit entry); solid white lines on RHS | Stay LEFT of the solid white line on the RHS (both roads)
+Montreal | 2026 | 2026 Canadian Grand Prix | T1 | designated rejoin route | Going straight into the T1 run-off | As shown in drawing | - | -
+Montreal | 2026 | 2026 Canadian Grand Prix | T9 | paved run-off rejoin | Passing completely left of the orange apex kerb | Far end of the asphalt run-off | Orange apex kerb | Keep completely LEFT
+Montreal | 2026 | 2026 Canadian Grand Prix | T13-T14 | paved run-off rejoin | Passing completely left of the orange apex kerb at T13 | Far end of the asphalt run-off | Orange apex kerb, orange line | Keep completely LEFT of the orange line
+Montreal | 2026 | 2026 Canadian Grand Prix | Pit entry / pit exit | pit entry | Pit entry road; pit exit road | - | Blue-highlighted white line; solid white lines on RHS; new dashed line before SC line 1 | Stay LEFT of the solid white line on the RHS
+Spielberg | 2025 | 2025 Austrian Grand Prix | Pit entry | pit entry | White line from the 50 m brake marker board; dashed line in pit entry road | - | White line; dashed line | Keep RIGHT of white line; crossing dashed line with four tyres = entering pit lane
+Spielberg | 2026 | 2026 Austrian Grand Prix | Pit entry | pit entry | White line from 50 m board; dashed line | - | White line; dashed line | Keep RIGHT; four tyres over dashed line = entering pit lane
+Spielberg | 2026 | 2026 Austrian Grand Prix | T1 / T2-T7 shortcut | run-off (change) | - | - | Closure of opening at T1 RHS; improved barrier at T2-T7 shortcut | -
+Silverstone | 2025 | 2025 British Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Silverstone | 2026 | 2026 British Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Spa | 2025 | 2025 Belgian Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Spa | 2025 | 2025 Belgian Grand Prix | After T1 to pit exit (post-race) | designated route (end of race) | Immediately after T1 after end-of-race signal | Pit exit road, up the fast lane to Parc Ferme | - | Turn right after T1
+Spa | 2026 | 2026 Belgian Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Spa | 2026 | 2026 Belgian Grand Prix | After T1 to pit exit (post-race) | designated route (end of race) | Immediately after T1 after end-of-race signal | Pit exit road, fast lane to Parc Ferme | - | Turn right after T1
+Hungaroring | 2025 | 2025 Hungarian Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Hungaroring | 2025 | 2025 Hungarian Grand Prix | Pit exit (after SC line 2) | pit exit | Pit exit | - | Continuous white line after SC2; dotted white line = track edge | Stay RIGHT of the line
+Hungaroring | 2026 | 2026 Hungarian Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Hungaroring | 2026 | 2026 Hungarian Grand Prix | Pit exit | pit exit | Pit exit | - | Pit exit line incl. line after SC2; dotted line = track edge | -
+Zandvoort | 2025 | 2025 Dutch Grand Prix | T1 | escape road | Going straight at T1 | Exit of T1 | Small road along front of the tyre barrier | -
+Zandvoort | 2025 | 2025 Dutch Grand Prix | T8 | escape road | Going straight at T8 | T9 | Small road along front of the tyre barrier | -
+Zandvoort | 2025 | 2025 Dutch Grand Prix | T11 | escape road | Going straight at T11 | T12 | Small road along front of the tyre barrier | -
+Zandvoort | 2025 | 2025 Dutch Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Zandvoort | 2026 | 2026 Dutch Grand Prix | T1 | escape road | Going straight at T1 | Exit of T1 | Small road along tyre barrier | -
+Zandvoort | 2026 | 2026 Dutch Grand Prix | T8 | escape road | Going straight at T8 | T9 | Small road along tyre barrier | -
+Zandvoort | 2026 | 2026 Dutch Grand Prix | T11 | escape road | Going straight at T11 | T12 | Small road along tyre barrier | -
+Zandvoort | 2026 | 2026 Dutch Grand Prix | Pit entry (SC line 1) | pit entry | Bollard at SC line 1 | - | Bollard | RIGHT of bollard = entering pit lane
+Madring Madrid | 2026 | 2026 Spanish Grand Prix (Madrid) | T1-T2 | paved run-off rejoin | Going straight, missing T2, passing right of the yellow line | Far end of the run-off area after the exit of T2 | Yellow line, bollard | Stay on the RIGHT of the yellow line/bollard
+Madring Madrid | 2026 | 2026 Spanish Grand Prix (Madrid) | T5-T5A | paved run-off rejoin | Going straight, missing T5A, passing right of the yellow line | Far end of the run-off area at T6 | Yellow line, bollard | Stay on the RIGHT of the yellow line/bollard
+Madring Madrid | 2026 | 2026 Spanish Grand Prix (Madrid) | T11 (inside) | designated rejoin route | Run-off area inside T11 | Track | Polystyrene block | Pass on the LEFT of the block
+Madring Madrid | 2026 | 2026 Spanish Grand Prix (Madrid) | Pit entry | pit entry | Intersection of dashed line with continuous line | - | Dashed / continuous line | RIGHT-hand side = entering pit lane
+Singapore | 2025 | 2025 Singapore Grand Prix | T1-T2-T3 | paved run-off rejoin | Failing T2, passing completely right of the orange kerb/line element | Outside of T3 | Orange kerb/line element; red and white polystyrene block | Keep to the RIGHT of the polystyrene block
+Singapore | 2025 | 2025 Singapore Grand Prix | Pit exit | pit exit | Pit exit road | - | Blue-arrow line (pit exit/track); white line on RHS of pit exit road | No tyre may cross either line (exceptions: recon laps / passing practice-start car)
+Singapore | 2025 | 2025 Singapore Grand Prix | Pit entry | pit entry | Junction of dashed and solid white lines | - | Dashed/solid white line | LEFT of junction = entering pit lane
+Singapore | 2026 | 2026 Singapore Grand Prix | T1-T2-T3 | paved run-off rejoin | Failing T2, passing completely right of orange kerb/line element | Outside of T3 | Orange kerb/line element; red and white polystyrene block | Keep RIGHT of the block
+Singapore | 2026 | 2026 Singapore Grand Prix | Pit exit | pit exit | Pit exit road | - | White line on RHS of pit exit road | No tyre may cross
+Singapore | 2026 | 2026 Singapore Grand Prix | Pit entry | pit entry | Junction of dashed and solid white lines | - | Dashed/solid white line | LEFT of junction = entering pit lane
+Austin COTA | 2025 | 2025 United States Grand Prix | Pit entry | pit entry | Bollard at pit entry | - | Bollard | LEFT of bollard = entering pit lane
+Mexico City | 2025 | 2025 Mexico City Grand Prix | T4-T5 | designated rejoin route | Missing T4 apex, crossing the solid yellow line across the run-off with all 4 wheels | After T5 via the asphalt rejoin route (highlighted orange) | Solid yellow line; asphalt rejoin route; grass only if unavoidable | -
+Mexico City | 2025 | 2025 Mexico City Grand Prix | T11 | designated rejoin route | Passing completely behind the red/white apex kerb of T11 | Exit of the corner | Two polystyrene block arrangements | RIGHT of the first block arrangement, then wholly LEFT of the second block
+Mexico City | 2025 | 2025 Mexico City Grand Prix | Pit entry | pit entry | Bollard at pit entry; white line on LHS of pit entry road | - | Bollard; white line | RIGHT of bollard = entering pit lane; no tyre may cross LHS line
+Interlagos | 2025 | 2025 Sao Paulo Grand Prix | Pit entry | pit entry | After SC line 1; pit entry road | - | Solid white line; 1st and 2nd bollard | Keep LEFT of solid line; LEFT of 1st bollard, RIGHT of 2nd bollard
+Interlagos | 2025 | 2025 Sao Paulo Grand Prix | Pit exit | pit exit | End of pit exit road (after practice start area) | - | Marshal blue flag; hatched zone removed | -
+Las Vegas | 2025 | 2025 Las Vegas Grand Prix | Pit entry | pit entry | After SC line 1 | - | Solid white line (highlighted blue) | Keep LEFT of the line; LEFT side = entering pit lane
+Lusail | 2025 | 2025 Qatar Grand Prix | Pit entry | pit entry | Bollard at pit entry | - | Bollard | Keep RIGHT of bollard; RIGHT = entering pit lane
+Lusail | 2025 | 2025 Qatar Grand Prix | Pit exit | pit exit | Pit exit road | - | Dotted white line = track edge | -
+Yas Marina | 2025 | 2025 Abu Dhabi Grand Prix | Pit entry (SC line 1) | pit entry | Orange bollard at pit entry / SC line 1 | - | Solid white line; orange bollard | Keep RIGHT of solid line; RIGHT of orange bollard = entering pit lane
+Yas Marina | 2025 | 2025 Abu Dhabi Grand Prix | Pit exit road | pit exit | Pit exit road | - | - | No overtaking

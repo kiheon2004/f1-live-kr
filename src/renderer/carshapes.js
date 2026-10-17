@@ -2,7 +2,7 @@
 // the era's car (car3d.js body2022 / body2026) as changes to its sections and parts. Photo-based approximations: no
 // team publishes its car's shape; the proportions stay the era's (wheelbase, width, wheels, cockpit, camera mounts –
 // the model contract of car3d.js is unchanged). "unknown" in the research keeps the era's neutral shape for that part.
-// Launch renders and show cars were not used. Research: ~/projects/f1kr-work/v035/research/cars2025.md, cars2026.md
+// Launch renders and show cars were not used. Research: docs/research/cars2025.md, cars2026.md, wheels.md
 // (each item with its source, date and confidence).
 //
 // nose:  len  long | medium | short (where the tip ends: on the front wing's main plane or on its second element)

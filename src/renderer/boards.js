@@ -4,7 +4,7 @@
 // corner – so nothing is copied to the corners no source covers. Where a board stands along the approach is the
 // corner's marker (F1's corner data) less its distance – an estimate (a board measures to the braking reference, not to
 // the marker); the side as the source says, or noted as estimated.
-// Research: ~/projects/f1kr-work/v035/research/monaco_start_boards.md part C.
+// Research: docs/research/monaco_start_boards.md part C.
 export const BOARDS = [
   { venue: 7, seasons: [2025, 2025], turn: 1, values: [50], side: null, src: "2025 Belgian GP RD event notes (24 Jul 2025): '50 m brake marker board before Turn 1'" },
   { venue: 39, seasons: [2026, 2026], turn: 1, values: [100], side: "L", src: "2026 Italian GP RD competition notes (3 Sep 2026): 100 m brake marker before T1 (LHS kerb reference)" },
