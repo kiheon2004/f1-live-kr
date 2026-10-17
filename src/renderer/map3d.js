@@ -10,7 +10,7 @@ import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
-import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights } from "./startplan.js";
+import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE } from "./crew.js";
@@ -1540,8 +1540,22 @@ function updateCars(dt) {
 }
 // the gantry's reds before a standing start (startplan.js startLights: a replay's estimate – the data has lights out only)
 function updateStartLights(src, t) {
-  const lamps = world?.group.getObjectByName("grid")?.userData.lamps; if (!lamps || !src) return;
-  const S = startState(src, t), L = startLights(S.hist.starts(src.isLive ? t : Infinity), t, { live: !!src.isLive });
+  const lamps = world?.group.getObjectByName("grid")?.userData.lamps;
+  // (no gantry or source: no lights and no note left from before)
+  if (!lamps || !src) { const el = document.getElementById("startLightNote"); if (el) el.hidden = true; return; }
+  // (a replay's standing starts at the moment the field set off by its telemetry where that differs from the race clock's
+  // – the clock isn't always lights out; live: as the clock says, nothing ahead)
+  const S = startState(src, t);
+  if (!S.launches) S.launches = new Map();
+  const starts = S.hist.starts(src.isLive ? t : Infinity).map((s) => {
+    // (a restart race control doesn't name: standing only if the field is seen setting off together from standstill)
+    if (src.isLive || s.standing === false) return s;
+    if (!S.launches.has(s.t)) S.launches.set(s.t, fieldLaunch(src.car, s));
+    const f = S.launches.get(s.t);
+    if (s.standing !== true) return f ? { ...s, t: f.t, standing: true, from: "field" } : s;
+    return f && Math.abs(f.t - s.t) > 3000 ? { ...s, t: f.t, from: "field" } : s;
+  });
+  const L = startLights(starts, t, { live: !!src.isLive });
   lamps.forEach((m, i) => { const on = i < L.lit; if ((m.emissiveIntensity > 0.5) !== on) { m.emissiveIntensity = on ? 1.1 : 0.04; m.color.set(on ? 0x500000 : 0x180505); m.emissive.set(on ? 0xff0a00 : 0xff2a1a); } });
   const note = L.est ? "출발 신호: 데이터에는 소등 시각만 있어요 – 빨간불이 켜지는 시점은 추정(1초 간격, 소등 2초 전 5개 점등)" : null;
   let el = document.getElementById("startLightNote");

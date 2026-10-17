@@ -262,3 +262,25 @@ test("start lights: one red a second before a standing start, out at the start; 
   assert.strictEqual(at(897000), 0, "rolling start: no reds");
   assert.strictEqual(at(97000, { live: true }), 0, "live: nothing ahead of the start");
 });
+
+// v0.36 review: a restart whose kind isn't known (standing null) lit the reds; only a known standing start does
+test("start lights: none before a restart whose kind isn't known", async () => {
+  const { startLights } = await import("../src/renderer/startplan.js");
+  assert.strictEqual(startLights([{ t: 10000, standing: null }], 9000).lit, 0);
+  assert.strictEqual(startLights([{ t: 10000, standing: true }], 7000).lit, 4);
+  assert.strictEqual(startLights([{ t: 10000 }], 9000).lit, 0);
+});
+
+// v0.36: the clock isn't always lights out (Sepang 2026: ~6 min behind the safety car first) – the field's own launch
+// from its telemetry, when it shows one
+test("start lights: lights out where the field set off, by its telemetry", async () => {
+  const { fieldLaunch } = await import("../src/renderer/startplan.js");
+  const car = (go) => { const t = [], v = []; for (let ms = 0; ms <= 400000; ms += 250) { t.push(ms); v.push(ms < go ? 0 : 100); } return { t, v }; };
+  const cars = {}; for (let i = 0; i < 20; i++) cars[i] = car(361000 + i * 60);
+  assert.strictEqual(fieldLaunch(cars, { t: 10000 }).t, 361000);
+  // the cars leaving one by one behind the safety car at the clock's start, then setting off together from the grid
+  const sc = {}; for (let i = 0; i < 20; i++) { const tt = [], v = []; for (let ms = 0; ms <= 400000; ms += 250) { tt.push(ms); v.push(ms < 12000 + i * 2500 ? 0 : ms < 300000 ? 80 : ms < 361000 ? 0 : 100); } sc[i] = { t: tt, v }; }
+  assert.strictEqual(fieldLaunch(sc, { t: 10000 }).t, 361000);
+  const rolling = {}; for (let i = 0; i < 20; i++) rolling[i] = { t: [0, 400000], v: [150, 150] };
+  assert.strictEqual(fieldLaunch(rolling, { t: 10000 }), null, "no standstill: nothing found");
+});

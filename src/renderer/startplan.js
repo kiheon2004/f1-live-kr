@@ -251,9 +251,34 @@ export function placeWithout({ start, kind, slot, car, lag = 0, Sv, t, line, L, 
 export function startLights(starts, t, { hold = 2, live = false } = {}) {
   if (live) return { lit: 0, est: false, start: null };
   for (const s of starts) {
-    if (s.standing === false) continue;
+    // (only a start known to be standing: the race start, or race control's "STANDING START" – one whose kind isn't
+    // known (standing null) shows no lights; v0.35 lit them for it)
+    if (s.standing !== true) continue;
     const on = s.t - hold * 1000 - 4000;
     if (t >= on && t < s.t) return { lit: Math.min(5, Math.floor((t - on) / 1000) + 1), est: true, start: s.t };
   }
   return { lit: 0, est: false, start: null };
+}
+
+// When the field actually set off at a standing start, by the cars' own telemetry: the earliest moment at which most of
+// the cars standing still (≥ 2 s) move off within `spread` ms of one another, from `before` ms ahead of the race clock's
+// start (s.t) to `after` ms past it – the race clock can run long before the lights (Sepang 2026: ~6 min behind the safety
+// car first). → { t, n } (the launch, cars in it) or null when the data doesn't show one (then the clock's moment stands).
+export function fieldLaunch(cars, s, { before = 5000, after = 12 * 60000, spread = 3000, share = 0.5 } = {}) {
+  const offs = [];
+  for (const car of Object.values(cars || {})) {
+    const T = car?.t, V = car?.v; if (!T?.length) continue;
+    let still = null;
+    for (let i = 0; i < T.length; i++) {
+      if (T[i] < s.t - before - 5000) continue; if (T[i] > s.t + after) break;
+      if (V[i] <= PLAN.still) { if (still == null) still = T[i]; }
+      else { if (still != null && T[i] - still >= 2000 && T[i] >= s.t - before) offs.push(T[i]); still = null; }   // (every set-off: the field's is the one they share)
+    }
+  }
+  const n = Object.keys(cars || {}).length; if (!n || !offs.length) return null;
+  offs.sort((a, b) => a - b);
+  for (let i = 0; i < offs.length; i++) { let j = i; while (j + 1 < offs.length && offs[j + 1] - offs[i] <= spread) j++; if (j - i + 1 >= n * share) return { t: offs[i], n: j - i + 1 }; }
+  // (Sepang 2026: the cars left one by one behind the safety car when the clock started, then stood on the grid and set
+  // off together 6.5 min later – the moment they share is the start)
+  return null;
 }
