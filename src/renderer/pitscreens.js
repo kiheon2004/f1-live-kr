@@ -9,15 +9,15 @@ export function driverPanel({ d, colour = "#888", line = null, app = null, car =
   const st = app?.Stints ? Object.values(app.Stints) : [], s = st[st.length - 1] || null;
   const pos = line && +line.Position > 0 ? +line.Position : null;
   const lap = line?.NumberOfLaps != null ? +line.NumberOfLaps : null;
-  const g = line?.IntervalToPositionAhead?.Value || "";
+  const g = String(line?.IntervalToPositionAhead?.Value ?? "").trim(), lapsG = /^\+?(\d+)\s*L(AP)?S?$/i.exec(g);
   const m = {
     num: d.num, tla: d.tla || d.num, colour,
-    pos, laps: lap,
-    gap: pos === 1 ? "LEADER" : g ? (/^\d/.test(g) ? "+" + g : g) : null,
+    pos, laps: Number.isFinite(lap) ? lap : null,
+    gap: pos === 1 ? "LEADER" : lapsG ? `+${lapsG[1]} LAP` : /^\+?\d+(\.\d+)?$/.test(g) ? (g.startsWith("+") ? g : "+" + g) : null,
     last: line?.LastLapTime?.Value || null,
     tyre: s?.Compound ? { c: s.Compound[0], age: s.TotalLaps != null ? +s.TotalLaps : null, isNew: s.New === "true" || s.New === true } : null,
     state: line?.Retired || line?.Stopped ? "OUT" : line?.InPit ? "IN PIT" : line?.PitOut ? "PIT EXIT" : null,
-    speed: car ? Math.round(car.speed) : null, gear: car ? (car.gear === 0 ? "N" : String(car.gear)) : null,
+    speed: car && Number.isFinite(car.speed) ? Math.round(car.speed) : null, gear: car && Number.isFinite(car.gear) ? (car.gear === 0 ? "N" : String(car.gear)) : null,
   };
   m.key = JSON.stringify(m);
   return m;

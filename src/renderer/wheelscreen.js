@@ -22,11 +22,14 @@ export function screenModel({ car, line = null, laps = null, season = null }) {
   const done = line && line.NumberOfLaps != null ? +line.NumberOfLaps : null;
   let lap = laps?.CurrentLap != null && done != null ? Math.min(+laps.CurrentLap, done + 1) : done != null ? done + 1 : null;
   if (laps?.TotalLaps && lap > +laps.TotalLaps) lap = +laps.TotalLaps;
-  const g = line?.IntervalToPositionAhead?.Value ?? null;
-  const gap = pos === 1 ? "LEADER" : g && /^\+?\d/.test(g) ? (g.startsWith("+") ? g : "+" + g) : g && /LAP/i.test(g) ? g.toUpperCase() : null;
+  // the gap to the car ahead: seconds ("+1.204"), or laps ("1 L" / "1 LAP" → "+1 LAP"); anything else (empty, partial) none
+  const g = String(line?.IntervalToPositionAhead?.Value ?? "").trim();
+  const lapsG = /^\+?(\d+)\s*L(AP)?S?$/i.exec(g), secs = /^\+?\d+(\.\d+)?$/.test(g);
+  const gap = pos === 1 ? "LEADER" : lapsG ? `+${lapsG[1]} LAP` : secs ? (g.startsWith("+") ? g : "+" + g) : null;
   const out = line && (line.Retired || line.Stopped) ? "OUT" : line?.InPit ? "PIT" : null;
   const drs = !stale && season != null && season <= 2025 && car.drs != null ? (car.drs >= 10 ? "open" : car.drs === 8 ? "armed" : null) : null;
-  const m = { gear, speed: stale ? null : Math.round(car.speed), rev: Math.round(rev * 10) / 10, pos, lap, gap, out, drs, stale };
+  const sp = stale ? null : Math.round(car.speed);
+  const m = { gear: !stale && !Number.isFinite(car.gear) ? "–" : gear, speed: Number.isFinite(sp) ? sp : null, rev: Number.isFinite(rev) ? Math.round(rev * 10) / 10 : 0, pos, lap: Number.isFinite(lap) ? lap : null, gap, out, drs, stale };
   m.key = JSON.stringify(m);
   return m;
 }

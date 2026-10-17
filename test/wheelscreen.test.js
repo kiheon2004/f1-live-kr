@@ -89,3 +89,18 @@ test("wheel screens: a screen handed to another driver is wiped at once and pain
   painted.length = 0; ws.reset(); assert.ok(painted.includes("NO DATA")); assert.strictEqual(ws.slots[0].painted, null);
   ws.assign([{ num: "16" }]); assert.strictEqual(ws.update(get, 1101), 1);
 });
+
+// v0.36: what the screens show from partial or odd timing – laps-down gaps, empty strings, missing numbers – never
+// "NaN" / "undefined", seconds and laps told apart; the wheel's lap the one being driven, the wall's laps completed
+test("wheel screen and pit wall panel: laps-down gaps, partial data, no NaN or undefined", async () => {
+  const { screenModel } = await import("../src/renderer/wheelscreen.js"), { driverPanel } = await import("../src/renderer/pitscreens.js");
+  const lines = [{ Position: "15", NumberOfLaps: 40, IntervalToPositionAhead: { Value: "1 L" } }, { Position: "16", NumberOfLaps: 39, IntervalToPositionAhead: { Value: "+2 LAPS" } },
+    { Position: "3", NumberOfLaps: 41, IntervalToPositionAhead: { Value: "" } }, { Position: "4", IntervalToPositionAhead: {} }, { Position: "5", NumberOfLaps: 41, IntervalToPositionAhead: { Value: "+0.8" } }];
+  const w = lines.map((line) => screenModel({ car: { speed: NaN, rpm: undefined, gear: undefined }, line, laps: { CurrentLap: 42, TotalLaps: 57 }, season: 2025 }));
+  assert.deepStrictEqual(w.map((m) => m.gap), ["+1 LAP", "+2 LAP", null, null, "+0.8"]);
+  assert.deepStrictEqual(w.map((m) => m.lap), [41, 40, 42, null, 42], "the lap being driven (completed + 1, never past the leader's); unknown without its laps");
+  for (const m of w) assert.ok(!/NaN|undefined/.test(m.key), m.key);
+  const p = lines.map((line) => driverPanel({ d: { num: "1", tla: "X" }, line, car: { speed: NaN, gear: undefined } }));
+  assert.deepStrictEqual(p.map((m) => m.laps), [40, 39, 41, null, 41], "the wall shows laps completed");
+  for (const m of p) assert.ok(!/NaN|undefined/.test(m.key), m.key);
+});
