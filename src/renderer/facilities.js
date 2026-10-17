@@ -948,7 +948,7 @@ function pitBuilding(ctx, p) {
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
       paddock: paddockInfo, pitWall: !!wallAt, wallFrom, wallStations: wallDbg,
-      heightFrom: parts.some((q) => q.guessed || q.synthetic) ? p.heightFrom || "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
+      heightFrom: parts.some((q) => q.guessed || q.b?.synthetic) ? p.heightFrom || "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
 }
 
 // Materials of the builders (per model: they're cheap; their textures are shared)
