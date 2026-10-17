@@ -137,4 +137,7 @@ test("car shapes: the date decides between a season's specs; without one, no par
   const C = await import("../src/renderer/car3d.js");
   assert.notStrictEqual(C.profileFor(2026, "Racing Bulls", "2026-05-03").key, C.profileFor(2026, "Racing Bulls", "2026-09-06").key);
   assert.strictEqual(C.profileFor(2026, "Racing Bulls", null).key, "2026");
+  // Haas 2026: the sidepods changed at the Canadian GP (v0.36 research: gully top before, ramp and deep undercut after)
+  const h = (d) => shapeFor(2026, "Haas F1 Team", d)?.id ?? null;
+  assert.deepStrictEqual([h("2026-05-03"), h("2026-05-22"), h("2026-09-06"), h(null)], ["vf26", "vf26b", "vf26b", null]);
 });

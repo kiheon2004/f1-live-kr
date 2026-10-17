@@ -1,5 +1,7 @@
 # F1 steering wheels 2025 / 2026 — research for 3D viewer
 
+> v0.36 corrections (wheels_cars_update.md): McLaren 2026's "second display" is a second bar on the same screen above the gear readout (the article never says a separate unit); the F1 Authentics "FW48 replica" page describes the 2024 FW46 wheel – not a 2026 source.
+
 Researched 2026-10-16. Text sources only: no photo was viewed directly (tools return page text, not images). Several key pages were unreachable (F1Technical 403, Motorsport.com tech pieces 502, Racecar Engineering not searchable).
 **Consequence:** almost no source gives grip colour, button hex colours, exact button counts, LED placement or bezel. Those are `null`/unknown below unless a source states them. Items marked *(default)* in the JSON are rendering fallbacks, NOT sourced facts, and always carry `conf:"L"`.
 
