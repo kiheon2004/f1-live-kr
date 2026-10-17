@@ -948,7 +948,7 @@ function pitBuilding(ctx, p) {
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
       paddock: paddockInfo, pitWall: !!wallAt, wallFrom, wallStations: wallDbg,
-      heightFrom: parts.some((q) => q.guessed) ? "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
+      heightFrom: parts.some((q) => q.guessed || q.synthetic) ? p.heightFrom || "facility (the data only guessed it, or counted floors)" : "data", groundFall: +(Math.max(...ground) - Math.min(...ground)).toFixed(1), upstreamFirst } };
 }
 
 // Materials of the builders (per model: they're cheap; their textures are shared)
@@ -1230,6 +1230,23 @@ export const PLAIN_PIT_WALL = { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, 
 // "the pitwall is upstairs"). Widths and heights are estimates; no FIA drawing gives them.
 export const PIT_LAYOUTS = { 22: { side: "right", front: 8, depth: 14, keepOff: 2, height: 12, pitch: 5.5, pitWall: { height: 1.2, thick: 0.6, fence: 2.6, walk: 0, deck: 0, at: 11, stands: "upper" },
   src: "FIA Monaco GP pit lane drawings 2025 V2 / 2026 V1; Williams 2023-05-23; Autosport 2016-05-29 – sizes estimated" } };
+// The pit building's height where the map gives none (or only guessed one) – per venue, from docs/research/pitbuildings.md
+// (v0.36): storeys as the sources say, the height published (est: false) or the storeys times a typical storey
+// (est: true, said so in the info). Not used where the map has the building's measured height.
+export const PIT_HEIGHTS = {
+  152: { h: 19.5, est: false, src: "Las Vegas Grand Prix Plaza pit building: 16.5–22.6 m high (ENR, search snippet) – the middle of the range" },
+  153: { h: 18.5, est: false, src: "Madring pit building: 3 floors, 18.5 m at most (official release, 2026)" },
+  149: { h: 18, est: true, src: "Jeddah: 4 staggered storeys (Tilke) – 4 × ~4.5 m" },
+  151: { h: 20, est: true, src: "Miami: garages + a three-storey Paddock Club on top (HOK, 2023) – ~18–22 m" },
+  23: { h: 16, est: true, src: "Montréal Espace Paddock (FABG, 2019): 3 storeys + roof structure – ~15–17 m" },
+  61: { h: 16, est: true, src: "Marina Bay pit building: 3 storeys (STB rental kit 2025) – ~15–18 m" },
+  9: { h: 15, est: true, src: "COTA pit building: 3 storeys – 3 × ~5 m" },
+  63: { h: 13, est: true, src: "Sakhir: partly 3, partly 2 storeys (pre-opening figures) – ~12–14 m" },
+  7: { h: 10, est: true, src: "Spa pit building (2007): two storeys – ~9–11 m" },
+  39: { h: 9.5, est: true, src: "Monza: 2 levels + roof terrace (the GP's Paddock Club tent on the roof not drawn) – ~9–10 m" },
+  55: { h: 10, est: true, src: "Zandvoort main building: 2 storeys + roof deck – ~9–11 m" },
+  144: { h: 9, est: true, src: "Baku temporary pit building: two storeys (2016 reports) – ~8–10 m" },
+};
 export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, boxes = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
   const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
@@ -1272,13 +1289,13 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       const o = gf.xz([0, 0]), out = lay ? layoutOutline(frame, g.side, u0, u1, lay, trackEdge) : genericOutline(frame, g.side, u0, u1);
       if (!clear(out)) { this.found.madeUp = "not made: it would stand on the track"; return (this.parts = []); }
       this.found.madeUp = true;
-      return (this.parts = [{ pts: out.map(([x, z]) => [x - o[0], o[1] - z]), h: lay?.height ?? GENERIC.height, min: 0, synthetic: true }]);
+      return (this.parts = [{ pts: out.map(([x, z]) => [x - o[0], o[1] - z]), h: lay?.height ?? (venue && PIT_HEIGHTS[venue.key]?.h) ?? GENERIC.height, min: 0, synthetic: true }]);
     },
     params: {
       // the garages along the run where the boxes are (the path's points at its ends)
       garageRange: [[frame.at(u0).x, frame.at(u0).z], [frame.at(u1).x, frame.at(u1).z]],
       // estimates (no source for any one circuit): garages 8.5 m wide, 8 m high where the map has no height
-      height: lay?.height ?? GENERIC.height, garagePitch: lay?.pitch ?? GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
+      height: lay?.height ?? (venue && PIT_HEIGHTS[venue.key]?.h) ?? GENERIC.height, ...(!lay && venue && PIT_HEIGHTS[venue.key] ? { heightFrom: (PIT_HEIGHTS[venue.key].est ? "estimate: " : "") + PIT_HEIGHTS[venue.key].src } : {}), garagePitch: lay?.pitch ?? GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#8e9196", fascia: "fasciaWhite",
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
       pitWall: lay?.pitWall || PLAIN_PIT_WALL, ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : {}),

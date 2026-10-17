@@ -491,3 +491,16 @@ test("Monaco pit layout: the garages open onto the lane (the builder takes the l
   assert.ok(lane.off > 0 && lane.off < 12, `the lane in front of the garages: off ${lane.off.toFixed(1)}`);
   assert.ok(inside.off < 0, `the building behind their front: off ${inside.off.toFixed(1)}`);
 });
+
+// v0.36: a generic pit building's height where the map has none – per venue from the research (docs/research/
+// pitbuildings.md), estimates marked so; other venues keep the generic estimate
+test("generic pit building: the venue's researched height where the map gives none, marked estimate or published", async () => {
+  const F = await load();
+  const pit = { path: [[0, 0], [1000, 0], [2000, 0], [3000, 0]], limitOn: 0, limitOff: 300 };
+  const args = (key) => ({ venue: { key }, location: "X", year: 2026, pit, toScene: ([X, Y]) => [X / 10, Y / 10], toTrack: () => [0, 1], registry: [] });
+  const lv = F.genericPitSpec(args(152)), mz = F.genericPitSpec(args(39)), sh = F.genericPitSpec(args(49));
+  assert.strictEqual(lv.params.height, 19.5); assert.ok(!/^estimate/.test(lv.params.heightFrom));
+  assert.strictEqual(mz.params.height, 9.5); assert.ok(/^estimate/.test(mz.params.heightFrom));
+  assert.ok(sh.params.heightFrom == null, "Shanghai: nothing found – the generic estimate");
+  assert.strictEqual(F.genericPitSpec(args(22)).params.height, 12, "Monaco: its own layout");
+});
