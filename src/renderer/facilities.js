@@ -396,7 +396,21 @@ function glassBand(g, w, h, y0, y1, col, mull, transom, lit) {
   const a = yPx(h, y1), b = yPx(h, y0);
   const gr = g.createLinearGradient(0, a, 0, b); gr.addColorStop(0, lit ? "#ffe2a8" : col[0]); gr.addColorStop(1, lit ? "#f3c780" : col[1]);
   g.fillStyle = gr; g.fillRect(0, a, w, b - a);
-  if (lit) return;
+  if (lit) {
+    // (at night: the panes between the mullions, a floor to a transom – some rooms dark, the same ones every time;
+    // v0.35 lit the whole band as one slab: a 20 m pit building's paddock side became two glowing stripes)
+    const rows = transom ? Math.max(1, Math.round((y1 - y0) / transom)) : 1, cols = Math.max(1, Math.round(w / mull));
+    g.fillStyle = "rgba(20,16,10,0.78)";
+    const dark = (i, j) => ((Math.imul(i + 1, 73856093) ^ Math.imul(j + 1, 19349663) ^ Math.imul(Math.round(y0 * 10) + 1, 83492791)) >>> 0) % 100 < 30;
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) if (dark(i, j)) {
+      const ya = yPx(h, y0 + ((j + 1) * (y1 - y0)) / rows), yb = yPx(h, y0 + (j * (y1 - y0)) / rows);
+      g.fillRect((i * w) / cols, ya, w / cols, yb - ya);
+    }
+    g.fillStyle = "#000";
+    for (let x = 0; x <= w; x += mull) g.fillRect(x - 2, a, 4, b - a);
+    if (transom) for (let y = y0 + transom; y < y1 - 0.2; y += transom) g.fillRect(0, yPx(h, y) - 2, w, 4);
+    return;
+  }
   g.fillStyle = "rgba(255,255,255,0.10)"; g.fillRect(0, a, w, (b - a) * 0.18);   // sky reflection
   g.fillStyle = "#2a2f33";
   for (let x = 0; x <= w; x += mull) g.fillRect(x - 2, a, 4, b - a);
