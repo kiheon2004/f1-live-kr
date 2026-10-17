@@ -106,14 +106,35 @@ export function blendHeight(trackY, terrainY, dist, near = 20, far = 60) {
 // opened the barrier along all of it (v0.34).
 // T (optional): the track (auxRuns' T) – a road leaving at a shallow angle stays within the barrier's reach (`reach` m
 // off the tarmac) further than `mouth`: open as far as it does (Barcelona's T1–T2 rejoin route, audit)
-export function onJoiningRun(runs, pad = 1.5, mouth = 30, T = null, reach = 16) {
+// v0.36 (re-audit, fixtures Shanghai T5 / Silverstone Vale): the reach is measured from the road's near edge, not its
+// centre line (a 12 m run-off road whose centre wandered 16 m out stopped the opening while its tarmac still met the
+// wall), and a short stretch beyond reach (up to `excursion` m) doesn't end it. A road running beside the track within
+// reach is still opened all along (Shanghai #6, 92 m; Silverstone's old pit lane; Lusail T3–T4, ~317 m, where the
+// imagery shows a kerb / wall between them): the map can't tell such a road (other layouts' tarmac – all "raceway")
+// from a run-off lane, and walled the barrier would stand on it lengthwise; opening only where a road crosses the line
+// was tried and walled real escape lanes (Monza T1, Shanghai T5). Moving the barrier beyond such a road: an open item.
+export function onJoiningRun(runs, pad = 1.5, mouth = 30, T = null, reach = 16, excursion = 20) {
   const segs = [];
-  const close = (p) => { if (!T) return false; const q = T.local(p[0], p[1]); if (!q || Math.abs(q.a) >= 3) return false; return q.l > 0 ? q.l - T.edge(q.s, 1) < reach : T.edge(q.s, -1) - q.l < reach; };
+  const close = (p, r) => {
+    if (!T) return false; const q = T.local(p[0], p[1]); if (!q || Math.abs(q.a) >= 3) return false;
+    const near = (q.l > 0 ? q.l - T.edge(q.s, 1) : T.edge(q.s, -1) - q.l) - r.w / 2;
+    return near < reach;
+  };
+  // from a joined end: every point within the mouth or close, a gap of up to `excursion` m bridged
+  const scan = (P, cum, from, step, r) => {
+    let last = from, i = from, bad = 0;
+    const along = (k) => Math.abs(cum[k] - cum[from]);
+    while (i >= 0 && i < P.length) {
+      if (along(i) <= mouth || close(P[i], r)) { last = i; bad = 0; }
+      else if ((bad += Math.abs(cum[i] - cum[i - step])) > excursion) break;
+      i += step;
+    }
+    return last;
+  };
   for (const r of runs) {
     const P = r.pts, cum = [0]; for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
-    const L = cum[cum.length - 1];
-    let a = 0; if (r.joins[0]) while (a < P.length - 1 && (cum[a] <= mouth || close(P[a]))) a++;
-    let b = P.length - 1; if (r.joins[1]) while (b > 0 && (L - cum[b] <= mouth || close(P[b]))) b--;
+    let a = 0; if (r.joins[0]) a = Math.min(P.length - 1, scan(P, cum, 0, 1, r) + 1);
+    let b = P.length - 1; if (r.joins[1]) b = Math.max(0, scan(P, cum, P.length - 1, -1, r) - 1);
     for (let i = 1; i < P.length; i++) if ((r.joins[0] && i <= a) || (r.joins[1] && i - 1 >= b)) segs.push([P[i - 1], P[i], r.w / 2 + pad]);
   }
   return (x, z) => segs.some(([a, b, h]) => {

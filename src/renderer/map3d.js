@@ -945,7 +945,7 @@ function kerbs(samples) {
 // point, on its side
 function wallOpenings(w, geo, list) {
   const n = w.samples.length, step = w.samples[0].p.distanceTo(w.samples[1].p);
-  const op = list.map((o) => { const [x, z] = geo.fromLL(o.ll[0], o.ll[1]), [s] = w.grid.nearest(x, z, 4); if (!s) return null; return { i: s.i, half: o.len / 2 / step, side: Math.sign((x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z) || 1 }; }).filter(Boolean);
+  const op = list.map((o) => { const [x, z] = geo.fromLL(o.ll[0], o.ll[1]), [s] = w.grid.nearest(x, z, 4); if (!s) return null; return { i: s.i, half: o.len / 2 / step, side: o.side === "R" ? 1 : o.side === "L" ? -1 : Math.sign((x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z) || 1 }; }).filter(Boolean);
   return (x, z) => { const [s] = w.grid.nearest(x, z, 2); if (!s) return false; const l = Math.sign((x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z); return op.some((o) => { const d = Math.abs(((s.i - o.i) % n + n + n / 2) % n - n / 2); return d <= o.half && l === o.side; }); };
 }
 // Street circuit barriers: a concrete wall about a metre from the edge with a debris fence on top.
@@ -981,6 +981,9 @@ function walls(samples, grid, extra = 12, h = 1.1, tones = [0x5d636b, 0xd9dde2],
       const j = (i + 1) % n;
       if (!ok[i] || !ok[j]) continue;
       const a = samples[i], b = samples[j], base = pos.length / 3;
+      // (the lap's normals turning over between two samples – Miami T17–T18: the left offset joined to the right one, a
+      // wall drawn across the track; v0.36 audit): no segment there
+      if (a.nor.x * b.nor.x + a.nor.z * b.nor.z < 0.5) continue;
       for (const s of [a, b]) for (const y of [y0, y0 + h]) {
         const o = offOf(s, side);
         pos.push(s.p.x + s.nor.x * o, s.p.y + y - 0.3, s.p.z + s.nor.z * o);
@@ -1985,7 +1988,12 @@ async function loadGeo(w) {
     // FIA's run-offs on street-style circuits the map has no line for (venues.js WALL_OPENINGS – they were walled off)
     const openings = wallOpeningsFor(venueOf({ circuitKey: app().circuitKey?.(), location: app().location?.() })?.key);
     const openAt = openings.length ? wallOpenings(w, built.geo, openings) : null;
-    const gap = built.auxGap && openAt ? (x, z) => built.auxGap(x, z) || openAt(x, z) : built.auxGap || openAt;
+    // (a street circuit: only the FIA's named run-offs – a road joining the track there is a public road closed behind
+    // the barrier; the map's pieces opened the walls at Monaco, Singapore, Las Vegas with no FIA basis (v0.36 audit) – and
+    // the map's roads right by the pit lane, its entry and exit)
+    const nearLane = (x, z) => !!w.laneZone && [[0, 0], [25, 0], [-25, 0], [0, 25], [0, -25]].some(([dx, dz]) => w.laneZone(x + dx, z + dz));
+    const aux = built.auxGap && w.street ? (x, z) => nearLane(x, z) && built.auxGap(x, z) : built.auxGap;
+    const gap = aux && openAt ? (x, z) => aux(x, z) || openAt(x, z) : aux || openAt;
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
     else if (gap) {
       const open = w.street ? streetWalls(w.samples, w.grid, gap) : walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.laneZone, gap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });

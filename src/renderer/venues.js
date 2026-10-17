@@ -166,12 +166,16 @@ export function aeroLocked(venueKey, season, list = AERO_LOCKED) { return list.s
 // routes the race directors' notes name (2025/2026), which the map has no line for – the point (lat, lon: on the run-off,
 // beside the track; its side of the track is the side opened) and `len` m along the track. From the v0.35 audit
 // (Esri imagery against the notes); lengths estimated from the imagery.
+// side (optional): "L" / "R" in the race's direction – else the side the point lies on
 export const WALL_OPENINGS = [
   { venue: 23, ll: [45.49774, -73.52268], len: 120, what: "T1 run-off and rejoin route (RD notes 2025/2026: rejoin 'as shown in the drawing')" },
-  { venue: 23, ll: [45.50863, -73.52871], len: 90, what: "T9 paved run-off (keep left of the orange line, rejoin at its far end)" },
+  // (v0.36: the point moved onto the run-off – it had stood on the verge right of the track, opening the wrong side;
+  // Esri imagery 2025-05-28, entry 45.508743, -73.528947 → rejoin 45.509232, -73.528141)
+  { venue: 23, ll: [45.509063, -73.528732], len: 110, side: "L", what: "T9 paved run-off (keep left of the orange line, rejoin at its far end)" },
   { venue: 23, ll: [45.50375, -73.52360], len: 140, what: "T13–T14 paved run-off (final chicane)" },
   { venue: 22, ll: [43.73710, 7.42530], len: 110, what: "T10–T11 chicane escape road (rejoin when the marshal's lights are green)" },
   { venue: 61, ll: [1.29450, 103.86320], len: 120, what: "T1–T3 paved run-off rejoin (keep right of the polystyrene block)" },
-  { venue: 153, ll: [40.46440, -3.61942], len: 120, what: "T1–T2 paved run-off (right of the yellow line and bollard)" },
+  // (its point lies 0.3 m off the lap's centre line: which side is open is not settled – no imagery of the 2026 circuit yet)
+  { venue: 153, ll: [40.46440, -3.61942], len: 120, sideUnverified: true, what: "T1–T2 paved run-off (right of the yellow line and bollard)" },
 ];
 export function wallOpeningsFor(venueKey, list = WALL_OPENINGS) { return list.filter((o) => o.venue === venueKey); }
