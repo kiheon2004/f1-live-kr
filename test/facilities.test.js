@@ -474,3 +474,20 @@ test("Monaco pit layout: the garages' side fixed along the whole lane; none for 
   const other = F.genericPitSpec({ venue: { key: 2 }, location: "Silverstone", year: 2026, pit, toScene, toTrack, trackEdge: edge, registry: [] });
   assert.notStrictEqual(other.params.height, 12);
 });
+
+// v0.36: the layout's side reaches the builder – the garages face the lane, not the nearest track (Monaco 2025: the
+// straight behind them had them face away, every car 22 m out in front and never "in box")
+test("Monaco pit layout: the garages open onto the lane (the builder takes the layout's side)", async () => {
+  const F = await load();
+  const pit = { path: [[0, 0], [1000, 0], [2000, 0], [3000, 0]], limitOn: 0, limitOff: 300 };
+  const toScene = ([X, Y]) => [X / 10, Y / 10];
+  const toTrack = (x, z) => [0, -1];                                  // the nearest track: the straight, behind the garages
+  const edge = (x, z) => Math.min(Math.abs(z + 27), Math.abs(z - 9)) - 0.5;
+  const spec = F.genericPitSpec({ venue: { key: 22 }, location: "Monte Carlo", year: 2025, pit, toScene, toTrack, trackEdge: edge, registry: [] });
+  const r = await F.buildFacilities({ scene: { location: "Monte Carlo", buildings: [] }, gf: { xz: ([x, y]) => [x, -y] }, groundAt: () => 0, trackEdge: edge, location: "Monte Carlo", year: 2025, toTrack, registry: [spec] });
+  const G = r.group.children[0].userData.garages;
+  assert.ok(G, "garages built");
+  const lane = G.project(150, 0), inside = G.project(150, -15);
+  assert.ok(lane.off > 0 && lane.off < 12, `the lane in front of the garages: off ${lane.off.toFixed(1)}`);
+  assert.ok(inside.off < 0, `the building behind their front: off ${inside.off.toFixed(1)}`);
+});

@@ -1280,7 +1280,7 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
       pitWall: lay?.pitWall || PLAIN_PIT_WALL, ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : {}),
     },
-    ...(lay ? { layout: lay.src } : {}),
+    ...(lay ? { layout: lay.src, toTrack } : {}),
   };
 }
 // the nearest point of a path frame (its normal there)
@@ -1339,7 +1339,10 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         // (every F1 pit lane has a pit wall along the track's edge: a pit building whose entry gives none gets the plain one
         // – its line from the measured edge, its size an estimate, said so in the info)
         const params = spec.kind === "pit-building" && !spec.params?.pitWall ? { ...(spec.params || {}), pitWall: PLAIN_PIT_WALL, pitWallFrom: "estimate (plain wall)" } : spec.params || {};
-        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, barrierRay, year, trial, toTrack, alongTrack, scene }, params);
+        // (an entry with its own side of the lane – a venue's layout, genericPitSpec – builds its garages facing that way: the
+        // nearest track is not always the lane's side – Monaco, the straight behind the garages had them face away from the
+        // lane, every car 22 m in front of them and never "in box", v0.35)
+        const r = BUILDERS[spec.builder]({ parts, gf, groundAt, surfaceAt, trackEdge, barrierRay, year, trial, toTrack: spec.toTrack || toTrack, alongTrack, scene }, params);
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
         made = { object: g, footprint: r.footprint, occupancy: r.occupancy, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";

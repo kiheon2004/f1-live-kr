@@ -3037,9 +3037,9 @@ window.Map3D = {
   // same: compared after seeks, pauses, speeds) and the cars lifted (model height, pitch, wheels on)
   // development: the pit states from t0 to t1 (ms) every `step` ms without drawing – the moments some car was in one of
   // `states` (default: waiting behind a teammate in the box): [[t, num, state, u]]
-  pitScan(t0, t1, step = 500, states = ["waiting (double stack)"]) {
+  pitScan(t0, t1, step = 500, states = ["waiting (double stack)"], nums = null) {
     const src = app().src, out = [];
-    for (let t = t0; t <= t1; t += step) { const f = pitFrame(src, t, 0, true); if (!f) continue; for (const r of f.values()) if (states.includes(r.state.state)) out.push([t, r.num, r.state.state, r.u == null ? null : Math.round(r.u)]); }
+    for (let t = t0; t <= t1; t += step) { const f = pitFrame(src, t, 0, true); if (!f) continue; for (const r of f.values()) if ((!states || states.includes(r.state.state)) && (!nums || nums.includes(r.num))) out.push([t, r.num, r.state.state, r.u == null ? null : Math.round(r.u), ...(nums ? [+r.off.toFixed(1), +r.input.speed.toFixed(1), +r.input.stillFor.toFixed(1), r.input.boxU == null ? null : Math.round(r.input.boxU)] : [])]); }
     return JSON.stringify(out);
   },
   // development: the grandstands as built – each with the nearest corner (F1's corner numbers for this circuit and
