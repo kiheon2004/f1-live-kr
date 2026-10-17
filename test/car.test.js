@@ -125,3 +125,16 @@ test("car model: turning the wheel, each forearm still starts at its glove", asy
     }
   }
 });
+
+// v0.36 review: without a date, a spec limited to part of the season was taken (Racing Bulls 2026 → the early airbox)
+test("car shapes: the date decides between a season's specs; without one, no part-season spec", async () => {
+  const { shapeFor } = await import("../src/renderer/carshapes.js");
+  const rb = (d) => shapeFor(2026, "Racing Bulls", d)?.id ?? null;
+  assert.deepStrictEqual([rb(null), rb(""), rb("not a date"), rb(undefined)], [null, null, null, null], "no date: the era's car");
+  assert.deepStrictEqual([rb("2026-07-24"), rb("2026-07-25"), rb("2026-10-01")], ["vcarb03", "vcarb03b", "vcarb03b"], "the upgrade from its first day");
+  assert.strictEqual(shapeFor(2026, "Ferrari", null)?.id, "sf26", "a whole-season spec needs no date");
+  // the car's model key follows the shape picked: an earlier session gives the earlier car again
+  const C = await import("../src/renderer/car3d.js");
+  assert.notStrictEqual(C.profileFor(2026, "Racing Bulls", "2026-05-03").key, C.profileFor(2026, "Racing Bulls", "2026-09-06").key);
+  assert.strictEqual(C.profileFor(2026, "Racing Bulls", null).key, "2026");
+});

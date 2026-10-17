@@ -1092,15 +1092,23 @@ function paintLabel(l, text, color, strong) {
   l.tex.needsUpdate = true;
 }
 
+// The session's local date (the track's day, YYYY-MM-DD): its archive path's session folder ("…/2026-06-14_Race/"), or
+// its SessionInfo StartDate (local track time) – null when neither has come (a live feed early on)
+function sessionDate() {
+  const si = app().src?.state.SessionInfo || {};
+  const m = /\/(\d{4}-\d\d-\d\d)_[^/]*\/?$/.exec(si.Path || "") || /^(\d{4}-\d\d-\d\d)/.exec(si.StartDate || "");
+  return m ? m[1] : null;
+}
 function carFor(num, d) {
   let c = cars.get(num);
   // (the model is chosen by season and team – the car of that year –, its paint by the team's colours)
-  const season = app().sessionYear?.() || null, color = "#" + (d.TeamColour || "888888"), key = `${color}|${d.TeamName || ""}|${season}`;
+  // (the session's date: a team's car changed during the season – carshapes.js; the key carries the shape picked, so a
+  // date that comes late – live – or a session of another part of the season gives the car its other shape)
+  const season = app().sessionYear?.() || null, color = "#" + (d.TeamColour || "888888"), date = sessionDate();
+  const key = `${color}|${d.TeamName || ""}|${season}|${profileFor(season, d.TeamName, date).key}`;
   if (c && c.key === key) return c;
   if (c) { scene.remove(c.obj); disposeGroup(c.obj); releaseShadowRefs(); }
   const obj = new THREE.Group();
-  // (the event's date: a team's car changed during the season – carshapes.js)
-  const date = /\d{4}-\d\d-\d\d/.exec(app().src?.state.SessionInfo?.Path || "")?.[0] || null;
   const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season, date });
   if (nightNow) setCarEnvironment(model, carEnvironment(true), 0.6);
   { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false }));

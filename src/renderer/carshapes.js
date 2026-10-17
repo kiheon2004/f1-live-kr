@@ -64,7 +64,13 @@ export const CAR_SHAPES = [
     src: "FW48: pull-rod front" },
 ];
 // The team's shape for a season (and the event's date, for a car changed during it), or null (the era's neutral car)
+// The date: the session's local date (YYYY-MM-DD, the track's) – an entry with from / until applies from its first day,
+// up to the day before `until`. Without a valid date, an entry limited to part of the season is never taken for the car
+// (v0.35 took the first one: Racing Bulls' early airbox for any 2026 session without a date) – the team's whole-season
+// entry if it has one, else the era's neutral car.
 export function shapeFor(season, teamName, date = null, list = CAR_SHAPES) {
-  const d = date ? String(date).slice(0, 10) : null;
-  return list.find((s) => s.season === +season && s.team.test(teamName || "") && (!d || ((!s.from || d >= s.from) && (!s.until || d < s.until)))) || null;
+  const d = typeof date === "string" && /^\d{4}-\d\d-\d\d/.test(date) ? date.slice(0, 10) : null;
+  const mine = list.filter((s) => s.season === +season && s.team.test(teamName || ""));
+  if (!d) return mine.find((s) => !s.from && !s.until) || null;
+  return mine.find((s) => (!s.from || d >= s.from) && (!s.until || d < s.until)) || null;
 }
