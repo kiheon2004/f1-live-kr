@@ -106,6 +106,15 @@
   // not changed (TyresNotChanged "1": a red flag's restart, say). A stop's tyre change is known only from this, and it
   // arrives some 15 s after the car has left its box (Barcelona 2026, Hamilton: standstill 4145–4149 s, stint 1 sent at
   // 4163.9 s) – so during a stop a live feed never knows; a replay knows from the session's record.
+  // A stint's first message can be corrected seconds later: Monaco 2025, Tsunoda's lap-1 stop – stint 1 sent as
+  // "UNKNOWN", TyresNotChanged "1" at 3481.4 s, then "HARD", new, TyresNotChanged "0" at 3486.4 s. Each correction is
+  // kept with the time it arrived (v0.35 kept the first message only: that stop showed no tyre change), and a stint is
+  // listed as it was known at t.
+  const tyreFields = (v, o = {}) => ({
+    compound: v.Compound || o.compound,
+    isNew: v.New != null ? v.New === "true" || v.New === true : o.isNew ?? false,
+    changed: v.TyresNotChanged != null ? !(v.TyresNotChanged === "1" || v.TyresNotChanged === 1) : o.changed ?? true,
+  });
   class TyreLog {
     constructor() { this.cars = {}; }
     feed(ms, topic, data) {
@@ -113,15 +122,27 @@
       for (const [num, line] of Object.entries(data.Lines)) {
         const st = line?.Stints; if (!st || typeof st !== "object") continue;
         for (const [k, v] of Array.isArray(st) ? st.entries() : Object.entries(st)) {
-          const idx = +k; if (!v || typeof v !== "object" || !v.Compound || !Number.isFinite(idx)) continue;
-          const list = this.cars[num] || (this.cars[num] = []);
-          if (list.some((x) => x.idx === idx)) continue;
-          list.push({ ms, idx, compound: v.Compound, isNew: v.New === "true" || v.New === true, changed: !(v.TyresNotChanged === "1" || v.TyresNotChanged === 1) });
+          const idx = +k; if (!v || typeof v !== "object" || !Number.isFinite(idx)) continue;
+          const list = this.cars[num] || (this.cars[num] = []), had = list.find((x) => x.idx === idx);
+          if (had) {
+            if (v.Compound == null && v.New == null && v.TyresNotChanged == null) continue;
+            const last = had.fix[had.fix.length - 1][1], now = tyreFields(v, last);
+            if (now.compound !== last.compound || now.isNew !== last.isNew || now.changed !== last.changed) { had.fix.push([ms, now]); Object.assign(had, now); }
+            continue;
+          }
+          if (!v.Compound) continue;
+          const f = tyreFields(v);
+          list.push({ ms, idx, ...f, fix: [[ms, f]] });
         }
       }
     }
-    // the stints created up to t (all of them: Infinity)
-    list(num, t = Infinity) { return (this.cars[num] || []).filter((x) => x.ms <= t); }
+    // the stints created up to t (all of them: Infinity), each as it was known at t
+    list(num, t = Infinity) {
+      return (this.cars[num] || []).filter((x) => x.ms <= t).map((x) => {
+        let f = x.fix[0][1]; for (const [m, v] of x.fix) { if (m > t) break; f = v; }
+        return { ms: x.ms, idx: x.idx, ...f };
+      });
+    }
   }
 
   // Pit stops gathered from two feeds: PitLaneTimeCollection (time through the pit lane, shown briefly then
