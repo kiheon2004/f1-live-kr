@@ -67,3 +67,25 @@ test("pit wall panels: a team's two drivers each with their own data, tied to th
   const swapped = driverPanel({ d: { num: "44", tla: "HAM" }, line: { Position: "1", NumberOfLaps: 24 }, car: null });
   assert.deepStrictEqual([swapped.num, swapped.tla, swapped.gap], ["44", "HAM", "LEADER"]);
 });
+
+// v0.36 review: a screen handed to another driver showed the previous driver's face until its rate limit let it repaint
+// (size 1, every 125 ms: 16 painted at 1000 ms, the slot given to 44 at 1050 ms – 44's first update was held back)
+test("wheel screens: a screen handed to another driver is wiped at once and painted for its new owner on the next update", async () => {
+  const { WheelScreens, screenModel } = await import("../src/renderer/wheelscreen.js");
+  const painted = []; const ctx = new Proxy(() => {}, { get: (t, k) => (k === "fillText" ? (s) => painted.push(String(s)) : k === "canvas" ? {} : () => {}), set: () => true });
+  const ws = new WheelScreens({ size: 1, every: 125, canvas: () => ({ width: 0, height: 0, getContext: () => ctx }) });
+  const data = { 16: { speed: 250, rpm: 11000, gear: 7 }, 44: { speed: 120, rpm: 9000, gear: 3 } };
+  const get = (n) => screenModel({ car: data[n], season: 2026 });
+  ws.assign([{ num: "16" }]); ws.update(get, 1000);
+  assert.strictEqual(ws.slots[0].painted, "16"); assert.ok(painted.includes("7"));
+  painted.length = 0;
+  ws.assign([{ num: "44" }]);
+  assert.ok(painted.includes("NO DATA") && !painted.includes("7"), "the old face wiped when the slot changed hands");
+  assert.strictEqual(ws.update(get, 1050), 1, "the new owner painted at once, not 75 ms later");
+  assert.strictEqual(ws.slots[0].painted, "44"); assert.ok(painted.includes("3"));
+  // still limited for its own updates
+  data[44] = { speed: 130, rpm: 9200, gear: 3 }; assert.strictEqual(ws.update(get, 1100), 0);
+  // a reset: wiped at once too
+  painted.length = 0; ws.reset(); assert.ok(painted.includes("NO DATA")); assert.strictEqual(ws.slots[0].painted, null);
+  ws.assign([{ num: "16" }]); assert.strictEqual(ws.update(get, 1101), 1);
+});

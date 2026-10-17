@@ -31,3 +31,21 @@ export function disposeGroup(root, done = new Set()) {
   });
   return done;
 }
+
+// The shadow pass draws each caster with one depth material three.js shares between them (WebGLShadowMap), handing it
+// the caster's map each time – and when the next caster has none, its uniform keeps the last one: a freed world's texture
+// went back onto the GPU at the next shadow redraw (a barrier's, 2 per circuit switch – traced in v0.36 with the dev
+// texture log). The depth materials in use are noted (three passes them to onBeforeShadow) and let go of any map when a
+// world or a car is freed: the uniform is rebuilt without it on their next use.
+const DEPTH_MATS = new Set();
+export function watchShadowDepth(THREE) {
+  if (THREE.Object3D.prototype.onBeforeShadow.__watch) return;
+  const f = function (r, o, cam, scam, geo, depthMaterial) { if (depthMaterial) DEPTH_MATS.add(depthMaterial); };
+  f.__watch = true; THREE.Object3D.prototype.onBeforeShadow = f;
+}
+export function releaseShadowRefs() {
+  let n = 0;
+  for (const m of DEPTH_MATS) if (m.map || m.alphaMap) { m.map = null; m.alphaMap = null; m.needsUpdate = true; n++; }
+  DEPTH_MATS.clear();
+  return n;
+}

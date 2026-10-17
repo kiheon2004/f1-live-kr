@@ -80,3 +80,20 @@ test("dispose: something that isn't a 3D object is skipped, not an error", async
   const { disposeGroup } = await import("../src/renderer/dispose.js");
   assert.doesNotThrow(() => { disposeGroup({ has: () => false }); disposeGroup(new Map()); disposeGroup(null); });
 });
+
+// v0.36: the texture leak traced to its owner – three's shadow pass shares one depth material and keeps the last
+// caster's map in its uniform; a freed world's texture went back onto the GPU at the next shadow redraw. The depth
+// materials seen in the shadow pass let go of their maps when a world is freed.
+test("shadow depth materials let go of a freed texture", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), D = await import("../src/renderer/dispose.js");
+  D.watchShadowDepth(THREE);
+  const tex = new THREE.Texture(), mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ map: tex }));
+  const depth = new THREE.MeshDepthMaterial(); depth.map = tex;   // (as WebGLShadowMap leaves it after drawing the mesh)
+  mesh.onBeforeShadow(null, mesh, null, null, mesh.geometry, depth, null);
+  const v = depth.version;
+  D.disposeGroup(mesh);
+  assert.strictEqual(D.releaseShadowRefs(), 1);
+  assert.strictEqual(depth.map, null);
+  assert.ok(depth.version > v, "rebuilt on next use");
+  assert.strictEqual(D.releaseShadowRefs(), 0, "nothing held after");
+});

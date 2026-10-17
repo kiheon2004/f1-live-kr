@@ -562,7 +562,8 @@ function barrierTexture(kind) {
       const gr = g.createLinearGradient(0, 40, 0, 64); gr.addColorStop(0, "rgba(70,70,60,0)"); gr.addColorStop(1, "rgba(70,70,60,0.35)"); g.fillStyle = gr; g.fillRect(0, 40, 256, 24);
     }
   }
-  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.name = "barrier:" + kind;
+  t.userData.from = (new Error().stack || "").split("\n").slice(2, 6).map((s) => s.trim().replace(/^at /, "").replace(/\(.*\/(\w+\.js):(\d+):\d+\)/, "$1:$2")).join(" < ");
   return t;
 }
 function barriersMesh(lines, gf, heightAt) {
@@ -596,9 +597,9 @@ function barriersMesh(lines, gf, heightAt) {
     const mat = spec.fence
       ? new THREE.MeshStandardMaterial({ map, roughness: 0.55, metalness: 0.5, transparent: true, side: THREE.DoubleSide, depthWrite: false })
       : new THREE.MeshStandardMaterial({ map, color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide });
-    const mesh = new THREE.Mesh(g, mat);
+    const mesh = new THREE.Mesh(g, mat); mesh.name = "barrier:" + kind;
     mesh.castShadow = !spec.fence; mesh.receiveShadow = true;
-    groups.add(mesh);
+    groups.add(mesh); (globalThis.__barMeshes ||= []).push(mesh); mesh.userData.mk = (new Error().stack || '').split('\n').slice(2, 8).map((s) => s.trim().replace(/^at /, '').replace(/\(.*\/(\w+\.js):(\d+):\d+\)/, '$1:$2')).join(' < ');
   }
   groups.name = "barriers";   // (map barriers: the pit lane's model looks for its wall among them – map3d.js pitModelFor)
   return groups.children.length ? groups : null;

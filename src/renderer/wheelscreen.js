@@ -54,6 +54,7 @@ export function paintScreen(g, m) {
   g.fillText(m.gap ? (m.gap.length > 8 ? m.gap.slice(0, 8) : m.gap) : "GAP –", 213, right ? 84 : 69);
 }
 
+const NEUTRAL = screenModel({ car: null });
 // A pool of `size` screens for the cars drawn close up. assign(list): list of { num, model } nearest first; each keeps
 // its screen while it stays on the list. update(get): get(num) → model data (screenModel); repainted when changed, at
 // most every `every` ms. Its textures are its own (marked shared: a car's disposal never frees them); clear() frees.
@@ -65,7 +66,7 @@ export class WheelScreens {
   slot() {
     const cv = this.mk(); cv.width = 256; cv.height = 128;
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4; tex.userData.shared = true;
-    const s = { cv, tex, num: null, key: null, at: -1e9 }; this.slots.push(s); return s;
+    const s = { cv, tex, num: null, key: null, at: -Infinity, painted: null }; this.slots.push(s); return s;
   }
   // which cars have a screen: the first `size` of the list; returns [{ num, tex }] for the caller to put on the wheels,
   // and the numbers that lost theirs
@@ -76,7 +77,9 @@ export class WheelScreens {
       if (this.byNum.has(num)) continue;
       const s = this.slots.find((x) => x.num == null) || (this.slots.length < this.size ? this.slot() : null);
       if (!s) continue;
-      s.num = num; s.key = null; this.byNum.set(num, s);
+      // (a new owner: the previous driver's face wiped at once and the first picture not held back by the rate limit –
+      // a reused screen had shown the old driver until its next allowed repaint)
+      s.num = num; this.clean(s); this.byNum.set(num, s);
     }
     return { have: [...this.byNum].map(([num, s]) => ({ num, tex: s.tex })), lost };
   }
@@ -85,11 +88,13 @@ export class WheelScreens {
     for (const [num, s] of this.byNum) {
       if (now - s.at < this.every) continue;
       const m = get(num); if (!m || m.key === s.key) continue;
-      paintScreen(s.cv.getContext("2d"), m); s.tex.needsUpdate = true; s.key = m.key; s.at = now; painted++;
+      paintScreen(s.cv.getContext("2d"), m); s.tex.needsUpdate = true; s.key = m.key; s.at = now; s.painted = num; painted++;
     }
     return painted;
   }
+  // the neutral face on a screen, its rate limit cleared (the next update paints its owner straight away)
+  clean(s) { paintScreen(s.cv.getContext("2d"), NEUTRAL); s.tex.needsUpdate = true; s.key = null; s.at = -Infinity; s.painted = null; }
   // forget every assignment (a new session: no screen keeps another driver's face)
-  reset() { for (const s of this.slots) { s.num = null; s.key = null; } this.byNum.clear(); }
+  reset() { for (const s of this.slots) { s.num = null; this.clean(s); } this.byNum.clear(); }
   clear() { for (const s of this.slots) s.tex.dispose(); this.slots = []; this.byNum.clear(); }
 }

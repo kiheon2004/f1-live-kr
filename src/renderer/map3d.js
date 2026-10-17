@@ -20,7 +20,7 @@ import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment,
 import { WheelScreens, screenModel } from "./wheelscreen.js";
 import { boardsFor, boardPlaces } from "./boards.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
-import { disposeGroup } from "./dispose.js";
+import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
 import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
 
@@ -489,7 +489,7 @@ function pitTeamsInfo() {
 // Back to the generic surroundings, then load the real ones again with the current settings.
 function rebuild() {
   if (!world) return;
-  if (world.real) { world.group.remove(world.real.group); disposeReal(world.real); world.real = null; world.occluders = []; }
+  if (world.real) { world.group.remove(world.real.group); disposeReal(world.real); world.real = null; world.occluders = []; releaseShadowRefs(); }
   forgetPitTeams();   // (its layer was in the real map just freed)
   for (const k of ["terrain", "trees", "walls"]) if (!world.syn[k].parent) world.group.add(world.syn[k]);
   world.farBase = world.far.material.color.clone().set(0x4f7a3c);
@@ -1097,7 +1097,7 @@ function carFor(num, d) {
   // (the model is chosen by season and team – the car of that year –, its paint by the team's colours)
   const season = app().sessionYear?.() || null, color = "#" + (d.TeamColour || "888888"), key = `${color}|${d.TeamName || ""}|${season}`;
   if (c && c.key === key) return c;
-  if (c) { scene.remove(c.obj); disposeGroup(c.obj); }
+  if (c) { scene.remove(c.obj); disposeGroup(c.obj); releaseShadowRefs(); }
   const obj = new THREE.Group();
   // (the event's date: a team's car changed during the season – carshapes.js)
   const date = /\d{4}-\d\d-\d\d/.exec(app().src?.state.SessionInfo?.Path || "")?.[0] || null;
@@ -1550,6 +1550,9 @@ function updateStartLights(src, t) {
 }
 // The steering wheels' screens: each driver's own data at the moment shown (wheelscreen.js) on the cars drawn close up –
 // the cockpit car first, then the nearest – four at most; the others show the neutral face. A new session starts clean.
+let TEXLOG = null;
+// (shadow depth materials let go of a freed world's maps – dispose.js watchShadowDepth / releaseShadowRefs)
+watchShadowDepth(THREE);
 const wheelScreens = new WheelScreens({ size: 4, every: 125 });
 let wheelScreensFor = null;
 function updateWheelScreens(src, t) {
@@ -2224,6 +2227,7 @@ function disposeWorld() {
   wheelScreens.reset(); wheelScreensFor = null;
   for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
   cars.clear();
+  releaseShadowRefs();
 }
 // the session a source key belongs to (a live key also carries the outline's length, which grows)
 const sessionOf = (key) => (key || "").startsWith("live:") ? key.split(":").slice(0, 2).join(":") : key || "";
@@ -3447,6 +3451,40 @@ window.Map3D = {
       out.push({ ll: R.geo.toLL(bx, bz).map((v) => +v.toFixed(6)), left: side(1), right: side(-1) });
     }
     return JSON.stringify({ n: world.n, limitOn: pd.limitOn, limitOff: pd.limitOff, len: Math.round(pts.reduce((a, p, i) => (i ? a + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0)), out });
+  },
+  // development: every texture uploaded to the GPU and not yet disposed (three.js adds its 'dispose' listener on upload):
+  // texTrack(true) starts recording, texList() → [{ uuid, name, type, size, owner }] – owner: where it is in the scene
+  // now (object path), "pool" / "shared" if marked, or "detached" (on the GPU, reachable from nothing drawn)
+  texTrack(on = true) {
+    if (!TEXLOG) {
+      TEXLOG = new Map();
+      THREE.Object3D.prototype.onBeforeRender = function (r, sc, cam) { TEXLOG.last = this; TEXLOG.lastScene = sc; TEXLOG.lastCam = cam; };
+      { const ob = THREE.Object3D.prototype.onBeforeShadow; THREE.Object3D.prototype.onBeforeShadow = function (r, o, cam, ...rest) { TEXLOG.last = this; TEXLOG.lastScene = "shadow"; TEXLOG.lastCam = cam; return ob.call(this, r, o, cam, ...rest); }; }
+      const od = THREE.Texture.prototype.dispose; THREE.Texture.prototype.dispose = function () { this.userData.disposedAt = performance.now(); return od.call(this); };
+      const orig = THREE.Texture.prototype.addEventListener;
+      THREE.Texture.prototype.addEventListener = function (type, fn) {
+        if (type === "dispose" && TEXLOG.on && !TEXLOG.has(this)) {
+          TEXLOG.set(this, { t: performance.now(), key: world?.sourceKey || null, after: this.userData?.disposedAt ?? null, obj: (() => { const o = TEXLOG.last; if (!o) return null; const c = []; let p = o; while (p && c.length < 8) { c.push(p.name || p.type); p = p.parent; } return c.join('<') + ' | scene:' + (TEXLOG.lastScene === scene ? 'main' : (TEXLOG.lastScene?.type || '?')) + ' cam:' + (TEXLOG.lastCam === camera ? 'main' : (TEXLOG.lastCam?.type || '?')); })(), stack: (new Error().stack || '').split('\n').slice(3, 9).map((s) => s.trim().replace(/^at /, '').replace(/\(.*\/(\w+\.js):(\d+):\d+\)/, '$1:$2')).join(' < ') });
+          const self = this; orig.call(this, "dispose", () => TEXLOG.delete(self));
+        }
+        return orig.call(this, type, fn);
+      };
+    }
+    TEXLOG.on = on; return String(TEXLOG.size);
+  },
+  get _scene() { return scene; },
+  texList() {
+    const where = new Map();
+    scene.traverse((o) => { for (const m of [].concat(o.material || [])) { if (!m) continue; for (const k in m) if (m[k]?.isTexture) where.set(m[k], (o.name || o.type) + "." + k); for (const t of m.userData?.ownedTextures || []) where.set(t, (o.name || o.type) + ".owned"); if (m.uniforms) for (const [k, u] of Object.entries(m.uniforms)) if (u?.value?.isTexture) where.set(u.value, (o.name || o.type) + ".u." + k); } });
+    for (const [k, u] of Object.entries(GLOW || {})) if (u?.value?.isTexture) where.set(u.value, "GLOW." + k);
+    for (const [k, u] of Object.entries(NL || {})) if (u?.value?.isTexture) where.set(u.value, "NL." + k);
+    if (scene.environment) where.set(scene.environment, "scene.environment"); if (scene.background?.isTexture) where.set(scene.background, "scene.background");
+    const out = [];
+    for (const [tex, rec] of TEXLOG || []) {
+      const im = tex.image, size = im ? `${im.width}x${im.height}` : "?";
+      out.push({ disposedBefore: rec.after, obj: rec.obj, disposedAt: tex.userData?.disposedAt ?? null, upStack: rec.stack, from: tex.userData?.from || null, uuid: tex.uuid.slice(0, 8), name: tex.name || "", type: tex.constructor.name, size, owner: where.get(tex) || (tex.userData?.shared ? "shared" : "detached"), at: Math.round(rec.t), key: (rec.key || "").slice(-30) });
+    }
+    return JSON.stringify(out);
   },
   // development: the braking boards built (boards.js): turn, distance, side, lat/lon
   boardsInfo() { const g = world?.group.getObjectByName("brakeBoards"), R = world?.real; return JSON.stringify((g?.children || []).filter((m) => m.userData.board).map((m) => ({ ...m.userData.board, ll: R ? R.geo.toLL(m.position.x, m.position.z).map((v) => +v.toFixed(6)) : null, y: +m.position.y.toFixed(1) }))); },
