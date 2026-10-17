@@ -124,3 +124,23 @@ test("other tarmac: a way mapped twice is one strip", async () => {
   const a = { k: "raceway", w: 10, pts: [[-120, 0], [-100, 11], [100, 11], [120, 0]] };
   assert.strictEqual(auxRuns([a, { ...a, pts: a.pts.map(([x, z]) => [x + 0.5, z]) }], T).length, 1);
 });
+
+// v0.36 re-audit, real maps (fixtures from the 2026 Chinese GP and British GP worlds): a joined run-off road whose
+// centre wanders more than 16 m from the track while its tarmac still meets the barrier's line. v0.35 measured from the
+// road's centre and stopped opening there: the generated barrier stood on the road (Shanghai T5: 89 wall points;
+// Silverstone Vale / Club: 24). Every wall point on such a strip is opened now.
+for (const [name, file] of [["Shanghai T5 hairpin", "shanghai-t5-roads"], ["Silverstone Vale–Club", "silverstone-vale-roads"]]) {
+  test(`run-off on the real map (${name}): no generated-wall point left on a joined road`, async () => {
+    const { auxRuns, onJoiningRun } = await import("../src/renderer/auxroads.js");
+    const fx = require(`./fixtures/${file}.json`);
+    const S = fx.samples.map((s) => ({ i: s.i, p: { x: s.p[0], z: s.p[1] }, tan: { x: s.tan[0], z: s.tan[1] }, nor: { x: s.nor[0], z: s.nor[1] }, L: s.L, R: s.R }));
+    const local = (x, z) => { let b = null, bd = Infinity; for (const s of S) { const d = Math.hypot(s.p.x - x, s.p.z - z); if (d < bd) { bd = d; b = s; } } if (!b || bd > 50) return null; const dx = x - b.p.x, dz = z - b.p.z; return { s: b, l: dx * b.nor.x + dz * b.nor.z, a: dx * b.tan.x + dz * b.tan.z }; };
+    const T = { local, edge: (s, side) => (side > 0 ? s.L : s.R) };
+    const runs = auxRuns(fx.lines, T), gap = onJoiningRun(runs, 1.5, 30, T);
+    const seg = (x, z, a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], L = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L)); return Math.hypot(a[0] + dx * t - x, a[1] + dz * t - z); };
+    const onJoined = (x, z) => runs.some((r) => (r.joins[0] || r.joins[1]) && r.pts.some((p, k) => k && seg(x, z, r.pts[k - 1], p) < r.w / 2));
+    const left = [];
+    for (const s of S) for (const side of [1, -1]) { const o = (side > 0 ? s.L : s.R) + side * 12, x = s.p.x + s.nor.x * o, z = s.p.z + s.nor.z * o; if (onJoined(x, z) && !gap(x, z)) left.push(s.i); }
+    assert.deepStrictEqual(left, []);
+  });
+}
