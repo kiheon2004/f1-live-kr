@@ -1219,8 +1219,11 @@ export const PLAIN_PIT_WALL = { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, 
 // 2026 V1: the lane on the inside of the straight, pit entry between T17 and T18, the exit road along the straight to
 // T1). The general rule – garages on the side away from the nearest track – flips along this lane (the Piscine section
 // on the other side comes nearer and goes): here the side is the data's, to the right of the cars' way down the lane
-// (the straight's side, checked against the measured path). Several storeys (Williams: ground floor, a first floor with
-// the pit wall gantry, a top floor for guests): 12 m high, an estimate. No pit wall at the track (there is none): a
+// (the straight's side, checked against the measured path). v0.35 took that side for the outline only: the builder still
+// faced the garages to the nearest track – the straight behind them, away from the lane – every car 22 m in front and
+// never "in box"; fixed v0.36 (the spec carries its side, genericPitSpec → toTrack), checked from above against the
+// 2025 race's stops.
+// Several storeys (Williams: ground floor, a first floor with the pit wall gantry, a top floor for guests): 12 m high, an estimate. No pit wall at the track (there is none): a
 // wall along the fast lane's far side, 11 m out from the garages (the F2 sheet's 6.8 m working area and equipment strip
 // plus a fast lane – estimate), garages about half the usual width (Williams: "roughly half the width" – 5.5 m, an
 // estimate), and the teams' stands on the first floor over their garages (Horner, Autosport 2016:
