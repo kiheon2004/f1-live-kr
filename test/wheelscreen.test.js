@@ -104,3 +104,23 @@ test("wheel screen and pit wall panel: laps-down gaps, partial data, no NaN or u
   assert.deepStrictEqual(p.map((m) => m.laps), [40, 39, 41, null, 41], "the wall shows laps completed");
   for (const m of p) assert.ok(!/NaN|undefined/.test(m.key), m.key);
 });
+
+// v0.36: a car rebuilt (its shape picked again – a session date that came late, another part of the season) keeps its
+// wheel screen: the pool's texture is shared – freeing the old model leaves it alone – and goes on the new model
+test("wheel screens: a car's model replaced – the screen's texture survives the old model and goes on the new one", async () => {
+  const { WheelScreens } = await import("../src/renderer/wheelscreen.js");
+  const C = await import("../src/renderer/car3d.js"), { disposeGroup } = await import("../src/renderer/dispose.js");
+  const ws = new WheelScreens({ size: 2, canvas });
+  const { have } = ws.assign([{ num: "30" }]), tex = have[0].tex;
+  let disposed = 0; tex.addEventListener("dispose", () => disposed++);
+  const before = C.makeCar({ teamName: "Racing Bulls", teamColour: "6692FF", number: 30, season: 2026, date: "2026-05-03" });
+  C.setWheelScreen(before, tex);
+  disposeGroup(before);
+  assert.strictEqual(disposed, 0, "the pool's texture is not freed with the car");
+  const after = C.makeCar({ teamName: "Racing Bulls", teamColour: "6692FF", number: 30, season: 2026, date: "2026-09-06" });
+  assert.notStrictEqual(after.userData.profile.key, before.userData.profile.key, "the later spec");
+  C.setWheelScreen(after, tex);
+  assert.strictEqual(after.userData.screen.material.map, tex);
+  assert.strictEqual(ws.byNum.get("30").tex, tex, "the slot kept");
+  ws.clear(); assert.strictEqual(disposed, 1, "freed by the pool, once");
+});
