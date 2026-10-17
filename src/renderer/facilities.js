@@ -1222,7 +1222,7 @@ export const PLAIN_PIT_WALL = { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, 
 // (the straight's side, checked against the measured path). v0.35 took that side for the outline only: the builder still
 // faced the garages to the nearest track – the straight behind them, away from the lane – every car 22 m in front and
 // never "in box"; fixed v0.36 (the spec carries its side, genericPitSpec → toTrack), checked from above against the
-// 2025 race's stops.
+// 2025 race's stops (docs/research/monaco_pit.md).
 // Several storeys (Williams: ground floor, a first floor with the pit wall gantry, a top floor for guests): 12 m high, an estimate. No pit wall at the track (there is none): a
 // wall along the fast lane's far side, 11 m out from the garages (the F2 sheet's 6.8 m working area and equipment strip
 // plus a fast lane – estimate), garages about half the usual width (Williams: "roughly half the width" – 5.5 m, an

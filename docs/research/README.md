@@ -10,6 +10,7 @@ picture's date (grandstands.json `img`).
 | cars2025.md, cars2026.md | src/renderer/carshapes.js `CAR_SHAPES` (each entry's `src`) |
 | wheels.md | carshapes.js `wheel` (steering wheels) |
 | monaco_start_boards.md | facilities.js `PIT_LAYOUTS[22]`; startplan.js `startLights`; boards.js `BOARDS` |
+| monaco_pit.md | facilities.js `PIT_LAYOUTS[22]`, `genericPitSpec` (the garages' side; the v0.36 check) |
 | pitwall.md | garages.js `PIT_WALL_SEATS`, `pitWallStand` |
 | escape_fia_notes.txt | venues.js `WALL_OPENINGS`; auxroads.js (FIA race directors' notes 2025/2026, 102 items) |
 | grandstands_*.md | src/data/grandstands.json (`note`, `src2`, `missing`) |
