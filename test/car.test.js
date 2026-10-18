@@ -152,7 +152,7 @@ test("halo: clear of the helmet and mirrors on every profile; the pillar under t
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
       const e = Math.hypot((x - hx) / (sx + 0.02), (y - hy) / (sy + 0.02), (z - hz) / (sz + 0.02)); minE = Math.min(minE, e); if (e < 1) inHelmet++;
-      if (Math.abs(Math.abs(x) - 0.5) < 0.1 && Math.abs(y - 0.68) < 0.05 && Math.abs(z - 0.52) < 0.05) inMirror++;
+      if (Math.abs(Math.abs(x) - 0.5) < 0.1 && Math.abs(y - 0.68) < 0.05 && Math.abs(z - 0.52 - (P.ck || 0)) < 0.05) inMirror++;
     }
     assert.strictEqual(inHelmet, 0, `${key}: halo within 2 cm of the helmet (closest ${minE.toFixed(2)})`);
     assert.strictEqual(inMirror, 0, `${key}: halo through a mirror`);
