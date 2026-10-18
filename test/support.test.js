@@ -146,6 +146,7 @@ test("moving things stay out of the static shadow map (v0.40): support cars and 
   // its shadow where the map was last drawn – the Monza 2026 safety car left a car-shaped shadow at the pit exit)
   const { makeSupportCar, SUPPORT_CARS } = await import("../src/renderer/support3d.js");
   const { makeFlag } = await import("../src/renderer/flag3d.js");
+  const { disposeGroup } = await import("../src/renderer/dispose.js");
   const THREE = await import("../src/renderer/vendor/three.module.js");
   for (const id of Object.keys(SUPPORT_CARS)) {
     const car = makeSupportCar(id), s = SUPPORT_CARS[id], casters = [];
@@ -164,6 +165,9 @@ test("moving things stay out of the static shadow map (v0.40): support cars and 
     for (let k = 0; k < ix.length; k += 3) { const a = v(ix[k]), b = v(ix[k + 1]), d = v(ix[k + 2]); assert.ok(b.sub(a).cross(d.sub(a)).y > 0, id + " face " + k / 3 + " up"); }
     for (let i = 0; i < 4; i++) assert.ok(c.getW(i) > 0.3 && c.getW(4 + i) === 0);
     assert.ok(sh[0].material.transparent && !sh[0].material.depthWrite);
+    // (its own geometry and material: freed with the car – dispose.js)
+    let freed = 0; sh[0].geometry.addEventListener("dispose", () => freed++); sh[0].material.addEventListener("dispose", () => freed++);
+    disposeGroup(car); assert.strictEqual(freed, 2, id + " contact shadow freed with the car");
   }
   const f = makeFlag("yellow"), casters = []; f.group.traverse((o) => { if (o.castShadow) casters.push(o.type); });
   assert.deepStrictEqual(casters, [], "a flag casts into the shadow map");
