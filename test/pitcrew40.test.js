@@ -178,6 +178,9 @@ test("standing as drawn: a car whose next sample is where it is stands from the 
   assert.ok(Math.abs(standingForPos(c, 1500) - 0.5) < 1e-9, String(standingForPos(c, 1500)));
   assert.ok(Math.abs(standingForPos(c, 3000) - 2.0) < 1e-9);
   assert.strictEqual(standingForPos(c, 3500), 0, "drawn moving off");
+  const { posSpeed, pitState } = await S();
+  assert.ok(posSpeed(c, 3500) > 10 && posSpeed(c, 3000) < 0.1, "the speed as drawn too: never 'standing' by its speed with no standstill (a crew restarting its work as the car pulls away)");
+  assert.notStrictEqual(pitState({ inPit: true, onLane: true, u: 100, gStart: 0, gEnd: 400, speed: posSpeed(c, 3500), stillFor: standingForPos(c, 3500), boxU: 100, boxFrom: "order", race: true, lastBox: { endU: 100, ago: 0.1 } }).state, "in box");
   const ls = lastStandPos(c, 3500, 25, 1); assert.ok(ls && ls.t0 === 1000 && ls.t1 === 3400, JSON.stringify(ls));
   assert.strictEqual(lastStandPos(c, 3000, 25, 1), null, "standing");
   // live: no sample after t – only what came in

@@ -240,6 +240,9 @@ function idxAt(c, t) { let lo = 0, hi = c.n - 1; if (!c.n || c.t[0] > t) return 
 const stepStill = (c, j, still) => { const dt = (c.t[j] - c.t[j - 1]) / 1000; return dt > 0 && dt < 3 && Math.hypot(c.x[j] - c.x[j - 1], c.y[j] - c.y[j - 1]) * DMm / dt < still; };
 export function posSpeed(c, t, span = 600) {
   const i = idxAt(c, t); if (i < 1) return 0;
+  // (as drawn – standingForPos: the step covering t, when the next sample is there; else the last span's)
+  const n = c.n ?? c.t.length;
+  if (i + 1 < n && c.t[i + 1] > t && c.t[i + 1] - c.t[i] < 3000) return Math.hypot(c.x[i + 1] - c.x[i], c.y[i + 1] - c.y[i]) * DMm / ((c.t[i + 1] - c.t[i]) / 1000);
   let j = i; while (j > 0 && c.t[i] - c.t[j - 1] <= span) j--;
   const dt = (c.t[i] - c.t[j]) / 1000; return dt > 0 ? Math.hypot(c.x[i] - c.x[j], c.y[i] - c.y[j]) * DMm / dt : 0;
 }
