@@ -19,10 +19,11 @@ import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./mars
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
-import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, walkPhase, flagPose, flagHold } from "./crew.js";
+import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, paintPitScreens, updateTeamScreens } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights } from "./car3d.js";
+import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
 import { WheelScreens, screenModel } from "./wheelscreen.js";
@@ -123,6 +124,7 @@ function initGeoSettings() {
     document.getElementById("geoPitWork").value = ["record", "observed", "typical"].includes(o.pitWork) ? o.pitWork : "record";
     document.getElementById("geoAero").value = o.aero === "off" ? "off" : "estimate";
     document.getElementById("geoCorners").value = ["near", "all", "off"].includes(o.corners) ? o.corners : "near";
+    document.getElementById("geoShift").value = o.shiftLights === "fill" ? "fill" : "team";
   };
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
@@ -152,6 +154,7 @@ function initGeoSettings() {
   document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
   document.getElementById("geoAero").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), aero: e.target.value }));
   document.getElementById("geoCorners").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), corners: e.target.value }));
+  document.getElementById("geoShift").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), shiftLights: e.target.value }));
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
     m.textContent = "확인하는 중…"; m.classList.remove("bad");
@@ -1378,6 +1381,17 @@ function gridCar(c, num, v, ctx) {
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
+// a car's shift lights now (shiftlights.js carLeds; its wheel's row in the viewer's chosen look); off without telemetry
+function lightLeds(c, num, t, src) {
+  const u = c.model.userData, look = geoSettings().shiftLights === "fill" ? "fill" : "team";
+  if (u.ledLook !== look) { u.ledProfile = profileForWheel(u.wheelSpec?.leds, look); u.ledLook = look; }
+  const tel = src?.car?.[num], st = tel && u.ledProfile ? carLeds(tel, t, u.ledProfile, u.profile.era) : null;
+  setLeds(c.model, st ? st.colours : null);
+  c.leds = st;
+  // (the flag lights: race control's track state – yellow for a yellow / SC / VSC, red for a red flag; else off)
+  const ts = src?.state?.TrackStatus?.Status;
+  setFlagLights(c.model, ts === "5" ? "#ff2414" : ts === "2" || ts === "4" || ts === "6" || ts === "7" ? "#ffb21a" : null);
+}
 // the wheels' angles (front, rear) and how much their markings smear this frame (car3d.js setSmear)
 function rollWheels(c, st, est, F, t, v) {
   const P = c.model.userData.profile, W = c.wheelSt || (c.wheelSt = { f: { a: null, t: null }, r: { a: null, t: null }, t: null, pos: new THREE.Vector3(), has: false });
@@ -1584,6 +1598,8 @@ function updateCars(dt) {
     // (the wheels' and steering wheel's angle eased: the turning rate from 4 Hz positions twitched them frame to frame)
     c.steer = c.steer == null ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
     setWheels(c.model, c.spinW, c.steer);
+    // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
+    if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
     // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
     // (straight mode at speed on straights, corner mode otherwise: the feed has no channel for it)
     let wantOpen;
@@ -1602,6 +1618,7 @@ function updateCars(dt) {
     const out = l.Retired || l.Stopped;
     const inCockpit = (camMode === "onboard" || camMode === "eye") && num === focusNum;
     c.obj.visible = true;
+    setCockpit(c.model, inCockpit && camMode === "eye");
     // the T-cam sees the driver's helmet in front of it, as on TV; from the driver's own eyes it is round the camera
     c.model.userData.helmet.visible = !(camMode === "eye" && num === focusNum);
     c.label.sp.userData.own = inCockpit;
@@ -2079,7 +2096,8 @@ function updateWheelScreens(src, t) {
   for (const num of lost) { const c = cars.get(num); if (c) setWheelScreen(c.model, null); }
   for (const { num, tex } of have) { const c = cars.get(num); if (c) setWheelScreen(c.model, tex); }
   const lines = src?.state?.TimingData?.Lines || {}, laps = src?.state?.LapCount || null, season = app()?.sessionYear?.() || null;
-  wheelScreens.update((num) => screenModel({ car: src?.carAt?.(num, t) || null, line: lines[num] || null, laps, season }));
+  const status = src?.state?.TrackStatus?.Status ?? null;
+  wheelScreens.update((num) => screenModel({ car: src?.carAt?.(num, t) || null, line: lines[num] || null, laps, season, status }));
   // the teams' own pit wall panels: their two drivers, by team – the session's public data at the moment shown (each
   // repainted on change, at most twice a second: ~11 small canvases)
   if (pitTeams.group) {
@@ -2419,14 +2437,14 @@ function paintHud() {
     ${l.LastLapTime?.Value ? `<span class="g">최근 랩 ${e(l.LastLapTime.Value)}</span>` : ""}`;
   // live car data: speed, gear, pedals
   const c = A.src?.carAt?.(num, A.t);
-  const tel = c ? `<span class="tel"><b>${Math.round(c.speed)}</b><small>km/h</small><b class="gear">${e(c.gear || "N")}</b><i class="thr" style="--v:${Math.max(0, Math.min(100, +c.thr || 0))}%"></i><i class="brk" style="--v:${c.brk ? 100 : 0}%"></i></span>` : "";
+  const tel = c ? `<span class="tel"><b>${Math.round(c.speed)}</b><small>km/h</small><b class="gear">${e(c.gear == null ? "–" : c.gear || "N")}</b><i class="thr" style="--v:${Math.max(0, Math.min(100, +c.thr || 0))}%"></i><i class="brk" style="--v:${c.brk ? 100 : 0}%"></i></span>` : "";
   const full = html + tel;
   if (hud.dataset.html !== full) { hud.innerHTML = full; hud.dataset.html = full; }
 }
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near" };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near", shiftLights: "team" };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -3182,6 +3200,9 @@ function frame(now) {
   if (world) updateCamera(dt);
   if (world) updateCorners(dt);
   if (devRec) devRec(now, dt);
+  // (the pit wall people's small parts near or not – decided before drawing, so the shadow pass sees the same; a change
+  // redraws the static shadow map)
+  if (peopleLod(camera.position)) refreshShadows();
   updateSun(now);
   thinFarTrees();
   world?.real?.stands?.update(camera.position, camMode === "heli" || camMode === "inspect" ? 520 : 300);
@@ -4122,6 +4143,16 @@ window.Map3D = {
     const yaw = c.yaw, f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)), r = new THREE.Vector3(f.z, 0, -f.x);
     camera.position.copy(c.pos).addScaledVector(r, dx).addScaledVector(UP, dy).addScaledVector(f, dz);
     camera.near = 0.05; camera.fov = 40; camera.updateProjectionMatrix(); camera.lookAt(c.pos.clone().addScaledVector(UP, 0.5));
+    return "ok";
+  },
+  // development: a static look at the focused car from (x, y, z) to (tx, ty, tz), both in the car's own frame (+x its
+  // left, +y up, +z its nose; metres) – the cockpit's parts up close (fine gloves on)
+  inspectAt(x, y, z, tx, ty, tz, fov = 35) {
+    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    setCam("heli"); controls.enabled = false; visible && (camMode = "inspect");
+    c.model.updateWorldMatrix(true, true); setCockpit(c.model, true); setDetail(c.model, "near");
+    camera.position.set(x, y, z).applyMatrix4(c.model.matrixWorld); camera.up.set(0, 1, 0);
+    camera.near = 0.01; camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(new THREE.Vector3(tx, ty, tz).applyMatrix4(c.model.matrixWorld));
     return "ok";
   },
   reset() { if (world) { setCam("heli"); frameCircuit(); } },

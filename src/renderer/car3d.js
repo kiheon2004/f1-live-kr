@@ -25,7 +25,9 @@
 // car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
 import { shapeFor } from "./carshapes.js";
-import { BODY, JOINT_R, LIMB_GEO, fistGeometry, reach2 } from "./body3d.js";
+import { BODY, reach2, driverGlove, mirrorGlove, armSkin } from "./body3d.js";
+import { wheelSpec, wheelParts as steeringParts, ledGeometry, teamWheel } from "./wheel3d.js";
+import { paintScreen, screenModel } from "./wheelscreen.js";
 
 // ---------- profiles ----------
 // FZ/RZ: axle positions along the car, FR/RR tyre radii, FW/RW tyre widths, W: overall width (outer tyre faces),
@@ -87,7 +89,10 @@ export function profileFor(season, teamName, date = null) {
   const era = y >= 2026 ? "2026" : "2022";
   const shape = shapeFor(y, teamName, date);
   const team = TEAM_PROFILES.find((t) => t.season === y && t.team.test(teamName || "")) || null;
-  return { key: shape ? `${era}:${shape.id}` : era, era, variant: shape?.id || null, shape, season: y, ...PROFILES[era], ...(team?.camera || {}), team: team?.id || null };
+  // (the steering wheel: the team's (wheel3d.js TEAM_WHEELS) over what the car's shape says; part of the model's key)
+  const wheel = teamWheel(y, teamName) ? { ...(shape?.wheel || {}), ...teamWheel(y, teamName) } : shape?.wheel || null;
+  const key = shape ? `${era}:${shape.id}` : era + (wheel?.id ? `+${wheel.id}` : "");   // (a shape's id is the team's already)
+  return { key, era, variant: shape?.id || null, shape, wheel, season: y, ...PROFILES[era], ...(team?.camera || {}), team: team?.id || null };
 }
 // (kept for callers of the old single model: the current era's numbers)
 export const WHEELBASE = PROFILES[2026].FZ - PROFILES[2026].RZ;
@@ -374,15 +379,11 @@ export function sidewallMaterial(color = 0xf2c230, era = "2022") {
   };
   return m;
 }
-// The steering wheel's display when no driver's own data is on it (wheelscreen.js paints those): a neutral face – lights
-// off, no gear, no made-up lap or delta
+// The steering wheel's display when no driver's own data is on it (wheelscreen.js paints those): its neutral face – no
+// gear, no made-up lap or delta – in the same layout, at a lower resolution (the cars further away)
 function wheelScreen() {
   return sharedTex("screen", () => {
-    const c = canvas(256, 128), g = c.getContext("2d");
-    g.fillStyle = "#050607"; g.fillRect(0, 0, 256, 128);
-    for (let i = 0; i < 10; i++) { g.fillStyle = "#16191c"; g.beginPath(); g.arc(28 + i * 22, 13, 7, 0, Math.PI * 2); g.fill(); }
-    g.fillStyle = "#1d2f45"; g.fillRect(10, 34, 66, 70); g.fillRect(180, 34, 66, 70);
-    g.fillStyle = "#3a434d"; g.font = "700 60px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("–", 128, 72);
+    const c = canvas(256, 144); paintScreen(c.getContext("2d"), screenModel({ car: null }), 256, 144);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
     return t;
   });
@@ -768,45 +769,52 @@ function cockpit(p) {
   { const q = helmet.attributes.position; for (let i = 0; i < q.count; i++) { const y = q.getY(i), z = q.getZ(i); if (y < -0.04 && z > 0) q.setY(i, y - 0.02 * (z / 0.155)); } helmet.computeVertexNormals(); }
   helmet.translate(hx, hy, hz);
   const visor = new THREE.SphereGeometry(1.01, 32, 8, Math.PI / 2 - 0.95, 1.9, 1.2, 0.42); visor.scale(sx, sy, sz); visor.translate(hx, hy, hz);
-  // the steering wheel: a rounded rectangle, its face (screen, buttons: −z, towards the driver) tilted up to the
-  // driver's eyes, grips and paddles behind
+  // the steering wheel (wheel3d.js): the team's where a source shows it (carshapes.js wheel), else the era's neutral
+  // one – carbon body, rubber grips, display in its bezel, buttons, rotaries, paddles, hub, and its shift lights' places;
+  // its face (−z, towards the driver) tilted up to the driver's eyes
   const wz = 0.36 + ck, wy = 0.61, tilt = 0.42;
-  // (the team's wheel where a source shows it – carshapes.js wheel: a sculpted top and slimmer lower section (Ferrari
-  // 2026), a top row of shift LEDs, its count of rotaries and buttons; else the neutral wheel)
-  const W = p.shape?.wheel || null, ww = 0.25, wh = W?.ratio ? ww / W.ratio : 0.14;
-  const wheelBody = W?.style === "sculpted"
-    ? merge([softBox(ww, 0.085, 0.035, 0, 0.025, 0, 0.3), softBox(0.15, 0.06, 0.032, 0, -0.04, 0, 0.3), ...[-0.08, 0, 0.08].map((x) => softBox(0.05, 0.02, 0.03, x, 0.07, 0, 0.45))])
-    : softBox(ww, wh, 0.035, 0, 0, 0, 0.25);
-  const grips = merge([softBox(0.055, 0.13, 0.055, 0.14, -0.005, 0.0, 0.45), softBox(0.055, 0.13, 0.055, -0.14, -0.005, 0.0, 0.45)]);
-  const paddles = merge([boxAt(0.07, 0.07, 0.006, 0.08, 0.0, 0.03), boxAt(0.07, 0.07, 0.006, -0.08, 0.0, 0.03)]);
-  const screen = new THREE.PlaneGeometry(0.11, 0.055); screen.rotateY(Math.PI); screen.translate(0, 0.02, -0.0185);
-  const buttons = [], btn = (bx, by, r = 0.008, d = 0.01) => { const b = new THREE.CylinderGeometry(r, r, d, 10); b.rotateX(Math.PI / 2); b.translate(bx, by, -0.02); buttons.push(b); };
-  if (!W) for (const [bx, by] of [[-0.1, 0.04], [0.1, 0.04], [-0.1, -0.03], [0.1, -0.03], [-0.07, -0.055], [0.07, -0.055], [-0.03, -0.055], [0.03, -0.055]]) btn(bx, by);
-  else {
-    // buttons in two columns either side of the screen, rotaries along the bottom (bigger), LEDs in a row on top
-    const nb = W.buttons || 8, per = Math.ceil(nb / 2);
-    for (let i = 0; i < nb; i++) { const k = i < per ? -1 : 1, j = i < per ? i : i - per; btn(0.088 * k + (j % 2) * 0.016 * k, 0.045 - Math.floor(j / 2) * 0.026, 0.0075); }
-    const nr = W.rotaries || 0, lowY = W.style === "sculpted" ? -0.05 : -wh / 2 + 0.018;
-    for (let i = 0; i < nr; i++) btn(nr === 1 ? 0 : -0.07 + (0.14 * i) / (nr - 1), lowY, 0.0115, 0.014);
-    for (let i = 0; i < (W.leds || 0); i++) btn(-0.07 + (0.14 * i) / Math.max(1, W.leds - 1), (W.style === "sculpted" ? 0.06 : wh / 2) - 0.012, 0.0035, 0.006);
+  const W = wheelSpec(p.wheel || null), SW = steeringParts(W, merge, metricUV);
+  const column = rod([0, -0.02, 0.06], [0, -0.02, 0.24], 0.018, 10);
+  // the gloves round the grips (body3d.js driverGlove: a left hand closed round the grip, phalanges tangent to it; the
+  // right hand its mirror image – v0.39 turned one left hand round for both), the wrists behind and outboard of them; the
+  // arms (one skinned sleeve each, body3d armSkin) from the shoulders – under the headrest, ~0.21 m below and 0.13 m
+  // behind the eyes (body3d proportions, the driver reclined; an estimate) – reach each wrist where the turned wheel has
+  // it (placeArms).
+  // (the left hand's fist frame in the wheel's: its +x along the grip downwards (index finger at the top), its −z (the
+  // palm) out from the grip and a little towards the nose, its +y from the wrist through the grip – the wrist behind the
+  // grip and a little outside it, the fingers round the grip's front to its inner side, the thumb on the wheel's face)
+  const g0 = SW.grips[0], up = new THREE.Vector3(...g0.up), gripC = new THREE.Vector3(...g0.c);
+  const shoulder = [0.19, p.eye[1] - 0.21, p.eye[2] - 0.13];
+  // (the hand lined up with its forearm: its +y – wrist to grip – along the forearm as the arm reaches the wheel held
+  // straight (the elbow from the same two-bone reach placeArms uses), square to the grip's axis; v0.40's first fixed
+  // frame left the glove's cuff ~45° off the forearm – a ball on the arm's end)
+  const wheelM = new THREE.Matrix4().compose(new THREE.Vector3(0, wy, wz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), tilt), new THREE.Vector3(1, 1, 1)), toWheel = wheelM.clone().invert();
+  const X = up.clone().negate(), out = new THREE.Vector3(up.y, -up.x, 0).normalize();
+  let Y = new THREE.Vector3(-0.25, 0, 1).normalize();
+  for (let it = 0; it < 4; it++) {
+    const w = gripC.clone().addScaledVector(Y, -BODY.grip).applyMatrix4(wheelM), E = [0, 0, 0], T = [0, 0, 0];
+    reach2(shoulder, w.toArray(), BODY.uarm, BODY.farm, [0.35, -1, 0], E, T);
+    const e = new THREE.Vector3(...E).applyMatrix4(toWheel), d = gripC.clone().addScaledVector(Y, -BODY.grip).sub(e);
+    d.addScaledVector(X, -d.dot(X)); if (d.lengthSq() > 1e-8) Y = d.normalize();
   }
-  const column = rod([0, -0.02, 0.02], [0, -0.02, 0.2], 0.018, 10);
-  // gloves round the grips (body3d.js fists: fingers wrapped round the grip's back, the thumb on its face, the palm on
-  // its outer side), the wrists behind and outboard of them; the arms (body3d's tapered upper and lower arm, an elbow
-  // between) from the shoulders – under the headrest, ~0.21 m below and 0.13 m behind the eyes (body3d proportions,
-  // the driver reclined; an estimate) – reach each wrist where the turned wheel has it (placeArms)
-  // (a fist's frame in the wheel's: its +y from the wrist through the grip, its +x the grip's axis (down), its +z from
-  // the palm to the grip)
-  const fistFrame = (k) => { const Z = new THREE.Vector3(-k, 0, -0.3).normalize(), X = new THREE.Vector3(0, -k, 0), Y = new THREE.Vector3().crossVectors(Z, X).normalize(); return { X, Y, Z: new THREE.Vector3().crossVectors(X, Y) }; };
-  const gripAt = (k) => new THREE.Vector3(0.14 * k, -0.005, 0);
-  const wristOf = (k) => { const { Y } = fistFrame(k); return gripAt(k).addScaledVector(Y, -BODY.grip); };
-  const glove = (k) => { const g = fistGeometry(true, 0.029), { X, Y, Z } = fistFrame(k), w = wristOf(k); g.applyMatrix4(new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(w)); return g; };
+  const Z = new THREE.Vector3().crossVectors(X, Y).normalize(), wrist = gripC.clone().addScaledVector(Y, -BODY.grip);
+  // (the palm, −z, should face in from the outside of the grip: if the forearm's line put it on the inside, the hand
+  // would be a right hand – kept, but noted for the tests: palmOut)
+  const palmOut = -Z.dot(out);
+  const fistM = new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(wrist), left = driverGlove(W.grip.r, 1).applyMatrix4(fistM), leftLo = driverGlove(W.grip.r, 0).applyMatrix4(fistM);
   return {
     rim, headrest: merge([headrest, tub]), helmet, visor,
     // (the arms: placed per car each frame from the shoulders to the turning wrists, setWheels)
-    wheel: { body: metricUV(merge([wheelBody, column, paddles]), 0.04), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), uarm: LIMB_GEO.uarm(16), farm: LIMB_GEO.farm(16), elbow: new THREE.SphereGeometry(JOINT_R.elbow, 16, 10), at: [0, wy, wz], tilt,
-      wrist: wristOf(1).toArray(), shoulder: [0.19, p.eye[1] - 0.21, p.eye[2] - 0.13] },
+    wheel: { body: SW.body, rubber: SW.rubber, bezel: SW.bezel, caps: SW.caps, metal: merge([SW.metal, column]), paddles: SW.paddles, screen: SW.screen, leds: SW.leds, led: ledGeometry(SW.led.r), ledWhere: W.leds?.where || null, spec: W,
+      flags: SW.flags, gloves: mergeGloves(left, mirrorGlove(left)), glovesLo: mergeGloves(leftLo, mirrorGlove(leftLo)), arm: armSkin(), at: [0, wy, wz], tilt,
+      wrist: wrist.toArray(), shoulder, palmOut },
   };
+}
+// the two gloves (vertex-coloured) into one geometry
+function mergeGloves(a, b) {
+  const out = new THREE.BufferGeometry();
+  for (const k of ["position", "normal", "color"]) { const A = a.attributes[k].array, B = b.attributes[k].array, arr = new Float32Array(A.length + B.length); arr.set(A); arr.set(B, A.length); out.setAttribute(k, new THREE.BufferAttribute(arr, 3)); }
+  a.dispose(); b.dispose(); out.computeBoundingSphere(); return out;
 }
 
 // Wheels: the tyre (rounded profile, sidewall bulge), the rim's lip, the wheel cover (with the compound's coloured
@@ -1103,11 +1111,20 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));
   const visorMat = mat("visor", () => new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 }));
   const screenMat = mat("screen", () => new THREE.MeshBasicMaterial({ map: wheelScreen(), toneMapped: false }));
-  const buttonMat = mat("buttons", () => new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.4, metalness: 0.5 }));
+  // the wheel's own materials (shared): grips' rubber, the matte black of the display's bezel and the light strip, the
+  // buttons' and scales' coloured caps (vertex colours), anodised metal (hub, paddle pivots); the shift lights unlit
+  // (lit through each car's instance colours – never brighter than their colour: no white blow-out by day or night)
+  const rubberMat = mat("wheelRubber", () => new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.93, metalness: 0 }));
+  const bezelMat = mat("wheelBezel", () => new THREE.MeshStandardMaterial({ color: 0x0c0d0f, roughness: 0.62, metalness: 0.05 }));
+  const capsMat = mat("wheelCaps", () => new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.38, metalness: 0.05 }));
+  const metalMat = mat("wheelMetal", () => new THREE.MeshStandardMaterial({ color: 0x8e949b, roughness: 0.3, metalness: 0.9 }));
+  const ledMat = mat("wheelLed", () => new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
   const bandMat = sidewallMaterial(0xf2c230, prof.era);
   const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
   const helmetMat = new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 });
-  const gloveMat = new THREE.MeshStandardMaterial({ color: l.base, roughness: 0.8, metalness: 0 });
+  // the driver's gloves (fabric with darker grip print: vertex colours) and suit sleeves in the team's colour
+  const gloveMat = new THREE.MeshStandardMaterial({ color: l.glove || l.base, vertexColors: true, roughness: 0.82, metalness: 0 });
+  const suitMat = new THREE.MeshStandardMaterial({ color: l.suit || l.base, vertexColors: true, roughness: 0.86, metalness: 0 });
   const g = new THREE.Group();
   const add = (geo, m, parent = g, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; parent.add(mesh); return mesh; };
   add(t.painted, paint); add(t.carbon, carbon); add(t.wing, wingPaint); add(t.rim, pad);
@@ -1120,10 +1137,34 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const near = new THREE.Group(); near.name = "near"; g.add(near);
   add(t.headrest, pad, near);
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
-  add(t.wheel.body, carbon, wheel); add(t.wheel.grips, pad, wheel); const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen"); add(t.wheel.buttons, buttonMat, wheel); add(t.wheel.gloves, gloveMat, wheel);
-  // arms: from each shoulder to its glove's wrist (the glove turns with the wheel) – placed by setWheels so the hands
-  // never leave the arms when the wheel turns (v0.34: the arms were fixed while the gloves turned)
-  const arms = [1, -1].map((k) => ({ k, uarm: add(t.wheel.uarm, gloveMat, near), farm: add(t.wheel.farm, gloveMat, near), elbow: add(t.wheel.elbow, gloveMat, near) }));
+  add(t.wheel.body, carbon, wheel); add(t.wheel.paddles, carbon, wheel); add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
+  const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen");
+  // (the gloves: the fine pair only for the car a cockpit camera rides in – setCockpit; ~16k triangles – else a light pair)
+  const gloveFine = add(t.wheel.gloves, gloveMat, wheel, "gloves"), gloveLo = add(t.wheel.glovesLo, gloveMat, wheel, "glovesLo"); gloveFine.visible = false;
+  // the shift lights: one instanced mesh per car (its own colours), the light's shape shared (shiftlights.js says which
+  // are lit, setLeds paints them)
+  let leds = null;
+  if (t.wheel.leds.length) {
+    const m = new THREE.InstancedMesh(t.wheel.led, ledMat, t.wheel.leds.length); m.name = "shiftLights"; m.frustumCulled = false;
+    const mt = new THREE.Matrix4(); t.wheel.leds.forEach(([x, y, z], i) => { m.setMatrixAt(i, mt.makeTranslation(x, y, z)); m.setColorAt(i, LED_OFF); });
+    wheel.add(m); leds = { mesh: m, count: t.wheel.leds.length, where: t.wheel.ledWhere, key: "" };
+  }
+  // the FIA flag lights beside the display (3 a side): lit by race control's track state (setFlagLights)
+  let flagLights = null;
+  if (t.wheel.flags.length) {
+    const m = new THREE.InstancedMesh(t.wheel.led, ledMat, t.wheel.flags.length); m.name = "flagLights"; m.frustumCulled = false;
+    const mt = new THREE.Matrix4(); t.wheel.flags.forEach(([x, y, z], i) => { m.setMatrixAt(i, mt.makeTranslation(x, y, z).scale(_one.set(1.3, 1.3, 1))); m.setColorAt(i, LED_OFF); });
+    wheel.add(m); flagLights = { mesh: m, count: t.wheel.flags.length, key: "" };
+  }
+  // arms: from each shoulder to its glove's wrist (the glove turns with the wheel) – one skinned sleeve each (its bones
+  // this car's own, the shape shared), placed by setWheels so the hands never leave the arms when the wheel turns
+  const arms = [1, -1].map((k) => {
+    const b0 = new THREE.Bone(), b1 = new THREE.Bone(), b2 = new THREE.Bone();
+    b1.position.set(0, BODY.uarm, 0); b2.position.set(0, BODY.farm, 0); b0.add(b1); b1.add(b2);
+    const sk = new THREE.SkinnedMesh(t.wheel.arm, suitMat); sk.add(b0); sk.updateMatrixWorld(true); sk.bind(new THREE.Skeleton([b0, b1, b2])); sk.frustumCulled = false; sk.name = "arm";
+    near.add(sk);
+    return { k, mesh: sk, bones: [b0, b1, b2] };
+  });
   const wheels = [], spins = [];
   const FX = prof.W / 2 - prof.FW / 2, RX = prof.W / 2 - prof.RW / 2;
   for (const [x, z, kind] of [[FX, prof.FZ, "front"], [-FX, prof.FZ, "front"], [RX, prof.RZ, "rear"], [-RX, prof.RZ, "rear"]]) {
@@ -1135,8 +1176,8 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     g.add(w); wheels.push(w); spins.push(s);
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
-  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armGeo: { wrist: t.wheel.wrist, shoulder: t.wheel.shoulder }, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
-    paintMats: [paint, wingPaint, fwPaint, helmetMat, gloveMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
+  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armGeo: { wrist: t.wheel.wrist, shoulder: t.wheel.shoulder, palmOut: t.wheel.palmOut }, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
+    leds, flagLights, gloveFine, gloveLo, cockpit: false, wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat, gloveMat, suitMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
 }
@@ -1164,6 +1205,33 @@ export function setWheels(car, spin, steer) {
   if (u.wheel) u.wheel.rotation.z = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, -steer * STEER_RATIO));
   if (u.arms && u.near.visible) placeArms(u);
 }
+// the steering wheel's spec this car was built with (wheel3d.js)
+export const wheelSpecOf = (car) => car.userData.wheelSpec || null;
+// The car a cockpit camera rides in (on) or not: its gloves in full detail – fingers' grip print, seams
+export function setCockpit(car, on) {
+  const u = car.userData; if (!u.gloveFine || u.cockpit === on) return;
+  u.cockpit = on; u.gloveFine.visible = on; u.gloveLo.visible = !on;
+}
+// The shift lights' colours (shiftlights.js ledState: a colour per light, null off) – painted only when they change
+const LED_OFF = new THREE.Color("#15181b"), _lc = new THREE.Color();
+export function setLeds(car, colours) {
+  const L = car.userData.leds; if (!L) return false;
+  const key = colours ? colours.join(",") : "";
+  if (key === L.key) return false;
+  L.key = key;
+  for (let i = 0; i < L.count; i++) { const c = colours?.[i]; L.mesh.setColorAt(i, c ? _lc.set(c) : LED_OFF); }
+  L.mesh.instanceColor.needsUpdate = true;
+  return true;
+}
+// The FIA flag lights on the wheel: colour (hex) or null (off) – all of them alike (what race control's track state says
+// for everybody; the per-car light-panel messages aren't in the feed)
+const _one = new THREE.Vector3();
+export function setFlagLights(car, colour) {
+  const L = car.userData.flagLights; if (!L) return;
+  const key = colour || ""; if (key === L.key) return; L.key = key;
+  for (let i = 0; i < L.count; i++) L.mesh.setColorAt(i, colour ? _lc.set(colour) : LED_OFF);
+  L.mesh.instanceColor.needsUpdate = true;
+}
 // How far the sidewall markings smear this frame (rad; wheelspin.js smearOf) – the wheel's look at speed
 export function setSmear(car, smear) {
   const u = car.userData; u.smear = smear;
@@ -1171,17 +1239,26 @@ export function setSmear(car, smear) {
 }
 // each arm from its shoulder to its glove's wrist (where the turned wheel has it): the upper arm and the forearm their
 // own fixed lengths (body3d), the elbow bent down and out between them – a two-bone reach, so turning the wheel moves
-// the elbows, never stretches an arm
-const _S = [0, 0, 0], _W = [0, 0, 0], _E = [0, 0, 0], _T = [0, 0, 0], _V = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0), _D = new THREE.Vector3(), _q = new THREE.Quaternion();
+// the elbows, never stretches an arm. The sleeve's bones: the shoulder's turned so its +y runs to the elbow and its x is
+// the elbow's hinge (square to both bones), the elbow's turned about that hinge – the skin bends at the crease.
+const _S = [0, 0, 0], _W = [0, 0, 0], _E = [0, 0, 0], _T = [0, 0, 0], _V = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0), _A = new THREE.Vector3(), _F = new THREE.Vector3(), _H = new THREE.Vector3(), _Zb = new THREE.Vector3(), _M = new THREE.Matrix4(), _q = new THREE.Quaternion(), _qi = new THREE.Quaternion();
 function placeArms(u) {
   u.wheel.updateMatrix();
   for (const a of u.arms) {
     const k = a.k, [wx, wy, wz] = u.armGeo.wrist, [sx, sy, sz] = u.armGeo.shoulder;
     _V.set(wx * k, wy, wz).applyMatrix4(u.wheel.matrix); _W[0] = _V.x; _W[1] = _V.y; _W[2] = _V.z;
     _S[0] = sx * k; _S[1] = sy; _S[2] = sz;
-    reach2(_S, _W, BODY.uarm, BODY.farm, [0.35 * k, -1, 0], _E, _T);
-    const seg = (m, A, B) => { _D.set(B[0] - A[0], B[1] - A[1], B[2] - A[2]).normalize(); m.position.set(A[0], A[1], A[2]); m.quaternion.copy(_q.setFromUnitVectors(_Y, _D)); };
-    seg(a.uarm, _S, _E); seg(a.farm, _E, _T); a.elbow.position.set(_E[0], _E[1], _E[2]);
+    a.short = reach2(_S, _W, BODY.uarm, BODY.farm, [0.35 * k, -1, 0], _E, _T, a.elbow || null);
+    a.elbow = a.elbow || [0, 0, 0]; a.elbow[0] = _E[0]; a.elbow[1] = _E[1]; a.elbow[2] = _E[2];
+    _A.set(_E[0] - _S[0], _E[1] - _S[1], _E[2] - _S[2]).normalize();       // the upper arm
+    _F.set(_T[0] - _E[0], _T[1] - _E[1], _T[2] - _E[2]).normalize();       // the forearm
+    _H.crossVectors(_A, _F); if (_H.lengthSq() < 1e-8) _H.set(k, 0, 0).addScaledVector(_A, -k * _A.x); _H.normalize();
+    _Zb.crossVectors(_H, _A);
+    const [b0, b1] = a.bones;
+    b0.position.set(_S[0], _S[1], _S[2]); b0.quaternion.setFromRotationMatrix(_M.makeBasis(_H, _A, _Zb));
+    // (the forearm's direction in the shoulder bone's frame: a turn about its x)
+    _qi.copy(b0.quaternion).invert(); _V.copy(_F).applyQuaternion(_qi);
+    b1.quaternion.copy(_q.setFromUnitVectors(_Y, _V));
   }
 }
 // Level of detail: "near" (everything), "mid" (no cockpit interior, hands, steering wheel), "far" (also no wheel covers,

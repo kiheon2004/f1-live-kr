@@ -684,10 +684,32 @@ export function peopleMeshes(people) {
   for (const [k, e] of Object.entries(meshes)) { e.m.count = counts[k]; e.m.instanceMatrix.needsUpdate = true; if (e.m.instanceColor) e.m.instanceColor.needsUpdate = true; e.m.computeBoundingSphere(); }
   // the small parts (hands, joints, hair, headsets, necks, shoes) drawn only with the camera within PEOPLE_NEAR m of the
   // stand (its bounding sphere's surface): a pit wall seen from further away is torsos, heads and limbs (v0.39 perf –
-  // 67 people at Suzuka were ~0.5 M triangles from anywhere)
-  for (const k of ["glove", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) {
-    const m = meshes[k]?.m; if (!m) continue; const full = m.count, bs = m.boundingSphere;
-    m.onBeforeRender = (r, sc, cam) => { m.count = bs && cam.position.distanceTo(_wc.copy(bs.center).applyMatrix4(m.matrixWorld)) - bs.radius > PEOPLE_NEAR ? 0 : full; };
-  }
+  // 67 people at Suzuka were ~0.5 M triangles from anywhere).
+  // v0.40: decided once a frame before drawing (peopleLod, from the view's camera) – no longer in each mesh's
+  // onBeforeRender: three.js draws the shadow map before the view and calls only onBeforeShadow there, so the shadow pass
+  // used the count the previous frame's view had left (and this app redraws its shadow map only when the shadow's area
+  // moves – hands and joints walked in from 120 m kept no shadow until then). Now the shadow pass and the view see the
+  // same counts, and a change asks the caller to redraw the shadow map.
+  const small = [];
+  for (const k of ["glove", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) { const m = meshes[k]?.m; if (m) small.push({ m, full: m.count }); }
+  const bs = group.children[0]?.boundingSphere;
+  let near = true;
+  group.userData.lod = (camPos) => {
+    group.updateWorldMatrix(true, false);
+    const want = !bs || camPos.distanceTo(_wc.copy(bs.center).applyMatrix4(group.children[0].matrixWorld)) - bs.radius <= PEOPLE_NEAR;
+    if (want === near) return false;
+    near = want; for (const e of small) e.m.count = near ? e.full : 0;
+    return true;
+  };
+  LIVE_PEOPLE.add(group);
+  group.children[0]?.addEventListener("dispose", () => LIVE_PEOPLE.delete(group));
   return group;
+}
+// the pit wall people's small parts near or not, for the camera at camPos (each frame, before the frame is drawn);
+// true when any changed (the static shadow map then wants redrawing). Only the groups in a scene now are looked at.
+const LIVE_PEOPLE = new Set();
+export function peopleLod(camPos) {
+  let changed = false;
+  for (const g of LIVE_PEOPLE) { let o = g; while (o.parent) o = o.parent; if (o.isScene) changed = g.userData.lod(camPos) || changed; }
+  return changed;
 }

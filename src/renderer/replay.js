@@ -358,7 +358,10 @@
     const i = sampleAt(c, t);
     if (i < 0 || t - c.t[i] > 3000) return null;
     const j = Math.min(i + 1, c.t.length - 1), f = c.t[j] > c.t[i] ? Math.min(1, (t - c.t[i]) / (c.t[j] - c.t[i])) : 0;
-    return { speed: c.v[i] + (c.v[j] - c.v[i]) * f, rpm: c.rpm[i] + (c.rpm[j] - c.rpm[i]) * f, gear: c.gear[i], thr: c.thr[i], brk: c.brk[i], drs: c.drs[i] === 255 ? null : c.drs[i] };
+    // (gear: 0 neutral … 8; anything else null – the 2026 feed counts the channel up 7 → 10 → … → 128 on a car that has
+    // stopped for good (Monza 2026: Leclerc, Bottas, standing at 0 km/h), which the wheel and the panels had shown as gear "128")
+    const g = c.gear[i];
+    return { speed: c.v[i] + (c.v[j] - c.v[i]) * f, rpm: c.rpm[i] + (c.rpm[j] - c.rpm[i]) * f, gear: g >= 0 && g <= 8 ? g : null, thr: c.thr[i], brk: c.brk[i], drs: c.drs[i] === 255 ? null : c.drs[i] };
   }
   // Samples between t0 and t1 with distance (m) from t0, integrated from speed.
   function carTrace(c, t0, t1) {

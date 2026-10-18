@@ -1016,7 +1016,7 @@
     // overtake or the battery – nothing is shown rather than a made-up state)
     const drsOpen = c.drs != null && c.drs >= 10;
     return `<div class="gauge"><span class="who" style="border-color:${color}">${esc(d.Tla)}</span>
-      <b class="spd">${Math.round(c.speed)}<small>km/h</small></b><b class="gear">${c.gear || "N"}<small>단</small></b>
+      <b class="spd">${Math.round(c.speed)}<small>km/h</small></b><b class="gear">${c.gear == null ? "–" : c.gear || "N"}<small>단</small></b>
       <span class="bars"><i class="rpm" style="width:${Math.min(100, (c.rpm / 13000) * 100)}%"></i><i class="thr" style="width:${Math.min(100, c.thr)}%"></i><i class="brk" style="width:${c.brk ? 100 : 0}%"></i></span>
       <span class="muted mono">${Math.round(c.rpm)} rpm</span>${drsOpen ? `<em class="drs">DRS</em>` : ""}</div>`;
   }

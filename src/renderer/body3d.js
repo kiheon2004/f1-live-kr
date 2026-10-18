@@ -164,3 +164,143 @@ function acrossOf(v, px, py, pz, out) {
   const dd = ax * x + ay * y + az * z; let ox = ax - dd * x, oy = ay - dd * y, oz = az - dd * z; const ol = Math.hypot(ox, oy, oz) || 1;
   out[0] = ox / ol; out[1] = oy / ol; out[2] = oz / ol; return out;
 }
+
+// ---------- the driver's hands and arms up close (v0.40) ----------
+// v0.39's cockpit gloves were the crews' fist (torus fingers round a thin handle, a capsule thumb) scaled onto the
+// wheel's 47 mm grips, the same LEFT hand turned round for both sides (its thumb on the wrong side of the right hand),
+// and the arms three rigid parts with a ball at the elbow. Now:
+//   driverGlove(handleR): a gloved LEFT hand closed round a grip of radius handleR, in fistGeometry's frame (wrist at the
+//   origin, +y to the grip's centre at BODY.grip, the grip's axis along x – index finger at −x –, the palm at −z). Each
+//   finger is three phalanges (gloved lengths from hand-anthropometry tables – Garrett 1971 / Buryanov & Kotiuk 2010 –
+//   scaled to a 1.78 m man; M), laid round the grip as a chain whose every phalanx is tangent to it (the pad touching,
+//   never through it): the knuckles stand off the grip, the tips curl round its far side. The thumb lies across the
+//   grip's face (the wheel's face side). The palm's grip panels and finger pads darker (silicone print on the palm of
+//   race gloves – FIA 8856-2018 gloves, maker photos; M), a seam ring at each finger joint, the gauntlet cuff with its
+//   strap. Vertex colours (white = the glove's colour; the material's colour tints them).
+//   For the other hand, mirror it (mirrorGlove) – never turn it round.
+//   armSkin(): one sleeve per arm (shoulder → wrist, the elbow's crease blended over ±5 cm) skinned to three bones –
+//   no ball at the elbow, no rigid parts turning against each other.
+export const GLOVE = {
+  // phalanx lengths (m, gloved, proximal → distal) and radii, index → little; their places along the grip (x)
+  fingers: [
+    { x: -0.0275, L: [0.042, 0.025, 0.021], r: 0.0093 },
+    { x: -0.0085, L: [0.046, 0.029, 0.023], r: 0.0096 },
+    { x: 0.0105, L: [0.043, 0.027, 0.022], r: 0.0092 },
+    { x: 0.0285, L: [0.034, 0.021, 0.019], r: 0.0082 },
+  ],
+  knuckle: 0.62,   // where the knuckles sit round the grip (rad from straight behind it, towards +y)
+  pad: 0.32,       // the darker grip print's shade
+};
+export function driverGlove(handleR = 0.0235, fine = 1) {
+  const G = BODY.grip, parts = [], seg = fine ? 12 : 6;
+  const shade = (g, k) => { const n = g.attributes.position.count, c = new Float32Array(n * 3).fill(k); g.setAttribute("color", new THREE.BufferAttribute(c, 3)); return g; };
+  const capsule = (A, B, r, k = 1) => {
+    const d = new THREE.Vector3().subVectors(B, A), len = d.length();
+    const g = new THREE.CapsuleGeometry(r, Math.max(0.001, len), fine ? 4 : 2, seg);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
+    g.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2);
+    return shade(g, k);
+  };
+  // the fingers: in the plane across the grip at their x, from the knuckle round the grip – each phalanx along the
+  // tangent from its base joint to the circle its pad touches (radius: grip + finger)
+  const tips = [];
+  for (const f of GLOVE.fingers) {
+    const c = handleR + f.r;
+    let a = GLOVE.knuckle, d = c + 0.006;
+    let P = new THREE.Vector3(f.x, G + d * Math.sin(a), -d * Math.cos(a));
+    const joints = [P.clone()];
+    for (const L of f.L) {
+      const q = Math.hypot(P.y - G, P.z), al = Math.atan2(P.y - G, -P.z), th = al + Math.acos(Math.min(1, c / q));
+      const T = new THREE.Vector3(f.x, G + c * Math.sin(th), -c * Math.cos(th)), u = T.sub(P);
+      const ul = u.length() || 1; u.multiplyScalar(1 / ul);
+      // (a phalanx shorter than the way to its tangent point stops short of the grip: it ends there, not through it)
+      P = P.clone().addScaledVector(u, L); joints.push(P.clone());
+    }
+    for (let i = 0; i < 3; i++) {
+      const r = f.r * (1 - 0.07 * i);
+      parts.push(capsule(joints[i], joints[i + 1], r));
+      // the pad – the half facing the grip – in the darker print: a thin capsule pressed onto that side (close up only)
+      const mid = joints[i].clone().lerp(joints[i + 1], 0.5), toAxis = new THREE.Vector3(0, G - mid.y, -mid.z).normalize();
+      if (fine) parts.push(capsule(joints[i].clone().addScaledVector(toAxis, r * 0.25), joints[i + 1].clone().addScaledVector(toAxis, r * 0.25), r * 0.72, GLOVE.pad));
+      if (fine && i < 2) { const s = new THREE.TorusGeometry(r * 1.01, 0.0011, 4, seg); s.lookAt(new THREE.Vector3().subVectors(joints[i + 1], joints[i])); s.translate(joints[i + 1].x, joints[i + 1].y, joints[i + 1].z); parts.push(shade(s, 0.55)); }
+    }
+    tips.push(joints[3]);
+  }
+  // the palm: from the wrist to the knuckles behind the grip, wider at the knuckles, its front (+z, against the grip) in
+  // the grip print; the back of the hand rounded; the thenar (thumb's base) bulging at the index side by the wrist
+  const kn = GLOVE.fingers.map((f) => { const d = handleR + f.r + 0.006; return new THREE.Vector3(f.x, G + d * Math.sin(GLOVE.knuckle), -d * Math.cos(GLOVE.knuckle)); });
+  const palmTop = (kn[0].y + kn[3].y) / 2, palmZ = -(handleR + 0.0205);
+  const palm = new THREE.SphereGeometry(1, seg + 4, fine ? seg : 8); palm.scale(0.043, (palmTop + 0.004) / 2, 0.019);
+  { const p = palm.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i), t = Math.max(0, Math.min(1, y / ((palmTop + 0.004) / 2) * 0.5 + 0.5)); p.setX(i, p.getX(i) * (0.74 + 0.26 * t)); } }
+  palm.translate(0.001, (palmTop + 0.004) / 2 - 0.002, palmZ); palm.computeVertexNormals(); parts.push(shade(palm, 1));
+  const print = new THREE.SphereGeometry(1, seg, 6, 0, Math.PI * 2, 0, Math.PI / 2); print.rotateX(Math.PI / 2); print.scale(0.036, (palmTop - 0.01) / 2, 0.012);
+  print.translate(0.002, (palmTop - 0.01) / 2 + 0.006, palmZ + 0.008); parts.push(shade(print, GLOVE.pad));
+  // knuckle ridge (the glove's padding over the knuckles)
+  parts.push(capsule(kn[0].clone().add(new THREE.Vector3(-0.004, 0, -0.004)), kn[3].clone().add(new THREE.Vector3(0.004, 0, -0.004)), 0.0105));
+  const thenar = new THREE.SphereGeometry(1, seg, 8); thenar.scale(0.02, 0.03, 0.017); thenar.translate(-0.025, 0.032, palmZ + 0.009); parts.push(shade(thenar, 1));
+  // the thumb: from its base at the palm's index edge round the grip's wrist side (−y: the wheel's face, towards the
+  // driver) to its inner side, over the index finger's tip – a closed hand's thumb on a wheel's grip (onboard footage:
+  // the thumbs on the wheel's face by the grips' tops). Its joints on a circle round the grip (the grip's radius + the
+  // thumb's): no part of it inside the grip
+  const ct = handleR + 0.0128, at = (x, th) => new THREE.Vector3(x, G + ct * Math.sin(th), -ct * Math.cos(th));
+  const t0 = new THREE.Vector3(-0.03, 0.034, palmZ + 0.006), t1 = at(-0.036, -1.75), t2 = at(-0.031, -2.55), t3 = at(-0.022, -3.05);
+  parts.push(capsule(t0, t1, 0.0125), capsule(t1, t2, 0.0112), capsule(t2, t3, 0.0102));
+  if (fine) parts.push(capsule(t1.clone().lerp(t2, 0.1).add(new THREE.Vector3(0, 0, -0.004)), t2.clone().lerp(t3, 0.9).add(new THREE.Vector3(0, 0, -0.004)), 0.0075, GLOVE.pad));
+  // the gauntlet cuff over the sleeve's end (the arm ends inside it) and its strap
+  const cuff = limbGeometry(0.085, 0.031, 0.039, 0.002, 0.5, 0.82, fine ? 16 : 10, 4); cuff.rotateZ(Math.PI); cuff.translate(0, 0.012, palmZ * 0.45); parts.push(shade(cuff, 0.92));
+  const strap = limbGeometry(0.024, 0.0365, 0.037, 0, 0.5, 0.84, fine ? 16 : 10, 2); strap.rotateZ(Math.PI); strap.translate(0, -0.022, palmZ * 0.45); parts.push(shade(strap, 0.45));
+  const out = mergeColoured(parts);
+  out.userData.tips = tips.map((v) => v.toArray());
+  return out;
+}
+// the other hand: the glove mirrored across its own x (the grip's axis) – a right hand from the left one, the winding
+// turned so its faces still face out
+export function mirrorGlove(g) {
+  const m = g.clone(); m.scale(-1, 1, 1);
+  const p = m.attributes.position.array, n = m.attributes.normal?.array, c = m.attributes.color?.array;
+  for (let i = 0; i < p.length; i += 9) for (const a of [p, n, c]) if (a) for (let k = 0; k < 3; k++) { const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t; }
+  m.computeVertexNormals();
+  return m;
+}
+// geometries (position, normal, color) into one, non-indexed
+function mergeColoured(gs) {
+  const pos = [], nor = [], col = [];
+  for (const g0 of gs) {
+    const g = g0.index ? g0.toNonIndexed() : g0, c = g.attributes.color;
+    for (const v of g.attributes.position.array) pos.push(v); for (const v of g.attributes.normal.array) nor.push(v);
+    for (let i = 0; i < g.attributes.position.count; i++) c ? col.push(c.getX(i), c.getY(i), c.getZ(i)) : col.push(1, 1, 1);
+    if (g !== g0) g.dispose(); g0.dispose();
+  }
+  const m = new THREE.BufferGeometry(); m.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); m.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); m.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  m.computeBoundingSphere(); return m;
+}
+// One sleeve from the shoulder (origin) along +y to the wrist (uarm + farm), the upper arm's and the forearm's swell,
+// skinned to three bones (0 shoulder, 1 elbow at +uarm, 2 wrist): the elbow's crease blended over ±ARM_BLEND – a bent
+// elbow folds the sleeve, no ball and no gap. The race suit's sleeve: a seam down its inside and a cuff ring at the wrist
+// (vertex colours as driverGlove). Its bind pose is the straight arm (bones along +y).
+export const ARM_BLEND = 0.05;
+export function armSkin(fine = 1) {
+  const L1 = BODY.uarm, L2 = BODY.farm, len = L1 + L2, rings = fine ? 30 : 16, seg = fine ? 18 : 10;
+  const radius = (y) => {
+    if (y < L1) { const t = y / L1; return 0.054 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.45) / 0.25) ** 2)); }
+    const t = (y - L1) / L2; return 0.043 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.25) / 0.25) ** 2));
+  };
+  const pos = [], idx = [], skI = [], skW = [], col = [];
+  for (let i = 0; i <= rings; i++) {
+    // (rings closer together round the elbow, where it bends)
+    const u = i / rings, y = u < 0.5 ? L1 * Math.pow(u * 2, 0.8) : L1 + L2 * (1 - Math.pow(1 - (u - 0.5) * 2, 0.8));
+    const r = radius(y), w1 = y <= L1 - ARM_BLEND ? 0 : y >= L1 + ARM_BLEND ? 1 : (() => { const t = (y - (L1 - ARM_BLEND)) / (2 * ARM_BLEND); return t * t * (3 - 2 * t); })();
+    for (let k = 0; k <= seg; k++) {
+      const a = (k / seg) * Math.PI * 2, x = Math.cos(a) * r, z = Math.sin(a) * r * 0.9;
+      pos.push(x, y, z); skI.push(0, 1, 2, 0); skW.push(1 - w1, w1, 0, 0);
+      const seam = Math.abs(Math.sin(a) + 1) < 0.02 ? 0.6 : 1, cuff = y > len - 0.03 ? 0.8 : 1;
+      col.push(seam * cuff, seam * cuff, seam * cuff);
+    }
+  }
+  for (let i = 0; i < rings; i++) for (let k = 0; k < seg; k++) { const a = i * (seg + 1) + k, b = a + seg + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skI, 4)); g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skW, 4));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}

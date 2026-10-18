@@ -150,3 +150,27 @@ test("wheels' odometer on a live feed: extended as samples arrive and cut with t
   for (const [t, d] of seen.slice(-20)) assert.ok(Math.abs(odometerAt(car, t) - d) < 1e-6, `t ${t}: ${odometerAt(car, t)} vs ${d}`);
   assert.ok(Math.abs(odometerAt(car, 399750) - (200 / 3.6) * 399.75) < 1e-6);
 });
+
+test("pit wall people: the small parts' near/far chosen before drawing (one state for the shadow pass and the view); a change reported for the shadow map", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const { peopleMeshes, peopleLod, PEOPLE_NEAR } = await import("../src/renderer/crew.js");
+  const { disposeGroup } = await import("../src/renderer/dispose.js");
+  const people = [0, 1, 2].map((i) => ({ x: i * 0.8, y: 0, z: 0, yaw: 0, shirt: "#123456", pose: "sit", seed: i }));
+  const g = peopleMeshes(people), scene = new THREE.Scene();
+  const glove = g.children.find((m) => m.geometry && m.count === 6 && m.onBeforeRender === THREE.Object3D.prototype.onBeforeRender);
+  assert.ok(glove, "no per-mesh onBeforeRender any more");
+  const counts = () => g.children.map((m) => m.count).join(",");
+  const full = counts();
+  // not in a scene: left alone
+  assert.strictEqual(peopleLod(new THREE.Vector3(5000, 0, 0)), false);
+  scene.add(g);
+  assert.strictEqual(peopleLod(new THREE.Vector3(5000, 0, 0)), true, "far: changed");
+  const far = counts(); assert.notStrictEqual(far, full);
+  assert.ok(g.children.some((m) => m.count === 0) && g.children.some((m) => m.count > 0), "torsos stay, small parts go");
+  assert.strictEqual(peopleLod(new THREE.Vector3(4000, 0, 0)), false, "still far: nothing to redraw");
+  assert.strictEqual(peopleLod(new THREE.Vector3(PEOPLE_NEAR * 0.5, 0, 0)), true, "near again");
+  assert.strictEqual(counts(), full);
+  // freed: forgotten (no work for a world already gone)
+  scene.remove(g); disposeGroup(g); scene.add(g);
+  assert.strictEqual(peopleLod(new THREE.Vector3(5000, 0, 0)), false);
+});
