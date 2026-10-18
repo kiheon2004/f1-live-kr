@@ -134,7 +134,8 @@ export function jackGripsAB(k, f) {
   const Ra = Math.sin(f), Rb = -Math.cos(f);
   return [[ca + Ra * JACK.half, cb + Rb * JACK.half, h, 1, Ra, Rb, 0], [ca - Ra * JACK.half, cb - Rb * JACK.half, h, 1, Ra, Rb, 0]];
 }
-// where the jacks engage (m from the axle lines: under the nose cone, the rear crash structure – estimates, M) and how
+// where the jacks engage (m from the axle lines: under the nose cone, the rear crash structure – estimates, M; a car
+// profile may give its own as JF / JR in the dimensions it hands over – car3d.js wheelParts – and the crew follows) and how
 // their men stand (from the jack's base to the man's hips), the lever's tilt ready / lifting (rad)
 export const JACKS = { front: 0.85, rear: 0.8, man: 1.38, tiltUp: 0.62, tiltDown: 0.25, rearWait: [0.4, 1.3], rearAngle: 0.7, swivel: 1.1, clear: 0.9, upright: 1.25,
   gunAside: [0.12, 0.2, 0.3] };   // (the gunner's step out and forward while the wheels change, his gun's way out – estimates, L)
@@ -209,7 +210,7 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   // to the garages' side (away from the car's way out – an estimate, L), JACKS.swivel round (60–90° in photos, L); once
   // it has dropped he pulls the jack out further that way.
   const kF = liftF / C.lift, kR = liftR / C.lift, sw = ss(C.swivel[0], C.swivel[1], w), clear = ss(dropAt, dropAt + 0.35, s);
-  const psi = left * JACKS.swivel * sw, fa = d.FZ + JACKS.front + 0.25 * clear, fbb = left * JACKS.clear * clear;
+  const psi = left * JACKS.swivel * sw, fa = d.FZ + (d.JF ?? JACKS.front) + 0.25 * clear, fbb = left * JACKS.clear * clear;
   const fj = { kind: "jack", a: fa, b: fbb, h: 0, yaw: psi, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kF), by: figures.length }, ff = psi + Math.PI;
   let fPose = blendPose("jack", "jackDown", kF);
   if (sw > 0.001 && sw < 0.999) fPose = shuffle(fPose, 0, left, JACKS.man * JACKS.swivel * sw, JACKS.man * JACKS.swivel);   // (round the jack: to his right with the garages on the car's left)
@@ -221,7 +222,7 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   // stop photos and McLaren's 2023 record-stop video, formula1.com; M) – here the garages' side (L).
   const rIn = ss(C.rearIn[0], C.rearIn[1], w), rOut = 1 - rIn, ry = Math.PI - left * JACKS.rearAngle, rf = ry + Math.PI;
   const rDa = JACKS.rearWait[0], rDb = -left * JACKS.rearWait[1];   // (the way in: from the wait to the place behind the car)
-  const ra = d.RZ - JACKS.rear - rDa * rOut, rb = -rDb * rOut;
+  const ra = d.RZ - (d.JR ?? JACKS.rear) - rDa * rOut, rb = -rDb * rOut;
   const rj = { kind: "jack", a: ra, b: rb, h: 0, yaw: ry, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kR), by: figures.length };
   let rPose = blendPose("jack", "jackDown", kR);
   if (rIn > 0.001 && rIn < 0.999) { const L = Math.hypot(rDa, rDb); rPose = shuffle("jack", rDa * Math.cos(rf) + rDb * Math.sin(rf), rDa * Math.sin(rf) - rDb * Math.cos(rf), L * rIn, L); }

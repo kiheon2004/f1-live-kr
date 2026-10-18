@@ -184,3 +184,13 @@ test("standing as drawn: a car whose next sample is where it is stands from the 
   const live = { ...c, n: 6 };
   assert.ok(Math.abs(standingForPos(live, 2300) - 1.3) < 1e-9);
 });
+
+test("a car of another shape moves its crew: the gunners at its hubs, the jacks at its axles (or its own lift points)", async () => {
+  const { stopChoreo } = await C();
+  const long = { ...D26, FZ: 1.9, RZ: -1.8, FX: 0.86 };
+  const a = stopChoreo({ wait: 0, D: 2.4 }, 0.35, D26, 1), b = stopChoreo({ wait: 0, D: 2.4 }, 0.35, long, 1), c = stopChoreo({ wait: 0, D: 2.4 }, 0.35, { ...long, JF: 1.1, JR: 0.9 }, 1);
+  assert.ok(Math.abs(b.figures[0][0] - a.figures[0][0] - 0.2) < 1e-9, "front gunner follows the front hub");
+  const jacks = (L) => L.kits.filter((k) => k.kind === "jack");
+  assert.ok(Math.abs(jacks(b)[0].a - jacks(a)[0].a - 0.2) < 1e-9 && Math.abs(jacks(b)[1].a - jacks(a)[1].a + 0.1) < 1e-9);
+  assert.ok(Math.abs(jacks(c)[0].a - jacks(b)[0].a - 0.25) < 1e-9 && Math.abs(jacks(c)[1].a - jacks(b)[1].a + 0.1) < 1e-9, "the profile's own lift points");
+});
