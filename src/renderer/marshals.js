@@ -102,12 +102,16 @@ export function panelSignal(n, state, { t = 0, vscEnd = null } = {}) {
   if (state.sc) return "sc";
   if (state.vscDeployed) return "vsc";
   // (after "VSC ENDING": "VSC" until the panels turn green, green for 30 s – also once the status is back to green –, then
-  // dark; the ending's time not known: "VSC" while the status says so, nothing made up after)
+  // dark; the ending's time not known: "VSC" while the status says so, nothing made up after. The 12 s is an estimate:
+  // a real change seen first – the status back to green – ends the "VSC" at once. v0.39: a yellow / double yellow in
+  // force in the panel's own sector is never covered by that green – the green is the VSC's end, not the sector's)
+  const here = state.sectors.get(n), local = here === "DOUBLE YELLOW" ? "double" : here === "YELLOW" ? "yellow" : null;
   const since = vscEnd != null && t >= vscEnd ? t - vscEnd : null;
-  if (since != null && since < PANEL.vscGreenAfter + PANEL.vscGreenFor) return since < PANEL.vscGreenAfter ? (state.vsc ? "vsc" : "green") : "green";
+  if (since != null && since < PANEL.vscGreenAfter && state.vsc) return "vsc";
+  if (local) return local;
+  if (since != null && since < PANEL.vscGreenAfter + PANEL.vscGreenFor) return "green";
   if (state.vsc && since == null) return "vsc";
-  const here = state.sectors.get(n);
-  return here === "DOUBLE YELLOW" ? "double" : here === "YELLOW" ? "yellow" : null;
+  return null;
 }
 // When the VSC ending in force at t began: the last change of TrackStatus to "7" straight from "6", at or before t (null:
 // none, or a safety car / red / new VSC since). changes: [[ms, status]] in time order, one per change

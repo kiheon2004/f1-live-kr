@@ -22,7 +22,9 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, skeleton } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens, updateTeamScreens } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
+import { stepWheel, smearOf } from "./wheelspin.js";
+import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
 import { WheelScreens, screenModel } from "./wheelscreen.js";
 import { boardsFor, boardPlaces } from "./boards.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
@@ -118,6 +120,7 @@ function initGeoSettings() {
     document.getElementById("geoNight").value = o.night || "auto";
     document.getElementById("geoPitWork").value = ["record", "observed", "typical"].includes(o.pitWork) ? o.pitWork : "record";
     document.getElementById("geoAero").value = o.aero === "off" ? "off" : "estimate";
+    document.getElementById("geoCorners").value = ["near", "all", "off"].includes(o.corners) ? o.corners : "near";
   };
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
@@ -146,6 +149,7 @@ function initGeoSettings() {
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
   document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
   document.getElementById("geoAero").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), aero: e.target.value }));
+  document.getElementById("geoCorners").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), corners: e.target.value }));
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
     m.textContent = "확인하는 중…"; m.classList.remove("bad");
@@ -1131,7 +1135,7 @@ function carFor(num, d) {
   obj.add(model);
   const label = labelSprite(); obj.add(label.sp);
   scene.add(obj);
-  c = { num, obj, model, label, color, key, yaw: 0, pitch: 0, roll: 0, speed: 0, spin: 0, aero: 0, pos: new THREE.Vector3(), has: false, sample: null };
+  c = { num, obj, model, label, color, key, yaw: 0, pitch: 0, roll: 0, speed: 0, spinW: null, aero: 0, pos: new THREE.Vector3(), has: false, sample: null };
   cars.set(num, c);
   return c;
 }
@@ -1337,6 +1341,20 @@ function gridCar(c, num, v, ctx) {
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
+// the wheels' angles (front, rear) and how much their markings smear this frame (car3d.js setSmear)
+function rollWheels(c, st, est, F, t, v) {
+  const P = c.model.userData.profile, W = c.wheelSt || (c.wheelSt = { f: { a: null, t: null }, r: { a: null, t: null }, t: null, pos: new THREE.Vector3(), has: false });
+  const pitU = est?.pit ? est.u : c.pit?.u;
+  const along = st ? { d: st.s, L: F?.L || null } : pitU != null ? { d: pitU, L: null } : null;
+  const moved = W.has ? Math.hypot(v.x - W.pos.x, v.z - W.pos.z) : null;
+  const fwd = Math.sin(c.yaw) * (v.x - W.pos.x) + Math.cos(c.yaw) * (v.z - W.pos.z) >= 0 ? 1 : -1;
+  const speed = st ? st.vs : (est?.pit ? est.vs : c.speed * (moved ? fwd : 1));
+  const dts = W.t == null ? 0 : (t - W.t) / 1000;
+  const fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }), ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved });
+  W.pos.copy(v); W.has = true; W.t = t;
+  (c.spinW || (c.spinW = [0, 0]))[0] = fa; c.spinW[1] = ra;
+  setSmear(c.model, smearOf(speed / P.RR, dts));
+}
 function updateCars(dt) {
   const A = app(), src = A.src;
   // position and velocity of every car from its smooth track (arrays reused frame to frame)
@@ -1512,14 +1530,16 @@ function updateCars(dt) {
       c.stab = null;
       c.model.rotation.set(c.pitch, c.yaw, c.roll + c.bump * 0.003, "YXZ");
     }
-    // wheels roll with the speed; front wheels steer with the turning rate (Ackermann-ish: δ ≈ L·ω / v)
-    c.spin = (c.spin + (c.speed * dt) / 0.354) % (Math.PI * 2);
+    // wheels roll the distance gone over each axle's own radius (wheelspin.js: on the lap / the pit lane from where the
+    // car is – a pause, any speed, a seek: the same angle; elsewhere rolled on by the session's time); front wheels
+    // steer with the turning rate (Ackermann-ish: δ ≈ L·ω / v)
+    rollWheels(c, st, est, F, A.t, v);
     // (the front tyres' slip angle on top, growing with the cornering force: an estimate, ~0.6° per g (0.01 rad); and a
     // touch of opposite lock when the rear steps out)
     const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;
     // (the wheels' and steering wheel's angle eased: the turning rate from 4 Hz positions twitched them frame to frame)
     c.steer = c.steer == null ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
-    setWheels(c.model, c.spin, c.steer);
+    setWheels(c.model, c.spinW, c.steer);
     // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
     // (straight mode at speed on straights, corner mode otherwise: the feed has no channel for it)
     let wantOpen;
@@ -2350,7 +2370,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record" };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near" };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -3025,23 +3045,64 @@ function cornerMarks() {
   if (!world || world.cornersAdded || !app().circuit?.corners?.length) return;
   world.cornersAdded = true; addCorners(); addBoards();
 }
+// The corners' numbers (corners.js decides which and how strongly): one sprite each, in their own group; their place on
+// the lap matched in lap order. Drawn with the depth test – a building, a tunnel's roof or a hill in front hides them –
+// except when the viewer asks for all of them (the old map-like view, over everything).
 function addCorners() {
   const circ = app().circuit;
   if (!circ?.corners?.length) return;
-  for (const k of circ.corners) {
-    const v = toWorld([k.x, k.y, 0], world.center);
-    const [s] = world.grid.nearest(v.x, v.z, 2);
+  const S = world.samples, pts = S.map((q) => q.p), cum = new Float64Array(S.length);
+  for (let i = 1; i < S.length; i++) cum[i] = cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+  const L = cum[S.length - 1] + Math.hypot(pts[0].x - pts[S.length - 1].x, pts[0].z - pts[S.length - 1].z);
+  const ks = circ.corners.map((k) => { const v = toWorld([k.x, k.y, 0], world.center); return { n: k.n, x: v.x, z: v.z, angle: k.angle }; });
+  const st = cornerStations(ks, pts, cum, L);
+  const group = new THREE.Group(); group.name = "cornerNumbers";
+  const list = [];
+  for (const k of ks) {
+    const at = st.find((q) => q.n === k.n), smp = S[at.i];
     const c = document.createElement("canvas"); c.width = c.height = 64;
     const x = c.getContext("2d");
     x.fillStyle = "rgba(14,16,19,0.75)"; x.beginPath(); x.arc(32, 32, 26, 0, Math.PI * 2); x.fill();
     x.fillStyle = "#e8ecf0"; x.font = "700 28px -apple-system, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(String(k.n), 32, 34);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), sizeAttenuation: false, depthTest: false, transparent: true, opacity: 0.85 }));
-    const a = (k.angle * Math.PI) / 180;
-    sp.position.set(v.x + Math.cos(a) * 22, (s ? s.p.y : 0) + 4, v.z - Math.sin(a) * 22);
-    sp.scale.set(0.032, 0.032, 1); sp.renderOrder = 5;
-    world.group.add(sp);
+    const tex = new THREE.CanvasTexture(c);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, sizeAttenuation: false, depthTest: true, depthWrite: false, transparent: true, opacity: 0 }));
+    sp.material.userData.ownedTextures = [tex];
+    // (beside the corner where F1's map puts its number, but no further out than the tarmac's edge + 6 m – 22 m out it
+    // stood inside the buildings of a street circuit)
+    const a = (k.angle * Math.PI) / 180, dx = Math.cos(a), dz = -Math.sin(a);
+    const half = Math.max(smp.L ?? 7, -(smp.R ?? -7)), off = Math.min(22, half + 6);
+    sp.position.set(smp.p.x + dx * off, smp.p.y + 3.2, smp.p.z + dz * off);
+    sp.scale.set(0.03, 0.03, 1); sp.renderOrder = 5; sp.visible = false;
+    group.add(sp);
+    list.push({ n: k.n, s: at.s, i: at.i, x: sp.position.x, z: sp.position.z, sp, alpha: 0 });
+  }
+  world.group.add(group);
+  world.corners = { group, list, L, cum, prev: new Map() };
+}
+// each frame: the numbers' targets for the camera now (corners.js), eased; sized by distance
+function updateCorners(dt) {
+  const C = world?.corners; if (!C) return;
+  const mode = ["near", "all", "off"].includes(geoSettings().corners) ? geoSettings().corners : "near";
+  const A = app(), focus = A.focus || leader(), c = cars.get(focus);
+  const riding = camMode === "chase" || camMode === "onboard" || camMode === "eye";
+  let carS = null;
+  if (riding && c?.has) { carS = c.onTrack && c.st?.s != null ? c.st.s : c.sample ? cornerS(c.sample.i) : null; }
+  const look = camMode === "heli" ? controls.target : camLook;
+  const T = cornerTargets(C.list, { mode, cam: riding ? camMode : "heli", carS, L: C.L, look, height: Math.max(0, camera.position.y - look.y), prev: C.prev });
+  const all = mode === "all";
+  for (const k of C.list) {
+    k.alpha = easeAlpha(k.alpha, T.get(k.n) || 0, dt);
+    if (k.alpha < 0.01) { k.alpha = T.get(k.n) ? k.alpha : 0; k.sp.visible = false; C.prev.set(k.n, 0); continue; }
+    C.prev.set(k.n, k.alpha);
+    const m = k.sp.material; k.sp.visible = true;
+    if (m.depthTest !== !all) { m.depthTest = !all; m.needsUpdate = true; }
+    m.opacity = 0.88 * k.alpha;
+    const sc = all ? 0.032 : cornerScale(camera.position.distanceTo(k.sp.position), camera.fov);
+    k.sp.scale.set(sc, sc, 1);
   }
 }
+// a lap-line point's distance along the lap (the corners' own measure)
+function cornerS(i) { return world.corners.cum[i] ?? null; }
 
 function frame(now) {
   if (!visible) return;
@@ -3053,6 +3114,7 @@ function frame(now) {
   const A = app();
   if (world && A?.src) updateCars(dt);
   if (world) updateCamera(dt);
+  if (world) updateCorners(dt);
   if (devRec) devRec(now, dt);
   updateSun(now);
   thinFarTrees();
@@ -3223,6 +3285,10 @@ function floodTest() {
 
 window.Map3D = {
   floodTest,
+  // development: the corners' numbers now – [{ n, s, alpha, visible, d (m from the camera) }]
+  cornerState() { const C = world?.corners; if (!C) return "no corners"; return JSON.stringify(C.list.map((k) => ({ n: k.n, s: Math.round(k.s), a: +k.alpha.toFixed(2), vis: k.sp.visible, d: Math.round(camera.position.distanceTo(k.sp.position)) }))); },
+  // development: a car's wheels – the angle front / rear (rad), its place on the lap (m), its smear
+  wheelState(num) { const c = cars.get(String(num)); if (!c) return "no car"; const u = c.model.userData; return JSON.stringify({ spin: c.spinW?.map((a) => +a.toFixed(4)), s: c.st?.s != null ? +c.st.s.toFixed(2) : null, onTrack: c.onTrack, speed: +c.speed.toFixed(2), smear: +(u.smear || 0).toFixed(3), rot: u.spins.map((q) => +q.rotation.x.toFixed(4)), lod: u.lod, R: [u.profile.FR, u.profile.RR] }); },
   // development: steadiness of the drawn cars over [t0, t1] (stream ms): raw tracks vs steadied ones
   steadiness(t0, t1) {
     const src = app().src; if (!world || !src) return "no world";

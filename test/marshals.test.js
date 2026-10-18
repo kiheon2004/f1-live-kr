@@ -89,10 +89,37 @@ test("light panels: SC and VSC are told apart; VSC ending goes green for 30 s, t
   const E = 100000;
   assert.strictEqual(at("7", 1, { t: E + 5000, vscEnd: E }), "vsc");
   assert.strictEqual(at("7", 1, { t: E + PANEL.vscGreenAfter + 1, vscEnd: E }), "green");
-  assert.strictEqual(at("1", 2, { t: E + PANEL.vscGreenAfter + 20000, vscEnd: E }), "green");
+  assert.strictEqual(at("1", 1, { t: E + PANEL.vscGreenAfter + 20000, vscEnd: E }), "green");
+  assert.strictEqual(at("1", 2, { t: E + PANEL.vscGreenAfter + 20000, vscEnd: E }), "yellow", "the sector's own yellow is not covered by the VSC's green");
   assert.strictEqual(at("1", 2, { t: E + PANEL.vscGreenAfter + PANEL.vscGreenFor + 1, vscEnd: E }), "yellow");
   assert.strictEqual(at("7", 1, { t: E }), "vsc", "the ending's time unknown: no green made up");
   assert.strictEqual(at("4", 1, { t: E + 15000, vscEnd: E }), "sc", "a safety car after the VSC wins");
+});
+
+test("light panels: a new sector warning after a VSC ending wins over its green; real changes before the 12 s estimate", async () => {
+  const { flagState, panelSignal, vscEndOf } = await load();
+  const msg = (Flag, Scope, Sector) => ({ Category: "Flag", Flag, Scope, Sector });
+  // the review's case: sector 4 double yellow, TrackStatus 2, the VSC ended at 1 s, shown at 14 s
+  const dy = flagState([msg("DOUBLE YELLOW", "Sector", 4)], "2");
+  assert.strictEqual(panelSignal(4, dy, { t: 14000, vscEnd: 1000 }), "double");
+  assert.strictEqual(panelSignal(3, dy, { t: 14000, vscEnd: 1000 }), "green", "the other sectors keep the VSC's green");
+  const y = flagState([msg("YELLOW", "Sector", 4)], "2");
+  assert.strictEqual(panelSignal(4, y, { t: 3000, vscEnd: 1000 }), "yellow", "status back to green before the 12 s estimate: no VSC kept");
+  assert.strictEqual(panelSignal(5, flagState([], "1"), { t: 3000, vscEnd: 1000 }), "green");
+  // cleared again: the green until its 30 s are over, then dark
+  const cl = flagState([msg("YELLOW", "Sector", 4), msg("CLEAR", "Sector", 4)], "1");
+  assert.deepStrictEqual([panelSignal(4, cl, { t: 20000, vscEnd: 1000 }), panelSignal(4, cl, { t: 50000, vscEnd: 1000 })], ["green", null]);
+  // a new safety car / red / VSC after the ending
+  assert.strictEqual(panelSignal(4, flagState([msg("DOUBLE YELLOW", "Sector", 4)], "4"), { t: 14000, vscEnd: 1000 }), "sc");
+  assert.strictEqual(panelSignal(4, flagState([], "5"), { t: 14000, vscEnd: 1000 }), "red");
+  assert.strictEqual(panelSignal(4, flagState([], "6"), { t: 14000, vscEnd: 1000 }), "vsc");
+  // pause / seek: the same moment always gives the same signal (the ending from the record at that moment)
+  const ch = [[0, "1"], [500, "6"], [1000, "7"], [1500, "1"], [9000, "2"]];
+  for (const t of [14000, 800, 14000, 3000, 14000]) {
+    const st = flagState(t >= 9000 ? [msg("DOUBLE YELLOW", "Sector", 4)] : [], t < 500 ? "1" : t < 1000 ? "6" : t < 1500 ? "7" : t < 9000 ? "1" : "2");
+    const want = t === 800 ? "vsc" : t === 3000 ? "green" : "double";
+    assert.strictEqual(panelSignal(4, st, { t, vscEnd: vscEndOf(ch, t) }), want, "at " + t);
+  }
 });
 
 test("flags from race control's list: a correction or deletion by index, never an older yellow revived", async () => {

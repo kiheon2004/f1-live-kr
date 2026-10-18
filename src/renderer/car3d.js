@@ -277,6 +277,72 @@ function carbonMaps() {
     }),
   };
 }
+// The tyres' sidewall markings (v0.39): the compound's colour where the real tyre has it – the band's arcs and the
+// lettering between them (SIDEWALL: where each is round the wheel; docs/research/wheels_tyres.md) – white on clear,
+// tinted by the material's colour (the compound). The maker's words are not drawn (a trademark): blocks the size and
+// place of the lettering stand in for them, so a slow wheel's turning reads as on TV. A second map is the same
+// markings averaged round the wheel – what a fast wheel looks like on camera (one smooth ring).
+// Angles in degrees round the wheel, radii as a share of the decal's outer radius (the tread's shoulder).
+export const SIDEWALL = {
+  // the band: arcs between the words, at r 0.80–0.865
+  band: { r: [0.8, 0.865], arcs: [[14, 76], [104, 166], [194, 256], [284, 346]] },
+  // the words: two long (at 90° and 270°), two short (0°, 180°) – lettering-sized blocks, r 0.81–0.855
+  words: [{ at: 90, span: 26, n: 7 }, { at: 270, span: 26, n: 7 }, { at: 0, span: 22, n: 6 }, { at: 180, span: 22, n: 6 }],
+  inner: 0.7,
+};
+function sidewallCanvas(avg = false) {
+  const N = 512, c = canvas(N, N), g = c.getContext("2d"), R = N / 2, cx = R, cy = R, rad = (d) => (d * Math.PI) / 180;
+  g.clearRect(0, 0, N, N); g.fillStyle = "#fff"; g.strokeStyle = "#fff";
+  const [b0, b1] = SIDEWALL.band.r;
+  for (const [a0, a1] of SIDEWALL.band.arcs) { g.beginPath(); g.arc(cx, cy, R * b1, rad(a0), rad(a1)); g.arc(cx, cy, R * b0, rad(a1), rad(a0), true); g.closePath(); g.fill(); }
+  // the lettering: upright strokes and bars of letter size along the arc (abstract – no word is spelled)
+  for (const w of SIDEWALL.words) {
+    const step = w.span / w.n;
+    for (let i = 0; i < w.n; i++) {
+      const a = w.at - w.span / 2 + step * (i + 0.5), kind = (i * 7 + w.n) % 3;
+      g.save(); g.translate(cx + Math.cos(rad(a)) * R * 0.832, cy + Math.sin(rad(a)) * R * 0.832); g.rotate(rad(a) + Math.PI / 2);
+      const h = R * 0.05, wd = (step / 360) * Math.PI * 2 * R * 0.832 * 0.72;
+      g.fillRect(-wd / 2, -h / 2, wd * 0.28, h);                          // a stem
+      if (kind !== 1) g.fillRect(-wd / 2, -h / 2, wd, h * 0.24);          // a top bar
+      if (kind === 2) g.fillRect(-wd / 2, -h * 0.06, wd * 0.8, h * 0.2);   // a middle bar
+      if (kind !== 0) g.fillRect(wd / 2 - wd * 0.28, -h / 2, wd * 0.28, h); // a second stem
+      g.restore();
+    }
+  }
+  if (!avg) return c;
+  // averaged round the wheel: each radius its mean coverage
+  const img = g.getImageData(0, 0, N, N), d = img.data, bins = new Float64Array(R + 1), cnt = new Float64Array(R + 1);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const r = Math.round(Math.hypot(x + 0.5 - cx, y + 0.5 - cy)); if (r <= R) { bins[r] += d[(y * N + x) * 4 + 3]; cnt[r]++; } }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const r = Math.round(Math.hypot(x + 0.5 - cx, y + 0.5 - cy)), k = (y * N + x) * 4; d[k] = d[k + 1] = d[k + 2] = 255; d[k + 3] = r <= R && cnt[r] ? bins[r] / cnt[r] : 0; }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+function sidewallMaps() {
+  const mk = (avg) => () => { const t = new THREE.CanvasTexture(sidewallCanvas(avg)); t.anisotropy = 8; t.colorSpace = THREE.SRGBColorSpace; return t; };
+  return { map: sharedTex("sidewall", mk(false)), avg: sharedTex("sidewallAvg", mk(true)) };
+}
+// The sidewall's material: the markings smeared round the wheel by the angle it turns in a frame (uniform smear, rad –
+// car3d setSmear): sampled along the arc, and the averaged ring once it has turned well over a word in a frame.
+export function sidewallMaterial(color = 0xf2c230) {
+  const M = sidewallMaps();
+  const m = new THREE.MeshBasicMaterial({ color, map: M.map, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  if (!M.map) return m;
+  const smear = { value: 0 }, avg = { value: M.avg };
+  m.userData.smear = smear;
+  m.customProgramCacheKey = () => "sidewall";
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uSmear = smear; sh.uniforms.avgMap = avg;
+    sh.fragmentShader = "uniform float uSmear;\nuniform sampler2D avgMap;\n" + sh.fragmentShader.replace("#include <map_fragment>", `
+#ifdef USE_MAP
+  vec2 c0 = vMapUv - 0.5; float sm = min(uSmear, 6.2832); vec4 acc = vec4(0.0);
+  for (int k = 0; k < 9; k++) { float a = sm * (float(k) / 8.0 - 0.5); float cs = cos(a), sn = sin(a); acc += texture2D(map, vec2(cs * c0.x - sn * c0.y, sn * c0.x + cs * c0.y) + 0.5); }
+  acc /= 9.0;
+  vec4 sampledDiffuseColor = mix(acc, texture2D(avgMap, vMapUv), smoothstep(1.0, 3.0, uSmear));
+  diffuseColor *= sampledDiffuseColor;
+#endif`);
+  };
+  return m;
+}
 // The steering wheel's display when no driver's own data is on it (wheelscreen.js paints those): a neutral face – lights
 // off, no gear, no made-up lap or delta
 function wheelScreen() {
@@ -579,7 +645,9 @@ function wheels(p) {
     const g = new THREE.LatheGeometry(pts, 48); g.rotateZ(Math.PI / 2);    // axle along X
     return metricUV(g.toNonIndexed(), 0.25);
   };
-  const band = (r, w) => { const g = new THREE.RingGeometry(r * 0.8, r * 0.86, 48); g.rotateY(Math.PI / 2); g.translate(w / 2 + 0.004, 0, 0); return both(g); };
+  // the sidewall's markings: a ring from the rim's lip to the shoulder, just off the rubber (its UVs the plane's: the
+  // texture's middle at the axle – SIDEWALL's angles and radii)
+  const band = (r, w) => { const out = r - 0.012, g = new THREE.RingGeometry(out * SIDEWALL.inner, out, 72, 1); g.rotateY(Math.PI / 2); g.translate(w / 2 + 0.004, 0, 0); return both(g); };
   const lip = (w) => { const g = new THREE.TorusGeometry(0.247, 0.012, 6, 40); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.012, 0, 0); return both(g); };
   const cover = (r, w) => { const g = new THREE.CircleGeometry(0.245, 32); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.016, 0, 0); const mark = boxAt(0.004, 0.2, 0.04, w / 2 - 0.012, 0.1, 0); const hub = new THREE.CylinderGeometry(0.05, 0.05, 0.02, 16); hub.rotateZ(Math.PI / 2); hub.translate(w / 2 - 0.006, 0, 0); return both(merge([g, mark, hub])); };
   const out = { front: { tyre: tyre(p.FR, p.FW), band: band(p.FR, p.FW), lip: lip(p.FW), cover: cover(p.FR, p.FW) }, rear: { tyre: tyre(p.RR, p.RW), band: band(p.RR, p.RW), lip: lip(p.RW), cover: cover(p.RR, p.RW) } };
@@ -685,7 +753,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const visorMat = mat("visor", () => new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 }));
   const screenMat = mat("screen", () => new THREE.MeshBasicMaterial({ map: wheelScreen(), toneMapped: false }));
   const buttonMat = mat("buttons", () => new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.4, metalness: 0.5 }));
-  const bandMat = new THREE.MeshBasicMaterial({ color: 0xf2c230 });
+  const bandMat = sidewallMaterial(0xf2c230);
   const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
   const helmetMat = new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 });
   const gloveMat = new THREE.MeshStandardMaterial({ color: l.base, roughness: 0.8, metalness: 0 });
@@ -740,9 +808,15 @@ export const STEER_RATIO = 10;
 export function setWheels(car, spin, steer) {
   const u = car.userData;
   u.wheels.forEach((w, i) => { w.rotation.y = i < 2 ? steer : 0; });
-  u.spins.forEach((s) => { s.rotation.x = spin; });
+  // (spin: one angle, or [front, rear] – each axle its own radius)
+  u.spins.forEach((s, i) => { s.rotation.x = Array.isArray(spin) ? spin[i < 2 ? 0 : 1] : spin; });
   if (u.wheel) u.wheel.rotation.z = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, -steer * STEER_RATIO));
   if (u.arms && u.near.visible) placeArms(u);
+}
+// How far the sidewall markings smear this frame (rad; wheelspin.js smearOf) – the wheel's look at speed
+export function setSmear(car, smear) {
+  const u = car.userData; u.smear = smear;
+  const sm = u.bandMat.userData.smear; if (sm) sm.value = smear;
 }
 // each forearm from its glove (where the turned wheel has it) to its elbow, the elbow following the hand a little (a
 // driver's arm bends with the wheel – an approximation: no joint model)

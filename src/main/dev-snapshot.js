@@ -186,6 +186,9 @@ module.exports = function snapshot(win, outFile) {
         const r = await run(js).catch((e) => "error " + e.message);
         console.log("SHOT", i + 1, typeof r === "string" ? r : JSON.stringify(r));
         await wait(+process.env.F1KR_SHOT_WAIT || 2500);
+        // (a shot whose script returns "burst:N:ms[:width]" saves N frames ms apart – out_i_f01.png …; a moving picture)
+        const b = typeof r === "string" && /^burst:(\d+):(\d+)(?::(\d+))?/.exec(r);
+        if (b) { for (let f = 0; f < +b[1]; f++) { const t0 = Date.now(); fs.writeFileSync(outFile.replace(/\.png$/, `_${i + 1}_f${String(f + 1).padStart(2, "0")}.png`), (await win.webContents.capturePage()).resize({ width: +(b[3] || 960) }).toPNG()); await wait(Math.max(0, +b[2] - (Date.now() - t0))); } continue; }
         fs.writeFileSync(outFile.replace(/\.png$/, `_${i + 1}.png`), (await win.webContents.capturePage()).resize({ width: 1600 }).toPNG());
       }
     }

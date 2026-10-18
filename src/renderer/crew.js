@@ -19,6 +19,7 @@
 // (pitlane.js crossSection keeps the room), none in the fast lane.
 // The car's frame: a along it (+ forward), b across (+ the car's left), from the model's origin between the axles.
 import * as THREE from "./vendor/three.module.js";
+import { sidewallMaterial } from "./car3d.js";
 
 // [along, across, facing (rad, 0 = looking along +a), pose, kit]: written with the garages on the car's left (+b)
 const WHEEL = (ax, ay) => {
@@ -280,7 +281,7 @@ function shared() {
   if (SHARED) return SHARED;
   const parts = partGeometries();
   SHARED = { parts, kit: kitParts(), teamMat: new THREE.MeshStandardMaterial({ roughness: 0.65 }), darkMat: new THREE.MeshStandardMaterial({ color: "#16181b", roughness: 0.45 }),
-    kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }), bandMat: new THREE.MeshBasicMaterial({ color: 0xffffff }) };
+    kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }), bandMat: sidewallMaterial(0xffffff) };
   for (const x of [SHARED.teamMat, SHARED.darkMat, SHARED.kitMat, SHARED.bandMat]) x.userData.shared = true;
   for (const [g] of Object.values(parts)) g.userData.shared = true;
   for (const g of Object.values(SHARED.kit)) g.userData.shared = true;
