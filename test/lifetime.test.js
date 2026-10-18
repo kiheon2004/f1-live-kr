@@ -97,3 +97,31 @@ test("shadow depth materials let go of a freed texture", async () => {
   assert.ok(depth.version > v, "rebuilt on next use");
   assert.strictEqual(D.releaseShadowRefs(), 0, "nothing held after");
 });
+
+// v0.37 (review of v0.36, C): the watch replaced Object3D.prototype.onBeforeShadow without calling what was there
+test("shadow watch: the previous onBeforeShadow still runs (this, arguments); installed once; custom depth materials left alone", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), D = await import("../src/renderer/dispose.js");
+  D.unwatchShadowDepth();
+  const P = THREE.Object3D.prototype, orig = P.onBeforeShadow, calls = [];
+  P.onBeforeShadow = function (...a) { calls.push([this, a.length, a[5]]); };
+  try {
+    D.watchShadowDepth(THREE); D.watchShadowDepth(THREE);   // twice: one wrapper
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()), depth = new THREE.MeshDepthMaterial();
+    mesh.onBeforeShadow(null, mesh, null, null, mesh.geometry, depth, null);
+    assert.deepStrictEqual(calls.map(([t, n, d]) => [t === mesh, n, d === depth]), [[true, 7, true]], "called once, same this and arguments");
+    // an InstancedMesh (the crews) goes through the same prototype
+    const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial(), 2);
+    inst.onBeforeShadow(null, inst, null, null, inst.geometry, depth, null);
+    assert.strictEqual(calls.length, 2);
+    // a mesh's own customDepthMaterial is its owner's: never emptied
+    const own = new THREE.MeshDepthMaterial(), tex = new THREE.Texture(); own.map = tex;
+    const m2 = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()); m2.customDepthMaterial = own;
+    m2.onBeforeShadow(null, m2, null, null, m2.geometry, own, null);
+    depth.map = new THREE.Texture();
+    D.releaseShadowRefs();
+    assert.strictEqual(own.map, tex, "custom depth material keeps its map");
+    assert.strictEqual(depth.map, null, "three's shared one lets go");
+    D.unwatchShadowDepth();
+    assert.notStrictEqual(P.onBeforeShadow.toString().includes("DEPTH_MATS"), true, "removed again");
+  } finally { D.unwatchShadowDepth(); P.onBeforeShadow = orig; D.watchShadowDepth(THREE); }
+});

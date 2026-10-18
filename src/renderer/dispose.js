@@ -37,11 +37,28 @@ export function disposeGroup(root, done = new Set()) {
 // went back onto the GPU at the next shadow redraw (a barrier's, 2 per circuit switch – traced in v0.36 with the dev
 // texture log). The depth materials in use are noted (three passes them to onBeforeShadow) and let go of any map when a
 // world or a car is freed: the uniform is rebuilt without it on their next use.
+// The watch wraps Object3D.prototype.onBeforeShadow once: whatever was there before (three's no-op, or another wrapper –
+// the dev texture log's) is still called with the same `this` and arguments (v0.36 replaced it outright – review of v0.36,
+// C). Only three's own shared depth / distance materials are noted – an object's customDepthMaterial /
+// customDistanceMaterial is its owner's, left alone. Not seen: an object with its own onBeforeShadow (BatchedMesh's
+// class method, an instance's own) – the shared material is noted from any other caster in the same pass; this app has no
+// BatchedMesh and no shadow-casting point light. unwatchShadowDepth() puts the previous function back (tests).
 const DEPTH_MATS = new Set();
+let WATCH = null;
 export function watchShadowDepth(THREE) {
-  if (THREE.Object3D.prototype.onBeforeShadow.__watch) return;
-  const f = function (r, o, cam, scam, geo, depthMaterial) { if (depthMaterial) DEPTH_MATS.add(depthMaterial); };
-  f.__watch = true; THREE.Object3D.prototype.onBeforeShadow = f;
+  const P = THREE.Object3D.prototype;
+  if (WATCH && P.onBeforeShadow === WATCH.f) return;
+  const prev = P.onBeforeShadow;
+  const f = function (r, o, cam, scam, geo, depthMaterial) {
+    if (depthMaterial && depthMaterial !== this.customDepthMaterial && depthMaterial !== this.customDistanceMaterial) DEPTH_MATS.add(depthMaterial);
+    return prev.apply(this, arguments);
+  };
+  WATCH = { P, f, prev };
+  P.onBeforeShadow = f;
+}
+export function unwatchShadowDepth() {
+  if (WATCH && WATCH.P.onBeforeShadow === WATCH.f) WATCH.P.onBeforeShadow = WATCH.prev;
+  WATCH = null;
 }
 export function releaseShadowRefs() {
   let n = 0;
