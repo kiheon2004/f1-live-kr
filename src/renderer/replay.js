@@ -113,28 +113,33 @@
   // and a stint is listed (public) only from its first compound – each field as known at t, never a value sent later:
   //   compound: as sent ("UNKNOWN" included – F1's own placeholder; nothing guessed) · isNew: false until New says so ·
   //   changed: true unless TyresNotChanged "1"
-  // A whole list sent as an array (the session's reset, "Stints": []) drops the stints it doesn't hold from then on;
-  // "_deleted" (merge's deletion) drops the ones it names.
+  // A whole list sent as an array is the car's full list as it stands: the indices it holds are restated (a correction of
+  // the same stint – a reconnect's snapshot is one), those it doesn't hold are gone from then on (Stints: [] – a reset);
+  // "_deleted" (merge's deletion) drops the ones it names. A stint index sent again after it was dropped is a NEW record
+  // (a generation of its own, v0.38): nothing of the dropped one carries over – not its compound, its flags nor its time –
+  // while the dropped one still shows for the moments before it went.
   const NO_FIELDS = { isNew: false, changed: true };
   const at = (h, t) => { let v; for (const [m, x] of h) { if (m > t) break; v = x; } return v; };
   class TyreLog {
     constructor() { this.cars = {}; }
-    stint(num, idx) {
-      const car = this.cars[num] || (this.cars[num] = new Map());
-      if (!car.has(idx)) car.set(idx, { idx, compound: [], isNew: [], changed: [], gone: [] });
-      return car.get(idx);
+    // the record a stint index stands for now (a new one if there's none, or its last was dropped)
+    stint(num, idx, ms) {
+      const car = this.cars[num] || (this.cars[num] = { live: new Map(), all: [] });
+      let s = car.live.get(idx);
+      if (!s) { s = { idx, born: ms, gone: null, gen: car.all.filter((x) => x.idx === idx).length, compound: [], isNew: [], changed: [] }; car.live.set(idx, s); car.all.push(s); }
+      return s;
     }
+    drop(num, idx, ms) { const car = this.cars[num], s = car?.live.get(idx); if (!s) return; s.gone = ms; car.live.delete(idx); }
     feed(ms, topic, data) {
       if (topic !== "TimingAppData" || !data?.Lines) return;
       for (const [num, line] of Object.entries(data.Lines)) {
         const st = line?.Stints; if (!st || typeof st !== "object") continue;
         const put = (h, v) => { if (h.length && h[h.length - 1][1] === v) return; h.push([ms, v]); };
-        if (Array.isArray(st)) for (const s of this.cars[num]?.values() || []) if (s.idx >= st.length) put(s.gone, true);
-        if (!Array.isArray(st) && Array.isArray(st._deleted)) for (const d of st._deleted) if (/^\d+$/.test(String(d)) && this.cars[num]?.has(+d)) put(this.cars[num].get(+d).gone, true);
+        if (Array.isArray(st)) for (const idx of [...(this.cars[num]?.live.keys() || [])]) { if (idx >= st.length || !st[idx] || typeof st[idx] !== "object") this.drop(num, idx, ms); }
+        if (!Array.isArray(st) && Array.isArray(st._deleted)) for (const d of st._deleted) if (/^\d+$/.test(String(d))) this.drop(num, +d, ms);
         for (const [k, v] of Array.isArray(st) ? st.entries() : Object.entries(st)) {
           const idx = +k; if (!v || typeof v !== "object" || !Number.isFinite(idx)) continue;
-          const s = this.stint(num, idx);
-          if (s.gone.length && at(s.gone, ms)) put(s.gone, false);
+          const s = this.stint(num, idx, ms);
           if (v.Compound) put(s.compound, String(v.Compound));
           if (v.New != null) put(s.isNew, v.New === "true" || v.New === true);
           if (v.TyresNotChanged != null) put(s.changed, !(v.TyresNotChanged === "1" || v.TyresNotChanged === 1));
@@ -142,14 +147,20 @@
       }
     }
     // the stints known at t (all of them: Infinity) – each as it was known then: { ms (its compound's first arrival), idx,
-    // compound, isNew, changed }
-    list(num, t = Infinity) {
+    // compound, isNew, changed }. history: also the records dropped by t, each as last known before it went (+ gone: ms) –
+    // the session's whole record for a stop that was before the drop.
+    list(num, t = Infinity, { history = false } = {}) {
       const out = [];
-      for (const s of this.cars[num]?.values() || []) {
-        if (!s.compound.length || s.compound[0][0] > t || at(s.gone, t)) continue;
-        out.push({ ms: s.compound[0][0], idx: s.idx, compound: at(s.compound, t), isNew: at(s.isNew, t) ?? NO_FIELDS.isNew, changed: at(s.changed, t) ?? NO_FIELDS.changed });
+      for (const s of this.cars[num]?.all || []) {
+        const gone = s.gone != null && s.gone <= t;
+        if (gone && !history) continue;
+        const k = gone ? s.gone - 1e-6 : t;   // (a dropped record: as it stood just before it went)
+        if (!s.compound.length || s.compound[0][0] > k) continue;
+        const e = { ms: s.compound[0][0], idx: s.idx, compound: at(s.compound, k), isNew: at(s.isNew, k) ?? NO_FIELDS.isNew, changed: at(s.changed, k) ?? NO_FIELDS.changed };
+        if (gone) e.gone = s.gone;
+        out.push(e);
       }
-      return out.sort((a, b) => a.idx - b.idx);
+      return out.sort((a, b) => a.idx - b.idx || a.ms - b.ms);
     }
   }
 
@@ -493,7 +504,7 @@
     allPitStops(t = this.t) { return this.pitLog.all(t); }
     // the session's tyre stints with the time each was created – the whole record (a replay has it all): the caller
     // chooses whether to look past the moment shown (map3d.js pitWorkPolicy)
-    tyreChanges(num, t = Infinity) { return this.tyreLog.list(num, t); }
+    tyreChanges(num, t = Infinity, opts) { return this.tyreLog.list(num, t, opts); }
     neutralPeriods(t = this.t) { return this.statusLog.periods(t); }
 
     // Moment the session clock starts running (skips the pre-session wait).
@@ -912,7 +923,7 @@
     pitStops(num) { return this.pitLog.list(num, this.t); }
     allPitStops() { return this.pitLog.all(this.t); }
     // (live: what has arrived – never later than the moment shown)
-    tyreChanges(num) { return this.tyreLog.list(num, this.t); }
+    tyreChanges(num, _t, opts) { return this.tyreLog.list(num, this.t, opts); }
     neutralPeriods() { return this.statusLog.periods(this.t); }
     // One clean lap from the car trails, once some car has driven a full lap (re-checked every 10 s).
     trackOutline(now = Date.now()) {

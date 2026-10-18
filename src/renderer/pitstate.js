@@ -168,7 +168,8 @@ export function stopPlan({ t, t0, t1 = null, tyres = [], stopTime = null, penalt
   const wait = timePen || 0;
   const posD = t1 != null && t1 >= t0 ? (t1 - t0) / 1000 + 0.25 : null;   // (positions ~4 a second: it left within the next quarter)
   const known = (e) => e.ms >= t0 - 2000 && (policy === "record" ? e.ms <= t0 + 90000 : e.ms <= t && (t1 == null || e.ms <= t1));
-  const set = tyres.find((e) => known(e));
+  // (of the records in the window, one still standing before one dropped later; then the latest)
+  const cand = tyres.filter((e) => known(e)), set = cand.find((e) => e.gone == null) || cand[cand.length - 1];
   if (set && set.changed !== false) {
     const D = policy === "record" ? posD ?? stopTime : null;
     return { kind: "tyres", from: policy === "record" ? "record" : "observed", D, wait, compound: set.compound || null };
