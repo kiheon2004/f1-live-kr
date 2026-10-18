@@ -19,6 +19,8 @@ export const SUPPORT_CARS = {
   dbx707: { name: "Aston Martin DBX707", role: "medical", type: "suv", L: 5.04, W: 2.0, H: 1.68, body: "#00473b", accent: "#c4e000", lights: "roof", wing: false, label: "MEDICAL CAR" },
   // (the maker not known for the event: a car of the role's usual type in neutral colours – said so in the info)
   neutralSc: { name: "safety car (maker not sourced for this event)", role: "sc", type: "coupe", L: 4.55, W: 1.99, H: 1.27, body: "#9aa0a6", accent: "#2a2d31", lights: "roof", wing: true, label: "SAFETY CAR" },
+  // (a support car in the feed whose role isn't known – never seen so far: plain, no lights or role on the doors)
+  neutralSupport: { name: "support car (role not known)", role: "support", type: "coupe", L: 4.55, W: 1.99, H: 1.27, body: "#8a8f95", accent: "#2a2d31", lights: null, wing: false, label: "" },
   neutralMedical: { name: "medical car (maker not sourced for this event)", role: "medical", type: "fourdoor", L: 5.05, W: 1.96, H: 1.45, body: "#d9dde1", accent: "#2a2d31", lights: "roof", wing: false, label: "MEDICAL CAR" },
 };
 
@@ -84,15 +86,17 @@ export function makeSupportCar(id) {
     const o = lamp("#ff7a00"), gr = lamp("#22e05a"); lamps.push(o, gr);
     group.add(new THREE.Mesh(boxAt(W * 0.28, 0.035, 0.05, -W * 0.15, top - 0.04, cf + 0.02), o), new THREE.Mesh(boxAt(W * 0.28, 0.035, 0.05, W * 0.15, top - 0.04, cf + 0.02), gr));
     if (spec.wing) group.add(new THREE.Mesh(boxAt(W * 0.6, 0.03, 0.03, 0, belt + 0.22, -hl + 0.17), o));
-  } else {
+  } else if (spec.lights) {
     const a = lamp(spec.role === "sc" ? "#ff8a00" : "#ffb000"), b = lamp(spec.role === "sc" ? "#22e05a" : "#ffb000"); lamps.push(a, b);
     group.add(new THREE.Mesh(softBox(W * 0.62, 0.07, 0.22, 0, top + 0.05, pz + 0.05), accentM));
     group.add(new THREE.Mesh(boxAt(W * 0.28, 0.05, 0.2, -W * 0.15, top + 0.06, pz + 0.05), a), new THREE.Mesh(boxAt(W * 0.28, 0.05, 0.2, W * 0.15, top + 0.06, pz + 0.05), b));
   }
   // the role on both doors
+  if (spec.label) {
   const tex = door(spec.label, spec.role === "medical" && spec.body === "#d9dde1" ? "#c41230" : "#ffffff");
   const labelM = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }); labelM.userData.ownedTextures = [tex];
   for (const s of [1, -1]) { const p = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.19), labelM); p.position.set(s * (W * 0.47 + 0.004), floor + (belt - floor) * 0.62, -0.05); p.rotation.y = s * Math.PI / 2; group.add(p); }
+  }
   // (one mesh per material: the parts' transforms baked in – a car is a handful of draw calls, not two dozen)
   const byMat = new Map(); for (const o of group.children) { o.updateMatrix(); const l = byMat.get(o.material) || []; l.push(o); byMat.set(o.material, l); }
   group.clear();

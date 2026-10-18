@@ -31,3 +31,106 @@ test("post signals: only the sector's posts; green at the first post after it; r
   assert.deepStrictEqual(show(flagState([msg("DOUBLE YELLOW", "Sector", 3)], "4")), ["yellow", "yellow", "yellow", "yellow", "double"]);
   assert.deepStrictEqual(show(flagState([], "6")), Array(5).fill(null), "VSC: panels only");
 });
+
+// v0.38 (review of v0.37): the sectors came from the panels that could be DRAWN – panel 2 left out (no barrier found) put
+// a post at i150 into sector 1. Now the logical map comes from the FIA data alone.
+test("marshal map: a panel that can't be drawn doesn't move posts into another sector", async () => {
+  const { marshalMap, sectorOf } = await load();
+  const panels = [{ n: 1, i: 0 }, { n: 2, i: 100 }, { n: 3, i: 200 }], posts = [{ id: "M1.5", i: 150 }], N = 300;
+  assert.strictEqual(sectorOf(150, panels.filter((p) => p.n !== 2), N), 1, "the v0.37 way (what was drawn): wrong");
+  const m = marshalMap(panels, posts, N);
+  assert.strictEqual(m.posts[0].sector, 2);
+  assert.strictEqual(m.posts[0].prev, 1);
+  assert.strictEqual(m.posts[0].first, true);
+});
+
+test("marshal map: no posts – sectors still known; no panels – posts have no sector, nothing invented", async () => {
+  const { marshalMap } = await load();
+  const m = marshalMap([{ n: 1, i: 10 }, { n: 2, i: 60 }], [], 100);
+  assert.deepStrictEqual(m.bounds.map((b) => b.n), [1, 2]);
+  assert.strictEqual(m.sectorOf(70), 2); assert.strictEqual(m.prevOf(1), 2);
+  const e = marshalMap([], [{ id: "M1", i: 5 }], 100);
+  assert.deepStrictEqual([e.posts[0].sector, e.posts[0].prev, e.posts[0].first], [null, null, undefined]);
+});
+
+test("marshal map: a sector's several posts, the green at the first after its panel; the lap wraps", async () => {
+  const { marshalMap, flagState, postSignal } = await load();
+  const N = 1000, panels = [{ n: 1, i: 950 }, { n: 2, i: 200 }, { n: 3, i: 600 }];
+  const posts = [{ id: "a", i: 980 }, { id: "b", i: 20 }, { id: "c", i: 150 }, { id: "d", i: 250 }, { id: "e", i: 590 }, { id: "f", i: 700 }];
+  const m = marshalMap(panels, posts, N);
+  assert.deepStrictEqual(m.posts.map((p) => [p.id, p.sector, !!p.first]), [["a", 1, true], ["b", 1, false], ["c", 1, false], ["d", 2, true], ["e", 2, false], ["f", 3, true]]);
+  assert.deepStrictEqual(m.posts.map((p) => p.prev), [3, 3, 3, 1, 1, 2]);
+  const show = (st) => m.posts.map((p) => postSignal(p, st, p.prev));
+  const msg = (Flag, Scope, Sector) => ({ Category: "Flag", Flag, Scope, Sector });
+  assert.deepStrictEqual(show(flagState([msg("YELLOW", "Sector", 1)], "2")), ["yellow", "yellow", "yellow", "green", null, null]);
+  assert.deepStrictEqual(show(flagState([msg("DOUBLE YELLOW", "Sector", 3)], "2")), ["green", null, null, null, null, "double"], "sector 3 wraps to panel 1");
+});
+
+test("marshal map: a panel number drawn twice (Lusail '8') starts its sector once; the copy is a mirror", async () => {
+  const { marshalMap } = await load();
+  const N = 1000, panels = [{ n: 7, i: 300 }, { n: 8, i: 420 }, { n: 8, i: 360 }, { n: 9, i: 500 }, { n: 1, i: 990 }];
+  const m = marshalMap(panels, [{ id: "x", i: 380 }, { id: "y", i: 430 }], N);
+  assert.deepStrictEqual(m.bounds.map((b) => [b.n, b.i]), [[7, 300], [8, 360], [9, 500], [1, 990]]);
+  assert.deepStrictEqual(m.mirrors, [{ n: 8, i: 420 }]);
+  assert.deepStrictEqual(m.posts.map((p) => [p.sector, !!p.first]), [[8, true], [8, false]]);
+  assert.strictEqual(m.prevOf(9), 8);
+});
+
+test("light panels: SC and VSC are told apart; VSC ending goes green for 30 s, then dark; red over all", async () => {
+  const { flagState, panelSignal, PANEL } = await load();
+  const msg = (Flag, Scope, Sector) => ({ Category: "Flag", Flag, Scope, Sector });
+  const ys = [msg("YELLOW", "Sector", 2), msg("DOUBLE YELLOW", "Sector", 3)];
+  const at = (status, n, o) => panelSignal(n, flagState(ys, status), o);
+  assert.deepStrictEqual([at("2", 1), at("2", 2), at("2", 3)], [null, "yellow", "double"]);
+  assert.deepStrictEqual([at("4", 1), at("4", 3)], ["sc", "sc"]);
+  assert.deepStrictEqual([at("6", 1), at("6", 3)], ["vsc", "vsc"]);
+  assert.strictEqual(at("5", 1), "red");
+  // VSC ending at 100 s: "VSC" for the first seconds, then green (also once back to green), then dark / the sector's own
+  const E = 100000;
+  assert.strictEqual(at("7", 1, { t: E + 5000, vscEnd: E }), "vsc");
+  assert.strictEqual(at("7", 1, { t: E + PANEL.vscGreenAfter + 1, vscEnd: E }), "green");
+  assert.strictEqual(at("1", 2, { t: E + PANEL.vscGreenAfter + 20000, vscEnd: E }), "green");
+  assert.strictEqual(at("1", 2, { t: E + PANEL.vscGreenAfter + PANEL.vscGreenFor + 1, vscEnd: E }), "yellow");
+  assert.strictEqual(at("7", 1, { t: E }), "vsc", "the ending's time unknown: no green made up");
+  assert.strictEqual(at("4", 1, { t: E + 15000, vscEnd: E }), "sc", "a safety car after the VSC wins");
+});
+
+test("flags from race control's list: a correction or deletion by index, never an older yellow revived", async () => {
+  const { flagState } = await load();
+  const { applyMessages, resetMessages } = require("../src/renderer/replay.js");
+  const src = {}; resetMessages(src);
+  applyMessages(src, [{ Category: "Flag", Flag: "YELLOW", Scope: "Sector", Sector: 4 }]);
+  applyMessages(src, { 1: { Category: "Flag", Flag: "CLEAR", Scope: "Sector", Sector: 4 } });
+  assert.strictEqual(flagState(src.messages, "1").sectors.size, 0);
+  // the yellow corrected to another sector: only that one, and its clear still clears 4 only
+  applyMessages(src, { 2: { Category: "Flag", Flag: "DOUBLE YELLOW", Scope: "Sector", Sector: 7 } });
+  applyMessages(src, { 2: { Sector: 8 } });
+  assert.deepStrictEqual([...flagState(src.messages, "2").sectors], [[8, "DOUBLE YELLOW"]]);
+  // the yellow taken back: gone, nothing before it revived
+  applyMessages(src, { _deleted: ["2"] });
+  assert.strictEqual(flagState(src.messages, "1").sectors.size, 0);
+  // a deleted CLEAR does bring its yellow back – race control withdrew the clear
+  applyMessages(src, { _deleted: ["1"] });
+  assert.deepStrictEqual([...flagState(src.messages, "2").sectors], [[4, "YELLOW"]]);
+});
+
+test("flags after a seek: forward, back and forward again – the same state as played, a later correction not early", async () => {
+  const { flagState } = await load();
+  const { Replay } = require("../src/renderer/replay.js");
+  const F = (Flag, Sector) => ({ Category: "Flag", Flag, Scope: "Sector", Sector });
+  const r = new Replay({ duration: 60000, topics: {
+    TrackStatus: [[1000, { Status: "2" }], [30000, { Status: "1" }], [40000, { Status: "6" }], [50000, { Status: "7" }]],
+    RaceControlMessages: [[1000, { Messages: [F("YELLOW", 5)] }], [10000, { Messages: { 0: { Flag: "DOUBLE YELLOW" } } }], [30000, { Messages: { 1: F("CLEAR", 5) } }]],
+  } });
+  const at = (t) => { r.seek(t); const s = flagState(r.messages, r.state.TrackStatus?.Status ?? null); return [[...s.sectors], s.vsc]; };
+  const played = [5000, 15000, 35000, 45000].map(at);
+  assert.deepStrictEqual(played, [[[[5, "YELLOW"]], false], [[[5, "DOUBLE YELLOW"]], false], [[], false], [[], true]]);
+  assert.deepStrictEqual([45000, 35000, 15000, 5000].map(at), [...played].reverse(), "back: the same");
+  assert.deepStrictEqual(at(5000), [[[5, "YELLOW"]], false], "the correction at 10 s isn't seen at 5 s");
+});
+
+test("VSC ending's start: only straight from a VSC; a later SC or VSC ends it", async () => {
+  const { vscEndOf } = await load();
+  const ch = [[0, "1"], [100, "6"], [200, "7"], [300, "1"], [400, "4"], [500, "1"], [600, "7"]];
+  assert.deepStrictEqual([50, 150, 250, 350, 450, 650].map((t) => vscEndOf(ch, t)), [null, null, 200, 200, null, null]);
+});

@@ -496,6 +496,8 @@
     positionsAt(t) { return this.tracks.all(t); }
     // the safety car's place while it is on the track (Position's 241–243; none while it waits): { num: [x, y, z] }
     supportAt(t) { return this.supportTracks ? this.supportTracks.all(t) : {}; }
+    // each support car's last sample at or before t ({ num: { t, x, y, z } }) – how old its place is, where it was last
+    supportLast(t) { const o = {}; for (const n of Object.keys(this.supportTracks?.cars || {})) { const s = this.supportTracks.lastAt(n, t); if (s) o[n] = s; } return o; }
     // the same into reused arrays, with velocities (dm/ms) – for drawing every frame without garbage
     positionsInto(t, into, vels) { return this.tracks.all(t, into, vels); }
     laps(num, t = this.t) { return this.tracker.laps(num, t); }
@@ -559,8 +561,11 @@
   // coordinates while it is out, the others at 0, 0, 0; nothing while it waits at the pit exit – 21 cached sessions with a
   // safety car, none without; v0.37 research). Never a competitor: kept out of the cars' tracks (laps, grid, smoothing,
   // pit states, spacing) in a track set of their own.
+  // Any other number from 200 up is taken the same way: an F1 car's number is 1–99 (2025 SR Art. 6.4 / 2026 B1.4.4: the
+  // drivers' numbers 2–99, 1 for the champion) – a new support number never joins the field.
   const SUPPORT_NUMS = new Set(["241", "242", "243"]);
-  function splitSupport(tr) { const s = new CarTracks(); for (const n of Object.keys(tr.cars)) if (SUPPORT_NUMS.has(n)) { s.cars[n] = tr.cars[n]; delete tr.cars[n]; } return s; }
+  const isSupportNum = (n) => SUPPORT_NUMS.has(n) || (/^\d+$/.test(n) && +n >= 200);
+  function splitSupport(tr) { const s = new CarTracks(); for (const n of Object.keys(tr.cars)) if (isSupportNum(n)) { s.cars[n] = tr.cars[n]; delete tr.cars[n]; } return s; }
   class CarTracks {
     constructor() { this.cars = {}; }
     // (from per-car typed arrays as the archive makes them: used as they are)
@@ -619,6 +624,13 @@
         if (vel) vel[a] = d00 * p0 + d10 * m0 + d01 * p1 + d11 * m1;
       }
       return true;
+    }
+    // The last sample at or before t: { t, x, y, z } | null
+    lastAt(num, t) {
+      const c = this.cars[num]; if (!c || !c.n || c.t[0] > t) return null;
+      let lo = 0, hi = c.n - 1;
+      if (c.t[hi] <= t) lo = hi; else while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c.t[m] <= t) lo = m; else hi = m; }
+      return { t: c.t[lo], x: c.x[lo], y: c.y[lo], z: c.z[lo] };
     }
     // All cars at time t into `into` ({num: [x, y, z]}, arrays reused); with `vels`, velocities too.
     all(t, into = {}, vels) {
@@ -825,7 +837,7 @@
           const cars = {};
           for (const [n, e] of Object.entries(p.Entries || {})) {
             if (!(e.X || e.Y)) continue;
-            if (SUPPORT_NUMS.has(n)) { this.supportTracks.push(n, at - (last - Date.parse(p.Timestamp)), [e.X, e.Y, e.Z || 0]); continue; }
+            if (isSupportNum(n)) { this.supportTracks.push(n, at - (last - Date.parse(p.Timestamp)), [e.X, e.Y, e.Z || 0]); continue; }
             cars[n] = [e.X, e.Y, e.Z || 0];
             // Longer per-car trail (only while moving) so the circuit can be traced once a full lap is in.
             const tr = this.trail[n] || (this.trail[n] = []), prev = tr[tr.length - 1];
@@ -912,6 +924,7 @@
     // a small lag so we interpolate between real samples
     positionsAt(t = this.t) { return this.tracks.all(t - 600); }
     supportAt(t = this.t) { return this.supportTracks.all(t - 600); }
+    supportLast(t = this.t) { const o = {}; for (const n of Object.keys(this.supportTracks.cars)) { const s = this.supportTracks.lastAt(n, t - 600); if (s) o[n] = { ...s, t: s.t + 600 }; } return o; }
     positionsInto(t, into, vels) { return this.tracks.all(t - 600, into, vels); }
     laps(num, t = this.t) { return this.tracker.laps(num, t); }
     raceLapAt(ms) { return lapAtMs(this.lapMarks, ms); }
@@ -935,7 +948,7 @@
     }
   }
 
-  const API = { Replay, LiveSource, CarTracks, SUPPORT_NUMS, LapTracker, PitLog, StatusLog, TyreLog, merge, newMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
+  const API = { Replay, LiveSource, CarTracks, SUPPORT_NUMS, isSupportNum, LapTracker, PitLog, StatusLog, TyreLog, merge, newMessages, applyMessages, resetMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
     pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);

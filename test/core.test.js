@@ -551,3 +551,16 @@ test("support cars: the safety car's positions kept apart from the field's", () 
   assert.deepStrictEqual(Object.keys(r.supportAt(1500)), ["243"]);
   assert.ok(Math.abs(r.supportAt(1500)["243"][0] - 510) < 2);
 });
+
+// v0.38: a support number not seen before (from 200 up – F1 car numbers are 1–99) never joins the field; the last place
+// and its age are there for "where was it last" (a place held 4 s after its last sample isn't "where it is")
+test("support cars: a new number kept out of the field; each one's last sample and its age", () => {
+  const { Replay, LiveSource, isSupportNum } = require("../src/renderer/replay.js");
+  assert.deepStrictEqual(["241", "250", "99", "1", "44"].map(isSupportNum), [true, true, false, false, false]);
+  const r = new Replay({ duration: 9000, topics: { Position: [[1000, { 1: [100, 100, 0], 250: [500, 500, 0] }], [2000, { 1: [110, 100, 0], 250: [520, 500, 0] }]] } });
+  assert.deepStrictEqual(Object.keys(r.tracks.cars), ["1"]);
+  assert.deepStrictEqual(r.supportLast(4500), { 250: { t: 2000, x: 520, y: 500, z: 0 } });
+  assert.deepStrictEqual(r.supportLast(500), {});
+  assert.ok(r.supportAt(4500)["250"], "CarTracks still holds the place 4 s – the age tells it's old");
+  assert.strictEqual(typeof LiveSource.prototype.supportLast, "function");
+});

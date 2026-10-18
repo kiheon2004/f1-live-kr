@@ -22,7 +22,8 @@ test("medical car and official: around the race's standing start only, the order
   assert.strictEqual(at(L).medical.mode, "following");
   assert.strictEqual(at(L + 60000, { lap1End: L + 90000 }).medical.mode, "following");
   assert.strictEqual(at(L + 95000, { lap1End: L + 90000 }).medical.mode, "parked", "into the pits at the lap's end");
-  assert.strictEqual(at(L + SUPPORT.medLap + 1).medical.mode, "parked", "no lap end in the data: not forever");
+  assert.strictEqual(at(L + SUPPORT.medLap + 1).medical.mode, "unknown", "no lap end in the data: not followed forever, not parked on a guess");
+  assert.strictEqual(at(L + SUPPORT.medLap + 1, { lap: 3 }).medical.mode, "parked", "by lap 3 it is back");
   assert.ok([at(10000), at(L + 50000)].every((p) => p.medical.from === "reproduction"));
   // the official: the flag, then off the track – gone before the lights (≥ 6 s before lights out) and after
   assert.strictEqual(at(L - 18000).official.phase, "flag");
@@ -45,4 +46,68 @@ test("support models: by season and event from sources; unknown events neutral, 
   assert.deepStrictEqual([supportModels(2025, 149).sc, supportModels(2025, 149).medical], ["vantage", "dbx707"]);
   assert.strictEqual(supportModels(2025, 55).sc, "vantageS");
   assert.deepStrictEqual([supportModels(2025, 2).sc, supportModels(2024, 2).sc], [null, null]);
+});
+
+// v0.38 (review of v0.37): the support cars' places checked against 55 cached sessions – one number at a time, exactly
+// while TrackStatus is "4"; Monaco 2026 had three SC periods and no place at all
+test("safety car: out but no place → not drawn (not parked); a stale place isn't 'where it is'; others' roles unknown", async () => {
+  const { supportPlan, pickSupport, SUPPORT } = await load();
+  assert.strictEqual(supportPlan({ t: 1, status: "4", sc: {}, race: true }).sc.mode, "unseen");
+  // the last sample 3 s old (CarTracks holds it 4 s): no longer on track
+  const stale = supportPlan({ t: 1, status: "1", sc: { 241: [5, 5, 0] }, ages: { 241: 3000 }, race: true });
+  assert.strictEqual(stale.sc.mode, "parked");
+  // a place while the status isn't SC (never seen in the data): a support car, role not known
+  const odd = supportPlan({ t: 1, status: "1", sc: { 242: [5, 5, 0] }, ages: { 242: 100 }, race: true });
+  assert.deepStrictEqual([odd.sc.mode, odd.sc.role], ["track", "unknown"]);
+  assert.strictEqual(supportPlan({ t: 1, status: "1", scRecent: true, sc: { 242: [5, 5, 0] }, ages: { 242: 100 }, race: true }).sc.role, "sc", "just after the SC period: still the SC");
+  // several at once: the freshest, then the lowest number – not the first key
+  assert.deepStrictEqual(pickSupport({ 243: [1, 1], 241: [2, 2], 242: [3, 3] }, { 243: 100, 241: 400, 242: 100 }), { num: "242", pos: [3, 3], others: ["243", "241"] });
+  assert.strictEqual(pickSupport({ 243: [1, 1] }, { 243: SUPPORT.fresh + 1 }), null);
+});
+
+test("safety car: from its last place by the pit lane on to its parking place, then parked – not a jump", async () => {
+  const { supportPlan, SUPPORT } = await load();
+  const last = { num: "243", t: 100000, laneU: 40 }, at = (t) => supportPlan({ t, status: "1", scLast: last, parkU: 340, race: true }).sc;
+  assert.deepStrictEqual([at(100000).mode, at(100000).u], ["returning", 40]);
+  const mid = at(110000); assert.strictEqual(mid.mode, "returning"); assert.ok(Math.abs(mid.u - (40 + SUPPORT.laneSpeed * 10)) < 1e-6);
+  assert.strictEqual(at(100000 + 300 / SUPPORT.laneSpeed * 1000 + 1).mode, "parked");
+  // its place ended away from the pit lane (data cut off, a red flag): parked, an estimate – no path made up
+  assert.strictEqual(supportPlan({ t: 100500, status: "5", scLast: { num: "241", t: 100000, laneU: null }, parkU: 340, race: true }).sc.mode, "parked");
+});
+
+test("medical car, live: the first lap's end comes in later – provisional, then final; into the pit lane, then parked", async () => {
+  const { supportPlan, SUPPORT } = await load();
+  const L = 300000, start = { t: L, standing: true }, base = { start, race: true, parkU: 300 };
+  // live, 60 s after the start: the lap's end not in yet – following, provisional
+  let p = supportPlan({ ...base, t: L + 60000, lap1: { t: null, final: false } });
+  assert.deepStrictEqual([p.medical.mode, p.medical.provisional], ["following", true]);
+  // 100 s: the data now has the end at 95 s – entering the pit lane from there (not stuck as unknown)
+  p = supportPlan({ ...base, t: L + 100000, lap1: { t: L + 95000, final: true } });
+  assert.strictEqual(p.medical.mode, "entering"); assert.ok(Math.abs(p.medical.u - SUPPORT.laneSpeed * 5) < 1e-6);
+  p = supportPlan({ ...base, t: L + 95000 + 300 / SUPPORT.laneSpeed * 1000, lap1: { t: L + 95000, final: true } });
+  assert.strictEqual(p.medical.mode, "parked");
+  // a long first lap (an SC on lap 1): the cap is no fact – past it, unknown until lap 3; the lap's end when it comes wins
+  assert.strictEqual(supportPlan({ ...base, t: L + 170000, lap1: { t: null, final: false }, lap: 1 }).medical.mode, "unknown");
+  assert.strictEqual(supportPlan({ ...base, t: L + 170000, lap1: { t: L + 180000, final: true }, lap: 1 }).medical.mode, "following");
+});
+
+// the medical car's lap: found in positions that come in bit by bit (live) – not only from a whole record at once
+test("medical car's lap 1 end from positions arriving bit by bit; the last car retiring hands over to the next", async () => {
+  const { medicalLap1, followTarget } = await load();
+  const L = 100000, entry = { x: 0, z: 0 };
+  // two starters on a 1 km loop: 20 (last on the grid) retires at 60 s; 7 runs on, at the pit entry at 95 s after the start
+  const loop = (frac) => ({ x: Math.cos(frac * 2 * Math.PI) * 159 - 159, z: Math.sin(frac * 2 * Math.PI) * 159 });
+  const track = { 7: (tau) => loop(((tau - L) / 95000) % 1), 20: (tau) => (tau < L + 60000 ? loop(((tau - L - 1500) / 95000 + 1) % 1) : loop((58500 / 95000) % 1)) };
+  const mk = (dataEnd) => ({ L, order: ["20", "7"], dataEnd, pos: (num, tau) => (tau > dataEnd || tau < L - 5000 ? null : track[num](tau)), inLane: () => false, nearEntry: (p) => Math.hypot(p.x - entry.x, p.z - entry.z) < 30 });
+  // after 20 retired the medical car follows 7
+  assert.strictEqual(followTarget(mk(Infinity), L + 30000).num, "20");
+  assert.strictEqual(followTarget(mk(Infinity), L + 70000).num, "7", "20 stopped: the next one up");
+  // live: positions in up to 60 s – not decided yet (provisional), then in up to 100 s – found, final
+  const steps = [L + 60000, L + 80000, L + 100000, L + 400000].map((e) => medicalLap1(mk(e)));
+  assert.deepStrictEqual(steps.slice(0, 2).map((r) => r.final), [false, false]);
+  assert.strictEqual(steps[2].final, true);
+  assert.ok(steps[2].t > L + 94000 && steps[2].t < L + 100000, "the lap's end, lag after 7 passed the entry: " + steps[2].t);
+  assert.deepStrictEqual(steps[3], steps[2], "more data later: the same answer");
+  // no car reaches the entry within the window (positions stop at 30 s, a replay): final, no time
+  assert.deepStrictEqual(medicalLap1({ ...mk(Infinity), pos: (num, tau) => (tau > L + 30000 ? null : track[num](tau)) }), { t: null, final: true });
 });
