@@ -13,6 +13,7 @@
 // render in a handful of draw calls.
 import * as THREE from "./vendor/three.module.js";
 import { NL } from "./nightlights.js";
+import { footing, footprintSamples } from "./footing.js";
 
 // ---------- texture layers ----------
 export const LAYER = { GLASS_BLUE: 0, GLASS_GREEN: 1, GLASS_DARK: 2, RIBBON: 3, PUNCHED: 4, BRICK: 5, STUCCO: 6, BALCONY: 7, GULF: 8, CLAD: 9, RETAIL: 10,
@@ -743,6 +744,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
   const compass = (deg) => { const r = (deg * Math.PI) / 180, E = [-north[1], north[0]]; return [north[0] * Math.cos(r) + E[0] * Math.sin(r), north[1] * Math.cos(r) + E[1] * Math.sin(r)]; };
 
   let dropped = 0, moved = 0, count = 0; const overTrack = [];
+  const fs = { n: 0, plinths: 0, dug: 0, maxBuried: 0 };   // (development: how the buildings met the ground – info.footing)
   // red aircraft warning lights on the roofs of tall buildings (medium intensity: flashing, a building's in step)
   const beacons = [];
   for (const b0 of scene.buildings) {
@@ -767,14 +769,23 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     const r = rand(Math.floor(gx * 7.31) * 73856093 ^ Math.floor(gz * 3.17) * 19349663);
     seed = r();
     useChunk(gx, gz);
-    let base = Infinity;
-    for (const [x, z] of pts) base = Math.min(base, groundAt(x, z));
+    // the floor: level, on the drawn ground sampled over the whole footprint (footing.js – the lowest corner left the
+    // walls under the high side's ground); a plinth from below the lowest ground up to it where the ground falls away
+    let base = Infinity, foot = null;
+    const fh = opts.terrainAt ? footing(footprintSamples(pts).map(([x, z]) => opts.terrainAt(x, z))) : null;
+    // (a step under 25 cm: the walls just run on down into the ground – no plinth faces)
+    let sunk = 0;
+    if (fh) { base = fh.floor; if (fh.plinth && !(b.min > 0.5)) { if (fh.floor - fh.lo > 0.25) foot = fh.foot; else sunk = fh.floor - fh.foot; } fs.n++; if (fh.plinth) fs.plinths++; if (fh.buried > 0.5) fs.dug++; fs.maxBuried = Math.max(fs.maxBuried, fh.buried); }
+    else for (const [x, z] of pts) base = Math.min(base, groundAt(x, z));
     if (!Number.isFinite(base)) continue;
+    const pts0 = pts;
     // guessed heights vary so a district isn't one flat slab; floors given → their height
     let H = b.h;
     if (b.est) H *= 0.75 + r() * 0.6;
     if (b.est && area > 300 && H < 9) H = Math.max(H, 6 + Math.floor(r() * 4) * 3.1);
     const st = styleOf(b, area, H, luAt(gx, gz), region, r);
+    // (ribbon glazing: horizontal bands of glass in silver frames – Monza's Hospitality Building, landmarks.js)
+    if (opts.landmarks?.restyle(b0)?.ribbon) { st.layer = LAYER.RIBBON; st.tint = "#ecebe6"; st.roof = "flat"; st.roofLayer = LAYER.R_FLAT; st.parapet = 0.9; st.plant = false; st.crown = false; st.podium = false; st.shop = false; }
     if (opts.landmarks?.restyle(b0)?.glass) { st.layer = H > 60 ? LAYER.HOTEL : LAYER.GLASS_BLUE; st.tint = "#f2f2ee"; st.roof = "flat"; st.plant = false; st.crown = false; st.podium = false; }
     if (b.lv && !b.est) st.storey = Math.max(2.6, Math.min(6, (H - (st.roof !== "flat" && b.rh ? b.rh : 0)) / b.lv));
     st.rh = b.rh || null;
@@ -788,7 +799,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     if (roof === "flat" && pitchedRoof) { st.roofLayer = st.roofLayer === LAYER.R_METAL ? LAYER.R_METAL : LAYER.R_FLAT; st.parapet = st.parapet || 0.6; }
     st.roof = roof;
     const roofH = roof === "flat" ? 0 : roof === "dome" || roof === "onion" ? 0 : st.rh || (roof === "pyramidal" ? Math.min(10, Math.sqrt(area) * st.pitch * 0.5) : Math.min(14, st.pitch * lenV / 2));
-    const y0 = base + (b.min || 0);
+    const y0 = base + (b.min || 0) - sunk;
     bt = [base, base + H];
     let y1 = base + Math.max(H - (b.est ? 0 : Math.min(roofH, H * 0.45)), (b.min || 0) + 2.5);
     // massing for tall buildings: a podium under the tower, a set-back crown at the top
@@ -808,6 +819,8 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
       walls(crown, base, y1 - crownH, y1 + (st.parapet || 0), { ...st, layer: st.layer === LAYER.RIBBON ? LAYER.GLASS_DARK : st.layer }, gx, gz);
       pts = crown;
     }
+    // (the plinth: plain concrete, a shade darker than the walls – no windows below the floor)
+    if (foot != null) walls(pts0, foot, foot, base, { ...st, shop: false, layer: LAYER.PLAIN, tint: shadeHex(st.tint === "#ffffff" ? "#cfcbc3" : st.tint, -0.25) }, gx, gz);
     const oo = crownH ? obb(pts) : o;
     if (roof === "flat") top = flatRoof(pts, oo, y1, st, Math.abs(polyArea(pts)), r);
     else if (roof === "pyramidal") top = pyramid(pts, gx, gz, y1, st);
@@ -846,7 +859,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
   }
-  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, region, beacons, overTrack,
+  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, region, beacons, overTrack, footing: { ...fs, maxBuried: +fs.maxBuried.toFixed(2) },
     update(cam) {
       for (const m of group.children) {
         const c = m.geometry.boundingSphere, d = Math.hypot(c.center.x - cam.x, c.center.y - cam.y, c.center.z - cam.z) - c.radius;
