@@ -16,6 +16,7 @@ import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./facilities.js";
 import { START_DATA } from "./startdata.js";
 import { PIT_BOXES } from "./pitorder.js";
+import { planTunnels, buildTunnels } from "./tunnel.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
 
@@ -794,6 +795,9 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     terrain.material = gm.material;
   }
 
+  // Covered stretches of the lap (tunnel.js – Monaco's tunnel): planned before the buildings, which the map has standing
+  // over them (drawn from the slab's top up, not cleared off the road)
+  const tplan = planTunnels({ venueKey: opts.venue?.key, samples: world.samples, geo: gf, buildings: scene.buildings });
   let bld = null, lm = null;
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");
@@ -825,10 +829,14 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
     lm = combine(lm, fac);
     if (lm.group) group.add(lm.group);
-    bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm }, corridor, inStand);
+    bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm, raise: tplan?.raise }, corridor, inStand);
     if (bld) group.add(bld);
   }
-  const blockedTrees = lm ? (x, z) => blocked(x, z) || lm.keepOut(x, z) : blocked;
+  const tun = tplan?.list.length ? buildTunnels(tplan, terrainAt) : null;
+  if (tun) group.add(tun.group);
+  // (nothing grows or lies in a tunnel or on its slab's edge)
+  const blocked0 = tplan?.list.length ? (x, z) => blocked(x, z) || tplan.inside(x, z, 1.5) : blocked;
+  const blockedTrees = lm ? (x, z) => blocked0(x, z) || lm.keepOut(x, z) : blocked0;
   const w = waterMesh(scene, gf, groundAt);
   if (w) group.add(w);
   if (opts.trees !== false) {
@@ -876,7 +884,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
       lines: scene.lines.filter((l) => l.k === "road" || l.k === "path" || l.k === "raceway").map((l) => ({ ...l, pts: xz(l.pts) })),
       paved: scene.areas.filter((a) => a.k === "paved").map((a) => xz(a.pts)),
       buildings: opts.buildings !== false ? scene.buildings.filter((b) => b.kind !== "grandstand" && !(b.min > 3)).map((b) => xz(b.pts)) : [],
-      onTrack: (x, z) => corridor.on(x, z, 4), urban: !!opts.street });
+      onTrack: (x, z) => corridor.on(x, z, 4), urban: !!opts.street, covered: tplan?.list.length ? (x, z) => tplan.inside(x, z, 0) : null });
     night.group = lampMeshes(night.lamps);
     const beacons = bld?.userData.beacons || [];
     if (beacons.length) night.group.add(glowPoints(beacons, "beacons"));
@@ -892,14 +900,16 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     auxGap: aux.length ? onJoiningRun(aux, 1.5, 30, T) : null,
     aux,       // (development: the strips – Map3D.auxNear)
     // (the camera's line-of-sight test isn't recursive: the facilities' meshes themselves)
-    occluders: (bld ? bld.children : []).concat(stands ? [stands.structure] : [], (() => { const out = []; lm?.group?.getObjectByName("facilities")?.traverse((o) => { if (o.isMesh) out.push(o); }); return out; })()),
+    tunnel: tun ? { mask: tun.mask, inside: tplan.inside, where: tplan.where, stations: tun.stations, info: tun.info } : null,
+    occluders: (bld ? bld.children : []).concat(tun ? tun.occluders : [], stands ? [stands.structure] : [], (() => { const out = []; lm?.group?.getObjectByName("facilities")?.traverse((o) => { if (o.isMesh) out.push(o); }); return out; })()),
     satAt: (x, z) => { const px = groundInfo.pixels(), W = ground.canvas.width, i = Math.floor((x - ext.x0) / ground.mpp), j = Math.floor((z - ext.z0) / ground.mpp); if (i < 0 || j < 0 || i >= W || j >= ground.canvas.height) return null; const o = (j * W + i) * 4; return [px[o], px[o + 1], px[o + 2]]; },
     isSea: seaLevel != null ? isSea : null, landAt: seaR ? (x, z) => seaR.landAt(x, z) : null,
     geo: gf,   // the frame's maps (F1 metres / lat-lon ↔ scene), for placing things by their real position
     scene,     // (development: the map data it was built from – Map3D.mapNear)
     landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
     info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
-      clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped, raisedOver: bld.userData.overTrack } : null,
+      clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped, raisedOver: bld.userData.overTrack, overTunnel: bld.userData.raised } : null,
+      tunnels: tplan?.info || null,
       trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,

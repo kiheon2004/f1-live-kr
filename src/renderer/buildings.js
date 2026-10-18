@@ -520,7 +520,7 @@ export { obbDir, turned, darkFloor };
 
 // ---------- the mesh ----------
 // scene: fitted scene; gf: geo frame; groundAt(x, z); track: trackCorridor (clearPolygon); inStand(x, z);
-// opts: { night, location }. Returns a THREE.Group of chunk meshes (userData: materials, dropped, moved, count).
+// opts: { night, location, raise: Map(record → { y0, y1, storeys, cls, colour }) – buildings over a tunnel, drawn from y0 }. Returns a THREE.Group of chunk meshes (userData: materials, dropped, moved, count).
 export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
   const region = regionOf(scene.location || opts.location);
   // land use around each building (from mapped areas), by a 50 m lookup grid of the area outlines
@@ -742,20 +742,24 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
   const north = (() => { const [la, lo] = scene.center || [0, 0], [x0, z0] = gf.fromLL(la, lo), [x1, z1] = gf.fromLL(la + 0.001, lo), l = Math.hypot(x1 - x0, z1 - z0) || 1; return [(x1 - x0) / l, (z1 - z0) / l]; })();
   const compass = (deg) => { const r = (deg * Math.PI) / 180, E = [-north[1], north[0]]; return [north[0] * Math.cos(r) + E[0] * Math.sin(r), north[1] * Math.cos(r) + E[1] * Math.sin(r)]; };
 
-  let dropped = 0, moved = 0, count = 0; const overTrack = [];
+  let dropped = 0, moved = 0, count = 0, raised = 0; const overTrack = [];
   // red aircraft warning lights on the roofs of tall buildings (medium intensity: flashing, a building's in step)
   const beacons = [];
   for (const b0 of scene.buildings) {
     if (b0.kind === "grandstand") continue;   // stands.js builds these, with their seats
     if (opts.landmarks?.skip(b0)) continue;   // modelled as the real building (landmarks.js, facilities.js)
     if (twice.has(b0)) continue;              // (merged into the other record on its outline)
-    const b = merged.get(b0) || b0;
+    // (over a covered stretch of the lap – tunnel.js planTunnels: Monaco's hotel over its tunnel –: drawn from the slab's top
+    // up, as the data's outline; not cleared off the track it stands over)
+    const up = opts.raise?.get(b0) || null;
+    const b = up ? { ...(merged.get(b0) || b0), min: 0, est: false, h: up.y1 - up.y0, lv: up.storeys || null, ...(up.cls ? { cls: up.cls } : {}), ...(up.colour ? { colour: up.colour } : {}) } : merged.get(b0) || b0;
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) continue;
     if (isSliver(b, pts)) { dropped++; continue; }
     if (inStand) { let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } if (inStand(cx / pts.length, cz / pts.length)) { dropped++; continue; } }
-    if (track && !(b.min >= 5)) {
+    if (up) raised++;
+    else if (track && !(b.min >= 5)) {
       const fixed = track.clearPolygon(pts);
       if (!fixed) { dropped++; continue; }
       if (fixed !== pts) { moved++; pts = fixed; }
@@ -769,6 +773,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     useChunk(gx, gz);
     let base = Infinity;
     for (const [x, z] of pts) base = Math.min(base, groundAt(x, z));
+    if (up) base = up.y0;
     if (!Number.isFinite(base)) continue;
     // guessed heights vary so a district isn't one flat slab; floors given → their height
     let H = b.h;
@@ -776,6 +781,8 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     if (b.est && area > 300 && H < 9) H = Math.max(H, 6 + Math.floor(r() * 4) * 3.1);
     const st = styleOf(b, area, H, luAt(gx, gz), region, r);
     if (opts.landmarks?.restyle(b0)?.glass) { st.layer = H > 60 ? LAYER.HOTEL : LAYER.GLASS_BLUE; st.tint = "#f2f2ee"; st.roof = "flat"; st.plant = false; st.crown = false; st.podium = false; }
+    // (a raised building's facade as the photos show it, where tunnel.js knows: the Fairmont's beige balcony bands)
+    if (up?.facade === "balcony") { st.layer = LAYER.BALCONY; st.crown = false; st.podium = false; }
     if (b.lv && !b.est) st.storey = Math.max(2.6, Math.min(6, (H - (st.roof !== "flat" && b.rh ? b.rh : 0)) / b.lv));
     st.rh = b.rh || null;
     // the walls stop below a pitched roof's height when the total height is tagged
@@ -846,7 +853,7 @@ export function buildingsMesh(scene, gf, groundAt, opts, track, inStand) {
     mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
   }
-  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, region, beacons, overTrack,
+  group.userData = { material: mat, materials: [mat, far], dropped, moved, count, raised, region, beacons, overTrack,
     update(cam) {
       for (const m of group.children) {
         const c = m.geometry.boundingSphere, d = Math.hypot(c.center.x - cam.x, c.center.y - cam.y, c.center.z - cam.z) - c.radius;

@@ -49,6 +49,7 @@ export function nightLit(m) {
   m.onBeforeCompile = function (sh, r) {
     prev?.call(this, sh, r);
     sh.uniforms.nlTex = NL.tex; sh.uniforms.nlHgt = NL.hgt; sh.uniforms.nlExt = NL.ext; sh.uniforms.nlGain = NL.gain;
+    sh.uniforms.tnTex = TN.tex; sh.uniforms.tnExt = TN.ext; sh.uniforms.tnOn = TN.on; sh.uniforms.tnLamp = TN.lamp; sh.uniforms.tnAmb = TN.amb;
     sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vNlPos;")
       .replace("#include <project_vertex>", `#include <project_vertex>
         { vec4 nlW = vec4(transformed, 1.0);
@@ -61,13 +62,58 @@ export function nightLit(m) {
       .replace("#include <lights_fragment_maps>", `#include <lights_fragment_maps>
         #if defined( RE_IndirectDiffuse )
           if (nlGain > 0.0) irradiance += nlLight(vNlPos, normalize((vec4(normal, 0.0) * viewMatrix).xyz));
-        #endif`);
+        #endif
+        ${TN_FRAG}`);
   };
   m.customProgramCacheKey = () => prevKey + "|nightLit";
   m.needsUpdate = true;
 }
+// A covered stretch of road (tunnel.js – Monaco's tunnel under the Fairmont): under its roof the sky's light is mostly
+// shut out and the sun's doesn't reach, the tunnel's own lamps light what is there. Asked per fragment by position, so a
+// car driving in darkens as it goes under the roof edge (no global exposure change) and the walls and road stay lit by
+// the lamps. The mask (TN.tex, over TN.ext): r how covered (0 out in the open, 1 under the roof; eased over the first
+// metres in from each mouth, where daylight still reaches), g the ceiling's height (only what is under it counts – the
+// slab's top and the hotel over it are outside), b the daylight still coming in through an open side (the colonnade's
+// gaps), a the tunnel lamps' light there (more near the walls they hang on). TN.on 0: nothing (no tunnel in this world).
+// Direct sun under the roof: a surface that takes the shadow map gets the slab's shadow from it – through the colonnade's
+// gaps too –, only kept off where the sides are solid (and wherever the shadows are switched off); one that doesn't (the
+// cars) is shaded by the mask alone, keeping as much as the open side lets in.
+const blankHalf = () => { const t = new THREE.DataTexture(new Uint16Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat, THREE.HalfFloatType); t.needsUpdate = true; t.userData.shared = true; return t; };
+export const TN = {
+  tex: { value: blankHalf() }, ext: { value: new THREE.Vector4(0, 0, 1, 1) }, on: { value: 0 },
+  lamp: { value: new THREE.Vector3(0, 0, 0) },   // the lamps' light (linear RGB irradiance at a = 1)
+  amb: { value: 0.12 },                          // the share of the sky's light left deep inside
+};
+TN.blank = TN.tex.value;
+const TN_FRAG = `
+        if (tnOn > 0.0) {
+          vec2 tnUv = (vNlPos.xz - tnExt.xy) / tnExt.zw;
+          if (tnUv.x > 0.0 && tnUv.y > 0.0 && tnUv.x < 1.0 && tnUv.y < 1.0) {
+            vec4 tnM = texture2D(tnTex, tnUv);
+            // (the ceiling's underside itself counts as inside; the slab's top 1 m+ over it doesn't; nothing far below)
+            float tnK = tnM.r * (1.0 - smoothstep(tnM.g + 0.12, tnM.g + 0.45, vNlPos.y)) * step(tnM.g - 12.0, vNlPos.y);
+            if (tnK > 0.002) {
+              vec3 tnN = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+              #if defined( RE_IndirectDiffuse )
+                irradiance *= mix(1.0, min(1.0, tnAmb + tnM.b), tnK);
+                // lamps on the upper edge of both walls: the road and the walls well lit, the ceiling's underside less
+                irradiance += tnLamp * (tnK * tnM.a * (tnN.y >= 0.0 ? 0.75 + 0.25 * tnN.y : 0.75 + 0.1 * tnN.y));
+              #endif
+              #if defined( RE_IndirectSpecular )
+                radiance *= mix(1.0, 0.3, tnK);
+              #endif
+              #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+                float tnD = receiveShadow ? (tnM.b > 0.02 ? 0.0 : tnK) : tnK * (1.0 - min(1.0, tnM.b * 2.0));
+              #else
+                float tnD = tnK * (1.0 - min(1.0, tnM.b * 2.0));
+              #endif
+              reflectedLight.directDiffuse *= 1.0 - tnD; reflectedLight.directSpecular *= 1.0 - tnD;
+            }
+          }
+        }`;
 export const NL_GLSL = `
   uniform sampler2D nlTex; uniform sampler2D nlHgt; uniform vec4 nlExt; uniform float nlGain;
+  uniform sampler2D tnTex; uniform vec4 tnExt; uniform float tnOn; uniform vec3 tnLamp; uniform float tnAmb;
   varying vec3 vNlPos;
   // light from the field falling on a surface at p facing n (world space)
   vec3 nlLight(vec3 p, vec3 n) {
@@ -98,7 +144,8 @@ const ROADS = {
 const ROAD_DEFAULT = { h: 8, gap: 32, both: false, c: "warm" };
 
 // opts: { ext: {x0,z0,x1,z1}, groundAt(x,z), track: { samples, width }, lines: [{ k, w, sub, pts: [[x,z]…] }] (scene
-// metres), paved: [[x,z]…][] (car parks, plazas), buildings: [[x,z]…][] (footprints), onTrack(x,z): on the
+// metres), paved: [[x,z]…][] (car parks, plazas), buildings: [[x,z]…][] (footprints), covered(x,z): under a tunnel's roof (no
+// floodlit band there), onTrack(x,z): on the
 // circuit's own tarmac (it has its floodlights), urban: footpaths lit too }
 // Returns { tex, hgt, ext: Vector4, lamps: [{ x, y, z, h, dx, dz, c, k }], dispose() } (dispose: releaseField).
 export function lightField(opts) {
@@ -192,7 +239,15 @@ export function lightField(opts) {
   const tr = opts.track;
   if (tr?.samples?.length) {
     const pts = tr.samples.map((s) => S(s.p.x, s.p.z));
-    const loop = () => { g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); };
+    // (not under a roof: a tunnel has its own lamps – tunnel.js; the band there lit its slab's top and what stands on it)
+    const cov = opts.covered ? tr.samples.map((s) => opts.covered(s.p.x, s.p.z)) : null;
+    const loop = () => {
+      g.beginPath();
+      if (!cov?.some(Boolean)) { pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); return; }
+      const n = pts.length, k0 = cov.indexOf(true);
+      let pen = false;
+      for (let j = 1; j <= n; j++) { const k = (k0 + j) % n; if (cov[k]) { pen = false; continue; } const [x, y] = pts[k]; if (pen) g.lineTo(x, y); else { g.moveTo(x, y); pen = true; } }
+    };
     for (const [extra, a] of [[44, 0.05], [26, 0.1], [14, 0.22], [6, 0.32], [0, 0.4]]) { g.strokeStyle = rgba(C.flood, a); g.lineWidth = (tr.width + 2 * extra) / mpp; loop(); g.stroke(); }
     // the pit lane and other venue tarmac
     for (const l of opts.lines) if (l.k === "raceway") {
