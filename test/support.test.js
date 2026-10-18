@@ -119,7 +119,7 @@ test("medical car's lap 1 end from positions arriving bit by bit; the last car r
 });
 
 test("support car models (v0.39): each its own outline, the wheels in arches at the spec's wheelbase, separate turning pivots", async () => {
-  const { makeSupportCar, SUPPORT_CARS, sideOutline, wheelPlaces } = await import("../src/renderer/support3d.js");
+  const { makeSupportCar, SUPPORT_CARS, bodyBottom, wheelPlaces } = await import("../src/renderer/support3d.js");
   const THREE = await import("../src/renderer/vendor/three.module.js");
   for (const id of Object.keys(SUPPORT_CARS)) {
     const s = SUPPORT_CARS[id], car = makeSupportCar(id), u = car.userData;
@@ -132,7 +132,7 @@ test("support car models (v0.39): each its own outline, the wheels in arches at 
     assert.ok(box.max.x - box.min.x <= s.W + 0.06 && box.max.x - box.min.x > s.W * 0.9, id + " width " + (box.max.x - box.min.x));
     assert.ok(box.max.y < s.H + 0.16, id + " height " + box.max.y);
     // an arch over each wheel: the outline's points over the axle sit above the tyre
-    const out = sideOutline(s), over = (z) => Math.min(...out.filter(([oz, oy]) => Math.abs(oz - z) < 0.05 && oy > 0.05 && oy < s.RF * 2 + 0.1).map(([, y]) => y));
+    const over = (z) => bodyBottom(s, (s.L / 2 - z) / s.L);
     assert.ok(over(W.zf) > s.RF * 2, id + " front arch"); assert.ok(over(W.zr) > s.RR * 2, id + " rear arch");
     u.setSpin(1.2, 0.7);
     assert.deepStrictEqual(u.wheels.map((w) => +w.rotation.x.toFixed(2)), [1.2, 1.2, 0.7, 0.7]);

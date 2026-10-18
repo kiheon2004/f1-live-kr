@@ -104,27 +104,6 @@ export function wheelPlaces(spec) {
   const zf = spec.L / 2 - spec.FO, zr = zf - spec.WB;
   return { zf, zr, archF: spec.RF + 0.035, archR: spec.RR + 0.035 };
 }
-// The lower body's side outline [[z, y]] (closed, counter-clockwise seen from +x): the top edge nose → tail, the tail down,
-// the sill back to the nose with the two arches cut out (half circles round the axles, reaching down to the sill)
-export function sideOutline(spec) {
-  const { L, GC } = spec, h = L / 2, Z = (u) => h - u * L, W = wheelPlaces(spec), sill = GC + 0.04, out = [];
-  const nose0 = lerpAt(spec.top, 0), tail0 = lerpAt(spec.top, 1);
-  // bottom from the tail to the nose, arches as arcs (the sill rising into them)
-  out.push([Z(1), sill + 0.12], [Z(1) + 0.08, sill]);
-  for (const [zc, ra, r] of [[W.zr, W.archR, spec.RR], [W.zf, W.archF, spec.RF]]) {
-    const dy = r - sill, a0 = dy < ra ? Math.acos(Math.max(-1, Math.min(1, dy / ra))) : 0;   // where the arch meets the sill
-    out.push([zc - Math.sin(a0) * ra, sill]);
-    for (let k = 1; k < 12; k++) { const a = -a0 + (2 * a0 * k) / 12; out.push([zc + Math.sin(a) * ra, r + Math.cos(a) * ra]); }
-    out.push([zc + Math.sin(a0) * ra, sill]);
-  }
-  out.push([Z(0) - 0.12, sill + 0.03], [Z(0), Math.min(nose0, sill + 0.2)]);
-  // the top edge nose → tail (counter-clockwise: back along the top)
-  const n = 40;
-  for (let k = 0; k <= n; k++) { const u = k / n; out.push([Z(u), lerpAt(spec.top, u)]); }
-  out.push([Z(1), Math.max(sill + 0.15, tail0 - 0.25)]);
-  return out;
-}
-
 const COL = (h) => new THREE.Color(h);
 // A body part lofted along the car: at each u (share of the length from the nose) a rounded section from y = bot(u) to
 // top(u), half width hw(u), squareness pw, its upper half drawn in by `tumble` (the sides leaning in towards the top).
