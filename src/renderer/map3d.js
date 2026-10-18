@@ -1809,6 +1809,14 @@ function laneNearest(x, z) {
   }
   return best;
 }
+// metres along the lap from sample a forward to sample b; the point s m ahead of sample i (on the racing line, its
+// direction)
+function trackDist(a, b) { const S = world.samples, n = S.length; let d = 0; for (let i = a; i !== b; i = (i + 1) % n) { const p = S[i].p, q = S[(i + 1) % n].p; d += Math.hypot(q.x - p.x, q.z - p.z); if (d > 5000) return Infinity; } return d; }
+function trackAhead(i, s) {
+  const S = world.samples, n = S.length; let d = 0;
+  for (let k = 0; k < n; k++) { const a = S[(i + k) % n], b = S[(i + k + 1) % n], l = Math.hypot(b.p.x - a.p.x, b.p.z - a.p.z); if (d + l >= s) { const f = (s - d) / (l || 1); return { x: a.p.x + (b.p.x - a.p.x) * f, z: a.p.z + (b.p.z - a.p.z) * f, dx: b.p.x - a.p.x, dz: b.p.z - a.p.z }; } d += l; }
+  return null;
+}
 // TrackStatus at or within `back` ms before t was s (replay: the session's record; live: as it came – statusTrail)
 function statusWas(src, t, s, back) {
   vscEndAt(src, t);   // (keeps the trail up to date)
@@ -1845,7 +1853,13 @@ function updateSupport(src, t) {
   const lastS = src.supportLast ? (src.isLive ? src.supportLast() : src.supportLast(t)) : {};
   const ages = {}; let scLast = null;
   for (const [n, s] of Object.entries(lastS)) { ages[n] = t - s.t; if (!scLast || s.t > scLast.t) scLast = { num: n, t: s.t, x: s.x, y: s.y }; }
-  if (scLast && P) { const q = toScene([scLast.x, scLast.y], c0), ln = laneNearest(q.x, q.z); scLast.laneU = ln && ln.d < 25 ? ln.u : null; scLast.laneD = ln ? +ln.d.toFixed(1) : null; scLast.at = [+q.x.toFixed(1), +q.z.toFixed(1)]; }
+  if (scLast && P) {
+    const q = toScene([scLast.x, scLast.y], c0), ln = laneNearest(q.x, q.z);
+    scLast.laneU = ln && ln.d < 25 ? ln.u : null; scLast.laneD = ln ? +ln.d.toFixed(1) : null; scLast.at = [+q.x.toFixed(1), +q.z.toFixed(1)];
+    // (on the track before the pit entry: how far along the lap to it – the entry's nearest track sample)
+    scLast.toEntry = null;
+    if (scLast.laneU == null) { const [a, da] = world.grid.nearest(q.x, q.z, 3), e = laneAt(0), [b] = e ? world.grid.nearest(e.x, e.z, 4) : []; if (a && b && da < 30) { const d = trackDist(a.i, b.i); if (d <= 800) { scLast.toEntry = d; scLast.i0 = a.i; } } }
+  }
   SP.scLast = scLast;
   const plan = supportPlan({ t, status, sc: sup, ages, scRecent: statusWas(src, t, "4", 6000), scLast, parkU: exitU, start, lap1: st?.lap1 || null, lap: +(src.state.LapCount?.CurrentLap || 0) || null, race: isRace });
   const models = supportModels(A.sessionYear?.() || 0, venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key ?? null, sessionDate());
@@ -1865,7 +1879,7 @@ function updateSupport(src, t) {
     // (heading from its last half second while it moves; standing or crawling (< 0.6 m in ½ s): the last heading it had)
     if (q && Math.hypot(p.x - q.x, p.z - q.z) > 0.6) SP.scDir = { dx: p.x - q.x, dz: p.z - q.z };
     placeSupportCar(SP, "sc", plan.sc.role === "sc" ? scId : "neutralSupport", { x: p.x, z: p.z, dx: SP.scDir?.dx ?? 0, dz: SP.scDir?.dz ?? 1 }, plan.sc.role === "sc", tsec);
-  } else if (plan.sc?.mode === "returning") placeSupportCar(SP, "sc", scId, laneSpot(plan.sc.u, 4), false, tsec);
+  } else if (plan.sc?.mode === "returning") placeSupportCar(SP, "sc", scId, plan.sc.leg === "track" ? trackAhead(scLast.i0, plan.sc.s) : laneSpot(plan.sc.u, 4), false, tsec);
   else placeSupportCar(SP, "sc", scId, plan.sc?.mode === "parked" ? parkedAt(4) : null, false, tsec);
   // the medical car
   let med = null;
@@ -1949,7 +1963,7 @@ function supportNote(plan, models) {
   if (plan.official) parts.push("그리드 후방 관계자: 재현(정확한 시각은 데이터에 없음)");
   if (plan.sc?.mode === "track") parts.push(plan.sc.role === "sc" ? "세이프티카: 실제 위치 데이터" : `지원 차량 ${plan.sc.num}: 실제 위치(역할 미확정)`);
   else if (plan.sc?.mode === "unseen") parts.push("세이프티카 출동 중: 위치 데이터 없음 – 표시 안 함");
-  else if (plan.sc?.mode === "returning") parts.push("세이프티카: 피트로 복귀(재현)");
+  else if (plan.sc?.mode === "returning") parts.push("세이프티카: 위치 데이터 종료 – 피트로 복귀(재현)");
   else if (plan.vsc) parts.push("VSC: 실제 세이프티카는 나오지 않아요");
   if ((plan.sc?.mode === "track" || parts.length) && !models.sc) parts.push("지원 차량 제조사: 이 경기는 확인 안 됨(중립 표시)");
   if (world?.marshals?.note) parts.push(world.marshals.note);

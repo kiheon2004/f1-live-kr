@@ -68,11 +68,17 @@ test("safety car: out but no place → not drawn (not parked); a stale place isn
 test("safety car: from its last place by the pit lane on to its parking place, then parked – not a jump", async () => {
   const { supportPlan, SUPPORT } = await load();
   const last = { num: "243", t: 100000, laneU: 40 }, at = (t) => supportPlan({ t, status: "1", scLast: last, parkU: 340, race: true }).sc;
-  assert.deepStrictEqual([at(100000).mode, at(100000).u], ["returning", 40]);
+  assert.deepStrictEqual([at(100000).mode, at(100000).leg, at(100000).u], ["returning", "lane", 40]);
   const mid = at(110000); assert.strictEqual(mid.mode, "returning"); assert.ok(Math.abs(mid.u - (40 + SUPPORT.laneSpeed * 10)) < 1e-6);
   assert.strictEqual(at(100000 + 300 / SUPPORT.laneSpeed * 1000 + 1).mode, "parked");
   // its place ended away from the pit lane (data cut off, a red flag): parked, an estimate – no path made up
-  assert.strictEqual(supportPlan({ t: 100500, status: "5", scLast: { num: "241", t: 100000, laneU: null }, parkU: 340, race: true }).sc.mode, "parked");
+  assert.strictEqual(supportPlan({ t: 100500, status: "5", scLast: { num: "241", t: 100000, laneU: null, toEntry: null }, parkU: 340, race: true }).sc.mode, "parked");
+  // ended on the track 220 m before the pit entry (Suzuka, Baku…): along the track, then the lane, then parked
+  const tr = { num: "243", t: 0, laneU: null, toEntry: 220 }, on = (t) => supportPlan({ t, status: "1", scLast: tr, parkU: 340, race: true }).sc;
+  assert.deepStrictEqual([on(5000).mode, on(5000).leg, on(5000).s], ["returning", "track", SUPPORT.trackSpeed * 5]);
+  const k = 220 / SUPPORT.trackSpeed * 1000;
+  assert.deepStrictEqual([on(k + 2000).leg, Math.round(on(k + 2000).u)], ["lane", Math.round(SUPPORT.laneSpeed * 2)]);
+  assert.strictEqual(on(k + 336 / SUPPORT.laneSpeed * 1000 + 1).mode, "parked");
 });
 
 test("medical car, live: the first lap's end comes in later – provisional, then final; into the pit lane, then parked", async () => {

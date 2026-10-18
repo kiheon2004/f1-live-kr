@@ -25,6 +25,7 @@ export const SUPPORT = {
   flag: [-21000, -15000], // the official's green flag, ms from lights out (estimate: before the pre-start and the lights)
   leave: [-15000, -12000], // walking off the track, ms from lights out
   laneSpeed: 16.7,       // m/s through the pit lane to its parking place (60 km/h, under the limiter – a reproduction)
+  trackSpeed: 22,        // m/s from its last place on the track to the pit entry (~80 km/h – a reproduction)
   fresh: 1500,           // ms: a support car's sample older than this is no longer "where it is" (the feed ~4 a second)
 };
 
@@ -45,8 +46,9 @@ export function pickSupport(sc = {}, ages = {}) {
 // t: the moment shown; status: TrackStatus.Status at t ("1" green, "2" yellow, "4" SC, "5" red, "6" VSC, "7" VSC
 // ending); sc / ages: the support cars' places at t and the age of each one's last sample (supportAt); scRecent: the
 // status was "4" within the last few seconds; scLast: the last support-car sample before t when none is fresh –
-// { num, t, laneU (m along the pit lane of the nearest point, null: not by the pit lane), laneLen } –; parkU: where on
-// the pit lane the safety car parks; start: the race's first standing start as shown ({ t, standing }) or null;
+// { num, t, laneU (m along the pit lane of the nearest point, null: not by the pit lane), toEntry (m along the track to
+// the pit entry, ≤ 800; null: not on the way) } –; parkU: the pit lane's end (the SC parks 4 m short of it, the medical
+// car 14 m); start: the race's first standing start as shown ({ t, standing }) or null;
 // lap1: when the medical car reached the pit entry after lap 1 – { t (ms) | null, final } (final: the data has said –
 // t null then means not found); lap: the race's lap count at t; race: a race or sprint session.
 // → { sc: { mode: "track" | "returning" | "parked" | "unseen", role?, num?, pos?, u?, from } | null, vsc,
@@ -59,10 +61,14 @@ export function supportPlan({ t, status = null, sc = {}, ages = {}, scRecent = f
   // (the safety car out but its place not in the feed – Monaco 2026: three SC periods, no place at all: not drawn – not
   // parked at the pit exit while it leads the field)
   else if (status === "4") out.sc = { mode: "unseen", from: "status" };
-  // (its place ended by the pit lane: on through it to its parking place at the limiter – a reproduction)
-  else if (race && scLast && scLast.laneU != null && parkU != null && scLast.laneU < parkU) {
-    const u = scLast.laneU + S.laneSpeed * (t - scLast.t) / 1000;
-    out.sc = u < parkU ? { mode: "returning", num: scLast.num, u, from: "reproduction" } : { mode: "parked", from: "estimate" };
+  // (its place ended – the status turned green as it came in: in 15 SC periods checked the last place was in the pit lane
+  // or up to ~330 m before its entry – on along the track to the entry (toEntry m, ≤ 800) and through the lane to its
+  // parking place: a reproduction; ended anywhere else: parked, no path made up)
+  else if (race && scLast && parkU != null && (scLast.laneU != null || scLast.toEntry != null)) {
+    const dt = Math.max(0, t - scLast.t) / 1000, onTrack = scLast.laneU != null ? 0 : scLast.toEntry / S.trackSpeed;
+    const u = dt < onTrack ? null : (scLast.laneU ?? 0) + S.laneSpeed * (dt - onTrack);
+    out.sc = u == null ? { mode: "returning", leg: "track", num: scLast.num, s: S.trackSpeed * dt, from: "reproduction" }
+      : u < parkU - 4 ? { mode: "returning", leg: "lane", num: scLast.num, u, from: "reproduction" } : { mode: "parked", from: "estimate" };
   } else if (race) out.sc = { mode: "parked", from: "estimate" };
   if (!race) return out;
   const L = start && start.standing === true ? start.t : null;
@@ -72,7 +78,7 @@ export function supportPlan({ t, status = null, sc = {}, ages = {}, scRecent = f
   if (t < L) out.medical = { mode: t >= L - S.gridWait ? "gridRear" : "parked", from: "reproduction" };
   else if (L1.t != null) {
     if (t < L1.t) out.medical = { mode: "following", lag: S.medLag, from: "reproduction" };
-    else { const u = S.laneSpeed * (t - L1.t) / 1000; out.medical = parkU != null && u < Math.max(0, parkU - 10) ? { mode: "entering", u, from: "reproduction" } : { mode: "parked", from: "reproduction" }; }
+    else { const u = S.laneSpeed * (t - L1.t) / 1000; out.medical = parkU != null && u < Math.max(0, parkU - 14) ? { mode: "entering", u, from: "reproduction" } : { mode: "parked", from: "reproduction" }; }
   } else if (t < L + S.medLap) out.medical = { mode: "following", lag: S.medLag, provisional: !L1.final, from: "reproduction" };
   // (no lap end in the data by then – a long first lap, the data cut off: not shown rather than parked on a guess, until
   // the race is on lap 3 – the medical car is long back by then)
