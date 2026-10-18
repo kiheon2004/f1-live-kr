@@ -42,13 +42,13 @@ export const PROFILES = {
     // a few cm, a degree or two – not a measured mount
     // the helmet as wide (~30 % of the frame in the two newer frames, ~47 % in the first – that one closer in) with its
     // top at ~72 % down: ~0.41 m ahead of the lens, its top ~0.90 m up, ~28 cm across (a racing helmet with its visor)
-    tcam: [0.08, 1.10, -0.46], tcamPitch: 15.5, tcamYaw: -2, tcamHfov: 72, eye: [0, 0.81, 0.0], helmet: [0, 0.755, -0.05], helmetSize: [0.14, 0.145, 0.16],
+    tcam: [0.08, 1.10, -0.46], tcamPitch: 15.5, tcamYaw: -2, tcamHfov: 72, eye: [0, 0.75, 0.0], helmet: [0, 0.755, -0.05], helmetSize: [0.14, 0.145, 0.16],
     src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre sizes from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm diameter; 25 mm / 30 mm narrower than 2025's 305 / 405 mm – motorsport.com) – the rest estimated",
   },
   2022: {
     era: "2022", FZ: 1.8, RZ: -1.8, FR: 0.36, RR: 0.36, FW: 0.305, RW: 0.405, W: 2.0, H: 0.95,
     // (no footage of these cars compared: the 2026 lens and angle, the mount from photos of the airbox – estimates)
-    tcam: [0, 1.05, -0.52], tcamPitch: 15.5, tcamHfov: 72, eye: [0, 0.79, -0.06], helmet: [0, 0.735, -0.08],
+    tcam: [0, 1.05, -0.52], tcamPitch: 15.5, tcamHfov: 72, eye: [0, 0.745, -0.03], helmet: [0, 0.735, -0.08],
     src: "2022–2025 F1 technical regulations: 3.6 m wheelbase max, 2.0 m width, 0.95 m height; 18-inch wheels, ~720 mm tyres (front ~305 mm, rear ~405 mm wide) – estimates; the rest from photos",
   },
 };
@@ -327,9 +327,14 @@ function halo(p) {
   // (and its rear legs closer in: in that footage they meet the bottom of the frame ~a quarter in from each side)
   const k = wide ? 0.86 : 1;
   const top = wide ? 0.91 : 0.935;
-  const hoop = sweep([[-0.335 * k, 0.6, -0.3], [-0.34 * k, 0.74, -0.16], [-0.31 * k, top - 0.075, 0.04], [-0.22, top - 0.02, 0.22], [0, top, 0.33], [0.22, top - 0.02, 0.22], [0.31 * k, top - 0.075, 0.04], [0.34 * k, 0.74, -0.16], [0.335 * k, 0.6, -0.3]], wide ? 0.045 : 0.046, wide ? 0.0225 : 0.034, 72, 18);
-  // the pillar: a blade, wide across (the fairing), from the hoop's front down to the chassis
-  const pillar = loft(smoothSections([[0.355, top - 0.01, 0.028, 0.03], [0.45, top - 0.075, 0.034, 0.03], [0.55, top - 0.175, 0.04, 0.028], [0.64, 0.64, 0.05, 0.03]].reverse(), 2), 14);
+  // (v0.37: the 2026 hoop's section 84 × 52 mm – it was 90 × 45, thinner than the 50 mm titanium tube it fairs
+  // (Symonds, Autosport 2021: a 50 × 4 mm tube); still within the T-cam fit's ~6 % of the frame. docs/research/halo.md)
+  const hoop = sweep([[-0.335 * k, 0.6, -0.3], [-0.34 * k, 0.74, -0.16], [-0.31 * k, top - 0.075, 0.04], [-0.22, top - 0.02, 0.22], [0, top, 0.33], [0.22, top - 0.02, 0.22], [0.31 * k, top - 0.075, 0.04], [0.34 * k, 0.74, -0.16], [0.335 * k, 0.6, -0.3]], wide ? 0.042 : 0.046, wide ? 0.026 : 0.034, 72, 18);
+  // the pillar: a blade from the hoop's front down to the chassis – across it the titanium strut (the FIA: 20 mm, 2017)
+  // and its thin fairing, ~32 mm at the driver's eye height, ~38 mm at the hoop, 44 mm at its foot (the regulations' front
+  // fairing box: ±25 mm, 2022–25 Art. 3.12.3b). v0.36 drew it 56–100 mm across: ~71 mm where the eye's line meets it –
+  // wider than the ~63 mm between a driver's eyes, so it hid what two eyes see round (docs/research/halo.md)
+  const pillar = loft(smoothSections([[0.355, top - 0.01, 0.019, 0.03], [0.45, top - 0.075, 0.016, 0.03], [0.55, top - 0.175, 0.017, 0.028], [0.64, 0.64, 0.022, 0.03]].reverse(), 2), 14);
   return merge([hoop, pillar]);
 }
 
