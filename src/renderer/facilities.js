@@ -1331,6 +1331,25 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       this.found.far = far.stations.map((st) => [Math.round(st.u), st.s == null ? null : +st.s.toFixed(1), st.ref ? `${st.ref.kind || "building"}:${st.ref.name || ""}` : null]);
       this.picked = g.parts;
       for (const b of g.parts) if (b.kind === "grandstand") { b.asPitBuilding = true; (this.found.stands ||= []).push(b.name || "(unnamed)"); }
+      // (the FIA drawing's garages running on past the map's building: the building carried on to them, as deep as the
+      // map's and as high – the map is older than the building (Zandvoort: six garages added towards Tarzan for 2024,
+      // motorsport.com 2023-11; the map's outline stops short, and the last two teams' garages, Williams' and Sauber's,
+      // had no bays – no team colours, no name boards). Not where it would stand on the track.)
+      if (g.parts.length && layout?.bays?.length) {
+        const uOf = (x, z) => { let best = 0, bd = Infinity; for (let uu = 0; uu <= frame.len; uu += 1) { const q = frame.at(uu), d = (q.x - x) ** 2 + (q.z - z) ** 2; if (d < bd) { bd = d; best = uu; } } return best; };
+        const us = g.parts.flatMap((b) => ring(b, gf).map(([x, z]) => uOf(x, z))), pmin = Math.min(...us), pmax = Math.max(...us);
+        const hs = g.parts.map((b) => b.h).filter(Number.isFinite).sort((a, b) => a - b), h = hs.length ? hs[hs.length >> 1] : GENERIC.height;
+        const front = g.front ?? GENERIC.front, ext = [];
+        if (u0 < pmin - 4) ext.push([u0, pmin + 1]);
+        if (u1 > pmax + 4) ext.push([pmax - 1, u1]);
+        const o = gf.xz([0, 0]), added = [];
+        for (const [a, b] of ext) {
+          const out = genericOutline(frame, g.side, a, b, front, Math.min(GENERIC.depth, 14), 4);
+          if (!clear(out)) { added.push({ run: [Math.round(a), Math.round(b)], made: false, why: "on the track" }); continue; }
+          g.parts.push({ pts: out.map(([x, z]) => [x - o[0], o[1] - z]), h, min: 0, synthetic: true, extension: true }); added.push({ run: [Math.round(a), Math.round(b)], made: true });
+        }
+        if (added.length) this.found.extended = added;
+      }
       if (g.parts.length) return (this.parts = g.parts);
       // (none on the line: one made up, its outline back in the map's own metres – gf.xz turned round)
       const o = gf.xz([0, 0]), out = lay ? layoutOutline(frame, g.side, u0, u1, lay, trackEdge) : genericOutline(frame, g.side, u0, u1);

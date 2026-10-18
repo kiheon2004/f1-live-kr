@@ -837,6 +837,25 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, barrierRay, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false, registry: generic ? [...FACILITIES, generic] : FACILITIES, bays,
       readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
+    // The terrain under the pit building's garages and its pit lane laid under their floor: the elevation grid (~10 m
+    // cells) knows nothing of a level pit complex cut into a slope, and where the ground rises behind the lane (Monaco:
+    // the harbour slope, v0.39 screenshots) it stood up inside the garages and across the lane, hiding the garages and
+    // the cars in them. Only vertices from the back of the garages to the lane's far side are lowered, to 0.1 m under
+    // the floor there – nothing is raised, nothing else moves.
+    if (fac?.group) fac.group.traverse((o) => {
+      const G = o.userData?.garages; if (!G) return;
+      let n = 0;
+      for (let k = 0; k < pos.length / 3; k++) {
+        const x = pos[k * 3], z = pos[k * 3 + 2], p = G.project(x, z);
+        if (p.u < G.gStart - 6 || p.u > G.gEnd + 6) continue;
+        const far = (G.wallFace?.(Math.max(G.gStart, Math.min(G.gEnd, p.u))) ?? 12) + 2;
+        if (p.off < -(G.depth + 2) || p.off > far) continue;
+        const f = G.floorAt(Math.max(G.gStart, Math.min(G.gEnd, p.u))) - 0.1;
+        if (pos[k * 3 + 1] > f) { pos[k * 3 + 1] = f; n++; }
+      }
+      if (n) { tg.attributes.position.needsUpdate = true; tg.computeVertexNormals(); tg.computeBoundingSphere(); }
+      G.terrainLowered = n;
+    });
     lm = combine(lm, fac);
     if (lm.group) group.add(lm.group);
     bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm }, corridor, inStand);

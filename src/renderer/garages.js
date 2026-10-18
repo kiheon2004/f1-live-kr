@@ -660,8 +660,10 @@ export function teamLayer(garages, teams, drivers, season = null) {
       // kick panels. Lower 2.9 m: teams line their garages to about head height and leave the building above (photos).
       const base = new THREE.Color(st.base), seam = base.clone().multiplyScalar(st.dark ? 1.6 : 0.78), skirt = new THREE.Color(st.dark ? "#0d0f11" : "#3a3f45");
       const H = Math.min(2.9, s.ceil - 0.4), wallQ = (c, ax, n, w2, ye, hgt, colr) => quad(panels, c, ax.clone().multiplyScalar(w2), up.clone().multiplyScalar(hgt), n, null, colr);
-      const lining = (centreAt, ax, n, len) => {
-        wallQ(centreAt(H / 2 + 0.15), ax, n, len, 0, H - 0.3, base);
+      // (the band and stripes stand 1 cm proud of the base, the joints 2 cm: coplanar quads flickered – v0.39 screenshots)
+      const lining = (centreAt0, ax, n, len) => {
+        const centreAt = (y) => centreAt0(y).addScaledVector(n, 0.01);
+        wallQ(centreAt0(H / 2 + 0.15), ax, n, len, 0, H - 0.3, base);
         wallQ(centreAt(0.15), ax, n, len, 0, 0.3, skirt);
         if (st.band === "low") wallQ(centreAt(0.95), ax, n, len, 0, 0.5, col);
         else if (st.band === "high") { wallQ(centreAt(H - 0.25), ax, n, len, 0, 0.5, col); wallQ(centreAt(H - 0.6), ax, n, len, 0, 0.06, col); }
@@ -670,13 +672,13 @@ export function teamLayer(garages, teams, drivers, season = null) {
       // (back wall)
       const back = (y) => at(s, s.depth - 0.035, 0, y);
       lining(back, along, out, s.width - 0.12);
-      if (st.band === "stripes") for (const f of [-0.3, 0.3]) quad(panels, at(s, s.depth - 0.04, f * s.width, H / 2 + 0.15), along.clone().multiplyScalar(0.35), up.clone().multiplyScalar(H - 0.3), out, null, col);
-      for (let x = -s.width / 2 + st.seams; x < s.width / 2 - 0.2; x += st.seams) quad(panels, at(s, s.depth - 0.04, x, H / 2 + 0.15), along.clone().multiplyScalar(0.025), up.clone().multiplyScalar(H - 0.3), out, null, seam);
+      if (st.band === "stripes") for (const f of [-0.3, 0.3]) quad(panels, at(s, s.depth - 0.05, f * s.width, H / 2 + 0.15), along.clone().multiplyScalar(0.35), up.clone().multiplyScalar(H - 0.3), out, null, col);
+      for (let x = -s.width / 2 + st.seams; x < s.width / 2 - 0.2; x += st.seams) quad(panels, at(s, s.depth - 0.055, x, H / 2 + 0.15), along.clone().multiplyScalar(0.025), up.clone().multiplyScalar(H - 0.3), out, null, seam);
       // (side walls, from just inside the opening to the back)
       for (const side of [-1, 1]) {
         const n = along.clone().multiplyScalar(-side), w = side * (s.width / 2 - 0.035), len = s.depth - 0.7;
         lining((y) => at(s, 0.6 + len / 2, w, y), inw, n, len);
-        for (let d = 0.6 + st.seams; d < s.depth - 0.2; d += st.seams) quad(panels, at(s, d, w - side * 0.005, H / 2 + 0.15), inw.clone().multiplyScalar(0.025), up.clone().multiplyScalar(H - 0.3), n, null, seam);
+        for (let d = 0.6 + st.seams; d < s.depth - 0.2; d += st.seams) quad(panels, at(s, d, w - side * 0.02, H / 2 + 0.15), inw.clone().multiplyScalar(0.025), up.clone().multiplyScalar(H - 0.3), n, null, seam);
       }
       // The floor: sealed epoxy (light grey, a dark one for a dark garage), on a car's bay its work position marked out –
       // a box of lines the size of a car (5.7 × 2.1 m; 2026: 3.4 m wheelbase, 1.9 m wide) with the team's colour along
@@ -687,12 +689,12 @@ export function teamLayer(garages, teams, drivers, season = null) {
       const carL = Math.min(5.7, s.depth - 1.6), cw = 2.1, cd = 0.7 + carL / 2, cx = space ? space.w || 0 : 0;
       const line = (c, ax, ay, colr) => quad(floor, c, ax, ay, up, null, colr), white = new THREE.Color(st.dark ? "#d8dadc" : "#f4f4f2"), yel = new THREE.Color("#e2b100");
       if (role === "car" && s.width / ((t.drivers.filter((d) => d.slot === s.k).length) || 1) >= cw + 0.3) {
-        for (const sd of [-1, 1]) line(at(s, cd, cx + sd * cw / 2, fy + 0.002), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.06), white);
-        for (const dd of [-1, 1]) line(at(s, cd + dd * carL / 2, cx, fy + 0.002), along.clone().multiplyScalar(cw), inw.clone().multiplyScalar(0.06), white);
-        for (const sd of [-1, 1]) line(at(s, cd, cx + sd * (cw / 2 + 0.22), fy + 0.002), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.12), col);
+        for (const sd of [-1, 1]) line(at(s, cd, cx + sd * cw / 2, fy + 0.008), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.06), white);
+        for (const dd of [-1, 1]) line(at(s, cd + dd * carL / 2, cx, fy + 0.008), along.clone().multiplyScalar(cw), inw.clone().multiplyScalar(0.06), white);
+        for (const sd of [-1, 1]) line(at(s, cd, cx + sd * (cw / 2 + 0.22), fy + 0.008), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.12), col);
       }
       // (the opening's edge: a yellow line along the front, where the garage meets the pit lane – photos)
-      line(at(s, 0.35, 0, fy + 0.002), along.clone().multiplyScalar(s.width - 0.1), inw.clone().multiplyScalar(0.08), yel);
+      line(at(s, 0.35, 0, fy + 0.008), along.clone().multiplyScalar(s.width - 0.1), inw.clone().multiplyScalar(0.08), yel);
       // The ceiling: the team's dark ceiling panel and lit strips across it (the building's own lights are behind it)
       quad(panels, at(s, s.depth / 2 + 0.4, 0, s.ceil - 0.08), along.clone().multiplyScalar(s.width - 0.1), inw.clone().multiplyScalar(s.depth - 0.9), down, null, new THREE.Color(st.dark ? "#121417" : "#5d636a"));
       for (let d = 1.4; d < s.depth - 0.5; d += 1.8) quad(lights, at(s, d, 0, s.ceil - 0.1), along.clone().multiplyScalar(s.width * 0.7), inw.clone().multiplyScalar(0.12), down, null, null);
