@@ -31,6 +31,7 @@ export const SHIFT = {
   minRpm: 8000,         // an upshift below this is a lift / a slow corner's shift, not a shift-light shift
   minThr: 90,           // full throttle (%) for an upshift to count
   keep: 7,              // the last upshifts in a gear the median is taken from
+  scan: 160,            // how many of the last upshifts are looked through for them (~3 laps' worth)
   flashHz: 8,           // the row flashing at the shift point, where the profile has it (a source shows it)
   note: "변속등: 이 드라이버의 실제 업시프트 RPM(텔레메트리)을 기준으로 한 근사 표시 – 팀의 실제 점등 설정은 공개되지 않음",
 };
@@ -60,7 +61,8 @@ export function shiftPoint(car, gear, t, era = "2026") {
   const u = upshifts(car), list = u?.list || [];
   let k = list.length; while (k > 0 && list[k - 1][0] > t) k--;
   const mine = [], any = [];
-  for (let i = k - 1; i >= 0 && (mine.length < SHIFT.keep || any.length < SHIFT.keep); i--) {
+  // (looked back over the last SHIFT.scan upshifts at most: 8th gear has none out of it, and this runs every frame)
+  for (let i = k - 1; i >= Math.max(0, k - SHIFT.scan) && (mine.length < SHIFT.keep || any.length < SHIFT.keep); i--) {
     if (list[i][1] === gear && mine.length < SHIFT.keep) mine.push(list[i][2]);
     if (any.length < SHIFT.keep) any.push(list[i][2]);
   }

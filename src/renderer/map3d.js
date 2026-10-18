@@ -1618,7 +1618,7 @@ function updateCars(dt) {
     const out = l.Retired || l.Stopped;
     const inCockpit = (camMode === "onboard" || camMode === "eye") && num === focusNum;
     c.obj.visible = true;
-    setCockpit(c.model, inCockpit && camMode === "eye");
+    setCockpit(c.model, (inCockpit && camMode === "eye") || (camMode === "inspect" && num === focusNum));
     // the T-cam sees the driver's helmet in front of it, as on TV; from the driver's own eyes it is round the camera
     c.model.userData.helmet.visible = !(camMode === "eye" && num === focusNum);
     c.label.sp.userData.own = inCockpit;
