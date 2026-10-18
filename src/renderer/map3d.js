@@ -19,7 +19,7 @@ import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./mars
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
-import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, skeleton } from "./crew.js";
+import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, walkPhase, flagPose, flagHold } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
@@ -1764,14 +1764,16 @@ function updateMarshals(src, t) {
         const a = (m - (MARSHAL.per - 1) / 2) * 1.3, x = p.x + p.along.x * a, z = p.z + p.along.z * a;
         const waving = sig && (m === 0 || sig === "double");
         const w = Math.sin(tsec * 2 * Math.PI * 1.4 + k + m * 0.7);
-        const pose = waving ? { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.05, arm: [[0.15, 0.08, 0.2], [2.5 + 0.4 * w, 0.25, 0.15]] } : { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.02, arm: [[0.12, 0.1, 0.25], [0.12, 0.1, 0.25]] };
-        figures.push({ x, y, z, yaw, colour: "#ff6a13", pose });
+        const pose = waving ? flagPose(w) : flagPose(0, true);
+        const fig = { x, y, z, yaw, colour: "#ff6a13", pose }; figures.push(fig);
         if (waving && dist < MARSHAL.flagFar) {
           const fk = k + ":" + m; used.add(fk);
           let f = MS.flags.get(fk); if (!f) { f = makeFlag("yellow"); MS.flags.set(fk, f); MS.group.add(f.group); }
           f.set(sig === "double" ? "yellow" : sig); f.group.visible = true;
-          const h = skeleton(pose, () => {})[1], c = Math.cos(yaw), sn = Math.sin(yaw);
-          f.pose({ x: x + h[0] * c + h[2] * sn, y: y + h[1], z: z - h[0] * sn + h[2] * c }, { x: -p.along.x, z: -p.along.z }, tsec, 1, k * 0.9 + m);
+          // (the pole in the fist, along the forearm: the arm's swing is the flag's – crew.js flagHold)
+          const { at: h, axis: ax } = flagHold(pose), c = Math.cos(yaw), sn = Math.sin(yaw);
+          fig.hands = [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]];
+          f.pose({ x: x + h[0] * c + h[2] * sn, y: y + h[1], z: z - h[0] * sn + h[2] * c }, { x: -p.along.x, z: -p.along.z }, tsec, 1, k * 0.9 + m, { x: ax[0] * c + ax[2] * sn, y: ax[1], z: -ax[0] * sn + ax[2] * c });
         }
       }
     }
@@ -1953,12 +1955,13 @@ function updateSupport(src, t) {
     // (facing the grid while waving – the starter's way –, then turning away)
     const face = plan.official.phase === "flag" ? f : side, yaw = Math.atan2(face.x, face.z) - Math.PI / 2;
     const wave = plan.official.phase === "flag" ? Math.sin(tsec * 2 * Math.PI * 1.4) : 0;
-    const pose = plan.official.phase === "flag" ? { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.03, arm: [[0.15, 0.08, 0.2], [2.6 + 0.35 * wave, 0.25, 0.1]] } : walkPose(tsec * 6);
-    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose }], [], camera.position);
-    const h = skeleton(pose, () => {})[1], c = Math.cos(yaw), sn2 = Math.sin(yaw);
+    // (walking off: the feet in step with the 2.5 m walked – walkPhase)
+    const flagging = plan.official.phase === "flag", pose = flagging ? flagPose(wave) : walkPose(walkPhase(2.5 * plan.official.f));
+    const { at: h, axis: ax } = flagHold(pose), c = Math.cos(yaw), sn2 = Math.sin(yaw);
+    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose, hands: flagging ? [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]] : null }], [], camera.position);
     const hx = x + h[0] * c + h[2] * sn2, hz = z - h[0] * sn2 + h[2] * c;
-    SP.flag.group.visible = plan.official.phase === "flag";
-    if (SP.flag.group.visible) SP.flag.pose({ x: hx, y: y + h[1], z: hz }, { x: side.x, z: side.z }, tsec, 1, 0.3);
+    SP.flag.group.visible = flagging;
+    if (flagging) SP.flag.pose({ x: hx, y: y + h[1], z: hz }, { x: side.x, z: side.z }, tsec, 1, 0.3, { x: ax[0] * c + ax[2] * sn2, y: ax[1], z: -ax[0] * sn2 + ax[2] * c });
     SP.officialShown = true; SP.officialAt = { x: +x.toFixed(1), z: +z.toFixed(1), out: +out.toFixed(1), sg, stand };
   } else if (SP.crew && SP.officialShown) { SP.crew.place([], [], camera.position); SP.flag.group.visible = false; SP.officialShown = false; }
   SP.plan = plan; SP.models = models;

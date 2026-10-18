@@ -24,6 +24,7 @@
 // car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
 import { shapeFor } from "./carshapes.js";
+import { BODY, JOINT_R, LIMB_GEO, fistGeometry, reach2 } from "./body3d.js";
 
 // ---------- profiles ----------
 // FZ/RZ: axle positions along the car, FR/RR tyre radii, FW/RW tyre widths, W: overall width (outer tyre faces),
@@ -639,16 +640,21 @@ function cockpit(p) {
     for (let i = 0; i < (W.leds || 0); i++) btn(-0.07 + (0.14 * i) / Math.max(1, W.leds - 1), (W.style === "sculpted" ? 0.06 : wh / 2) - 0.012, 0.0035, 0.006);
   }
   const column = rod([0, -0.02, 0.02], [0, -0.02, 0.2], 0.018, 10);
-  // gloves on the grips; forearms back to the elbows, hidden lower in the cockpit; shoulders under the headrest
-  // a fist round the grip: the fingers wrapped over its front, the thumb on the wheel's face
-  const glove = (k) => { const g = new THREE.CapsuleGeometry(0.03, 0.05, 6, 12); g.scale(1.15, 1, 1); g.translate(0.145 * k, -0.005, 0.004); const th = new THREE.CapsuleGeometry(0.012, 0.03, 4, 8); th.rotateZ(0.9 * k); th.translate(0.112 * k, 0.03, -0.024); return merge([g, th]); };
-  // (forearms in the car's frame: from the grips down and back to the elbows, inside the cockpit under its rim)
-  const forearm = (k) => { const g = new THREE.CapsuleGeometry(0.033, 0.26, 4, 12); const A = new THREE.Vector3(0.15 * k, wy - 0.02, wz - 0.03), B = new THREE.Vector3(0.22 * k, 0.5, wz - 0.32); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize())); g.translate((A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2); return g; };
+  // gloves round the grips (body3d.js fists: fingers wrapped round the grip's back, the thumb on its face, the palm on
+  // its outer side), the wrists behind and outboard of them; the arms (body3d's tapered upper and lower arm, an elbow
+  // between) from the shoulders – under the headrest, ~0.21 m below and 0.13 m behind the eyes (body3d proportions,
+  // the driver reclined; an estimate) – reach each wrist where the turned wheel has it (placeArms)
+  // (a fist's frame in the wheel's: its +y from the wrist through the grip, its +x the grip's axis (down), its +z from
+  // the palm to the grip)
+  const fistFrame = (k) => { const Z = new THREE.Vector3(-k, 0, -0.3).normalize(), X = new THREE.Vector3(0, -k, 0), Y = new THREE.Vector3().crossVectors(Z, X).normalize(); return { X, Y, Z: new THREE.Vector3().crossVectors(X, Y) }; };
+  const gripAt = (k) => new THREE.Vector3(0.14 * k, -0.005, 0);
+  const wristOf = (k) => { const { Y } = fistFrame(k); return gripAt(k).addScaledVector(Y, -BODY.grip); };
+  const glove = (k) => { const g = fistGeometry(true, 0.029), { X, Y, Z } = fistFrame(k), w = wristOf(k); g.applyMatrix4(new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(w)); return g; };
   return {
     rim, headrest: merge([headrest, tub]), helmet, visor,
-    // (the forearms: one unit capsule – placed per car each frame from the turning grip to the elbow, setWheels)
-    wheel: { body: metricUV(merge([wheelBody, column, paddles]), 0.04), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), arm: new THREE.CapsuleGeometry(0.033, 1, 4, 12), at: [0, wy, wz], tilt,
-      grip: [0.145, -0.005, 0.004], elbow: [0.22, 0.5, wz - 0.32] },
+    // (the arms: placed per car each frame from the shoulders to the turning wrists, setWheels)
+    wheel: { body: metricUV(merge([wheelBody, column, paddles]), 0.04), grips, screen, buttons: merge(buttons), gloves: merge([glove(1), glove(-1)]), uarm: LIMB_GEO.uarm(16), farm: LIMB_GEO.farm(16), elbow: new THREE.SphereGeometry(JOINT_R.elbow, 16, 10), at: [0, wy, wz], tilt,
+      wrist: wristOf(1).toArray(), shoulder: [0.19, p.eye[1] - 0.21, p.eye[2] - 0.13] },
   };
 }
 
@@ -827,9 +833,9 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   add(t.headrest, pad, near);
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
   add(t.wheel.body, carbon, wheel); add(t.wheel.grips, pad, wheel); const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen"); add(t.wheel.buttons, buttonMat, wheel); add(t.wheel.gloves, gloveMat, wheel);
-  // forearms: from each glove (it turns with the wheel) back to its elbow – placed by setWheels so the hands never leave
-  // the arms when the wheel turns (v0.34: the arms were fixed while the gloves turned)
-  const arms = [1, -1].map((k) => { const m = add(t.wheel.arm, gloveMat, near); m.userData.k = k; return m; });
+  // arms: from each shoulder to its glove's wrist (the glove turns with the wheel) – placed by setWheels so the hands
+  // never leave the arms when the wheel turns (v0.34: the arms were fixed while the gloves turned)
+  const arms = [1, -1].map((k) => ({ k, uarm: add(t.wheel.uarm, gloveMat, near), farm: add(t.wheel.farm, gloveMat, near), elbow: add(t.wheel.elbow, gloveMat, near) }));
   const wheels = [], spins = [];
   const FX = prof.W / 2 - prof.FW / 2, RX = prof.W / 2 - prof.RW / 2;
   for (const [x, z, kind] of [[FX, prof.FZ, "front"], [-FX, prof.FZ, "front"], [RX, prof.RZ, "rear"], [-RX, prof.RZ, "rear"]]) {
@@ -841,7 +847,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     g.add(w); wheels.push(w); spins.push(s);
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
-  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armGeo: { grip: t.wheel.grip, elbow: t.wheel.elbow }, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
+  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armGeo: { wrist: t.wheel.wrist, shoulder: t.wheel.shoulder }, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
     paintMats: [paint, wingPaint, helmetMat, gloveMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
@@ -875,21 +881,19 @@ export function setSmear(car, smear) {
   const u = car.userData; u.smear = smear;
   const sm = u.bandMat.userData.smear; if (sm) sm.value = smear;
 }
-// each forearm from its glove (where the turned wheel has it) to its elbow, the elbow following the hand a little (a
-// driver's arm bends with the wheel – an approximation: no joint model)
-const _A = new THREE.Vector3(), _B = new THREE.Vector3(), _D = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion();
+// each arm from its shoulder to its glove's wrist (where the turned wheel has it): the upper arm and the forearm their
+// own fixed lengths (body3d), the elbow bent down and out between them – a two-bone reach, so turning the wheel moves
+// the elbows, never stretches an arm
+const _S = [0, 0, 0], _W = [0, 0, 0], _E = [0, 0, 0], _T = [0, 0, 0], _V = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0), _D = new THREE.Vector3(), _q = new THREE.Quaternion();
 function placeArms(u) {
   u.wheel.updateMatrix();
-  for (const m of u.arms) {
-    const k = m.userData.k, [gx, gy, gz] = u.armGeo.grip, [ex, ey, ez] = u.armGeo.elbow;
-    _A.set(gx * k, gy, gz).applyMatrix4(u.wheel.matrix);
-    // (the grip's place with the wheel straight: worked out once)
-    const rest = m.userData.rest || (m.userData.rest = new THREE.Vector3(gx * k, gy, gz).applyMatrix4(new THREE.Matrix4().compose(u.wheel.position, new THREE.Quaternion().setFromEuler(new THREE.Euler(u.wheel.rotation.x, 0, 0)), new THREE.Vector3(1, 1, 1))));
-    _B.set(ex * k, ey, ez); _D.copy(_A).sub(rest); _B.addScaledVector(_D, 0.45);
-    _D.copy(_B).sub(_A); const len = _D.length();
-    m.position.copy(_A).addScaledVector(_D, 0.5);
-    m.quaternion.copy(_q.setFromUnitVectors(_Y, _D.normalize()));
-    m.scale.set(1, Math.max(0.05, len - 0.066), 1);
+  for (const a of u.arms) {
+    const k = a.k, [wx, wy, wz] = u.armGeo.wrist, [sx, sy, sz] = u.armGeo.shoulder;
+    _V.set(wx * k, wy, wz).applyMatrix4(u.wheel.matrix); _W[0] = _V.x; _W[1] = _V.y; _W[2] = _V.z;
+    _S[0] = sx * k; _S[1] = sy; _S[2] = sz;
+    reach2(_S, _W, BODY.uarm, BODY.farm, [0.35 * k, -1, 0], _E, _T);
+    const seg = (m, A, B) => { _D.set(B[0] - A[0], B[1] - A[1], B[2] - A[2]).normalize(); m.position.set(A[0], A[1], A[2]); m.quaternion.copy(_q.setFromUnitVectors(_Y, _D)); };
+    seg(a.uarm, _S, _E); seg(a.farm, _E, _T); a.elbow.position.set(_E[0], _E[1], _E[2]);
   }
 }
 // Level of detail: "near" (everything), "mid" (no cockpit interior, hands, steering wheel), "far" (also no wheel covers,

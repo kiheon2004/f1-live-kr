@@ -577,12 +577,18 @@ export function teamLayer(garages, teams, drivers, season = null) {
     // stools and the people on them (their seat's height the sit pose's hips over the deck)
     for (let i = 0; i < N; i++) {
       const a = -L / 2 + 0.3 + 0.8 * (i + 0.5);
-      boxQ(panels, at(a, 0.28, deck + 0.24), A, up, O, 0.05, 0.48, 0.05, steel);
-      boxQ(panels, at(a, 0.28, deck + 0.5), A, up, O, 0.38, 0.05, 0.36, black);
+      // (high stools with a footrest – the console stands at a bar's height, 1.08 m: seated at it, the elbows come to the
+      // desk; the seat ~0.77 m – an estimate from photos of team pit walls, M)
+      boxQ(panels, at(a, 0.28, deck + 0.37), A, up, O, 0.05, 0.74, 0.05, steel);
+      boxQ(panels, at(a, 0.28, deck + 0.745), A, up, O, 0.38, 0.05, 0.36, black);
+      boxQ(panels, at(a, 0.12, deck + 0.3), A, up, O, 0.34, 0.025, 0.03, steel);
       // (facing the track: the figures' +x along −O; crewAt's convention: yaw = atan2 of the facing, less 90°)
       const f = O.clone().negate(), yaw = Math.atan2(f.x, f.z) - Math.PI / 2;
-      const q = at(a, 0.55, deck - 0.02);
-      people.push({ x: q.x, y: q.y, z: q.z, yaw, shirt: t.colour, pose: i % 3 === 1 ? "sitLean" : "sit", seed: hashStr(t.team + i) });
+      // (on the stool – the hips over its middle, the seat height and the feet on the footrest the pose's –, the hands on
+      // the console's top near its front edge: 0.55 m ahead, 1.08 m over the deck; the figure's frame: x ahead, z to its
+      // right)
+      const q = at(a, 0.28, deck), seed = hashStr(t.team + i), lean = i % 3 === 1, hz = (seed % 5) * 0.012;
+      people.push({ x: q.x, y: q.y, z: q.z, yaw, shirt: t.colour, pose: lean ? "sitLean" : "sit", seed, hands: [[0.6, 1.11, 0.21 + hz, 1, 0, 0, 1], [lean ? 0.68 : 0.6, 1.11, -0.2 - hz, 1, 0, 0, 1]] });
     }
     // canopy: posts at the corners, the roof in the team's colour, its front fascia carrying the name
     for (const a of [-L / 2 + 0.05, L / 2 - 0.05]) for (const o of [-0.72, 0.82]) boxQ(panels, at(a, o, 1.35), A, up, O, 0.07, 2.7, 0.07, steel);
