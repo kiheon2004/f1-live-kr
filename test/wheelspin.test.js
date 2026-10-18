@@ -55,12 +55,10 @@ test("wheels off the lap: rolled on by the session's time × speed; nothing at a
 });
 
 test("wheels: front and rear their own radius; the smear is the frame's turning (0 paused, capped at a seek)", async () => {
-  const { rollAngle, smearOf } = await load();
+  const { rollAngle, smearOf, SHUTTER } = await load();
   assert.ok(!close(rollAngle(100, 0.353), rollAngle(100, 0.355)), "2026: the rear's radius isn't the front's");
-  assert.strictEqual(smearOf(200, 0), 0);
-  assert.ok(Math.abs(smearOf(200, 1 / 60) - 200 / 60) < 1e-9);
-  assert.ok(Math.abs(smearOf(200, 4 / 60) - 4 * smearOf(200, 1 / 60)) < 1e-9, "4× playback: 4× the smear");
-  assert.strictEqual(smearOf(200, 30), 200 * 0.2);
-  // a slow frame (0.1 s at 1×) is not a longer exposure: the smear stays the shutter's
-  assert.ok(Math.abs(smearOf(200, 0.1, 0.1) - 200 / 60) < 1e-9);
+  assert.strictEqual(smearOf(200, 0), 0, "paused");
+  assert.ok(Math.abs(smearOf(200, 1) - 200 * SHUTTER) < 1e-9);
+  assert.ok(Math.abs(smearOf(200, 4) - 4 * smearOf(200, 1)) < 1e-9, "4× playback: 4× the smear");
+  assert.strictEqual(smearOf(200, 1, true), 0, "a seek's jump: none");
 });

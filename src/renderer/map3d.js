@@ -1379,7 +1379,7 @@ const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // the wheels' angles (front, rear) and how much their markings smear this frame (car3d.js setSmear)
-function rollWheels(c, st, est, F, t, v, frameS) {
+function rollWheels(c, st, est, F, t, v) {
   const P = c.model.userData.profile, W = c.wheelSt || (c.wheelSt = { f: { a: null, t: null }, r: { a: null, t: null }, t: null, pos: new THREE.Vector3(), has: false });
   const pitU = est?.pit ? est.u : c.pit?.u;
   const along = st ? { d: st.s, L: F?.L || null } : pitU != null ? { d: pitU, L: null } : null;
@@ -1390,7 +1390,7 @@ function rollWheels(c, st, est, F, t, v, frameS) {
   const fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }), ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved });
   W.pos.copy(v); W.has = true; W.t = t;
   (c.spinW || (c.spinW = [0, 0]))[0] = fa; c.spinW[1] = ra;
-  setSmear(c.model, smearOf(speed / P.RR, dts, frameS));
+  setSmear(c.model, smearOf(speed / P.RR, app().rate ?? 1, !(dts >= 0) || dts > 1));
 }
 function updateCars(dt) {
   const A = app(), src = A.src;
@@ -1570,7 +1570,7 @@ function updateCars(dt) {
     // wheels roll the distance gone over each axle's own radius (wheelspin.js: on the lap / the pit lane from where the
     // car is – a pause, any speed, a seek: the same angle; elsewhere rolled on by the session's time); front wheels
     // steer with the turning rate (Ackermann-ish: δ ≈ L·ω / v)
-    rollWheels(c, st, est, F, A.t, v, dt);
+    rollWheels(c, st, est, F, A.t, v);
     // (the front tyres' slip angle on top, growing with the cornering force: an estimate, ~0.6° per g (0.01 rad); and a
     // touch of opposite lock when the rear steps out)
     const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;

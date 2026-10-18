@@ -365,10 +365,10 @@ export function sidewallMaterial(color = 0xf2c230, era = "2022") {
     sh.uniforms.uSmear = smear; sh.uniforms.avgMap = avg;
     sh.fragmentShader = "uniform float uSmear;\nuniform sampler2D avgMap;\n" + sh.fragmentShader.replace("#include <map_fragment>", `
 #ifdef USE_MAP
-  vec2 c0 = vMapUv - 0.5; float sm = min(uSmear, 6.2832); vec4 acc = vec4(0.0);
+  vec2 c0 = vMapUv - 0.5; float sm = clamp(uSmear - 0.12, 0.0, 6.2832); vec4 acc = vec4(0.0);   // (a slow wheel crisp: under ~0.12 rad no smear)
   for (int k = 0; k < 9; k++) { float a = sm * (float(k) / 8.0 - 0.5); float cs = cos(a), sn = sin(a); acc += texture2D(map, vec2(cs * c0.x - sn * c0.y, sn * c0.x + cs * c0.y) + 0.5); }
   acc /= 9.0;
-  vec4 sampledDiffuseColor = mix(acc, texture2D(avgMap, vMapUv), smoothstep(1.0, 3.0, uSmear));
+  vec4 sampledDiffuseColor = mix(acc, texture2D(avgMap, vMapUv), smoothstep(0.6, 1.6, uSmear));   // (~100 km/h on: one ring, as on TV – no wagon wheel)
   diffuseColor *= sampledDiffuseColor;
 #endif`);
   };

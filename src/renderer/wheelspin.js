@@ -38,11 +38,8 @@ export function stepWheel(w, { t, r, along = null, speed = 0, moved = null }) {
   return w.a;
 }
 // How much the wheel's markings smear on screen: the angle it turns while a camera's shutter is open (rad). The shutter
-// here: 1/60 s of the session's time × the playback speed – not the frame's own time (a slow frame is not a longer
-// exposure: at 10 fps a wheel at 20 km/h smeared into a ring). ω: rad per session second; dts: the session's time this
-// frame stands for (s; 0 paused); frameS: the screen's frame time (s). A seek's jump is not a frame's: capped.
-export const SHUTTER = 1 / 60;
-export function smearOf(omega, dts, frameS = SHUTTER) {
-  const t = Math.max(0, Math.min(0.2, dts || 0)) * Math.min(1, SHUTTER / Math.max(1e-3, frameS));
-  return Math.abs(omega) * t;
-}
+// here: 1/100 s (a TV camera's usual shutter at 50 fps) × the playback rate – not the frame's own time (a slow frame is not a longer
+// exposure: frames taken slowly showed a wheel at 20 km/h smeared into a ring). ω: rad per session second; rate: the
+// playback rate (0 paused; F1KR.rate); jumped: the session's time jumped this frame (a seek) – no smear.
+export const SHUTTER = 1 / 100;
+export function smearOf(omega, rate, jumped = false) { return jumped ? 0 : Math.abs(omega) * Math.max(0, Math.min(32, rate || 0)) * SHUTTER; }
