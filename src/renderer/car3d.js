@@ -741,11 +741,11 @@ function body2022(p) {
   // (read from the PDF 2026-10-19): the profiles between XR +140 and +555 (the tips to +680), the endplates' volume to
   // XR +680; the model's endplates reached XR +775 and the flap's trailing edge XR +680)
   const rwMain = wingSpan(rwSpan, (e) => [0.775 + 0.035 * e * e - tip(e), -2.0 - 0.02 * e, 0.3, 0.04, 0.1]);
-  const rwFlap = wingSpan(rwSpan - 0.01, (e) => [0.915 + 0.015 * e * e - tip(e), -2.2 - 0.01 * e, 0.2, 0.026, 0.45]);
+  const rwFlap = wingSpan(rwSpan - 0.01, (e) => [0.855 + 0.015 * e * e - tip(e), -2.2 - 0.01 * e, 0.2, 0.026, 0.42]);   // (its trailing edge under Z 910: it stood at 1.01 m)
   // (the endplates' lower rear corner cut away, their tops rounding over into the elements – photos of SF-25, MCL39)
   const ep = [[-1.96, 0.54], [-1.95, 0.8], [-1.97, 0.88], [-2.06, 0.93], [-2.2, 0.95], [-2.4, 0.945], [-2.475, 0.9], [-2.47, 0.73], [-2.3, 0.7], [-2.1, 0.62], [-2.04, 0.54]];
   const rwPlates = merge([plate(ep, rwSpan / 2 + 0.006, 0.012), plate(ep, -rwSpan / 2 - 0.006, 0.012)]);
-  const rwPylon = merge([plate([[-2.18, 0.33], [-2.09, 0.55], [-2.03, 0.76], [-2.23, 0.76], [-2.28, 0.58], [-2.4, 0.4], [-2.44, 0.33]], 0, 0.014), softBox(0.04, 0.06, 0.14, 0, 0.86, -2.14, 0.4)]);
+  const rwPylon = merge([plate([[-2.18, 0.33], [-2.09, 0.55], [-2.03, 0.76], [-2.23, 0.76], [-2.28, 0.58], [-2.4, 0.4], [-2.44, 0.33]], 0, 0.014), softBox(0.04, 0.06, 0.14, 0, 0.8, -2.14, 0.4)]);
   const beam = merge([wingSpan(0.88, (e) => [0.36, -2.3, 0.14, 0.02, 0.15], 10), wingSpan(0.84, (e) => [0.435, -2.42, 0.12, 0.018, 0.4], 10)]);
   const susp = suspension(p, (S?.fsusp ?? "pull") === "pull", S?.rsusp === "pull");
   // mirrors on the inlets' top, stays to the chassis's side
@@ -760,7 +760,7 @@ function body2022(p) {
     paintExtra: [paintUV(halo(p), true), rwPlates, ...M.heads],
     carbon: metricUV(merge([...floor, fw0, fwPlates, rwPylon, beam, ...susp, ...corners(p), ...M.stays, fin, tcamPod, inlets, airbox, exhaust, ...mirrorGlass([0.5, 0.68, 0.52 + ck], [0.16, 0.065, 0.06]), ...shapeParts(S, p, fwSpan, 2.68, 0.35, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge([...fwF, ...fwEnds]), rwFlaps: rwFlap,   // (2022–25 flaps never move: the endplates go with them)
-    fwPivot: [0.13, 2.68], rwPivot: [0.92, -2.2], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
+    fwPivot: [0.13, 2.68], rwPivot: [0.855, -2.2], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
     lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: null,
   };
 }
@@ -807,8 +807,9 @@ function body2026(p) {
   // (v0.40: the elements within the profiles' volume, XR +165…+630 – App. §30, Issue 17, read from the PDF 2026-10-19: the
   // flaps' trailing edge was at XR +740, behind it; the endplates may reach XR +750 and keep their place. The tips rise
   // outboard as §30.2's plane asks – Z ≥ 785 at Y 575 against 725 inboard)
-  const rwMain = wingSpan(rwSpan, (e) => [0.78 + 0.05 * e * e, -1.88 - 0.01 * e, 0.24, 0.04, 0.12]);
-  const rwFlaps = merge([wingSpan(rwSpan - 0.02, (e) => [0.87 + 0.04 * e * e, -2.09, 0.15, 0.026, 0.42]), wingSpan(rwSpan - 0.04, (e) => [0.915 + 0.03 * e * e, -2.205, 0.1, 0.02, 0.62])]);
+  // (and under its top, Z 880 – ~0.92 m over the ground: the top flap's trailing edge was at 1.0 m)
+  const rwMain = wingSpan(rwSpan, (e) => [0.765 + 0.05 * e * e, -1.88 - 0.01 * e, 0.24, 0.04, 0.12]);
+  const rwFlaps = merge([wingSpan(rwSpan - 0.02, (e) => [0.81 + 0.03 * e * e, -2.09, 0.15, 0.026, 0.38]), wingSpan(rwSpan - 0.04, (e) => [0.87 + 0.015 * e * e, -2.205, 0.1, 0.02, 0.45])]);
   // (v0.40: the endplate as the rules draw it – App. §31, Issue 17: in the X-plane its section runs from the lower part
   // inboard (Y 345–375, Z 250–425) up a diagonal to the upper part outboard (Y 535–575, from Z 700 to 880), one piece; its
   // leading edge from XR +375 at Z 250 forward to XR +160 at Z 700, its trailing edge from XR +625 back to XR +750 at
@@ -833,7 +834,7 @@ function body2026(p) {
     // (2026 halos are black carbon on every car in the footage and photos – not painted)
     carbon: metricUV(merge([...floor, fw0, pylons, fwPlates, boards, rwPylon, ...susp, ...corners(p), ...M.stays, tcamPod, fin, inlets, airbox, exhaust, halo(p), ...mirrorGlass([0.56, 0.74, 0.48 + ck], [0.22, 0.085, 0.07]), ...shapeParts(S, p, fwSpan, 2.5, 0.37, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge(fwF), rwFlaps,
-    fwPivot: [0.16, 2.5], rwPivot: [0.87, -2.09], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
+    fwPivot: [0.16, 2.5], rwPivot: [0.81, -2.09], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
     // (v0.40, C14.3 Issue 17: two lights in the endplates, lenses facing back – within 5° of the X-axis –, between Z 700
     // and 870, and the middle one's rear face centred at Z 295–305 on Y = 0. They were 0.36 m strips along the endplates'
     // outer faces, lit sideways: now upright strips at the endplates' trailing edges, a reference plane ~4 cm up)
@@ -1222,7 +1223,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const matte = l.finish === "matte";
   // (v0.40 finishes: gloss paint is clear-coated – sharper than 0.28 drew it; matte paint (Red Bull 2025) a satin 0.55;
   // the reflections are the sky's (skyLit) – estimates against race photos, not measured)
-  const paint = skyLit(new THREE.MeshStandardMaterial({ map: liveryTexture(l, number, prof), color: hasDom ? 0xffffff : l.base, roughness: matte ? 0.55 : 0.2, metalness: 0.05 }));
+  const paint = skyLit(new THREE.MeshStandardMaterial({ map: liveryTexture(l, number, prof), color: hasDom ? 0xffffff : l.base, roughness: matte ? 0.55 : 0.2, metalness: 0.05 }), 0.85);
   const cm = carbonMaps();
   // (the weave as colour only: a normal and roughness map over a car that fills the cockpit cameras' screen, with the
   // reflections, dropped frames on the GPU – measured; the colour map costs next to nothing)
