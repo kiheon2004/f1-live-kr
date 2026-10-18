@@ -170,7 +170,8 @@ export function wheelParts(W, merge, metricUV) {
     const zf = onDisplay ? face - 0.0055 : face - 0.0035;
     if (!onDisplay) bezel.push(frame(span + 0.012, 0.011, 0, y, face - 0.001, 0.006));
     for (let i = 0; i < L.count; i++) {
-      const x = L.count === 1 ? 0 : -span / 2 + (span * i) / (L.count - 1);
+      // (light 0 on the driver's left: +x – the wheel's frame has +x on the car's left, the driver facing +z)
+      const x = L.count === 1 ? 0 : span / 2 - (span * i) / (L.count - 1);
       // (an arched top: the strip follows the edge)
       const yy = L.where === "top" ? y + (topY(x) - topY(0)) : y;
       leds.push([x, yy, zf]);

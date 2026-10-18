@@ -174,3 +174,30 @@ test("pit wall people: the small parts' near/far chosen before drawing (one stat
   scene.remove(g); disposeGroup(g); scene.add(g);
   assert.strictEqual(peopleLod(new THREE.Vector3(5000, 0, 0)), false);
 });
+
+test("shift lights: light 0 sits on the driver's left (the row fills left to right as the driver sees it); the row counts the driver's own upshift point", async () => {
+  const { wheelParts, wheelSpec } = await import("../src/renderer/wheel3d.js");
+  const C = await import("../src/renderer/car3d.js");
+  const car = C.makeCar({ teamName: "McLaren", teamColour: "ff8000", number: 4, season: 2025 });
+  const L = car.userData.leds, m = new (await import("../src/renderer/vendor/three.module.js")).Matrix4();
+  L.mesh.getMatrixAt(0, m); const x0 = m.elements[12]; L.mesh.getMatrixAt(L.count - 1, m); const xn = m.elements[12];
+  assert.ok(x0 > xn, "+x is the driver's left in the wheel's frame (the driver faces +z): light 0 there");
+  const S = await import("../src/renderer/shiftlights.js");
+  // a driver who shifts out of 7th at ~11,400: at 11,000 in 7th most of the row is lit, at 11,450 all of it
+  const car7 = { t: [], rpm: [], gear: [], thr: [] };
+  for (let k = 0; k < 6; k++) { const t0 = k * 10000; car7.t.push(t0, t0 + 250); car7.rpm.push(11400, 10200); car7.gear.push(7, 8); car7.thr.push(100, 100); }
+  car7.t.push(70000, 70250, 70500); car7.rpm.push(10300, 11000, 11450); car7.gear.push(7, 7, 7); car7.thr.push(100, 100, 100);
+  const p = S.profileForWheel({ count: 15 }, "team");
+  assert.strictEqual(S.shiftPoint(car7, 7, 70000).from, "gear"); assert.strictEqual(S.shiftPoint(car7, 7, 70000).rpm, 11400);
+  const a = S.carLeds(car7, 70250, p), b = S.carLeds(car7, 70500, p);
+  assert.ok(a.lit >= 8 && a.lit < 15 && !a.at, `11,000 rpm: ${a.lit} lit`); assert.ok(b.at && b.lit === 15);
+  // no telemetry: all off; the 2026 feed's 128 "gear" on a stopped car: all off
+  assert.strictEqual(S.carLeds(null, 0, p).lit, 0);
+  assert.strictEqual(S.carLeds({ t: [0], rpm: [11500], gear: [128], thr: [0] }, 100, p).lit, 0);
+  // an upshift between two samples: held until half-way, then the drop (not a quarter-second drain)
+  const up = { t: [0, 250], rpm: [11500, 10100], gear: [6, 7], thr: [100, 100] };
+  assert.strictEqual(S.revsAt(up, 100).rpm, 11500); assert.strictEqual(S.revsAt(up, 150).rpm, 10100);
+  // the fill look: the right end red at the shift point
+  const f = S.ledState(S.profileForWheel({ count: 15 }, "fill"), 12000, 11600);
+  assert.strictEqual(f.colours[14], "#ff1e12");
+});
