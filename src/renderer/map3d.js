@@ -28,6 +28,7 @@ import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners
 import { WheelScreens, screenModel } from "./wheelscreen.js";
 import { boardsFor, boardPlaces } from "./boards.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
+import { tunnelLight } from "./tunnel.js";
 import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
 import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
@@ -2438,7 +2439,10 @@ async function loadGeo(w) {
     // the map's roads right by the pit lane, its entry and exit)
     const nearLane = (x, z) => !!w.laneZone && [[0, 0], [25, 0], [-25, 0], [0, 25], [0, -25]].some(([dx, dz]) => w.laneZone(x + dx, z + dz));
     const aux = built.auxGap && w.street ? (x, z) => nearLane(x, z) && built.auxGap(x, z) : built.auxGap;
-    const gap = aux && openAt ? (x, z) => aux(x, z) || openAt(x, z) : aux || openAt;
+    const gap0 = aux && openAt ? (x, z) => aux(x, z) || openAt(x, z) : aux || openAt;
+    // (none of the generated barriers or fences in a tunnel: its own walls and armco are there – tunnel.js; the fence stood
+    // through the ceiling)
+    const inTun = built.tunnel?.inside, gap = inTun ? (gap0 ? (x, z) => gap0(x, z) || inTun(x, z, 2) : (x, z) => inTun(x, z, 2)) : gap0;
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
     else if (gap) {
       const open = w.street ? streetWalls(w.samples, w.grid, gap) : walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.laneZone, gap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });
@@ -2585,6 +2589,7 @@ function applyLighting() {
   renderer.toneMappingExposure = night ? 1.0 : 1.05;
   lastSun = 0; refreshShadows();
   NL.gain.value = 0;
+  tunnelLight(world?.real?.tunnel, night);
   if (!world) return;
   nightLitWorld();
   if (night) {
@@ -2597,7 +2602,7 @@ function applyLighting() {
   // fills the cockpit cameras' screen dropped frames on the GPU – measured: frames over 30 ms 26 → 10 in 4 s)
   for (const c of cars.values()) { lightCar(c.model, night); setCarEnvironment(c.model, night ? carEnvironment(true) : null, 0.6); }
   if (lit) { world.group.remove(lit); disposeGroup(lit); lit = null; }
-  if (night) { lit = floodlights(world.samples); world.group.add(lit); }
+  if (night) { lit = floodlights(world.samples, world.real?.tunnel?.inside); world.group.add(lit); }
   // the ground keeps its colour (the light falling on it changes, not the ground); lit windows switch on
   const real = world.real?.group.getObjectByName("terrain");
   if (real) real.material.color.set(0xffffff);
@@ -2612,9 +2617,10 @@ function applyLighting() {
 const NIGHT_GAIN = 5.5;   // light field → irradiance
 // Light towers along the track (instanced): a mast, a bank of projectors aimed at the track, their lit faces and
 // glare. Alternating sides, ~36 m apart (the field lights the track itself).
-function floodlights(samples) {
+function floodlights(samples, covered = null) {
   const g = new THREE.Group(), n = samples.length, every = 18;
   const count = Math.floor(n / every);
+  let used = 0;
   const poleG = new THREE.CylinderGeometry(0.16, 0.26, 14, 6); poleG.translate(0, 7, 0);
   const headG = new THREE.BoxGeometry(2.4, 0.9, 0.45);
   const faceG = new THREE.PlaneGeometry(2.2, 0.75); faceG.translate(0, 0, 0.24);
@@ -2626,16 +2632,20 @@ function floodlights(samples) {
   for (let k = 0; k < count; k++) {
     const s = samples[k * every], side = k % 2 ? 1 : -1, off = Math.abs(edgeOf(s, side)) + 7;
     p.set(s.p.x + s.nor.x * side * off, s.p.y - 0.3, s.p.z + s.nor.z * side * off);
+    // (none over a tunnel: a 14 m pole stood through its slab – the tunnel has lamps of its own)
+    if (covered && (covered(s.p.x, s.p.z, 8) || covered(p.x, p.z, 4))) continue;
+    const kk = used++;
     // facing the track (local +z towards it), tipped down a little
     q.setFromAxisAngle(UP, Math.atan2(-s.nor.x * side, -s.nor.z * side));
-    m.compose(p, q, one); poles.setMatrixAt(k, m);
+    m.compose(p, q, one); poles.setMatrixAt(kk, m);
     tilt.setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.35); const qh = q.clone().multiply(tilt);
-    m.compose(tmp.copy(p).setY(p.y + 14.2), qh, one); heads.setMatrixAt(k, m); faces.setMatrixAt(k, m);
+    m.compose(tmp.copy(p).setY(p.y + 14.2), qh, one); heads.setMatrixAt(kk, m); faces.setMatrixAt(kk, m);
     for (const u of [-0.75, 0, 0.75]) {
       const ax = s.tan.x * u, az = s.tan.z * u, toward = 0.6;
       glow.push({ x: p.x + ax - s.nor.x * side * toward, y: p.y + 14.1, z: p.z + az - s.nor.z * side * toward, c: [240, 244, 255], i: 4, s: 2.6 });
     }
   }
+  poles.count = heads.count = faces.count = used;
   g.add(poles, heads, faces, glowPoints(glow, "floodGlow"));
   return g;
 }
@@ -3801,6 +3811,41 @@ window.Map3D = {
         frames: chase.frames, unsafeFrames: chase.unsafe, heldFrames: chase.held, exposedFrames: chase.exposed } });
   },
   // development: what the scene holds, by part – objects, meshes drawn (visible, in view or not), triangles
+  // development: the covered stretches (tunnel.js) – where they were placed, the buildings raised over them, the mask
+  tunnel() {
+    const T = world?.real?.tunnel; if (!T) return JSON.stringify({ tunnel: null });
+    return JSON.stringify({ info: T.info, mask: T.mask ? { w: T.mask.tex.image.width, h: T.mask.tex.image.height, ext: T.mask.ext.toArray().map((v) => +v.toFixed(1)) } : null,
+      stations: T.stations.map((S) => ({ n: S.length, len: +S[S.length - 1].s.toFixed(1), y0: +S[0].y.toFixed(2), y1: +S[S.length - 1].y.toFixed(2), sea: +S[Math.floor(S.length / 2)].sea.toFixed(1), hill: +S[Math.floor(S.length / 2)].hill.toFixed(1) })) });
+  },
+  // development: night on / off / auto ("on" | "off" | "auto") and the real map built again with it
+  nightMode(mode) { saveGeoSettings({ ...geoSettings(), night: mode }); rebuild(); return "ok"; },
+  // development: the session times (ms, from t0 to t1 every `step`) at which car `num` is in or near covered stretch 0 –
+  // [t, metres along from its entry] for each – to find a car driving through (the cars stepped as motionTest does)
+  tunnelPass(num, t0, t1, step = 250) {
+    const T = world?.real?.tunnel; if (!T) return "no tunnel";
+    const real = window.F1KR, out = []; let fakeT = t0;
+    num = String(num || real.focus || leader());
+    window.F1KR = new Proxy(real, { get: (o, k) => (k === "t" ? fakeT : k === "focus" ? num : Reflect.get(o, k)) });
+    try {
+      for (let t = t0; t <= t1; t += step) {
+        fakeT = t; updateCars(0.05);
+        const c = cars.get(num); if (!c?.obj.visible) continue;
+        const S = T.stations[0], loc = T.where(c.pos.x, c.pos.z);
+        let best = null; for (const x of S) { const d = (x.x - c.pos.x) ** 2 + (x.z - c.pos.z) ** 2; if (!best || d < best.d) best = { d, s: x.s }; }
+        if (best && best.d < 400) out.push([t, Math.round(best.s), loc ? 1 : 0]);
+      }
+    } finally { window.F1KR = real; }
+    return JSON.stringify(out);
+  },
+  // development: a free camera at s m into covered stretch k, `o` m towards the sea, h m over its floor, looking `ahead`
+  // m further along (negative: back), at `ho` m – inside the tunnel
+  viewTunnel(k = 0, s = 30, o = 0, h = 1.5, ahead = 30, ho = 1.2, fov = 70) {
+    const S = world?.real?.tunnel?.stations?.[k]; if (!S) return "no tunnel";
+    // (beyond a mouth: straight on from the end station)
+    const st = (d) => { const x = S.reduce((b, q) => (Math.abs(q.s - d) < Math.abs(b.s - d) ? q : b), S[0]), e = d - x.s; return { ...x, x: x.x + x.tx * e, z: x.z + x.tz * e }; };
+    const a = st(s), b = st(s + ahead), at = (x, oo, hh) => [x.x + x.ox * oo, x.y + hh, x.z + x.oz * oo];
+    return this.look(...at(a, o, h), ...at(b, o, ho), fov);
+  },
   sceneStats() {
     const out = {}, add = (k, o) => { const r = out[k] || (out[k] = { objects: 0, meshes: 0, visibleMeshes: 0, tris: 0 }); r.objects++; if (o.isMesh || o.isPoints || o.isSprite || o.isLine) { r.meshes++; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (v) { r.visibleMeshes++; const g = o.geometry; if (g?.attributes?.position) r.tris += Math.round(((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1)); } } };
     scene.traverse((o) => { let top = o, sub = null; while (top.parent && top.parent !== scene) { sub = top; top = top.parent; } const name = top === world?.group ? "world/" + (sub ? (sub === world.real?.group ? "real" : sub.name || sub.type) : "-") : top.name || top.type; add(name, o); });
