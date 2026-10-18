@@ -844,12 +844,14 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // the floor there – nothing is raised, nothing else moves.
     if (fac?.group) fac.group.traverse((o) => {
       const G = o.userData?.garages; if (!G) return;
-      let n = 0;
+      let n = 0; const cell = Math.max(W / nx, H / nz);
       for (let k = 0; k < pos.length / 3; k++) {
         const x = pos[k * 3], z = pos[k * 3 + 2], p = G.project(x, z);
         if (p.u < G.gStart - 6 || p.u > G.gEnd + 6) continue;
         const far = (G.wallFace?.(Math.max(G.gStart, Math.min(G.gEnd, p.u))) ?? 12) + 2;
-        if (p.off < -(G.depth + 2) || p.off > far) continue;
+        // (to a grid cell behind the garages' back wall: a vertex left high there tilts the triangles into the garage –
+        // v0.39 Monaco, a mound inside every garage; not the track's own vertices: those the ground already holds under it)
+        if (p.off < -(G.depth + cell * 1.05) || p.off > far || trackDist(x, z) < (opts.trackW || 14) / 2 + 1) continue;
         const f = G.floorAt(Math.max(G.gStart, Math.min(G.gEnd, p.u))) - 0.1;
         if (pos[k * 3 + 1] > f) { pos[k * 3 + 1] = f; n++; }
       }
