@@ -942,8 +942,11 @@ function cornerKerbs(samples) {
   }
   return mark;
 }
-function kerbs(samples) {
+// (covered: a test for points under a tunnel's roof – tunnel.js; no kerbs there: the Monaco tunnel's road runs between
+// armco with no kerbs, but its bend made them – v0.39)
+function kerbs(samples, covered = null) {
   const n = samples.length, mark = cornerKerbs(samples);
+  if (covered) for (let i = 0; i < n; i++) if (covered(samples[i].p.x, samples[i].p.z, 0)) { mark.inside[i] = 0; mark.outside[i] = 0; mark.strip[i] = 0; }
   samples.kerbMark = mark;
   const pos = [], col = [], idx = [], uv = [];
   const red = new THREE.Color(0xd8262b), white = new THREE.Color(0xf4f4f4), green = new THREE.Color(0x2f7d4f);
@@ -2487,6 +2490,7 @@ async function loadGeo(w) {
     refreshShadows();
     w.real = built;
     w.occluders = built.occluders;
+    if (built.tunnel?.inside) { const k = kerbs(w.samples, built.tunnel.inside); w.group.remove(w.kerb); disposeGroup(w.kerb); w.kerb = k; w.group.add(k); w.kerbMark = w.samples.kerbMark; }
     applyLighting();
     // credits are listed in the 🛰 지도 panel; only Google's imagery must carry its logo and data credits on the map
     const credits = document.getElementById("geo3dCredits");
