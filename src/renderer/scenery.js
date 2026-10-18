@@ -707,7 +707,10 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // same triangles.
   let pads = null, padKeepOut = null, padWhy = null;
   const dY = new Float32Array((nx + 1) * (nz + 1));
-  if (opts.buildings !== false && !opts.groundOld && scene.buildings.length) {
+  // (not on street circuits: there the buildings stand along the very streets the cars use, on real slopes (Monaco,
+  // Baku's old town), the yards changed the ground right beside the kerbs and took seconds over thousands of buildings
+  // (Baku: 4.1 s) – the footing alone stands them level there)
+  if (opts.buildings !== false && !opts.groundOld && !opts.street && scene.buildings.length) {
     const t0 = performance.now(), CELL = 40, cells = new Map();
     const put = (x, z, o) => { const k = `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`; let c = cells.get(k); if (!c) cells.set(k, (c = [])); c.push(o); };
     for (const l of scene.lines) {
@@ -723,12 +726,15 @@ async function buildReal(api, scene, world, opts, onStep, own) {
       }
     }
     const waters = scene.areas.filter((a) => a.k === "water").map((a) => { const q = a.pts.map(gf.xz); let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of q) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { q, x0: x0 - 8, x1: x1 + 8, z0: z0 - 8, z1: z1 + 8 }; });
+    // (water areas by the same cells – the big ones, over 2 km across, are asked everywhere)
+    const wCells = new Map(), bigWaters = waters.filter((w) => w.x1 - w.x0 > 2000 || w.z1 - w.z0 > 2000);
+    for (const w of waters) { if (bigWaters.includes(w)) continue; for (let i = Math.floor(w.x0 / CELL); i <= Math.floor(w.x1 / CELL); i++) for (let j = Math.floor(w.z0 / CELL); j <= Math.floor(w.z1 / CELL); j++) { const k = `${i},${j}`; if (!wCells.has(k)) wCells.set(k, [...bigWaters]); wCells.get(k).push(w); } }
     const segD = (x, z, a, b) => { const ex = b[0] - a[0], ez = b[1] - a[1], l = ex * ex + ez * ez, t = l ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / l)) : 0; return Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t); };
     // (in: the point is inside a building's outline – no run-off or lane there: only the tarmac's own edge is kept)
     const keepOut = (x, z, inn = false) => {
       const [s, d] = nearTrack(x, z);
       if (isSea(x, z)) return "water";
-      for (const w of waters) if (x > w.x0 && x < w.x1 && z > w.z0 && z < w.z1 && polyDist(x, z, w.q) < 8) return "water";
+      for (const w of wCells.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`) || bigWaters) if (x > w.x0 && x < w.x1 && z > w.z0 && z < w.z1 && polyDist(x, z, w.q) < 8) return "water";
       let tarmac = s && d < Math.max(s.L ?? 7, -(s.R ?? -7)) + (inn ? 4 : 30);
       for (const sg of cells.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`) || []) if (segD(x, z, sg.a, sg.b) < (inn ? sg.r - 6.5 : sg.r)) { if (sg.water) return "water"; tarmac = true; }
       return tarmac ? "tarmac" : false;
