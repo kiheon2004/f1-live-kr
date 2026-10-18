@@ -105,3 +105,18 @@ test("garage styles: teams differ (base, band, joints) and stay the same from bu
   assert.deepStrictEqual(G.garageStyle("Mercedes").dark, true);
   assert.deepStrictEqual(G.garageStyle("Ferrari"), G.garageStyle("Ferrari"));
 });
+
+test("boardsDiag (v0.40): a see-through catch fence or an undrawn surface between the camera and a board doesn't hide it; a wall does", async () => {
+  // (Monaco 2025: every board readable through the 28 %-opaque street fence was reported "occluded: behind syntheticWalls")
+  const { seeThrough } = await import("../src/renderer/garages.js");
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const fence = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.28, depthWrite: false });
+  const wall = new THREE.MeshStandardMaterial({ color: 0x888888 });
+  const glassy = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.88 });   // (water, tinted glass: hides)
+  assert.strictEqual(seeThrough(fence), true);
+  assert.strictEqual(seeThrough(Object.assign(new THREE.MeshBasicMaterial(), { colorWrite: false })), true);
+  assert.strictEqual(seeThrough(wall), false);
+  assert.strictEqual(seeThrough(glassy), false);
+  assert.strictEqual(seeThrough([fence, wall]), false, "a mesh with any solid material hides");
+  assert.strictEqual(seeThrough(null), false);
+});

@@ -1001,7 +1001,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,
     // (development: the drawn terrain's height – its grid triangles, not groundAt – and its cell size: Map3D.groundDiag)
-    terrainAt, terrainCell: [W / nx, H / nz], padKeepOut, padWhy: (b) => padWhy?.get(b) ?? null,
+    terrainAt, terrainCell: [W / nx, H / nz], padKeepOut, padWhy: (b) => padWhy?.get(b) ?? null, padAt,
   };
 }
 

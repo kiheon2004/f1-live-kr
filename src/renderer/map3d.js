@@ -21,7 +21,7 @@ import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, walkPhase, flagPose, flagHold } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
-import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, paintPitScreens, updateTeamScreens } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
 import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
@@ -520,7 +520,7 @@ function boardsDiag() {
     if ((cam.x - p.x) * b.n[0] + (cam.y - p.y) * b.n[1] + (cam.z - p.z) * b.n[2] <= 0) { r.status = "hidden"; r.reason = "faces away from the camera (seen from inside or behind the building)"; continue; }
     v.copy(p).project(camera); if (Math.abs(v.x) > 1 || Math.abs(v.y) > 1 || v.z > 1) { r.status = "off-screen"; r.reason = "outside the view"; continue; }
     rc.set(cam.clone(), p.clone().sub(cam).normalize()); rc.far = d - 0.05;
-    const hit = rc.intersectObjects(targets, true).find((h) => h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh && h.object.name !== "teamLabels");
+    const hit = rc.intersectObjects(targets, true).find((h) => h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh && h.object.name !== "teamLabels" && !seeThrough(h.object.material));
     if (hit) { let o = hit.object, n = []; while (o && n.length < 2) { if (o.name) n.push(o.name); o = o.parent; } r.status = "occluded"; r.reason = "behind " + (n.join("<") || hit.object.type); r.hit = +hit.distance.toFixed(1); continue; }
     if (r.px < 6) { r.status = "tiny"; r.reason = `${r.px} px high at ${r.dist} m`; continue; }
     r.status = "visible";
@@ -3701,6 +3701,17 @@ window.Map3D = {
   groundFix(on = true) {
     devGroundOld = !on; rebuild(); const t0 = performance.now();
     return new Promise((res) => { const t = setInterval(() => { if (world?.real?.info || performance.now() - t0 > 150e3) { clearInterval(t); res(world?.real ? `rebuilt (${on ? "fix" : "old"}) ${Math.round(performance.now() - t0)} ms` : "timeout"); } }, 400); });
+  },
+  // development: the drawn terrain's height (terrainAt) where the yards must never change it – along the pit lane, out
+  // from the track's edges over its run-off (2–29 m), along the map's raceway lines (escape roads, service tracks) –
+  // [{ k, x, z, y }]; compared before / after groundFix(false) it shows what the yards (footing.js padPlan) moved there
+  padProbe() {
+    const R = world?.real; if (!R?.terrainAt) return "no map";
+    const out = [], add = (k, x, z) => out.push([k, +x.toFixed(1), +z.toFixed(1), +R.terrainAt(x, z).toFixed(3), +(R.padAt?.(x, z) ?? 0).toFixed(3), R.padKeepOut ? R.padKeepOut(x, z) : null]);
+    for (const p of world.pitLane?.pts || []) add("lane", p.x, p.z);
+    const S = world.samples; for (let i = 0; i < S.length; i += 6) { const s = S[i]; for (const sg of [1, -1]) { const e = sg > 0 ? (s.L ?? 7) : -(s.R ?? -7); for (const o of [2, 10, 20, 29]) add("runoff" + o, s.p.x + s.nor.x * (e + o) * sg, s.p.z + s.nor.z * (e + o) * sg); } }
+    for (const l of R.scene?.lines || []) if (l.k === "raceway") for (const q of l.pts) { const [x, z] = R.geo.xz(q); add("raceway", x, z); }
+    return out;
   },
   // development: groundDiag's counts over the whole map (no list)
   groundDiagAll() { const R = world?.real; if (!R?.scene) return "no map"; const [la, lo] = R.scene.center || R.geo.toLL(0, 0), d = JSON.parse(this.groundDiag(la, lo, 1e5, 0)); delete d.list; return JSON.stringify(d); },
