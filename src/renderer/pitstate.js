@@ -243,16 +243,23 @@ export function posSpeed(c, t, span = 600) {
   let j = i; while (j > 0 && c.t[i] - c.t[j - 1] <= span) j--;
   const dt = (c.t[i] - c.t[j]) / 1000; return dt > 0 ? Math.hypot(c.x[i] - c.x[j], c.y[i] - c.y[j]) * DMm / dt : 0;
 }
+// v0.40: standing as the car is drawn – positions are interpolated between the samples on either side of t (replay.js
+// CarTracks.at), so a car whose next sample is where its last one was is drawn at rest already: that step counts
+// (Monza 2025, Leclerc: the samples 1.2 s apart through the stop – the crew stood idle for 1.1 s beside a car drawn at
+// rest, then jumped 1.2 s into its work). Only the step the drawing itself uses; live, no sample after t exists yet.
 export function standingForPos(c, t, still = 0.6) {
-  const i = idxAt(c, t); if (i < 1 || !stepStill(c, i, still)) return 0;
+  let i = idxAt(c, t); if (i < 1) return 0;
+  const n = c.n ?? c.t.length;
+  if (i + 1 < n && c.t[i + 1] > t && c.t[i + 1] - c.t[i] < 3000) { if (!stepStill(c, i + 1, still)) return 0; i++; }   // (drawn moving off: gone)
+  else if (!stepStill(c, i, still)) return 0;
   let j = i; while (j > 1 && stepStill(c, j - 1, still) && t - c.t[j - 1] < 600000) j--;
-  return (t - c.t[j - 1]) / 1000;
+  return Math.max(0, (t - c.t[j - 1]) / 1000);
 }
 export function lastStandPos(c, t, within = 25, min = 1.2, still = 0.6) {
   let i = idxAt(c, t); if (i < 1) return null;
   while (i > 1 && !stepStill(c, i, still) && t - c.t[i] <= within * 1000) i--;
   if (i < 1 || !stepStill(c, i, still) || t - c.t[i] > within * 1000) return null;
-  if (i === idxAt(c, t)) return null;   // still standing: no last standstill yet
+  if (standingForPos(c, t, still) > 0) return null;   // still standing (as drawn): no last standstill yet
   const t1 = c.t[i]; let j = i; while (j > 1 && stepStill(c, j - 1, still)) j--;
   const t0 = c.t[j - 1];
   return t1 - t0 >= min * 1000 ? { t0, t1, i } : null;

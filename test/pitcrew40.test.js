@@ -122,11 +122,10 @@ test("no tyre change where none is known: a drive-through, a stop-and-go, a car 
 
 test("right hands are right hands: the crews' right glove is the left one mirrored (thumb on the other side), wound to face out", async () => {
   const { crewMeshes } = await C();
-  const cm = crewMeshes(2), byName = {};
+  const cm = crewMeshes(2);
   cm.place([{ x: 0, y: 0, z: 3, yaw: 0, colour: "#ff0000", pose: "stand" }], [], { x: 0, y: 1.6, z: 0 });
-  for (const m of cm.group.children) if (m.visible) byName[m.geometry.uuid] = m;
-  const vis = cm.group.children.filter((m) => m.visible && m.count === 1 && m.geometry.attributes.position.count > 1500);
-  assert.ok(vis.length >= 2, "a left and a right fine glove drawn");
+  const vis = ["gloveFine", "gloveFineR"].map((n) => cm.group.getObjectByName(n));
+  assert.ok(vis.every((m) => m.visible && m.count === 1), "a left and a right fine glove drawn");
   const [g1, g2] = vis.map((m) => m.geometry.attributes.position.array);
   let mirrored = g1.length === g2.length;
   for (let i = 0; mirrored && i < g1.length; i += 9) mirrored = Math.abs(g1[i] + g2[i]) < 1e-6 && Math.abs(g1[i + 3] + g2[i + 6]) < 1e-6 && Math.abs(g1[i + 1] - g2[i + 1]) < 1e-6;
@@ -158,4 +157,30 @@ test("the front jack man steps aside while the car is still up – the jack's he
     // and after the drop, both he and the jack further out of the way
     const e = at(dropAt + 0.5); assert.ok(left * e.fj.b > 0.8 && left * e.man[1] > 1.8);
   }
+});
+
+test("marshals and officials: a bare face and a cap, no helmet or visor (marshal kit: Motorsport UK 2025); the crews keep theirs", async () => {
+  const { crewMeshes } = await C();
+  const cm = crewMeshes(4), seen = () => Object.fromEntries(["head", "visor", "face", "cap"].map((n) => [n, cm.group.getObjectByName(n).count]));
+  cm.place([{ x: 0, y: 0, z: 3, yaw: 0, colour: "#ff6a13", pose: "stand", role: "marshal" }], [], { x: 0, y: 1.6, z: 0 });
+  assert.deepStrictEqual(seen(), { head: 0, visor: 0, face: 1, cap: 1 });
+  cm.place([{ x: 0, y: 0, z: 3, yaw: 0, colour: "#ff0000", pose: "stand" }], [], { x: 0, y: 1.6, z: 0 });
+  assert.deepStrictEqual(seen(), { head: 1, visor: 1, face: 0, cap: 0 });
+});
+
+// Monza 2025, Leclerc's stop: position samples 1.2 s apart while the car stood – it was drawn at rest (interpolated to
+// the next sample) a whole sample before the crew saw it stand, which then jumped 1.2 s into its work
+test("standing as drawn: a car whose next sample is where it is stands from the last sample; moving off, it has gone", async () => {
+  const { standingForPos, lastStandPos } = await S();
+  // moving to 1000 ms (20 m/s, 250 ms samples), samples at 1000, 2200, 3400 standing, moving again after 3400
+  const t = [0, 250, 500, 750, 1000, 2200, 3400, 3650, 3900], x = [0, 50, 100, 150, 200, 200, 200.2, 230, 280];
+  const c = { t: Float64Array.from(t), x: Float64Array.from(x), y: new Float64Array(t.length), n: t.length };
+  assert.ok(Math.abs(standingForPos(c, 1500) - 0.5) < 1e-9, String(standingForPos(c, 1500)));
+  assert.ok(Math.abs(standingForPos(c, 3000) - 2.0) < 1e-9);
+  assert.strictEqual(standingForPos(c, 3500), 0, "drawn moving off");
+  const ls = lastStandPos(c, 3500, 25, 1); assert.ok(ls && ls.t0 === 1000 && ls.t1 === 3400, JSON.stringify(ls));
+  assert.strictEqual(lastStandPos(c, 3000, 25, 1), null, "standing");
+  // live: no sample after t – only what came in
+  const live = { ...c, n: 6 };
+  assert.ok(Math.abs(standingForPos(live, 2300) - 1.3) < 1e-9);
 });

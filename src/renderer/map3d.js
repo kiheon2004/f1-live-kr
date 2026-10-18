@@ -1810,7 +1810,7 @@ function updateMarshals(src, t) {
         const waving = sig && (m === 0 || sig === "double");
         const w = Math.sin(tsec * 2 * Math.PI * 1.4 + k + m * 0.7);
         const pose = waving ? flagPose(w) : flagPose(0, true);
-        const fig = { x, y, z, yaw, colour: "#ff6a13", pose }; figures.push(fig);
+        const fig = { x, y, z, yaw, colour: "#ff6a13", pose, role: "marshal", seed: k * 3 + m }; figures.push(fig);
         if (waving && dist < MARSHAL.flagFar) {
           const fk = k + ":" + m; used.add(fk);
           let f = MS.flags.get(fk); if (!f) { f = makeFlag("yellow"); MS.flags.set(fk, f); MS.group.add(f.group); }
@@ -2003,7 +2003,7 @@ function updateSupport(src, t) {
     // (walking off: the feet in step with the 2.5 m walked – walkPhase)
     const flagging = plan.official.phase === "flag", pose = flagging ? flagPose(wave) : walkPose(walkPhase(2.5 * plan.official.f));
     const { at: h, axis: ax } = flagHold(pose), c = Math.cos(yaw), sn2 = Math.sin(yaw);
-    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose, hands: flagging ? [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]] : null }], [], camera.position);
+    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose, role: "marshal", seed: 1, hands: flagging ? [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]] : null }], [], camera.position);
     const hx = x + h[0] * c + h[2] * sn2, hz = z - h[0] * sn2 + h[2] * c;
     SP.flag.group.visible = flagging;
     if (flagging) SP.flag.pose({ x: hx, y: y + h[1], z: hz }, { x: side.x, z: side.z }, tsec, 1, 0.3, { x: ax[0] * c + ax[2] * sn2, y: ax[1], z: -ax[0] * sn2 + ax[2] * c });

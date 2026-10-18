@@ -543,15 +543,31 @@ export const flagPose = (w, still = false) => (still ? { th: [0.03, 0.03], sh: [
 function partGeometries() {
   const ring = new THREE.CylinderGeometry(0.15, 0.15, 0.05, 16, 1, true).scale(0.72, 1, 1.02);
   return {
-    pelvis: [pelvisGeometry(), true, false, 1], chest: [chestGeometry(), true, false, 1], belt: [ring, false, true, 1],
+    pelvis: [pelvisGeometry(), true, false, 1], chest: [yokedChest(), true, false, 1], belt: [ring, false, true, 1],
     neck: [limbGeometry(0.13, 0.058, 0.054, 0, 0.5, 1, 10, 2), false, false, 1],
     head: [helmetGeometry(), true, false, 1], visor: [visorGeometry(), false, true, 1],
+    // (marshals and officials: no helmet – orange overalls, gloves, a hat; Motorsport UK 2025, F1 Singapore 2025 – a bare
+    // face and a cap in the overalls' colour)
+    face: [headGeometry(), "skin", false, 1], cap: [capGeometry(), true, false, 1],
     thigh: [LIMB_GEO.thigh(), true, false, 2], shin: [LIMB_GEO.shin(), true, false, 2], uarm: [LIMB_GEO.uarm(), true, false, 2], farm: [LIMB_GEO.farm(), true, false, 2],
-    joint: [new THREE.SphereGeometry(1, 8, 6), true, true, 6], boot: [shoeGeometry(), false, true, 2],
+    joint: [new THREE.SphereGeometry(1, 12, 8), true, true, 6], boot: [shoeGeometry(), false, true, 2],
     gloveFine: [fistGeometry(true), false, true, 1], gloveMid: [fistGeometry(false), false, true, 1],
     gloveFineR: [mirrorX(fistGeometry(true)), false, true, 1], gloveMidR: [mirrorX(fistGeometry(false)), false, true, 1],
     farBody: [farBodyGeometry(), true, false, 1],
   };
+}
+// The chest with the shoulders' line across its top: a rounded bar from one shoulder joint to the other (the trapezius
+// and the overalls' shoulder seams) – v0.39's narrow chest top left the shoulder spheres standing out like a doll's
+function yokedChest() {
+  const bar = new THREE.CapsuleGeometry(0.058, 2 * BODY.shoulderZ, 4, 12).rotateX(Math.PI / 2).scale(0.85, 0.9, 1).translate(-0.016, BODY.chestShoulder + 0.004, 0);
+  const trap = new THREE.CapsuleGeometry(0.05, 2 * BODY.shoulderZ - 0.12, 4, 10).rotateX(Math.PI / 2).scale(0.9, 0.8, 1).translate(-0.02, BODY.chestShoulder + 0.04, 0);
+  return mergeSimple([chestGeometry(), bar, trap]);
+}
+// A cap: the crown over the head's top and a peak ahead (about the head's centre, facing +x)
+function capGeometry() {
+  const crown = new THREE.SphereGeometry(1, 14, 6, 0, Math.PI * 2, 0, 1.15).scale(0.104, 0.1, 0.086).translate(-0.004, 0.035, 0);
+  const peak = new THREE.CylinderGeometry(0.075, 0.075, 0.008, 14, 1, false, -Math.PI / 2, Math.PI).scale(1.1, 1, 1.05).rotateZ(-0.12).translate(0.07, 0.05, 0);
+  return mergeSimple([crown, peak]);
 }
 // A geometry's mirror image across x (a right hand from a left one): the positions and normals mirrored, each
 // triangle's winding turned back (an instance matrix with a negative determinant would leave three.js culling the
@@ -658,19 +674,23 @@ function partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s) {
 export function crewMeshes(max = 120) {
   const S = shared(), group = new THREE.Group(); group.name = "crews";
   const mk = (geo, mat, n, coloured) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.visible = false; m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; if (coloured) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3); group.add(m); return m; };
-  const body = {}; for (const [k, [g, team, small, per]] of Object.entries(S.parts)) body[k] = { mesh: mk(g, team ? S.teamMat : k === "visor" ? S.visorMat : S.darkMat, max * per, team), team, small, cap: max * per };
+  const body = {}; for (const [k, [g, team, small, per]] of Object.entries(S.parts)) body[k] = { mesh: mk(g, team ? S.teamMat : k === "visor" ? S.visorMat : S.darkMat, max * per, !!team), team, small, cap: max * per };
+  for (const [k, b] of Object.entries(body)) b.mesh.name = k;
   const kit = { gun: mk(S.kit.gun, S.kitMat, max, false), jackBase: mk(S.kit.base, S.kitMat, 32, false), jackBar: mk(S.kit.bar, S.kitMat, 32, false) };
   const kitCap = { gun: max, jackBase: 32, jackBar: 32 };
   let wheel = null;   // { key, front, rear, frontBand, rearBand }
   const m4 = new THREE.Matrix4(), mp = new THREE.Matrix4(), mk4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
   const counts = {}, alias = { knee: "joint", elbow: "joint", shoulder: "joint" };
-  let lod = "mid", colour = col;
-  // a part at its place in the person's frame, into the world through the person's matrix (mp)
+  let lod = "mid", colour = col, bare = false;
+  const skin = new THREE.Color();
+  // a part at its place in the person's frame, into the world through the person's matrix (mp); a marshal's (bare) head
+  // a face and a cap, no helmet or visor
   const put = (part, x, y, z, yx, yy, yz, xx, xy, xz, s) => {
-    const k = part === "glove" ? (lod === "near" ? "gloveFine" : "gloveMid") : part === "gloveR" ? (lod === "near" ? "gloveFineR" : "gloveMidR") : alias[part] || part, b = body[k];
+    if (bare && part === "visor") return;
+    const k = part === "glove" ? (lod === "near" ? "gloveFine" : "gloveMid") : part === "gloveR" ? (lod === "near" ? "gloveFineR" : "gloveMidR") : bare && part === "head" ? "face" : bare && part === "hair" ? "cap" : alias[part] || part, b = body[k];
     if (!b || (lod === "far" && b.small) || counts[k] >= b.cap) return;
     partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
-    const i = counts[k]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, colour);
+    const i = counts[k]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, b.team === "skin" ? skin : colour);
   };
   // a jack: its base where m4 says, the lever tilted up by tilt about its pivot
   const putJack = (tilt) => {
@@ -695,7 +715,7 @@ export function crewMeshes(max = 120) {
         if (people++ >= max) { people--; break; }
         const d = cam ? Math.hypot(f.x - cam.x, f.y - cam.y, f.z - cam.z) : CREW_LOD.near + 1;
         lod = d < CREW_LOD.near ? "near" : d > CREW_LOD.far ? "far" : "mid";
-        colour = col.set(f.colour || "#9aa0a6");
+        colour = col.set(f.colour || "#9aa0a6"); bare = f.role === "marshal"; if (bare) skin.set(SKIN[((f.seed ?? people) * 7) % SKIN.length]);
         q.setFromAxisAngle(up, f.yaw); p.set(f.x, f.y, f.z); mp.compose(p, q, one);
         if (d > CREW_LOD.body) { put("farBody", 0, 0, 0, 0, 1, 0, 1, 0, 0, null); continue; }
         // kit carried by the figure itself (walking out or standing ready, no stop played): held in front, the hands on it
@@ -780,6 +800,7 @@ export function kitAt(where, kits, bands = {}) {
 // soles on the footrest 0.31 m up, 0.16 m ahead; M)
 POSES.sit = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.12, arm: [[0.95, 0.12, 0.65], [0.9, 0.14, 0.7]], seat: 0.86, feet: [0.14, 0.11], footY: 0.312 };
 POSES.sitLean = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.3, arm: [[1.15, 0.1, 0.45], [1.1, 0.12, 0.5]], seat: 0.86, feet: [0.15, 0.1], footY: 0.312 };
+const SKIN = ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"];
 let PEOPLE = null;
 function peopleShared() {
   if (PEOPLE) return PEOPLE;
@@ -795,7 +816,7 @@ function peopleShared() {
       pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], visor: [set, "kit", 1],
       uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveMid[0], "skin", 1], gloveR: [S.parts.gloveMidR[0], "skin", 1],   // (mittens: fingers on 67 seated people behind the consoles were ~240k triangles drawn from anywhere – v0.39 perf)
       shoulder: [S.parts.joint[0], "shirt", 2], elbow: [S.parts.joint[0], "skin", 2], knee: [S.parts.joint[0], "legs", 2] },
-    skin: ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"], hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
+    skin: SKIN, hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
     mat: new THREE.MeshStandardMaterial({ roughness: 0.75 }), kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }),
   };
   for (const [g] of Object.values(PEOPLE.parts)) g.userData.shared = true;
