@@ -19,7 +19,7 @@ import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./mars
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
-import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, walkPhase, flagPose, flagHold } from "./crew.js";
+import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
@@ -437,6 +437,7 @@ function updateCrews(frame) {
       else if (ph.phase === "back" && me.lastBox?.t0 != null) { t0 = me.lastBox.t0; plan = pitPlanFor(ph.num, src, policy, { t0, t1: me.lastBox.t1, input: me.input }); }
       else if (ph.phase === "ready" && policy !== "observed") { t0 = policy === "record" ? nextStandPos(trk, A.t) : null; plan = t0 != null ? pitPlanFor(ph.num, src, policy, { t0, input: me.input }) : policy === "typical" ? { kind: "tyres", from: "typical", D: null, wait: 0, compound: null } : null; }
     }
+    if (plan && t0 != null) plan.seed = stopSeed(ph.num, t0);   // (the stop's own wheel-to-wheel differences: crew.js wheelTimes)
     if (plan?.kind === "tyres") {
       const car = cars.get(ph.num), dims = wheelParts(A.sessionYear?.() || null, team);
       world.crews.wheels(dims);

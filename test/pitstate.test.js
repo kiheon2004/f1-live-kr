@@ -124,7 +124,7 @@ test("crew layouts: in the inner lane on the garages' side of the car's lane-sid
   const { crewLayout } = await import("../src/renderer/crew.js");
   const boxC = 5;
   const work = crewLayout("work", 1, boxC, 1);
-  assert.strictEqual(work.length, 19);
+  assert.strictEqual(work.length, 20);   // (v0.40: and the spare rear jack standing by)
   // across (+ the garages' side): never more than boxC towards the garages, never more than 2.4 m towards the fast lane
   for (const [, b] of work) assert.ok(b <= boxC && b >= -2.4, String(b));
   const right = crewLayout("work", 1, boxC, -1);

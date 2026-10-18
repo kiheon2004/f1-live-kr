@@ -90,13 +90,14 @@ test("the tyre change: hands on the gun's grips with its socket on the wheel nut
       for (const k of L.kits) assert.ok(L.figures[k.by]?.[5], `${k.kind} held by figure ${k.by}`);
       // a gun on its hub: the socket at the hub's height, just out from the wheel's face
       for (const k of L.kits.filter((x) => x.kind === "gun")) {
-        const h = H.find((x) => Math.abs(x.a - k.a) < 1e-9 && Math.sign(x.b) === Math.sign(k.b)), hubH = h.r + L.car.lift[h.axle === "front" ? 0 : 1];
+        const h = H.find((x) => Math.abs(x.a - k.a) < 0.2 && Math.sign(x.b) === Math.sign(k.b)), hubH = h.r + L.car.lift[h.axle === "front" ? 0 : 1];
         const onHub = Math.abs(k.h - hubH) < 1e-3;
         if (onHub) assert.ok(Math.abs(Math.abs(k.b) - (Math.abs(h.face) + 0.06)) < 0.01, `the gun's socket on the nut at ${s.toFixed(2)}`);
         void GUN;
       }
       const wk = stopClock(plan, s).w;
-      if (wk > 0.3 && wk < 1.3) assert.ok(L.kits.filter((x) => x.kind === "gun").some((k) => { const h = H.find((x) => Math.abs(x.a - k.a) < 1e-9 && Math.sign(x.b) === Math.sign(k.b)); return Math.abs(k.h - (h.r + L.car.lift[h.axle === "front" ? 0 : 1])) < 1e-3; }), `guns on the hubs mid-stop (${s.toFixed(2)})`);
+      // (on the nuts undoing them and doing the new ones up; drawn back off the hub while the wheels change – v0.40)
+      if ((wk > 0.3 && wk < 0.42) || (wk > 1.25 && wk < 1.4)) assert.ok(L.kits.filter((x) => x.kind === "gun").some((k) => { const h = H.find((x) => Math.abs(x.a - k.a) < 0.2 && Math.sign(x.b) === Math.sign(k.b)); return Math.abs(k.h - (h.r + L.car.lift[h.axle === "front" ? 0 : 1])) < 1e-3; }), `guns on the hubs mid-stop (${s.toFixed(2)})`);
     }
   }
 });
