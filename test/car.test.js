@@ -109,19 +109,22 @@ test("car model: teams' shapes are their own templates; wheels, hubs and mounts 
 
 // v0.35: the hands stay on the arms when the wheel turns – each forearm runs from its glove (which turns with the
 // wheel) back towards the elbow (v0.34: the arms stayed put while the gloves went round with the wheel)
-test("car model: turning the wheel, each forearm still starts at its glove", async () => {
-  const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js");
+test("car model: turning the wheel, each forearm still ends at its glove's wrist, the elbow joins both arm bones, no bone stretches (v0.39)", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js"), { BODY } = await import("../src/renderer/body3d.js");
   const car = C.makeCar({ teamName: "Ferrari", teamColour: "e8002d", number: 16, season: 2026 }), u = car.userData;
-  for (const steer of [0, 0.08, -0.12]) {
+  const end = (m, len) => m.getWorldPosition(new THREE.Vector3()).addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(m.getWorldQuaternion(new THREE.Quaternion())), len);
+  for (const steer of [0, 0.08, -0.12, 0.2, -0.2]) {
     C.setWheels(car, 0, steer); car.updateMatrixWorld(true);
-    for (const m of u.arms) {
-      const k = m.userData.k, glove = new THREE.Vector3(0.145 * k, -0.005, 0.004).applyMatrix4(u.wheel.matrixWorld);
-      // the arm's end nearer the wheel: its centre less half its length along its axis
-      const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(m.getWorldQuaternion(new THREE.Quaternion()));
-      const len = m.scale.y + 0.066, c = m.getWorldPosition(new THREE.Vector3());
-      const ends = [c.clone().addScaledVector(axis, len / 2), c.clone().addScaledVector(axis, -len / 2)];
-      const d = Math.min(...ends.map((e) => e.distanceTo(glove)));
-      assert.ok(d < 0.02, `steer ${steer}, arm ${k}: ${d.toFixed(3)} m from the glove`);
+    for (const a of u.arms) {
+      const [wx, wy, wz] = u.armGeo.wrist, wrist = new THREE.Vector3(wx * a.k, wy, wz).applyMatrix4(u.wheel.matrixWorld);
+      const d = end(a.farm, BODY.farm).distanceTo(wrist);
+      assert.ok(d < 0.01, `steer ${steer}, arm ${a.k}: forearm ends ${d.toFixed(3)} m from the wrist`);
+      const e = a.elbow.getWorldPosition(new THREE.Vector3());
+      assert.ok(end(a.uarm, BODY.uarm).distanceTo(e) < 1e-6 && a.farm.getWorldPosition(new THREE.Vector3()).distanceTo(e) < 1e-6, "the elbow joins the upper arm and the forearm");
+      // (the elbow inside the cockpit: below its rim, or – the raised arm at a big lock – up in its opening, never
+      // through the bodywork beside it)
+      const el = car.worldToLocal(e.clone());
+      assert.ok((el.y < 0.56 && Math.abs(el.x) < 0.3) || Math.abs(el.x) < 0.24, `steer ${steer}, arm ${a.k}: elbow at ${el.toArray().map((v) => v.toFixed(2))}`);
     }
   }
 });

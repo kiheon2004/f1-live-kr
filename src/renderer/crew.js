@@ -20,6 +20,7 @@
 // The car's frame: a along it (+ forward), b across (+ the car's left), from the model's origin between the axles.
 import * as THREE from "./vendor/three.module.js";
 import { sidewallMaterial } from "./car3d.js";
+import { BODY, JOINT_R, LIMB_GEO, limbGeometry, trunkGeometry, mergeSimple, chestGeometry, pelvisGeometry, shoeGeometry, fistGeometry, helmetGeometry, visorGeometry, headGeometry, hairGeometry, reach2 } from "./body3d.js";
 
 // [along, across, facing (rad, 0 = looking along +a), pose, kit]: written with the garages on the car's left (+b)
 const WHEEL = (ax, ay) => {
@@ -56,7 +57,7 @@ export function crewLayout(phase, f, boxC, left = 1) {
     const k = clamp01(f), ahead = phase === "back" && a > 2;
     const y = ahead ? mouth + (Math.max(b, 1.6) - mouth) * k * 0.5 : mouth + (b - mouth) * k;
     const moving = k > 0.02 && k < 0.98;
-    return [a, y, moving ? (phase === "back" ? Math.PI / 2 : -Math.PI / 2) : face, moving ? "walk" : pose === "kneel" ? "ready" : pose, kit === "gun" || kit === "tyre" ? kit : null];
+    return [a, y, moving ? (phase === "back" ? Math.PI / 2 : -Math.PI / 2) : face, moving ? walkPose(walkPhase(Math.abs(y - mouth))) : pose === "kneel" ? "ready" : pose, kit === "gun" || kit === "tyre" ? kit : null];
   });
   return left > 0 ? out : out.map(([a, b, face, pose, kit]) => [a, -b, -face, pose, kit]);
 }
@@ -83,19 +84,53 @@ export function stopClock(plan, s, C = CHANGE) {
 }
 
 // The car's hubs, from its dimensions (car3d.js wheelParts): per wheel in the car's order (front left, front right,
-// rear left, rear right) { a, b (hub centre), side (+1 left), face (b of the wheel's outer face), r, axle }
+// rear left, rear right) { a, b (hub centre), side (+1 left), face (b of the wheel's outer face), r, w, axle }
 export function hubsOf(d) {
   return [[d.FZ, d.FX, "front"], [d.FZ, -d.FX, "front"], [d.RZ, d.RX, "rear"], [d.RZ, -d.RX, "rear"]].map(([a, b, axle]) => {
     const side = Math.sign(b), w = axle === "front" ? d.FW : d.RW;
-    return { a, b, side, face: b + side * w / 2, r: axle === "front" ? d.FR : d.RR, axle };
+    return { a, b, side, face: b + side * w / 2, r: axle === "front" ? d.FR : d.RR, w, axle };
   });
 }
 
-// The tyre change at s seconds since the car stood: { figures: [[a, b, facing, pose, kit]], kits: [{ kind, axle, a, b,
-// h, yaw (about up, 0 = the car's heading), flip }], car: { lift: [front, rear] m, off: [4 × bool: that wheel not on
-// the car] } } in the car's frame (b + its left). left: +1 with the garages on the car's left. pose: a POSES name or a
-// pose (blendPose). A kit a figure holds is drawn with it ("frontJack", "rearJack"); the guns and the wheels off the
-// car are kits of their own ("gun"; "old" / "new": the old set's and the new set's).
+// ---------- what the hands hold (in the box's frame: [a, b, h, weight, handle axis a, b, h]) ----------
+// A figure at (fa, fb) facing f: forward (cos f, sin f), its right (+z) (sin f, −cos f) – hand 0 the one on its right.
+const wrapPi = (x) => Math.atan2(Math.sin(x), Math.cos(x));
+const byRight = (f, p, q) => { const ra = Math.sin(f), rb = -Math.cos(f); return p[0] * ra + p[1] * rb >= q[0] * ra + q[1] * rb ? [p, q] : [q, p]; };
+// a wheel (centre a, b, h; turned by yaw – its axle (−sin φ, cos φ), φ = yaw (+π flipped)): both hands on the tread at
+// its front and back (3 and 9 o'clock), on the half nearer the figure – how tyre men hold a wheel (F1 media photos)
+export function wheelGrips(k, R, W, fa, fb, f, w = 1) {
+  const ph = k.yaw + (k.flip ? Math.PI : 0), Aa = -Math.sin(ph), Ab = Math.cos(ph), Za = Math.cos(ph), Zb = Math.sin(ph);
+  const tw = Math.sign((fa - k.a) * Aa + (fb - k.b) * Ab || 1) * Math.max(0, W / 2 - 0.07), r = R - 0.03;
+  const p = [k.a + Za * r + Aa * tw, k.b + Zb * r + Ab * tw], q = [k.a - Za * r + Aa * tw, k.b - Zb * r + Ab * tw];
+  const [h0, h1] = byRight(f, p, q);
+  return [[h0[0], h0[1], k.h + 0.02, w, 0, 0, 1], [h1[0], h1[1], k.h + 0.02, w, 0, 0, 1]];
+}
+// a gun (socket a, b, h pointing along yaw – the facing convention): the trigger hand on its pistol grip, the other on
+// the front handle (w1: that hand's weight – off it while the gunner signals)
+export function gunGripsAB(k, w0 = 1, w1 = 1) {
+  const F = [Math.cos(k.yaw), Math.sin(k.yaw)], Rt = [Math.sin(k.yaw), -Math.cos(k.yaw)];
+  const tr = (v) => [k.a + F[0] * v[0] + Rt[0] * v[2], k.b + F[1] * v[0] + Rt[1] * v[2], k.h + v[1]], ax = (v) => [F[0] * v[0] + Rt[0] * v[2], F[1] * v[0] + Rt[1] * v[2], v[1]];
+  return [[...tr(GUN.rear), w0, ...ax(GUN.rearAxis)], [...tr(GUN.front), w1, ...ax(GUN.frontAxis)]];
+}
+// a jack (base a, b; its lever along yaw, tilted up by tilt): the T handle's two ends, for a man facing f
+export function jackGripsAB(k, f) {
+  const L = JACK.bar * Math.cos(k.tilt), ca = k.a + Math.cos(k.yaw) * L, cb = k.b + Math.sin(k.yaw) * L, h = JACK.pivot + JACK.bar * Math.sin(k.tilt);
+  const Ra = Math.sin(f), Rb = -Math.cos(f);
+  return [[ca + Ra * JACK.half, cb + Rb * JACK.half, h, 1, Ra, Rb, 0], [ca - Ra * JACK.half, cb - Rb * JACK.half, h, 1, Ra, Rb, 0]];
+}
+// where the jacks engage (m from the axle lines: under the nose cone, the rear crash structure – estimates, M) and how
+// their men stand (from the jack's base to the man's hips), the lever's tilt ready / lifting (rad)
+export const JACKS = { front: 0.85, rear: 0.8, man: 1.38, tiltUp: 0.62, tiltDown: 0.25 };
+// carried in front of a walking man: a gun at the waist (its socket 0.56 m ahead), a wheel at the hips (its centre
+// 0.5 m ahead, axle along his way) – heights where straight-ish arms hold them (body3d proportions)
+const CARRY = { gun: [0.56, 0.95], wheel: [0.5, 0.86] };
+
+// The tyre change at s seconds since the car stood: { figures: [[a, b, facing, pose, kit, grips]], kits: [{ kind,
+// axle, a, b, h, yaw (about up, 0 = the car's heading), flip, tilt, by (its holder: a figure's index) }], car: { lift:
+// [front, rear] m, off: [4 × bool: that wheel not on the car] } } in the car's frame (b + its left). left: +1 with the
+// garages on the car's left. pose: a POSES name or a pose (blendPose); grips: what the hands hold (above). The guns,
+// the jacks and the wheels off the car are kits of their own ("gun", "jack"; "old" / "new": the old set's and the new
+// set's).
 export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   const { w, dropAt, down } = stopClock(plan, s, C), H = hubsOf(d), figures = [], kits = [];
   const liftF = C.lift * ss(C.liftF[0], C.liftF[1], w) * (1 - down), liftR = C.lift * ss(C.liftR[0], C.liftR[1], w) * (1 - down);
@@ -107,149 +142,293 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
     // are done up, the arm up, standing back once the jacks drop
     const gk = ss(C.gunIn[0], C.gunIn[1], t);
     const gPose = standUp > 0 ? blendPose("signal", "ready", standUp) : t >= C.signal ? blendPose("kneel", "signal", ss(C.signal, C.signal + 0.15, t)) : blendPose("ready", "kneel", gk);
-    figures.push([h.a, sd * (fb + lerp(0.85, 0.42, gk) + 0.3 * standUp), inward, gPose, null]);
+    const sig = standUp > 0 ? 1 - standUp : t >= C.signal ? ss(C.signal, C.signal + 0.15, t) : 0;
+    const gi = figures.length, gFig = [h.a, sd * (fb + lerp(0.98, 0.62, gk) + 0.3 * standUp), inward, gPose, null, null];
+    figures.push(gFig);
     const gunOn = gk * (1 - ss(C.back[1] - 0.1, C.back[1] + 0.1, t));
-    kits.push({ kind: "gun", a: h.a, b: sd * (fb + lerp(0.55, 0.06, gunOn) + 0.3 * standUp), h: lerp(0.45, hubH, gunOn), yaw: inward, flip: false });
-    // the old wheel: off the car from `off`, pulled straight out, then carried back behind the gun
+    // (off the hub the gun is in front of him – at his waist crouched, lower kneeling, at his hips once he stands)
+    const gOut = lerp(0.98, 0.62, gk) + 0.3 * standUp, gOffH = standUp > 0 ? lerp(0.5, 0.86, standUp) : lerp(0.62, 0.5, gk);
+    const gun = { kind: "gun", a: h.a, b: sd * (fb + lerp(gOut - 0.5, 0.06, gunOn)), h: lerp(gOffH, hubH, gunOn), yaw: inward, flip: false, by: gi };
+    kits.push(gun); gFig[5] = gunGripsAB(gun, 1, 1 - sig);
+    // the old wheel: off the car from `off`, pulled straight out, then carried back behind the gun (turned to face its
+    // carrier, lifted to his hips)
     const reach = ss(C.off[0] - 0.15, C.off[0], t), pull = ss(C.off[0], C.off[1], t), away = ss(C.away[0], C.away[1], t);
     const oa = h.a - lerp(lerp(0.5, 0.3, reach), 1.05, away) - 0.2 * pull * (1 - away);
-    const ob = sd * (fb + lerp(lerp(0.6, 0.35, reach), 1.2, away) + 0.35 * pull * (1 - away));
+    const ob = sd * (fb + lerp(lerp(0.6, 0.3, reach), 1.2, away) + 0.35 * pull * (1 - away));
     const oFace = inward + sd * 0.45;
-    const oPose = t < C.off[0] - 0.15 ? "ready" : t < C.off[1] ? blendPose("ready", "reach", reach * (1 - ss(C.off[0] + 0.15, C.off[1], t))) : "carry";
-    figures.push([oa, ob, oFace, oPose, null]);
+    const oPose = t < C.off[0] - 0.15 ? "ready" : t < C.off[1] ? blendPose("ready", "reach", reach * (1 - ss(C.off[0] + 0.15, C.off[1], t))) : blendPose("reach", "carry", away);
+    const oi = figures.length, oFig = [oa, ob, oFace, oPose, null, null];
+    figures.push(oFig);
+    const flip = sd < 0, oYaw = nearYaw(wrapPi(oFace - Math.PI / 2 - (flip ? Math.PI : 0)));
     if (t >= C.off[0]) {
-      // from the hub out (still at its height), then held at the waist in front of its carrier
-      const ha = oa + Math.cos(oFace) * 0.45, hb = ob - Math.sin(oFace) * 0.45;
-      kits.push({ kind: "old", axle: h.axle, a: lerp(h.a - 0.1 * pull, ha, away), b: lerp(h.b + sd * 0.5 * pull, hb, away), h: lerp(hubH, 0.6, away), yaw: 0, flip: sd < 0 });
-    }
+      // from the hub out (still at its height), then held at the hips in front of its carrier
+      const ha = oa + Math.cos(oFace) * CARRY.wheel[0], hb = ob + Math.sin(oFace) * CARRY.wheel[0];
+      const k = { kind: "old", axle: h.axle, a: lerp(h.a - 0.1 * pull, ha, away), b: lerp(h.b + sd * 0.5 * pull, hb, away), h: lerp(hubH, CARRY.wheel[1], away), yaw: oYaw * away, flip, by: oi };
+      kits.push(k); oFig[5] = wheelGrips(k, h.r, h.w, oa, ob, oFace);
+    } else if (reach > 0) oFig[5] = wheelGrips({ a: h.a, b: h.b, h: hubH, yaw: 0, flip }, h.r, h.w, oa, ob, oFace, reach);   // (reaching for it on the car)
     // the new wheel: held ready ahead of the gun, onto the hub from `on`, fitted at its end; its carrier steps back
     const fit = ss(C.on[0], C.on[1], t), back = ss(C.back[0], C.back[1], t), nFace = inward - sd * 0.4;
     // (stepping back: ahead of the wheel, except on the fast lane's side – the car leaves that way – where it's behind)
     const na = h.a + lerp(lerp(0.65, 0.3, fit), sd === -left ? -0.7 : 0.85, back), nb = sd * (fb + lerp(lerp(0.65, 0.4, fit), sd === -left ? 1.65 : 1.0, back));   // (and out past the old wheel's man)
-    figures.push([na, nb, nFace, back > 0 ? blendPose("reach", "stand", back) : blendPose("carry", "reach", fit), null]);
+    const ni = figures.length, nFig = [na, nb, nFace, back > 0 ? blendPose("reach", "stand", back) : blendPose("carry", "reach", fit), null, null];
+    figures.push(nFig);
+    const nYaw = nearYaw(wrapPi(nFace - Math.PI / 2 - (flip ? Math.PI : 0)));
     if (t < C.on[1]) {
-      const ha = na + Math.cos(nFace) * 0.42, hb = nb - Math.sin(nFace) * 0.42;
-      kits.push({ kind: "new", axle: h.axle, a: lerp(ha, h.a, fit), b: lerp(hb, h.b, fit), h: lerp(0.6, hubH, fit), yaw: 0, flip: sd < 0 });
-    }
+      const ha = na + Math.cos(nFace) * CARRY.wheel[0], hb = nb + Math.sin(nFace) * CARRY.wheel[0];
+      const k = { kind: "new", axle: h.axle, a: lerp(ha, h.a, fit), b: lerp(hb, h.b, fit), h: lerp(CARRY.wheel[1], hubH, fit), yaw: nYaw * (1 - fit), flip, by: ni };
+      kits.push(k); nFig[5] = wheelGrips(k, h.r, h.w, na, nb, nFace);
+    } else if (back < 1) nFig[5] = wheelGrips({ a: h.a, b: h.b, h: hubH, yaw: 0, flip }, h.r, h.w, na, nb, nFace, 1 - back);   // (letting go of it on the car)
     off[i] = t >= C.off[0] && t < C.on[1];
   });
-  // the jacks: in at the nose and the tail, the levers down as the car goes up, back up as it drops; the front one
-  // pulled out to the garages' side as soon as it is down (the car leaves through where he stands)
-  const front = d.FZ + 1.85, rear = d.RZ - 1.6, aside = ss(dropAt, dropAt + 0.35, s);
-  figures.push([front + 0.2 * aside, left * 1.9 * aside, Math.PI, blendPose("jack", "jackDown", liftF / C.lift), "frontJack"]);
-  figures.push([rear, 0, 0, blendPose("jack", "jackDown", liftR / C.lift), "rearJack"]);
+  // the jacks: in at the nose and the tail, the levers pulled down as the car goes up, back up as it drops; the front
+  // one pulled out to the garages' side with its man as soon as it is down (the car leaves through where he stands)
+  const aside = ss(dropAt, dropAt + 0.35, s), kF = liftF / C.lift, kR = liftR / C.lift;
+  const fj = { kind: "jack", a: d.FZ + JACKS.front + 0.2 * aside, b: left * 1.9 * aside, h: 0, yaw: 0, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kF), by: figures.length };
+  kits.push(fj); figures.push([fj.a + JACKS.man, fj.b, Math.PI, blendPose("jack", "jackDown", kF), null, jackGripsAB(fj, Math.PI)]);
+  const rj = { kind: "jack", a: d.RZ - JACKS.rear, b: 0, h: 0, yaw: Math.PI, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kR), by: figures.length };
+  kits.push(rj); figures.push([rj.a - JACKS.man, 0, 0, blendPose("jack", "jackDown", kR), null, jackGripsAB(rj, 0)]);
   // the front wing's ends, steadying at the sides (hands on the car while it is up), the release controller
   const steady = (liftF + liftR) / (2 * C.lift);
   // (as the jacks drop, the ones on the fast lane's side ahead of the car – a wing man, the release controller – step
   // back beside it: the car turns out through where they stood)
   const wing = (sd) => (sd === -left ? [2.75 - 2.2 * aside, sd * (1.25 + 0.45 * aside)] : [2.75, sd * 1.25]);
-  figures.push([...wing(1), Math.PI * 0.85, "ready", null], [...wing(-1), -Math.PI * 0.85, "ready", null]);
-  figures.push([0.15, 1.35, -Math.PI / 2, blendPose("ready", "reach", steady * 0.6), null], [0.15, -1.35, Math.PI / 2, blendPose("ready", "reach", steady * 0.6), null]);
-  figures.push([3.6 - 3.0 * aside, -left * (2.15 + 0.15 * aside), left > 0 ? Math.PI * 0.75 : -Math.PI * 0.75, s >= dropAt ? "signal" : "stand", null]);
+  figures.push([...wing(1), Math.PI * 0.85, "ready", null, null], [...wing(-1), -Math.PI * 0.85, "ready", null, null]);
+  for (const sd of [1, -1]) {
+    const f = -sd * Math.PI / 2, [h0, h1] = byRight(f, [0.32, sd * 0.5], [-0.02, sd * 0.52]), sw = ss(0, 0.6, steady);
+    figures.push([0.15, sd * 1.35, f, blendPose("ready", "reach", steady * 0.6), null, sw > 0 ? [[h0[0], h0[1], 0.66, sw, 1, 0, 0], [h1[0], h1[1], 0.64, sw, 1, 0, 0]] : null]);
+  }
+  figures.push([3.6 - 3.0 * aside, -left * (2.15 + 0.15 * aside), left > 0 ? Math.PI * 0.75 : -Math.PI * 0.75, s >= dropAt ? "signal" : "stand", null, null]);
   return { figures, kits, car: { lift: [liftF, liftR], off } };
 }
+// (a wheel's turn either way round – the one nearer its turn on the car)
+const nearYaw = (y) => (Math.abs(y) > Math.PI / 2 ? wrapPi(y + Math.PI) : y);
 
 // Before the stop (a car of the team coming: f 0 → 1 as it nears) and after it (the car gone: f 1 → 0 back to the
-// garage): the tyre-change crew walking out to its places with the new wheels and guns, and back with the old wheels.
-// Positions blend between the garage's opening (boxC − 0.7 m out) and the places at the stop's start or end; those
-// ahead of the car walk back by the garage side (the car drove off through where they stood).
+// garage): the tyre-change crew walking out to its places with the new wheels, guns and jacks, and back with the old
+// wheels. Positions blend between the garage's opening (boxC − 0.7 m out) and the places at the stop's start or end;
+// those ahead of the car walk back by the garage side (the car drove off through where they stood). Walking, each
+// carries his kit in front of him (CARRY), his feet in step with the distance walked (walkPhase).
 export function changeWalk(phase, f, d, boxC, left = 1, C = CHANGE) {
   const mouth = left * (boxC - 0.7), k = clamp01(f), moving = k > 0.02 && k < 0.98;
   const at = phase === "ready" ? stopChoreo({ wait: 0, D: null }, -1, d, left, C) : stopChoreo({ wait: 0, D: C.base }, C.base + 1, d, left, C);
-  const figures = at.figures.map(([a, b, face, pose, kit], i) => {
+  const figures = at.figures.map(([a, b, face, pose, kit, grips], i) => {
     const ahead = phase === "back" && a > 2;
     const y = ahead ? mouth + (left * Math.max(left * b, 1.6) - mouth) * k * 0.5 : mouth + (b - mouth) * k;
-    return [a, y, moving ? (phase === "back" ? left * Math.PI / 2 : -left * Math.PI / 2) : face, moving ? walkPose(k * Math.abs(b - mouth) * 3 + i) : pose, kit];
+    return [a, y, moving ? (phase === "back" ? left * Math.PI / 2 : -left * Math.PI / 2) : face, moving ? walkPose(walkPhase(Math.abs(y - mouth)) + i) : pose, kit, moving ? null : grips];
   });
-  const kits = [];
+  const kits = [], hubs = hubsOf(d);
   for (const kt of at.kits) {
-    // a kit goes with the figure nearest it (its carrier) – new wheels and guns out, old wheels and guns back
+    // a kit goes with its holder – new wheels, guns and jacks out, old wheels, guns and jacks back
     if ((phase === "ready" && kt.kind === "old") || (phase === "back" && kt.kind === "new")) continue;
-    let best = 0, bd = Infinity; at.figures.forEach(([a, b], i) => { const dd = (a - kt.a) ** 2 + (b - kt.b) ** 2; if (dd < bd) { bd = dd; best = i; } });
-    const [a0, b0] = at.figures[best], [a1, b1] = figures[best];
-    kits.push({ ...kt, a: kt.a + (a1 - a0), b: kt.b + (b1 - b0), h: kt.kind === "gun" ? 0.45 : 0.6 });
+    const i = kt.by ?? 0, [a0, b0] = at.figures[i], fig = figures[i], [a1, b1, face] = fig;
+    let K;
+    if (!moving) K = { ...kt, a: kt.a + (a1 - a0), b: kt.b + (b1 - b0) };
+    else if (kt.kind === "gun") K = { ...kt, a: a1 + Math.cos(face) * CARRY.gun[0], b: b1 + Math.sin(face) * CARRY.gun[0], h: CARRY.gun[1], yaw: face };
+    else if (kt.kind === "jack") { const t = JACKS.tiltUp, L = 0.42 + JACK.bar * Math.cos(t); K = { ...kt, a: a1 + Math.cos(face) * L, b: b1 + Math.sin(face) * L, yaw: face + Math.PI, tilt: t }; }
+    else K = { ...kt, a: a1 + Math.cos(face) * CARRY.wheel[0], b: b1 + Math.sin(face) * CARRY.wheel[0], h: CARRY.wheel[1], yaw: wrapPi(face - Math.PI / 2), flip: false };
+    kits.push(K);
+    if (moving) {
+      const hb = hubs.find((x) => x.axle === kt.axle) || hubs[0];
+      fig[5] = K.kind === "gun" ? gunGripsAB(K) : K.kind === "jack" ? jackGripsAB(K, face) : wheelGrips(K, hb.r, hb.w, a1, b1, face);
+    } else if (fig[5]) fig[5] = fig[5].map((g) => g && [g[0] + (a1 - a0), g[1] + (b1 - b0), ...g.slice(2)]);
   }
   return { figures, kits, car: null };
 }
 
 // ---------- the figures: jointed ----------
-// One person 1.78 m tall, from capsules and boxes on a skeleton – hips, knees, waist, shoulders, elbows – posed by
-// joint angles, so poses blend smoothly (a gunner kneeling down, a jack man pulling his lever) instead of jumping from
-// one shape to the next. Every body part is one instanced mesh for all the crews (a part per person in it): the fire
-// suit and the helmet's shell in the team's colour, the visor, belt, gloves and boots dark.
+// One person (body3d.js: 1.78 m, the segment lengths of Drillis & Contini as in Winter 2009), rigid parts on a
+// skeleton – hips, knees, ankles, the low back, neck, shoulders, elbows, wrists – posed by joint angles, so poses blend
+// smoothly (a gunner kneeling down, a jack man pulling his lever). Tapered limbs end in joint spheres (no gaps at a
+// bent knee or elbow); the bones never change length. Hands reach for what they hold (the wheel gun's grips, a tyre's
+// tread, the jack's handle, a flag's pole, the pit wall console) by a two-bone reach from the shoulder: the pose's arm
+// angles are only where the hands rest when they hold nothing. Standing figures stand on y = 0 (the lowest of their
+// soles and knees); seated ones sit at the pose's seat height with their feet on the floor.
+// Every body part is one instanced mesh for all the crews (a part per person in it): the overalls and the helmet's
+// shell in the team's colour, the visor, balaclava, gloves and shoes dark.
 // Angles (rad): th – thigh from straight down, + forward; sh – the shin's own angle from straight down (+ the foot
-// ahead of the knee); lean – the torso forward from upright; arm – per arm [flex (from straight down, + forward),
-// spread (out to the side), elbow bend]. Index 0: the left leg / arm.
+// ahead of the knee); lean – the trunk forward from upright; arm – per arm [flex (from straight down, + forward),
+// spread (out to the side), elbow bend]. Index 0: the leg / arm on the figure's +z side. Optional: seat (the hips'
+// height, sitting) with feet [x, x] (the ankles' distance ahead, the soles at footY – the floor or a footrest), head
+// (the head's pitch).
 export const POSES = {
-  stand: { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.03, arm: [[0.15, 0.08, 0.2], [0.15, 0.08, 0.2]] },
-  ready: { th: [0.55, 0.55], sh: [-0.35, -0.35], lean: 0.45, arm: [[1.0, 0.15, 0.4], [1.0, 0.15, 0.4]] },
-  reach: { th: [1.0, 0.55], sh: [-0.2, -0.65], lean: 0.85, arm: [[1.35, 0.25, 0.15], [1.35, 0.25, 0.15]] },
-  kneel: { th: [1.45, 0.08], sh: [0.05, -1.5], lean: 0.35, arm: [[1.35, 0.1, 0.35], [1.3, 0.12, 0.4]] },
-  signal: { th: [1.45, 0.08], sh: [0.05, -1.5], lean: 0.2, arm: [[1.35, 0.1, 0.35], [2.9, 0.15, 0.1]] },
-  carry: { th: [0.2, 0.2], sh: [-0.15, -0.15], lean: 0.15, arm: [[0.75, 0.35, 0.9], [0.75, 0.35, 0.9]] },
-  jack: { th: [0.45, -0.1], sh: [0.1, -0.4], lean: 0.6, arm: [[1.2, 0.16, 0.2], [1.2, 0.16, 0.2]] },
-  jackDown: { th: [0.75, 0.05], sh: [-0.05, -0.55], lean: 0.95, arm: [[1.55, 0.16, 0.05], [1.55, 0.16, 0.05]] },
+  stand: { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.03, arm: [[0.12, 0.1, 0.2], [0.12, 0.1, 0.2]] },
+  ready: { th: [0.95, 0.95], sh: [-0.75, -0.75], lean: 0.55, arm: [[0.9, 0.18, 0.5], [0.9, 0.18, 0.5]] },
+  reach: { th: [1.25, 0.8], sh: [-0.55, -1.05], lean: 0.95, arm: [[1.35, 0.25, 0.15], [1.35, 0.25, 0.15]] },
+  // (the gunner: down on the knee on the car's side away from the gun – both hands on it; F1 media photos 2024–25)
+  kneel: { th: [1.4, 0.15], sh: [0.05, -1.45], lean: 0.75, arm: [[1.3, 0.12, 0.35], [1.25, 0.14, 0.4]] },
+  signal: { th: [1.4, 0.15], sh: [0.05, -1.45], lean: 0.35, arm: [[1.3, 0.12, 0.35], [2.95, 0.15, 0.1]] },
+  carry: { th: [0.3, 0.3], sh: [-0.25, -0.25], lean: 0.3, arm: [[0.6, 0.3, 0.9], [0.6, 0.3, 0.9]] },
+  jack: { th: [0.6, 0.0], sh: [-0.4, -0.3], lean: 0.7, arm: [[1.0, 0.16, 0.3], [1.0, 0.16, 0.3]] },
+  jackDown: { th: [1.25, 0.5], sh: [-0.75, -1.3], lean: 0.62, arm: [[1.3, 0.16, 0.1], [1.3, 0.16, 0.1]] },
 };
-// A step of a walk at phase ph (rad): the legs swinging opposite, the knee bent on the swinging leg, the arms opposite
+// A walk: the planted foot slides back under the hips at an even speed while the other swings ahead (the knee bending
+// it clear of the ground) – a step of WALK.step m each half cycle, so a figure that moves d metres is walkPhase(d)
+// into its cycle and its planted foot stays where it was put down (no skating). Step ~0.4 × stature (an ordinary
+// walking step; M).
+export const WALK = { step: 0.72, lift: 0.07, bend: 0.035 };
+export const walkPhase = (dist) => (dist * Math.PI) / WALK.step;
+const _m = [0, 0, 0], _e = [0, 0, 0], _o = [0, 0, 0];
 export function walkPose(ph) {
-  const sw = Math.sin(ph), lg = [0.32 * sw, -0.32 * sw], bend = [0.2 + 0.45 * Math.max(0, -Math.cos(ph)), 0.2 + 0.45 * Math.max(0, Math.cos(ph))];
-  return { th: lg, sh: [lg[0] - bend[0], lg[1] - bend[1]], lean: 0.08, arm: [[-0.3 * sw, 0.08, 0.3], [0.3 * sw, 0.08, 0.3]] };
+  const s = WALK.step / 2, Lx = BODY.thigh + BODY.shank - 0.008, th = [0, 0], sh = [0, 0], X = [0, 0], Y = [0, 0];
+  let stanceX = 0;
+  for (let i = 0; i < 2; i++) {
+    const u = (((ph / (2 * Math.PI) + i * 0.5) % 1) + 1) % 1;
+    if (u < 0.5) { X[i] = s * (1 - 4 * u); stanceX = X[i]; }            // planted: from ahead to behind, evenly
+    else { const v = (u - 0.5) * 2, e = v * v * (3 - 2 * v); X[i] = -s + 2 * s * e; Y[i] = WALK.lift * Math.sin(Math.PI * v); }
+  }
+  // (the hips as high as the planted leg allows – lowest with the feet apart: the walk's natural rise and fall)
+  const legH = Math.min(BODY.thigh + BODY.shank - WALK.bend, Math.sqrt(Lx * Lx - stanceX * stanceX));
+  for (let i = 0; i < 2; i++) {
+    reach2(_o, [X[i], -legH + Y[i], 0], BODY.thigh, BODY.shank, [1, 0, 0], _m, _e);
+    th[i] = Math.atan2(_m[0], -_m[1]); sh[i] = Math.atan2(_e[0] - _m[0], -(_e[1] - _m[1]));
+  }
+  const sw = Math.sin(ph);
+  return { th, sh, lean: 0.08, arm: [[0.32 * sw, 0.1, 0.35], [-0.32 * sw, 0.1, 0.35]] };
 }
 POSES.walk = walkPose(0);
 const poseOf = (p) => (typeof p === "string" ? POSES[p] || POSES.stand : p || POSES.stand);
 export function blendPose(a, b, k) {
   const A = poseOf(a), B = poseOf(b); k = clamp01(k);
   if (k <= 0) return A; if (k >= 1) return B;
-  return { th: [lerp(A.th[0], B.th[0], k), lerp(A.th[1], B.th[1], k)], sh: [lerp(A.sh[0], B.sh[0], k), lerp(A.sh[1], B.sh[1], k)], lean: lerp(A.lean, B.lean, k),
+  const out = { th: [lerp(A.th[0], B.th[0], k), lerp(A.th[1], B.th[1], k)], sh: [lerp(A.sh[0], B.sh[0], k), lerp(A.sh[1], B.sh[1], k)], lean: lerp(A.lean, B.lean, k),
     arm: [0, 1].map((i) => [0, 1, 2].map((j) => lerp(A.arm[i][j], B.arm[i][j], k))) };
+  if (A.seat != null && B.seat != null) { out.seat = lerp(A.seat, B.seat, k); out.footY = lerp(A.footY || 0, B.footY || 0, k); out.feet = [lerp(A.feet[0], B.feet[0], k), lerp(A.feet[1], B.feet[1], k)]; }
+  return out;
 }
-const LIMB = { thigh: 0.44, shin: 0.43, uarm: 0.29, farm: 0.27, torso: 0.55 };
-// The body's parts for a pose, in the person's frame (x forward, y up, z across; standing on y = 0: the lower of each
-// leg's foot and knee on the ground): put(part, x, y, z, ax, ay, az) – the part's centre and, for a limb, its
-// direction (unit); for the others ay = null and ax their lean about z. Returns the hands' places [[x, y, z] × 2].
-export function skeleton(P, put) {
+// the limbs' lengths (constants: no pose stretches a bone)
+export const LIMB = { thigh: BODY.thigh, shin: BODY.shank, uarm: BODY.uarm, farm: BODY.farm, reach: BODY.farm + BODY.grip };
+const FOOT_ROM = [-1.05, 0.44];   // the foot's pitch from flat, relative to the shin's angle (ankle ~65°–150° to the shin)
+
+// The body's parts for a pose, in the person's frame (x forward, y up, z across), through
+//   put(part, x, y, z, yx, yy, yz, xx, xy, xz, s): the part's origin, its +y direction (a limb: from its near joint to
+//   its far one), its +x direction (null: any square to +y) and a scale (joint spheres: their radius; else null).
+// hands: [[x, y, z, w, ax, ay, az] | null × 2] – what each hand holds, in the person's frame: the point a closed fist
+// grips (w: 0 the pose's own arm, 1 on the point), the axis of the handle through the fist (optional).
+// Returns the hands' grip points [[x, y, z] × 2], with .joints (each joint's place, .short: how far a hand stayed
+// from its point, .ground: the lowest sole/knee) for the callers that hang things on a hand and for the tests.
+export function skeleton(P, put = null, hands = null) {
   P = poseOf(P);
-  let hip = 0;
-  for (let i = 0; i < 2; i++) { const dT = LIMB.thigh * Math.cos(P.th[i]), dS = LIMB.shin * Math.max(0, Math.cos(P.sh[i])); hip = Math.max(hip, dT + dS + 0.05, dT + 0.06); }
+  const B = BODY, K = { knee: [], ankle: [], foot: [], shoulder: [], elbow: [], wrist: [], grip: [], short: [0, 0] };
+  // legs: from each hip joint (at height 0 first), the knee and the ankle; the foot as flat as the ankle allows
+  let low = Infinity, hip = 0;
+  const seated = P.seat != null && P.feet;
   for (let i = 0; i < 2; i++) {
-    const z = (i ? -1 : 1) * 0.11, kx = Math.sin(P.th[i]) * LIMB.thigh, ky = hip - Math.cos(P.th[i]) * LIMB.thigh;
-    put("thigh", kx / 2, (hip + ky) / 2, z, Math.sin(P.th[i]), -Math.cos(P.th[i]), 0);
-    const fx = kx + Math.sin(P.sh[i]) * LIMB.shin, fy = ky - Math.cos(P.sh[i]) * LIMB.shin;
-    put("shin", (kx + fx) / 2, (ky + fy) / 2, z, Math.sin(P.sh[i]), -Math.cos(P.sh[i]), 0);
-    put("boot", fx + 0.06, Math.max(0.045, fy - 0.01), z, Math.max(-1.2, Math.min(0, P.sh[i] + 0.6)), null, null);
+    const z = (i ? -1 : 1) * B.hipZ;
+    let kx, ky, ax, ay;
+    if (seated) {
+      reach2([0, 0, 0], [P.feet[i], (P.footY || 0) + B.ankle - P.seat, 0], B.thigh, B.shank, [1, 0.6, 0], _m, _e);
+      kx = _m[0]; ky = _m[1]; ax = _e[0]; ay = _e[1];
+    } else {
+      kx = Math.sin(P.th[i]) * B.thigh; ky = -Math.cos(P.th[i]) * B.thigh;
+      ax = kx + Math.sin(P.sh[i]) * B.shank; ay = ky - Math.cos(P.sh[i]) * B.shank;
+    }
+    const shA = Math.atan2(ax - kx, -(ay - ky)), p = Math.max(shA + FOOT_ROM[0], Math.min(shA + FOOT_ROM[1], P.foot?.[i] ?? 0));
+    const c = Math.cos(p), s = Math.sin(p);
+    const toeY = ay + B.footFront * s - B.ankle * c, heelY = ay - B.footBack * s - B.ankle * c;
+    low = Math.min(low, toeY, heelY, ky - JOINT_R.knee);
+    K.knee.push([kx, ky, z]); K.ankle.push([ax, ay, z]); K.foot.push(p);
   }
-  const L = P.lean, T = LIMB.torso;
-  put("pelvis", 0, hip + 0.02, 0, 0, null, null);
-  put("torso", Math.sin(L) * (T / 2 + 0.06), hip + Math.cos(L) * (T / 2 + 0.06), 0, -L, null, null);
-  put("belt", Math.sin(L) * 0.1, hip + Math.cos(L) * 0.1, 0, -L, null, null);
-  const nx = Math.sin(L) * T, ny = hip + Math.cos(L) * T + 0.04;
-  put("neck", nx + 0.01, ny + 0.03, 0, -L * 0.5, null, null);
-  put("helmet", nx + 0.03, ny + 0.17, 0, 0, null, null);
-  put("visor", nx + 0.14, ny + 0.165, 0, 0, null, null);
-  const hands = [];
-  for (let i = 0; i < 2; i++) {
-    const side = i ? -1 : 1, [a, spread, elbow] = P.arm[i], sx = nx - 0.02, sy = ny - 0.05, sz = side * 0.21;
-    const ex = sx + Math.sin(a) * LIMB.uarm, ey = sy - Math.cos(a) * LIMB.uarm, ez = sz + side * spread * 0.25;
-    const ul = Math.hypot(ex - sx, ey - sy, ez - sz);
-    put("uarm", (sx + ex) / 2, (sy + ey) / 2, (sz + ez) / 2, (ex - sx) / ul, (ey - sy) / ul, (ez - sz) / ul);
-    const b = a + elbow, hx = ex + Math.sin(b) * LIMB.farm, hy = ey - Math.cos(b) * LIMB.farm;
-    put("farm", (ex + hx) / 2, (ey + hy) / 2, ez, Math.sin(b), -Math.cos(b), 0);
-    put("glove", hx, hy, ez, 0, null, null);
-    hands.push([hx, hy, ez]);
-  }
-  return hands;
-}
-// the parts: [geometry (centred; limbs along y), in the team's colour, small (left out far away), per person]
-function partGeometries() {
-  const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 3, 8);
-  return {
-    thigh: [cap(0.075, LIMB.thigh - 0.1), true, false, 2], shin: [cap(0.065, LIMB.shin - 0.1), true, false, 2], boot: [new THREE.BoxGeometry(0.26, 0.09, 0.11), false, true, 2],
-    // (the torso rounded – a capsule flattened front to back, broad at the shoulders; the pelvis across the hips)
-    torso: [cap(0.16, LIMB.torso - 0.3).scale(0.78, 1, 1.18), true, false, 1], pelvis: [cap(0.11, 0.12).rotateX(Math.PI / 2).scale(0.95, 1, 1), true, false, 1],
-    belt: [new THREE.CylinderGeometry(0.135, 0.135, 0.06, 14).scale(0.8, 1, 1.4), false, true, 1], neck: [new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8), true, false, 1],
-    helmet: [new THREE.SphereGeometry(0.13, 14, 10).scale(1.08, 1, 0.95), true, false, 1], visor: [new THREE.BoxGeometry(0.04, 0.06, 0.17), false, true, 1],
-    uarm: [cap(0.055, LIMB.uarm - 0.08), true, false, 2], farm: [cap(0.05, LIMB.farm - 0.08), true, false, 2], glove: [new THREE.SphereGeometry(0.055, 8, 6), false, true, 2],
+  hip = seated ? P.seat : -low;
+  for (let i = 0; i < 2; i++) { K.knee[i][1] += hip; K.ankle[i][1] += hip; }
+  K.hip = hip; K.ground = seated ? null : 0;
+  // trunk: the pelvis tips a third of the lean, the chest the whole lean; the head stays nearer upright (eyes ahead).
+  // A hand that can't reach its point bends the trunk a little further towards it (never past 1.35 rad).
+  const shoulders = (L) => {
+    const pl = L * 0.35, lx = Math.sin(pl) * B.lumbar, ly = hip + Math.cos(pl) * B.lumbar, cx = Math.sin(L), cy = Math.cos(L);
+    return { L, pl, lx, ly, cx, cy, S: [0, 1].map((i) => [lx + cx * B.chestShoulder - 0.012 * cy, ly + cy * B.chestShoulder + 0.012 * cx, (i ? -1 : 1) * B.shoulderZ]) };
   };
+  let T = shoulders(P.lean);
+  if (hands) {
+    const miss = (tt) => { let m = 0; for (let i = 0; i < 2; i++) { const h = hands[i]; if (h && (h[3] ?? 1) >= 0.5) m = Math.max(m, Math.hypot(h[0] - tt.S[i][0], h[1] - tt.S[i][1], h[2] - tt.S[i][2]) - (B.uarm + LIMB.reach - 0.01)); } return m; };
+    for (let k = 0, m = miss(T); m > 0 && k < 8 && T.L < 1.35; k++) { const n = shoulders(T.L + 0.08), mn = miss(n); if (mn >= m) break; T = n; m = mn; }
+  }
+  const { L, pl, lx, ly, cx, cy } = T;
+  K.lean = L; K.lumbar = [lx, ly, 0];
+  const Q = put || (() => {});
+  Q("pelvis", lx, ly, 0, Math.sin(pl), Math.cos(pl), 0, Math.cos(pl), -Math.sin(pl), 0, null);
+  Q("belt", lx, ly, 0, Math.sin(pl), Math.cos(pl), 0, Math.cos(pl), -Math.sin(pl), 0, null);
+  Q("chest", lx, ly, 0, cx, cy, 0, cy, -cx, 0, null);
+  const nx = lx + cx * B.neck, ny = ly + cy * B.neck, hp = P.head ?? L * 0.3, hx = Math.sin(hp), hy = Math.cos(hp);
+  Q("neck", lx + cx * (B.neck - 0.085), ly + cy * (B.neck - 0.085), 0, cx * 0.5 + hx * 0.5, cy * 0.5 + hy * 0.5, 0, null, null, null, null);
+  const hcx = nx + hx * B.headC + hy * 0.012, hcy = ny + hy * B.headC - hx * 0.012;
+  K.head = [hcx, hcy, 0];
+  for (const part of ["head", "visor", "hair"]) Q(part, hcx, hcy, 0, hx, hy, 0, hy, -hx, 0, null);
+  // legs drawn: thigh from the hip joint, shin from the knee, the knee's sphere, the shoe from the ankle
+  for (let i = 0; i < 2; i++) {
+    const z = (i ? -1 : 1) * B.hipZ, [kx, ky] = K.knee[i], [ax, ay] = K.ankle[i], p = K.foot[i];
+    Q("thigh", 0, hip, z, kx / B.thigh, (ky - hip) / B.thigh, 0, null, null, null, null);
+    Q("knee", kx, ky, z, 0, 1, 0, null, null, null, JOINT_R.knee);
+    Q("shin", kx, ky, z, (ax - kx) / B.shank, (ay - ky) / B.shank, 0, null, null, null, null);
+    Q("boot", ax, ay, z, -Math.sin(p), Math.cos(p), 0, Math.cos(p), Math.sin(p), 0, null);
+  }
+  // arms: the pose's angles, or a reach to what the hand holds (the elbow bent down and out)
+  const out = [];
+  for (let i = 0; i < 2; i++) {
+    const side = i ? -1 : 1, [a, sp, el] = P.arm[i], S = T.S[i], cs = Math.cos(sp), ss_ = Math.sin(sp);
+    const E = [S[0] + Math.sin(a) * cs * B.uarm, S[1] - Math.cos(a) * cs * B.uarm, S[2] + side * ss_ * B.uarm];
+    const b = a + el, G = [E[0] + Math.sin(b) * cs * LIMB.reach, E[1] - Math.cos(b) * cs * LIMB.reach, E[2] + side * ss_ * LIMB.reach];
+    const h = hands?.[i];
+    if (h && (h[3] ?? 1) > 0) {
+      const w = clamp01(h[3] ?? 1), tg = [lerp(G[0], h[0], w), lerp(G[1], h[1], w), lerp(G[2], h[2], w)];
+      // (the elbow's way: down and out, back a little; for a hand above the shoulder, out to the side)
+      const up = tg[1] > S[1] + 0.1, pole = up ? [-0.3, -0.2, side] : [-0.25, -1, side * 0.75];
+      K.short[i] = reach2(S, tg, B.uarm, LIMB.reach, pole, E, G) * (w >= 0.999 ? 1 : 0);
+    }
+    const dx = G[0] - E[0], dy = G[1] - E[1], dz = G[2] - E[2], dl = Math.hypot(dx, dy, dz) || 1, fx = dx / dl, fy = dy / dl, fz = dz / dl;
+    const W = [E[0] + fx * B.farm, E[1] + fy * B.farm, E[2] + fz * B.farm];
+    const ux = E[0] - S[0], uy = E[1] - S[1], uz = E[2] - S[2], ul = Math.hypot(ux, uy, uz) || 1;
+    Q("shoulder", S[0], S[1], S[2], 0, 1, 0, null, null, null, JOINT_R.shoulder);
+    Q("uarm", S[0], S[1], S[2], ux / ul, uy / ul, uz / ul, null, null, null, null);
+    Q("elbow", E[0], E[1], E[2], 0, 1, 0, null, null, null, JOINT_R.elbow);
+    Q("farm", E[0], E[1], E[2], fx, fy, fz, null, null, null, null);
+    // the fist: its handle's axis – what it holds, else across the body for a hand ahead of it, else ahead (a hanging
+    // arm's knuckles face forward)
+    let gx = h?.[4] ?? 0, gy = h?.[5] ?? 0, gz = h?.[6] ?? (fx > 0.6 ? side : 0);
+    if (h?.[4] == null && !(fx > 0.6)) gx = 1;
+    Q("glove", W[0], W[1], W[2], fx, fy, fz, gx, gy, gz, null);
+    K.shoulder.push(S); K.elbow.push(E); K.wrist.push(W); K.grip.push(G);
+    out.push(G);
+  }
+  out.joints = K;
+  return out;
+}
+// A held flag's pole (marshals, the rear-of-grid official): the fist round it, the pole along the forearm tipped up a
+// little (the wrist cocked), the hand a hand's breadth above the pole's end – in the person's frame
+export function flagHold(pose, i = 1) {
+  const j = skeleton(pose).joints, G = j.grip[i], E = j.elbow[i];
+  let ax = G[0] - E[0], ay = G[1] - E[1] + 0.35 * LIMB.reach, az = G[2] - E[2]; const l = Math.hypot(ax, ay, az) || 1;
+  return { at: G, axis: [ax / l, ay / l, az / l] };
+}
+// a marshal's or official's flag: waving (w: −1…1 the arm's swing, from the session's time) or held still
+export const flagPose = (w, still = false) => (still ? { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.02, arm: [[0.12, 0.12, 0.25], [0.12, 0.12, 0.25]] }
+  : { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.04, arm: [[0.12, 0.1, 0.25], [2.45 + 0.42 * w, 0.32, 0.25 - 0.1 * w]] });
+
+// the parts: [geometry (from its joint, limbs along +y), in the team's colour, small (left out far away), per person]
+function partGeometries() {
+  const ring = new THREE.CylinderGeometry(0.15, 0.15, 0.05, 16, 1, true).scale(0.72, 1, 1.02);
+  return {
+    pelvis: [pelvisGeometry(), true, false, 1], chest: [chestGeometry(), true, false, 1], belt: [ring, false, true, 1],
+    neck: [limbGeometry(0.13, 0.058, 0.054, 0, 0.5, 1, 10, 2), false, false, 1],
+    head: [helmetGeometry(), true, false, 1], visor: [visorGeometry(), false, true, 1],
+    thigh: [LIMB_GEO.thigh(), true, false, 2], shin: [LIMB_GEO.shin(), true, false, 2], uarm: [LIMB_GEO.uarm(), true, false, 2], farm: [LIMB_GEO.farm(), true, false, 2],
+    joint: [new THREE.SphereGeometry(1, 8, 6), true, true, 6], boot: [shoeGeometry(), false, true, 2],
+    gloveFine: [fistGeometry(true), false, true, 2], gloveMid: [fistGeometry(false), false, true, 2],
+    farBody: [farBodyGeometry(), true, false, 1],
+  };
+}
+// A whole figure standing, in one coarse geometry (~300 triangles): what stands for a person far away (CREW_LOD.body)
+function farBodyGeometry() {
+  const lo = { pelvis: trunkGeometry([[-0.2, 0.06], [-0.11, 0.15], [0, 0.13], [0.06, 0.11]], 0.64, 6), chest: trunkGeometry([[-0.04, 0.12], [0.2, 0.15], [0.33, 0.16], [0.42, 0.11], [0.45, 0.03]], 0.68, 6),
+    head: new THREE.SphereGeometry(1, 6, 4).scale(0.15, 0.15, 0.13), thigh: limbGeometry(BODY.thigh, 0.075, 0.055, 0, 0.3, 1, 5, 1), shin: limbGeometry(BODY.shank, 0.055, 0.04, 0, 0.3, 1, 5, 1),
+    uarm: limbGeometry(BODY.uarm, 0.05, 0.042, 0, 0.3, 1, 5, 1), farm: limbGeometry(BODY.farm + 0.06, 0.042, 0.035, 0, 0.3, 1, 5, 1), boot: new THREE.BoxGeometry(0.27, 0.07, 0.1).translate(0.07, -0.035, 0) };
+  const out = [], m = new THREE.Matrix4();
+  skeleton("stand", (part, x, y, z, yx, yy, yz, xx, xy, xz) => {
+    const g = lo[part]; if (!g) return;
+    partMatrix(m, new THREE.Matrix4(), x, y, z, yx, yy, yz, xx, xy, xz, null);
+    out.push(g.clone().applyMatrix4(m));
+  });
+  for (const g of Object.values(lo)) g.dispose();
+  return mergeSimple(out);
 }
 // geometries [[geometry, rgb]] into one, its vertex colours from each part's
 function mergeGeo(gs) {
@@ -262,12 +441,32 @@ function mergeGeo(gs) {
   const m = new THREE.BufferGeometry(); m.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); m.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); m.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   m.computeBoundingSphere(); return m;
 }
-// the kit: a wheel gun (its socket at the origin, the body behind it along −x, a grip), a jack (its bar and the head)
+// The kit. A wheel gun: its socket at the origin (on the wheel nut), the body behind it along −x, a pistol grip under
+// its back end (the trigger hand) and a handle over its front (the other hand), the air hose out of the back – the
+// usual shape of the guns teams use (team videos, 2024–25: a two-handed gun; sizes estimated, M). A jack: its base
+// (the head that lifts the car and the wheels it rolls on) at the origin, and its lever – from the pivot up along +x
+// to a T handle, turned by its tilt (the man at the handle pulls it down to lift the car).
+export const GUN = { rear: [-0.29, -0.1, 0], rearAxis: [0.25, 1, 0], front: [-0.13, 0.105, 0], frontAxis: [1, 0, 0] };
+export const JACK = { pivot: 0.075, bar: 1.05, half: 0.13 };
 function kitParts() {
-  const grey = [0.55, 0.58, 0.6], dark = [0.1, 0.1, 0.11];
-  const gun = mergeGeo([[new THREE.CylinderGeometry(0.05, 0.05, 0.26, 10).rotateZ(Math.PI / 2).translate(-0.16, 0, 0), grey], [new THREE.CylinderGeometry(0.035, 0.035, 0.06, 8).rotateZ(Math.PI / 2).translate(0, 0, 0), dark], [new THREE.BoxGeometry(0.05, 0.16, 0.05).translate(-0.22, -0.08, 0), dark]]);
-  const jack = mergeGeo([[new THREE.CylinderGeometry(0.025, 0.025, 1.3, 8).rotateZ(Math.PI / 2 - 0.5).translate(0.55, 0.32, 0), grey], [new THREE.BoxGeometry(0.22, 0.12, 0.5).translate(1.05, 0.12, 0), grey], [new THREE.CylinderGeometry(0.06, 0.06, 0.05, 10).rotateX(Math.PI / 2).translate(0.95, 0.06, 0.2), dark], [new THREE.CylinderGeometry(0.06, 0.06, 0.05, 10).rotateX(Math.PI / 2).translate(0.95, 0.06, -0.2), dark]]);
-  return { gun, jack };
+  const grey = [0.55, 0.58, 0.6], dark = [0.1, 0.1, 0.11], steel = [0.72, 0.74, 0.76];
+  const gun = mergeGeo([
+    [new THREE.CylinderGeometry(0.052, 0.056, 0.25, 14).rotateZ(Math.PI / 2).translate(-0.175, 0, 0), grey],
+    [new THREE.CylinderGeometry(0.028, 0.034, 0.06, 10).rotateZ(Math.PI / 2).translate(-0.025, 0, 0), dark],     // the socket
+    [new THREE.BoxGeometry(0.045, 0.14, 0.04).rotateZ(0.25).translate(-0.285, -0.095, 0), dark],                 // the pistol grip
+    [new THREE.CylinderGeometry(0.014, 0.014, 0.14, 8).rotateZ(Math.PI / 2).translate(-0.13, 0.105, 0), dark],   // the front handle's bar
+    [new THREE.BoxGeometry(0.018, 0.06, 0.018).translate(-0.07, 0.075, 0), dark], [new THREE.BoxGeometry(0.018, 0.06, 0.018).translate(-0.19, 0.075, 0), dark],
+    [new THREE.CylinderGeometry(0.014, 0.014, 0.22, 6).rotateZ(Math.PI / 2 - 0.5).translate(-0.38, -0.05, 0), dark],   // the hose's start
+  ]);
+  const base = mergeGeo([
+    [new THREE.BoxGeometry(0.2, 0.08, 0.36).translate(-0.04, 0.06, 0), grey], [new THREE.BoxGeometry(0.12, 0.04, 0.3).translate(-0.12, 0.11, 0), dark],   // the lifting head
+    [new THREE.CylinderGeometry(0.045, 0.045, 0.04, 12).rotateX(Math.PI / 2).translate(0, 0.045, 0.2), dark], [new THREE.CylinderGeometry(0.045, 0.045, 0.04, 12).rotateX(Math.PI / 2).translate(0, 0.045, -0.2), dark],
+  ]);
+  const bar = mergeGeo([
+    [new THREE.CylinderGeometry(0.022, 0.026, JACK.bar, 10).rotateZ(-Math.PI / 2).translate(JACK.bar / 2, 0, 0), steel],
+    [new THREE.CylinderGeometry(0.018, 0.018, JACK.half * 2 + 0.06, 8).rotateX(Math.PI / 2).translate(JACK.bar, 0, 0), dark],   // the T handle
+  ]);
+  return { gun, base, bar };
 }
 // A wheel off the car, from the car's own parts (car3d.js wheelParts – cloned: those are shared): the tyre, the rim's
 // lip and its cover in one geometry (vertex colours); the sidewall band the car's own (the compound's colour per wheel)
@@ -280,35 +479,58 @@ let SHARED = null;
 function shared() {
   if (SHARED) return SHARED;
   const parts = partGeometries();
-  SHARED = { parts, kit: kitParts(), teamMat: new THREE.MeshStandardMaterial({ roughness: 0.65 }), darkMat: new THREE.MeshStandardMaterial({ color: "#16181b", roughness: 0.45 }),
+  SHARED = { parts, kit: kitParts(), teamMat: new THREE.MeshStandardMaterial({ roughness: 0.72 }), darkMat: new THREE.MeshStandardMaterial({ color: "#17191c", roughness: 0.6 }),
+    visorMat: new THREE.MeshStandardMaterial({ color: "#0b0d12", roughness: 0.08, metalness: 0.6 }),
     kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }), bandMat: sidewallMaterial(0xffffff) };
-  for (const x of [SHARED.teamMat, SHARED.darkMat, SHARED.kitMat, SHARED.bandMat]) x.userData.shared = true;
+  for (const x of [SHARED.teamMat, SHARED.darkMat, SHARED.visorMat, SHARED.kitMat, SHARED.bandMat]) x.userData.shared = true;
   for (const [g] of Object.values(parts)) g.userData.shared = true;
   for (const g of Object.values(SHARED.kit)) g.userData.shared = true;
   return SHARED;
 }
+// how a figure is drawn at its distance from the camera: near (fingers), mid (mittens), far (no small parts), beyond
+// `body` one coarse standing figure (its pose too small to see there)
+export const CREW_LOD = { near: 14, far: 90, body: 170 };
+// a part's world matrix from put()'s arguments, into m4 (the person's matrix mp applied)
+const _X = new THREE.Vector3(), _Y = new THREE.Vector3(), _Z = new THREE.Vector3(), _P = new THREE.Vector3(), _UP = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion();
+function partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s) {
+  _Y.set(yx, yy, yz).normalize();
+  if (xx != null) { _X.set(xx, xy, xz); _X.addScaledVector(_Y, -_X.dot(_Y)); }
+  if (xx == null || _X.lengthSq() < 1e-6) { _q.setFromUnitVectors(_UP, _Y); m4.makeRotationFromQuaternion(_q); }
+  else { _X.normalize(); _Z.crossVectors(_X, _Y); m4.makeBasis(_X, _Y, _Z); }
+  if (s != null) m4.scale(_P.set(s, s, s));
+  m4.setPosition(x, y, z);
+  return m4.premultiply(mp);
+}
 
 // Crews for up to `max` people: { group, wheels(parts), place(figures, loose, cam), clear() }.
 //   wheels(parts): the wheels' shape for this session's cars (car3d.js wheelParts; rebuilt when it changes)
-//   place([{ x, y, z, yaw, colour, pose, kit }], [{ kind, x, y, z, yaw, flip, band }], cam) – figures (pose: a name
-//   or a pose) and loose kit (kind "gun"; "front" / "rear": a wheel off a car, band its sidewall's colour). Over 90 m
-//   from cam the small parts (boots, belt, visor, gloves) are left out.
+//   place([{ x, y, z, yaw, colour, pose, kit, hands }], [{ kind, x, y, z, yaw, flip, band, tilt }], cam) – figures
+//   (pose: a name or a pose; hands: what each hand holds, in the figure's frame – crewAt) and loose kit (kind "gun";
+//   "jack" with its lever's tilt; "front" / "rear": a wheel off a car, band its sidewall's colour). Within
+//   CREW_LOD.near of cam the gloves have fingers; beyond CREW_LOD.far the small parts (shoes, belt, visor, gloves,
+//   joints) are left out.
 export function crewMeshes(max = 120) {
   const S = shared(), group = new THREE.Group(); group.name = "crews";
   const mk = (geo, mat, n, coloured) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.visible = false; m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; if (coloured) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3); group.add(m); return m; };
-  const body = {}; for (const [k, [g, team, small, per]] of Object.entries(S.parts)) body[k] = { mesh: mk(g, team ? S.teamMat : S.darkMat, max * per, team), team, small, cap: max * per };
-  const kit = { gun: mk(S.kit.gun, S.kitMat, max, false), frontJack: mk(S.kit.jack, S.kitMat, 16, false), rearJack: mk(S.kit.jack, S.kitMat, 16, false) };
-  const kitCap = { gun: max, frontJack: 16, rearJack: 16 };
+  const body = {}; for (const [k, [g, team, small, per]] of Object.entries(S.parts)) body[k] = { mesh: mk(g, team ? S.teamMat : k === "visor" ? S.visorMat : S.darkMat, max * per, team), team, small, cap: max * per };
+  const kit = { gun: mk(S.kit.gun, S.kitMat, max, false), jackBase: mk(S.kit.base, S.kitMat, 32, false), jackBar: mk(S.kit.bar, S.kitMat, 32, false) };
+  const kitCap = { gun: max, jackBase: 32, jackBar: 32 };
   let wheel = null;   // { key, front, rear, frontBand, rearBand }
-  const m4 = new THREE.Matrix4(), mp = new THREE.Matrix4(), q = new THREE.Quaternion(), qp = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), col = new THREE.Color(), dir = new THREE.Vector3(), zAxis = new THREE.Vector3(0, 0, 1);
-  const counts = {};
-  let far = false, colour = col;
+  const m4 = new THREE.Matrix4(), mp = new THREE.Matrix4(), mk4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
+  const counts = {}, alias = { knee: "joint", elbow: "joint", shoulder: "joint" };
+  let lod = "mid", colour = col;
   // a part at its place in the person's frame, into the world through the person's matrix (mp)
-  const put = (part, x, y, z, ax, ay, az) => {
-    const b = body[part]; if ((far && b.small) || counts[part] >= b.cap) return;
-    if (ay != null) { dir.set(ax, ay, az); qp.setFromUnitVectors(up, dir); } else qp.setFromAxisAngle(zAxis, ax || 0);
-    p.set(x, y, z); m4.compose(p, qp, one).premultiply(mp);
-    const i = counts[part]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, colour);
+  const put = (part, x, y, z, yx, yy, yz, xx, xy, xz, s) => {
+    const k = part === "glove" ? (lod === "near" ? "gloveFine" : "gloveMid") : alias[part] || part, b = body[k];
+    if (!b || (lod === "far" && b.small) || counts[k] >= b.cap) return;
+    partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
+    const i = counts[k]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, colour);
+  };
+  // a jack: its base where m4 says, the lever tilted up by tilt about its pivot
+  const putJack = (tilt) => {
+    if (counts.jack >= kitCap.jackBase) return;
+    const i = counts.jack++; kit.jackBase.setMatrixAt(i, m4);
+    mk4.makeRotationZ(tilt).setPosition(0, JACK.pivot, 0); kit.jackBar.setMatrixAt(i, mk4.premultiply(m4));
   };
   return {
     group,
@@ -320,20 +542,31 @@ export function crewMeshes(max = 120) {
     },
     place(list, loose = [], cam = null) {
       for (const k of Object.keys(body)) counts[k] = 0;
-      const n = { gun: 0, frontJack: 0, rearJack: 0, front: 0, rear: 0 };
+      counts.jack = 0;
+      const n = { gun: 0, front: 0, rear: 0 };
+      let people = 0;
       for (const f of list) {
-        if (counts.torso >= max) break;
-        far = !!cam && Math.hypot(f.x - cam.x, f.y - cam.y, f.z - cam.z) > 90;
+        if (people++ >= max) { people--; break; }
+        const d = cam ? Math.hypot(f.x - cam.x, f.y - cam.y, f.z - cam.z) : CREW_LOD.near + 1;
+        lod = d < CREW_LOD.near ? "near" : d > CREW_LOD.far ? "far" : "mid";
         colour = col.set(f.colour || "#9aa0a6");
         q.setFromAxisAngle(up, f.yaw); p.set(f.x, f.y, f.z); mp.compose(p, q, one);
-        const hands = skeleton(f.pose, put);
-        if (f.kit && kit[f.kit] && n[f.kit] < kitCap[f.kit]) {
-          // (a gun in the right hand, pointing ahead; a jack's bar from the hands down to its head on the ground)
-          if (f.kit === "gun") p.set(hands[1][0] + 0.12, hands[1][1], hands[1][2]); else p.set(0.2, 0, 0);
-          m4.compose(p, qp.identity(), one).premultiply(mp); kit[f.kit].setMatrixAt(n[f.kit]++, m4);
+        if (d > CREW_LOD.body) { put("farBody", 0, 0, 0, 0, 1, 0, 1, 0, 0, null); continue; }
+        // kit carried by the figure itself (walking out or standing ready, no stop played): held in front, the hands on it
+        let hands = f.hands || null;
+        if (f.kit === "gun" && !hands && n.gun < kitCap.gun) {
+          m4.makeTranslation(0.56, 0.95, -0.04).premultiply(mp); kit.gun.setMatrixAt(n.gun++, m4);
+          hands = gunGrips([0.56, 0.95, -0.04], 0);
+        } else if ((f.kit === "frontJack" || f.kit === "rearJack") && !hands) {
+          // (the jack ahead of its man, its lever towards him: the base turned round)
+          const t = 0.55, bx = 0.42 + JACK.bar * Math.cos(t);
+          m4.makeRotationY(Math.PI).setPosition(bx, 0, 0).premultiply(mp); putJack(t);
+          hands = jackGrips(bx, Math.PI, t);
         }
+        skeleton(f.pose, put, hands);
       }
       for (const k of loose) {
+        if (k.kind === "jack") { q.setFromAxisAngle(up, k.yaw); p.set(k.x, k.y, k.z); m4.compose(p, q, one); putJack(k.tilt ?? 0.5); continue; }
         q.setFromAxisAngle(up, k.yaw + (k.flip ? Math.PI : 0)); p.set(k.x, k.y, k.z); m4.compose(p, q, one);
         if (k.kind === "gun") { if (n.gun < kitCap.gun) kit.gun.setMatrixAt(n.gun++, m4); }
         else if (wheel && (k.kind === "front" || k.kind === "rear") && n[k.kind] < 64) {
@@ -342,80 +575,109 @@ export function crewMeshes(max = 120) {
         }
       }
       for (const [k, b] of Object.entries(body)) { b.mesh.count = counts[k]; b.mesh.visible = counts[k] > 0; b.mesh.instanceMatrix.needsUpdate = true; if (b.mesh.instanceColor) b.mesh.instanceColor.needsUpdate = true; }
-      for (const [k, mesh] of Object.entries(kit)) { mesh.count = n[k]; mesh.visible = n[k] > 0; mesh.instanceMatrix.needsUpdate = true; }
+      const kn = { gun: n.gun, jackBase: counts.jack, jackBar: counts.jack };
+      for (const [k, mesh] of Object.entries(kit)) { mesh.count = kn[k]; mesh.visible = kn[k] > 0; mesh.instanceMatrix.needsUpdate = true; }
       if (wheel) for (const k of ["front", "rear"]) for (const mesh of [wheel[k], wheel[k + "Band"]]) { mesh.count = n[k]; mesh.visible = n[k] > 0; mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; }
-      return { people: counts.torso, wheels: n.front + n.rear, guns: n.gun };
+      return { people, wheels: n.front + n.rear, guns: n.gun };
     },
     clear() { for (const m of group.children) { m.count = 0; m.visible = false; } },
   };
 }
+// the grips of a gun at [x, y, z] pointing along `yaw` (facing convention: 0 = +x) in the same frame – [rear, front]
+// as hands (index 0: the trigger hand on the pistol grip, 1: the front handle), w the weights
+function gunGrips(at, yaw, w0 = 1, w1 = 1) {
+  const c = Math.cos(yaw), s = Math.sin(yaw), tr = (v) => [at[0] + v[0] * c - v[2] * s, at[1] + v[1], at[2] + v[0] * s + v[2] * c], ax = (v) => [v[0] * c - v[2] * s, v[1], v[0] * s + v[2] * c];
+  return [[...tr(GUN.rear), w0, ...ax(GUN.rearAxis)], [...tr(GUN.front), w1, ...ax(GUN.frontAxis)]];
+}
+// the T handle's two ends of a jack whose base is at x (on the figure's axis) turned by yaw, its lever tilted t – as hands
+function jackGrips(bx, yaw, t) {
+  const hx = bx + Math.cos(yaw) * JACK.bar * Math.cos(t), hy = JACK.pivot + JACK.bar * Math.sin(t);
+  return [[hx, hy, JACK.half, 1, 0, 0, 1], [hx, hy, -JACK.half, 1, 0, 0, 1]];
+}
 
 // The figures in the world for a layout in the box's frame (where: x, y, z of the frame's origin – the car's, or the
 // box's place – and its heading yaw as the cars': forward = (sin yaw, cos yaw); its left = (cos yaw, −sin yaw)).
-// A figure's own facing: 0 looks along +x of its geometry; turned to face the layout's direction.
+// A figure's own facing f: 0 looks along +a; its forward in the box's frame is (cos f, sin f), its +z (right)
+// (sin f, −cos f). What its hands hold (layout's 6th: [[a, b, h, w, axis a, b, h] | null × 2]) into its own frame.
 export function crewAt(where, layout, colour) {
   const c = Math.cos(where.yaw), s = Math.sin(where.yaw);
-  return layout.map(([a, b, f, pose, kit]) => ({ x: where.x + s * a + c * b, y: where.y, z: where.z + c * a - s * b, yaw: where.yaw + f - Math.PI / 2, colour, pose, kit }));
+  return layout.map(([a, b, f, pose, kit, grips]) => {
+    const fig = { x: where.x + s * a + c * b, y: where.y, z: where.z + c * a - s * b, yaw: where.yaw + f - Math.PI / 2, colour, pose, kit };
+    if (grips) fig.hands = gripsToFigure(grips, a, b, f);
+    return fig;
+  });
 }
-// Loose kit in the world from the box's frame (as crewAt): guns, and wheels off the car (bands: { old, new } – the
-// sidewall colours of the old set's and the new set's compounds; null: not known)
+export function gripsToFigure(grips, a, b, f) {
+  const cf = Math.cos(f), sf = Math.sin(f);
+  return grips.map((g) => {
+    if (!g) return null;
+    const ra = g[0] - a, rb = g[1] - b, out = [ra * cf + rb * sf, g[2], ra * sf - rb * cf, g[3] ?? 1];
+    if (g[4] != null) out.push(g[4] * cf + g[5] * sf, g[6], g[4] * sf - g[5] * cf);
+    return out;
+  });
+}
+// Loose kit in the world from the box's frame (as crewAt): guns, jacks, and wheels off the car (bands: { old, new } –
+// the sidewall colours of the old set's and the new set's compounds; null: not known)
 export function kitAt(where, kits, bands = {}) {
   const c = Math.cos(where.yaw), s = Math.sin(where.yaw);
-  return kits.map((k) => ({ kind: k.kind === "gun" ? "gun" : k.axle, x: where.x + s * k.a + c * k.b, y: where.y + k.h, z: where.z + c * k.a - s * k.b,
-    yaw: k.kind === "gun" ? where.yaw + k.yaw - Math.PI / 2 : where.yaw + k.yaw, flip: !!k.flip, band: k.kind === "new" ? bands.new : k.kind === "old" ? bands.old : null }));
+  return kits.map((k) => ({ kind: k.kind === "gun" || k.kind === "jack" ? k.kind : k.axle, x: where.x + s * k.a + c * k.b, y: where.y + k.h, z: where.z + c * k.a - s * k.b,
+    yaw: k.kind === "gun" || k.kind === "jack" ? where.yaw + k.yaw - Math.PI / 2 : where.yaw + k.yaw, flip: !!k.flip, tilt: k.tilt, band: k.kind === "new" ? bands.new : k.kind === "old" ? bands.old : null }));
 }
 
 // ---------- the team's people on the pit wall ----------
 // Seated on stools at the stand's console, facing the track (the screens in front of them; from the garage one sees
-// their backs – formula1.com, "The insider's guide to the pit wall"), headsets on: the same skeleton as the crews (the
-// "sit" pose), dressed in the team's shirt, dark trousers and shoes, a bare head with a headset – no helmets.
+// their backs – formula1.com, "The insider's guide to the pit wall"), headsets on: the same skeleton as the crews
+// (the "sit" pose: on the stool – hips at the seat, feet on the deck –, the hands on the console where garages.js says
+// it is), dressed in the team's shirt, dark trousers and shoes, a bare head with hair and a headset – no helmets.
 // Static (a layer's people stand still until the layer is rebuilt): one instanced mesh per body part for all of them.
-POSES.sit = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.12, arm: [[0.95, 0.12, 0.65], [0.9, 0.14, 0.7]] };
-POSES.sitLean = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.32, arm: [[1.15, 0.1, 0.45], [1.1, 0.12, 0.5]] };
+// (seat: the stool's top 0.77 m over the deck – garages.js – plus ~9 cm from the seat to the hip joints, seated; the
+// soles on the footrest 0.31 m up, 0.16 m ahead; M)
+POSES.sit = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.12, arm: [[0.95, 0.12, 0.65], [0.9, 0.14, 0.7]], seat: 0.86, feet: [0.14, 0.11], footY: 0.312 };
+POSES.sitLean = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.3, arm: [[1.15, 0.1, 0.45], [1.1, 0.12, 0.5]], seat: 0.86, feet: [0.15, 0.1], footY: 0.312 };
 let PEOPLE = null;
 function peopleShared() {
   if (PEOPLE) return PEOPLE;
-  const S = shared(), cap = (r, l) => new THREE.CapsuleGeometry(r, l, 2, 6);
-  const head = new THREE.SphereGeometry(0.105, 10, 8).scale(1.05, 1.12, 0.92);
-  // the headset: a band over the head and a cup at each ear
-  const set = mergeGeo([[new THREE.TorusGeometry(0.115, 0.012, 4, 12, Math.PI).rotateY(Math.PI / 2).translate(0, 0.02, 0), [0.08, 0.08, 0.09]],
-    [new THREE.CylinderGeometry(0.045, 0.045, 0.03, 10).rotateX(Math.PI / 2).translate(0, -0.01, 0.115), [0.08, 0.08, 0.09]], [new THREE.CylinderGeometry(0.045, 0.045, 0.03, 10).rotateX(Math.PI / 2).translate(0, -0.01, -0.115), [0.08, 0.08, 0.09]]]);
+  const S = shared();
+  // the headset: a band over the head and a cup at each ear, a boom microphone (about the head's centre)
+  const k = [0.08, 0.08, 0.09];
+  const set = mergeGeo([[new THREE.TorusGeometry(0.118, 0.012, 4, 14, Math.PI).rotateY(Math.PI / 2).translate(0, 0.02, 0), k],
+    [new THREE.CylinderGeometry(0.045, 0.045, 0.03, 12).rotateX(Math.PI / 2).translate(0, -0.005, 0.088), k], [new THREE.CylinderGeometry(0.045, 0.045, 0.03, 12).rotateX(Math.PI / 2).translate(0, -0.005, -0.088), k],
+    [new THREE.CylinderGeometry(0.005, 0.005, 0.12, 5).rotateZ(Math.PI / 2 - 0.35).translate(0.06, -0.06, 0.09), k]]);
   PEOPLE = {
-    // part → [geometry, colour role: "shirt" | "legs" | "skin" | "dark", per person]
-    parts: { thigh: [cap(0.072, LIMB.thigh - 0.1), "legs"], shin: [cap(0.06, LIMB.shin - 0.1), "legs"], boot: [new THREE.BoxGeometry(0.25, 0.08, 0.1), "dark"],
-      pelvis: [S.parts.pelvis[0], "legs"], torso: [S.parts.torso[0], "shirt"], neck: [S.parts.neck[0], "skin"], helmet: [head, "skin"], visor: [set, "kit"],
-      uarm: [cap(0.052, LIMB.uarm - 0.08), "shirt"], farm: [cap(0.045, LIMB.farm - 0.08), "skin"], glove: [new THREE.SphereGeometry(0.045, 6, 5), "skin"] },
-    skin: ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"],
-    mat: new THREE.MeshStandardMaterial({ roughness: 0.7 }), kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }),
+    // part → [geometry, colour role: "shirt" | "legs" | "skin" | "hair" | "dark" | "kit", per person]
+    parts: { thigh: [S.parts.thigh[0], "legs", 2], shin: [S.parts.shin[0], "legs", 2], boot: [S.parts.boot[0], "dark", 2],
+      pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], visor: [set, "kit", 1],
+      uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveFine[0], "skin", 2],
+      shoulder: [S.parts.joint[0], "shirt", 2], elbow: [S.parts.joint[0], "skin", 2], knee: [S.parts.joint[0], "legs", 2] },
+    skin: ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"], hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
+    mat: new THREE.MeshStandardMaterial({ roughness: 0.75 }), kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }),
   };
   for (const [g] of Object.values(PEOPLE.parts)) g.userData.shared = true;
   PEOPLE.mat.userData.shared = true; PEOPLE.kitMat.userData.shared = true;
   return PEOPLE;
 }
-// people: [{ x, y, z, yaw (as crewAt's: the geometry's +x turned to face), shirt, pose, seed }] → a Group (its instanced
-// meshes own nothing shared: the geometries and materials are; disposeGroup leaves them)
+// people: [{ x, y, z, yaw (as crewAt's: the geometry's +x turned to face), shirt, pose, seed, hands (the figure's
+// frame) }] → a Group (its instanced meshes own nothing shared: the geometries and materials are; disposeGroup leaves them)
 export function peopleMeshes(people) {
   const P = peopleShared(), group = new THREE.Group(); group.name = "pitWallPeople";
   if (!people.length) return group;
-  const per = { thigh: 2, shin: 2, boot: 2, uarm: 2, farm: 2, glove: 2 }, meshes = {}, counts = {};
-  for (const [k, [g, role]] of Object.entries(P.parts)) {
-    const m = new THREE.InstancedMesh(g, role === "kit" ? P.kitMat : P.mat, people.length * (per[k] || 1)); m.count = 0; m.castShadow = true; m.receiveShadow = true;
+  const meshes = {}, counts = {};
+  for (const [k, [g, role, per]] of Object.entries(P.parts)) {
+    const m = new THREE.InstancedMesh(g, role === "kit" ? P.kitMat : P.mat, people.length * per); m.count = 0; m.castShadow = true; m.receiveShadow = true;
     if (role !== "kit") m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(m.instanceMatrix.count * 3), 3);
     meshes[k] = { m, role }; counts[k] = 0; group.add(m);
   }
-  const mp = new THREE.Matrix4(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), qp = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), z = new THREE.Vector3(0, 0, 1), dir = new THREE.Vector3();
-  const cShirt = new THREE.Color(), cLegs = new THREE.Color("#25282d"), cSkin = new THREE.Color(), cDark = new THREE.Color("#141518");
+  const mp = new THREE.Matrix4(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+  const cShirt = new THREE.Color(), cLegs = new THREE.Color("#25282d"), cSkin = new THREE.Color(), cHair = new THREE.Color(), cDark = new THREE.Color("#141518");
   for (const f of people) {
-    cShirt.set(f.shirt || "#9aa0a6"); cSkin.set(P.skin[(f.seed ?? 0) % P.skin.length]);
+    cShirt.set(f.shirt || "#9aa0a6"); cSkin.set(P.skin[(f.seed ?? 0) % P.skin.length]); cHair.set(P.hair[((f.seed ?? 0) >> 3) % P.hair.length]);
     q.setFromAxisAngle(up, f.yaw); p.set(f.x, f.y, f.z); mp.compose(p, q, one);
-    skeleton(f.pose || "sit", (part, x, y, zz, ax, ay, az) => {
+    skeleton(f.pose || "sit", (part, x, y, z, yx, yy, yz, xx, xy, xz, s) => {
       const e = meshes[part]; if (!e) return;
-      if (ay != null) { dir.set(ax, ay, az); qp.setFromUnitVectors(up, dir); } else qp.setFromAxisAngle(z, ax || 0);
-      p.set(x, part === "visor" ? y : y, zz); if (part === "visor") p.x -= 0.11;   // (the headset round the head, not at the visor's place)
-      m4.compose(p, qp, one).premultiply(mp);
+      partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
       const i = counts[part]++; e.m.setMatrixAt(i, m4);
-      if (e.role !== "kit") e.m.setColorAt(i, e.role === "shirt" ? cShirt : e.role === "legs" ? cLegs : e.role === "skin" ? cSkin : cDark);
-    });
+      if (e.role !== "kit") e.m.setColorAt(i, e.role === "shirt" ? cShirt : e.role === "legs" ? cLegs : e.role === "skin" ? cSkin : e.role === "hair" ? cHair : cDark);
+    }, f.hands || null);
   }
   for (const [k, e] of Object.entries(meshes)) { e.m.count = counts[k]; e.m.instanceMatrix.needsUpdate = true; if (e.m.instanceColor) e.m.instanceColor.needsUpdate = true; e.m.computeBoundingSphere(); }
   return group;
