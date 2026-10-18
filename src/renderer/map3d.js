@@ -1742,7 +1742,14 @@ function updateSupport(src, t) {
   const scId = models.sc || "neutralSc", medId = models.medical || "neutralMedical", tsec = t / 1000;
   // the safety car: on track (its feed's place, heading from its last half second) or parked at the pit exit
   const exitU = world.pitLane ? world.pitLane.exitU : null;
-  const parkedAt = (back) => { if (exitU == null) return null; const a = laneAt(Math.max(0, exitU - back)); return a; };
+  // (parked beside the lane's line at its end – the cars leaving the pits drive past, never through them: the side away
+  // from the track, 4 m off the line – an estimate of the spot)
+  const parkedAt = (back) => {
+    if (exitU == null) return null; const a = laneAt(Math.max(0, exitU - back)); if (!a) return null;
+    const l = Math.hypot(a.dx, a.dz) || 1, nx = a.dz / l, nz = -a.dx / l, d = (sg) => { const [q, dd] = world.grid.nearest(a.x + nx * 4 * sg, a.z + nz * 4 * sg, 2); return q ? dd : 99; };
+    const sg = d(1) >= d(-1) ? 1 : -1;
+    return { ...a, x: a.x + nx * 4 * sg, z: a.z + nz * 4 * sg };
+  };
   if (plan.sc?.mode === "track") {
     const p = toScene(plan.sc.pos, c0), q0 = (src.isLive ? src.supportAt(t - 500) : src.supportAt(t - 500))?.[plan.sc.num], q = q0 ? toScene(q0, c0) : null;
     placeSupportCar(SP, "sc", scId, { x: p.x, z: p.z, dx: q ? p.x - q.x : SP.scDir?.dx ?? 0, dz: q ? p.z - q.z : SP.scDir?.dz ?? 1 }, true, tsec);
@@ -3387,7 +3394,7 @@ window.Map3D = {
   // development: the support cars and the official as placed this frame
   support() { const SP = world?.support; if (!SP) return "null"; const pos = (k) => { const o = SP.cars[k]?.obj; return o?.visible ? o.position.toArray().map((v) => +v.toFixed(1)) : null; }; return JSON.stringify({ plan: SP.plan, models: SP.models, sc: pos("sc"), med: pos("med"), last: [...SP.starts.values()][0] || null, official: SP.officialShown || false, gridBack: SP.gridBack ? { x: +SP.gridBack.x.toFixed(1), z: +SP.gridBack.z.toFixed(1), f: [+SP.gridBack.f.x.toFixed(3), +SP.gridBack.f.z.toFixed(3)] } : null }); },
   // development: the marshal posts as placed, their flags now
-  marshals() { const M = world?.marshals; if (!M) return "null"; return JSON.stringify({ info: M.info, state: M.state, flags: [...M.flags].filter(([, f]) => f.group.visible).length, posts: M.posts.slice(0, 80).map((p) => [p.id, p.sector, +p.x.toFixed(1), +p.z.toFixed(1), p.estimated ? 1 : 0]) }); },
+  marshals() { const M = world?.marshals; if (!M) return "null"; return JSON.stringify({ info: M.info, state: M.state, flags: [...M.flags].filter(([, f]) => f.group.visible).length, posts: M.posts.slice(0, 80).map((p) => [p.id, p.sector, +p.x.toFixed(1), +p.z.toFixed(1), +groundY(p.x, p.z).toFixed(1)]) }); },
   // development: the harbour's yachts as laid out (per zone: count, lengths)
   harbour() { const H = world?.harbour; if (!H?.list) return JSON.stringify({ yachts: 0 }); const z = {}; for (const y of H.list) { const e = z[y.zone] || (z[y.zone] = { n: 0, L: [] }); e.n++; e.L.push(Math.round(y.L)); } return JSON.stringify({ yachts: H.list.length, seaY: +world.real.seaLevel.toFixed(2), zones: z, first: H.list.slice(0, 3).map((y) => [+y.x.toFixed(1), +y.z.toFixed(1)]) }); },
   pitCar(num) {
