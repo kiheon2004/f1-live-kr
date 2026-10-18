@@ -3799,7 +3799,7 @@ window.Map3D = {
   hitAt(x = 0, y = 0) {
     const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x, y), camera); rc.camera = camera;
     const name = (o) => { const out = []; let q = o; while (q && out.length < 3) { if (q.name) out.push(q.name); q = q.parent; } return out.join("<") || o.type; };
-    return JSON.stringify(rc.intersectObject(scene, true).filter((h) => !h.object.isSprite).slice(0, 5).map((h) => [name(h.object), +h.distance.toFixed(2), h.object.visible]));
+    return JSON.stringify(rc.intersectObject(scene, true).filter((h) => !h.object.isSprite).slice(0, 5).map((h) => [name(h.object), +h.distance.toFixed(2), h.object.visible, h.object.receiveShadow ? "rx" : "-", h.object.castShadow ? "cast" : "-", h.object.material?.type]));
   },
   // development: the pit lane across, along the garages (every `every`-th garage): its floor height, the ground's and
   // the track model's height out from the front (0, 4, 8, 12 m), how far the track's tarmac edge is, where the pit wall
@@ -4109,6 +4109,8 @@ window.Map3D = {
     if ("sky" in o) scene.background = o.sky ? (nightNow ? nightSky : daySky) : new THREE.Color(0x8fb3d6);
     if ("all" in o) world.group.visible = o.all;
     if ("labels" in o) for (const c of cars.values()) c.label.sp.visible = o.labels;
+    if ("shadowBias" in o) { sun.shadow.bias = o.shadowBias; refreshShadows(); }
+    if ("normalBias" in o) { sun.shadow.normalBias = o.normalBias; refreshShadows(); }
     if (o.shadowSize) { sun.shadow.mapSize.set(o.shadowSize, o.shadowSize); sun.shadow.map?.dispose(); sun.shadow.map = null; refreshShadows(); }
     if (o.shadowType) { renderer.shadowMap.type = THREE[o.shadowType]; scene.traverse((x) => { if (x.material) [].concat(x.material).forEach((m) => { m.needsUpdate = true; }); }); refreshShadows(); }
     return "ok";
@@ -4220,6 +4222,7 @@ window.Map3D = {
   },
   // development: the helicopter camera let go of the car (as after a pan) at p looking at t – the user's free view, whose
   // shadow area stays put (updateSun), unlike look()'s inspect camera
+  shadowInfo() { const sc = sun.shadow.camera; return JSON.stringify({ cast: sun.castShadow, enabled: renderer.shadowMap.enabled, key: shadowKey, map: sun.shadow.map ? [sun.shadow.map.width, sun.shadow.map.height] : null, cam: [sc.left, sc.right, sc.near, sc.far], sun: sun.position.toArray().map(Math.round), target: sun.target.position.toArray().map(Math.round), int: sun.shadow.intensity, bias: [sun.shadow.bias, sun.shadow.normalBias] }); },
   heliAt(px, py, pz, tx, ty, tz) { if (camMode !== "heli") setCam("heli"); heli.follow = false; controls.target.set(tx, ty, tz); camera.position.set(px, py, pz); controls.update(); return "ok"; },
   look(px, py, pz, tx, ty, tz, fov = 50) {
     setCam("heli"); controls.enabled = false; camMode = "inspect";
