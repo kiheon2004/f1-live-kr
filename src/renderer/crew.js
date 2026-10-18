@@ -68,8 +68,19 @@ export function crewLayout(phase, f, boxC, left = 1) {
 // on (0.75–1.1), done up (to 1.5), the gunner's arm up, the jacks drop (1.95–2.1), the car released. A wheel a few
 // hundredths of a second after another (four crews never move as one). A depiction of the usual sequence: the data has
 // only when the car stood and left, and – from the record – that a new set went on.
-export const CHANGE = { base: 2.3, lift: 0.07, liftF: [0.05, 0.3], liftR: [0.1, 0.35], drop: 1.95, dropFor: 0.15, gunIn: [0, 0.18],
-  off: [0.5, 0.85], away: [0.85, 1.25], on: [0.75, 1.1], back: [1.15, 1.5], signal: 1.5, wheelLag: [0, 0.05, 0.03, 0.08] };
+export const CHANGE = { base: 2.3, lift: 0.07, liftF: [0.05, 0.3], liftR: [0.25, 0.45], rearIn: [0, 0.24], drop: 1.95, dropFor: 0.15, gunIn: [0, 0.18],
+  off: [0.5, 0.85], away: [0.85, 1.25], on: [0.75, 1.1], back: [1.15, 1.5], signal: 1.5, wheelLag: [0, 0.05, 0.03, 0.08], lagMax: 0.1, nutMax: 0.06 };
+// Each stop's own small differences between its four wheels (no two stops' crews move alike, the same stop always the
+// same – a seek shows it again): from the car's number and when it stood (stopSeed), each wheel a little behind the
+// first (up to lagMax s) and its nut a little slower to do up (up to nutMax) – estimates (M: in stop videos the four
+// gunners' arms go up within about a tenth of a second of each other). Everything stays inside the stop's own timings:
+// the last wheel is done (back + lagMax + nutMax = 1.66 s at the usual pace) before the jacks drop (1.95).
+export function stopSeed(num, t0) { let h = 2166136261; for (const ch of `${num}:${Math.round((t0 || 0) / 1000)}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; }
+const unit = (seed, k) => { let h = Math.imul(seed ^ Math.imul(k + 1, 0x9e3779b1), 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+export function wheelTimes(seed, C = CHANGE) {
+  if (seed == null) return C.wheelLag.map((lag) => ({ lag, nut: 0 }));
+  return [0, 1, 2, 3].map((i) => ({ lag: unit(seed, i) * C.lagMax, nut: unit(seed, i + 4) * C.nutMax }));
+}
 
 // The stop's own clock: seconds into the work from seconds since the car stood (s), the plan's wait (a time penalty
 // served at the stop: nobody touches the car until it has run) and its known length (D, s; null unknown) – a stop known
@@ -135,17 +146,18 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   const { w, dropAt, down } = stopClock(plan, s, C), H = hubsOf(d), figures = [], kits = [];
   const liftF = C.lift * ss(C.liftF[0], C.liftF[1], w) * (1 - down), liftR = C.lift * ss(C.liftR[0], C.liftR[1], w) * (1 - down);
   const off = [false, false, false, false];
-  const standUp = ss(dropAt, dropAt + 0.3, s);
+  const standUp = ss(dropAt, dropAt + 0.3, s), WT = wheelTimes(plan.seed, C);
   H.forEach((h, i) => {
-    const t = w - C.wheelLag[i], sd = h.side, inward = sd > 0 ? -Math.PI / 2 : Math.PI / 2, hubH = h.r + (h.axle === "front" ? liftF : liftR), fb = Math.abs(h.face);
+    // (t: this wheel's own clock; tn: its nut's – done up a little later on some wheels)
+    const t = w - WT[i].lag, tn = t - WT[i].nut, sd = h.side, inward = sd > 0 ? -Math.PI / 2 : Math.PI / 2, hubH = h.r + (h.axle === "front" ? liftF : liftR), fb = Math.abs(h.face);
     // the gun: crouched ready just out from the wheel, kneels at it as the car stops, the gun on the hub until the nuts
     // are done up, the arm up, standing back once the jacks drop
     const gk = ss(C.gunIn[0], C.gunIn[1], t);
-    const gPose = standUp > 0 ? blendPose("signal", "ready", standUp) : t >= C.signal ? blendPose("kneel", "signal", ss(C.signal, C.signal + 0.15, t)) : blendPose("ready", "kneel", gk);
-    const sig = standUp > 0 ? 1 - standUp : t >= C.signal ? ss(C.signal, C.signal + 0.15, t) : 0;
+    const gPose = standUp > 0 ? blendPose("signal", "ready", standUp) : tn >= C.signal ? blendPose("kneel", "signal", ss(C.signal, C.signal + 0.15, tn)) : blendPose("ready", "kneel", gk);
+    const sig = standUp > 0 ? 1 - standUp : tn >= C.signal ? ss(C.signal, C.signal + 0.15, tn) : 0;
     const gi = figures.length, gFig = [h.a, sd * (fb + lerp(0.98, 0.62, gk) + 0.3 * standUp), inward, gPose, null, null];
     figures.push(gFig);
-    const gunOn = gk * (1 - ss(C.back[1] - 0.1, C.back[1] + 0.1, t));
+    const gunOn = gk * (1 - ss(C.back[1] - 0.1, C.back[1] + 0.1, tn));
     // (off the hub the gun is in front of him – at his waist crouched, lower kneeling, at his hips once he stands)
     const gOut = lerp(0.98, 0.62, gk) + 0.3 * standUp, gOffH = standUp > 0 ? lerp(0.5, 0.86, standUp) : lerp(0.62, 0.5, gk);
     const gun = { kind: "gun", a: h.a, b: sd * (fb + lerp(gOut - 0.5, 0.06, gunOn)), h: lerp(gOffH, hubH, gunOn), yaw: inward, flip: false, by: gi };
@@ -167,7 +179,7 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
       kits.push(k); oFig[5] = wheelGrips(k, h.r, h.w, oa, ob, oFace);
     } else if (reach > 0) oFig[5] = wheelGrips({ a: h.a, b: h.b, h: hubH, yaw: 0, flip }, h.r, h.w, oa, ob, oFace, reach);   // (reaching for it on the car)
     // the new wheel: held ready ahead of the gun, onto the hub from `on`, fitted at its end; its carrier steps back
-    const fit = ss(C.on[0], C.on[1], t), back = ss(C.back[0], C.back[1], t), nFace = inward - sd * 0.4;
+    const fit = ss(C.on[0], C.on[1], t), back = ss(C.back[0], C.back[1], tn), nFace = inward - sd * 0.4;
     // (stepping back: ahead of the wheel, except on the fast lane's side – the car leaves that way – where it's behind)
     const na = h.a + lerp(lerp(0.65, 0.3, fit), sd === -left ? -0.7 : 0.85, back), nb = sd * (fb + lerp(lerp(0.65, 0.4, fit), sd === -left ? 1.65 : 1.0, back));   // (and out past the old wheel's man)
     const ni = figures.length, nFig = [na, nb, nFace, back > 0 ? blendPose("reach", "stand", back) : blendPose("carry", "reach", fit), null, null];
@@ -250,16 +262,59 @@ export function changeWalk(phase, f, d, boxC, left = 1, C = CHANGE) {
 // spread (out to the side), elbow bend]. Index 0: the leg / arm on the figure's +z side. Optional: seat (the hips'
 // height, sitting) with feet [x, x] (the ankles' distance ahead, the soles at footY – the floor or a footrest), head
 // (the head's pitch).
+// Or planted (the crews' working poses): plant = { hip (the hip joints' height), ankle: [[x, y] × 2] (each ankle's place
+// under the hips: ahead, above the ground), foot: [pitch × 2] } – the legs reached to their ankles, so a pose says where
+// the feet and knees touch the ground and they stay there through a blend (v0.39 posed the working figures by angles
+// alone, the lowest point put on the ground: the kneeling gunner knelt 22 cm above it on one toe, the jack men's
+// front feet were 9–12 cm up). Written with stance() from where the soles and knees go.
+const FOOT_ROM = [-1.05, 0.44];   // the foot's pitch from flat, relative to the shin's angle (ankle ~65°–150° to the shin)
+const _sa = [0, 0, 0], _sb = [0, 0, 0];
+// a sole's lowest point (toe or heel) for an ankle at height ay with the foot at pitch p
+const soleLow = (ay, p) => Math.min(ay + BODY.footFront * Math.sin(p) - BODY.ankle * Math.cos(p), ay - BODY.footBack * Math.sin(p) - BODY.ankle * Math.cos(p));
+// the foot's pitch: as wanted, within the ankle's range for the shin from knee k to ankle a
+const footPitch = (k, a, want) => { const shA = Math.atan2(a[0] - k[0], -(a[1] - k[1])); return Math.max(shA + FOOT_ROM[0], Math.min(shA + FOOT_ROM[1], want)); };
+// a foot on the ground at x (the ankle's distance ahead of the hips) for hips at `hip`: the ankle's height that puts the
+// sole's lowest point on the ground with the foot as near the pitch wanted as the ankle allows (flat, or on its toes)
+function footOnGround(hip, x, want = 0) {
+  let ay = BODY.ankle, p = want;
+  for (let it = 0; it < 6; it++) {
+    reach2([0, hip, 0], [x, ay, 0], BODY.thigh, BODY.shank, [1, 0, 0], _sa, _sb);
+    p = footPitch(_sa, _sb, want); ay -= soleLow(ay, p);
+  }
+  return [x, ay, p];
+}
+// a knee on the ground at kx (ahead of the hips; its sphere touching), the shin back along the ground and the foot
+// stretched back on its toes' tip – how one kneels on a hard floor; the hips then at the thigh's length over the knee
+function kneeOnGround(kx) {
+  const ky = JOINT_R.knee, hip = ky + Math.sqrt(BODY.thigh ** 2 - kx * kx);
+  // (the shin's rise from the knee: the least that brings the toe's tip down to the ground, the foot pointed)
+  let lo = -0.2, hi = 0.8, a = 0, p = 0;
+  for (let it = 0; it < 30; it++) {
+    a = (lo + hi) / 2; const ax = kx - Math.cos(a) * BODY.shank, ay = ky + Math.sin(a) * BODY.shank; p = footPitch([kx, ky], [ax, ay], -3);
+    if (soleLow(ay, p) > 0) hi = a; else lo = a;
+  }
+  return { hip, leg: [kx - Math.cos(a) * BODY.shank, ky + Math.sin(a) * BODY.shank, p] };
+}
+// legs: per leg ["foot", x, pitch wanted] or ["knee", kx]; the hips' height from a kneeling leg, else `hip`
+export function stance(hip, legs, rest) {
+  const kn = legs.map((l) => (l[0] === "knee" ? kneeOnGround(l[1]) : null)), h = kn.find(Boolean)?.hip ?? hip;
+  const L = legs.map((l, i) => kn[i]?.leg || footOnGround(h, l[1], l[2] ?? 0));
+  return { ...rest, plant: { hip: h, ankle: L.map(([x, y]) => [x, y]), foot: L.map((l) => l[2]) } };
+}
 export const POSES = {
   stand: { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.03, arm: [[0.12, 0.1, 0.2], [0.12, 0.1, 0.2]] },
-  ready: { th: [0.95, 0.95], sh: [-0.75, -0.75], lean: 0.55, arm: [[0.9, 0.18, 0.5], [0.9, 0.18, 0.5]] },
-  reach: { th: [1.25, 0.8], sh: [-0.55, -1.05], lean: 0.95, arm: [[1.35, 0.25, 0.15], [1.35, 0.25, 0.15]] },
-  // (the gunner: down on the knee on the car's side away from the gun – both hands on it; F1 media photos 2024–25)
-  kneel: { th: [1.4, 0.15], sh: [0.05, -1.45], lean: 0.75, arm: [[1.3, 0.12, 0.35], [1.25, 0.14, 0.4]] },
-  signal: { th: [1.4, 0.15], sh: [0.05, -1.45], lean: 0.35, arm: [[1.3, 0.12, 0.35], [2.95, 0.15, 0.1]] },
-  carry: { th: [0.3, 0.3], sh: [-0.25, -0.25], lean: 0.3, arm: [[0.6, 0.3, 0.9], [0.6, 0.3, 0.9]] },
-  jack: { th: [0.6, 0.0], sh: [-0.4, -0.3], lean: 0.7, arm: [[1.0, 0.16, 0.3], [1.0, 0.16, 0.3]] },
-  jackDown: { th: [1.25, 0.5], sh: [-0.75, -1.3], lean: 0.62, arm: [[1.3, 0.16, 0.1], [1.3, 0.16, 0.1]] },
+  // (waiting crouched, on the balls of the feet – the ankle's range lifts the heels in so deep a crouch)
+  ready: stance(0.7, [["foot", 0.1], ["foot", 0.04]], { lean: 0.55, arm: [[0.9, 0.18, 0.5], [0.9, 0.18, 0.5]] }),
+  // (a lunge towards the wheel: the near foot ahead flat, the other back on its toes)
+  reach: stance(0.7, [["foot", 0.42], ["foot", -0.3, -0.6]], { lean: 0.95, arm: [[1.35, 0.25, 0.15], [1.35, 0.25, 0.15]] }),
+  // (the gunner: down on one knee – on the ground – the other foot flat ahead, both hands on the gun; F1 media photos
+  // 2024–25)
+  kneel: stance(0, [["foot", 0.42], ["knee", 0.1]], { lean: 0.75, arm: [[1.3, 0.12, 0.35], [1.25, 0.14, 0.4]] }),
+  signal: stance(0, [["foot", 0.42], ["knee", 0.1]], { lean: 0.35, arm: [[1.3, 0.12, 0.35], [2.95, 0.15, 0.1]] }),
+  carry: stance(0.86, [["foot", 0.08], ["foot", -0.02]], { lean: 0.3, arm: [[0.6, 0.3, 0.9], [0.6, 0.3, 0.9]] }),
+  // (the jack men: braced, a foot ahead, pulling the lever down to the deep lunge as the car goes up)
+  jack: stance(0.88, [["foot", 0.3], ["foot", -0.22]], { lean: 0.7, arm: [[1.0, 0.16, 0.3], [1.0, 0.16, 0.3]] }),
+  jackDown: stance(0.66, [["foot", 0.42], ["foot", -0.42, -0.7]], { lean: 0.62, arm: [[1.3, 0.16, 0.1], [1.3, 0.16, 0.1]] }),
 };
 // A walk: the planted foot slides back under the hips at an even speed while the other swings ahead (the knee bending
 // it clear of the ground) – a step of WALK.step m each half cycle, so a figure that moves d metres is walkPhase(d)
@@ -290,14 +345,31 @@ const poseOf = (p) => (typeof p === "string" ? POSES[p] || POSES.stand : p || PO
 export function blendPose(a, b, k) {
   const A = poseOf(a), B = poseOf(b); k = clamp01(k);
   if (k <= 0) return A; if (k >= 1) return B;
-  const out = { th: [lerp(A.th[0], B.th[0], k), lerp(A.th[1], B.th[1], k)], sh: [lerp(A.sh[0], B.sh[0], k), lerp(A.sh[1], B.sh[1], k)], lean: lerp(A.lean, B.lean, k),
-    arm: [0, 1].map((i) => [0, 1, 2].map((j) => lerp(A.arm[i][j], B.arm[i][j], k))) };
-  if (A.seat != null && B.seat != null) { out.seat = lerp(A.seat, B.seat, k); out.footY = lerp(A.footY || 0, B.footY || 0, k); out.feet = [lerp(A.feet[0], B.feet[0], k), lerp(A.feet[1], B.feet[1], k)]; }
+  const out = { lean: lerp(A.lean, B.lean, k), arm: [0, 1].map((i) => [0, 1, 2].map((j) => lerp(A.arm[i][j], B.arm[i][j], k))) };
+  if (A.th && B.th) { out.th = [lerp(A.th[0], B.th[0], k), lerp(A.th[1], B.th[1], k)]; out.sh = [lerp(A.sh[0], B.sh[0], k), lerp(A.sh[1], B.sh[1], k)]; }
+  if (A.head != null || B.head != null) out.head = lerp(A.head ?? A.lean * 0.3, B.head ?? B.lean * 0.3, k);
+  if (A.seat != null && B.seat != null) { out.th = out.th || A.th; out.sh = out.sh || A.sh; out.seat = lerp(A.seat, B.seat, k); out.footY = lerp(A.footY || 0, B.footY || 0, k); out.feet = [lerp(A.feet[0], B.feet[0], k), lerp(A.feet[1], B.feet[1], k)]; }
+  // (a planted pose with another: both as planted – the ankles' places blended, so a foot on the ground in both stays on
+  // it, and a knee goes down to the ground in one even move)
+  else if (A.plant || B.plant) {
+    const a = plantOf(A), b = plantOf(B);
+    out.plant = { hip: lerp(a.hip, b.hip, k), ankle: [0, 1].map((i) => [lerp(a.ankle[i][0], b.ankle[i][0], k), lerp(a.ankle[i][1], b.ankle[i][1], k)]), foot: [0, 1].map((i) => lerp(a.foot[i], b.foot[i], k)) };
+  }
   return out;
+}
+// a pose's legs as planted (angles: where they put the ankles and feet, the lowest point on the ground)
+function plantOf(P) {
+  if (P.plant) return P.plant;
+  const kn = [], an = [], ft = []; let low = Infinity;
+  for (let i = 0; i < 2; i++) {
+    const kx = Math.sin(P.th[i]) * BODY.thigh, ky = -Math.cos(P.th[i]) * BODY.thigh, ax = kx + Math.sin(P.sh[i]) * BODY.shank, ay = ky - Math.cos(P.sh[i]) * BODY.shank;
+    const p = footPitch([kx, ky], [ax, ay], P.foot?.[i] ?? 0);
+    low = Math.min(low, soleLow(ay, p), ky - JOINT_R.knee); kn.push(ky); an.push([ax, ay]); ft.push(p);
+  }
+  return { hip: -low, ankle: an.map(([x, y]) => [x, y - low]), foot: ft };
 }
 // the limbs' lengths (constants: no pose stretches a bone)
 export const LIMB = { thigh: BODY.thigh, shin: BODY.shank, uarm: BODY.uarm, farm: BODY.farm, reach: BODY.farm + BODY.grip };
-const FOOT_ROM = [-1.05, 0.44];   // the foot's pitch from flat, relative to the shin's angle (ankle ~65°–150° to the shin)
 
 // The body's parts for a pose, in the person's frame (x forward, y up, z across), through
 //   put(part, x, y, z, yx, yy, yz, xx, xy, xz, s): the part's origin, its +y direction (a limb: from its near joint to
@@ -311,24 +383,29 @@ export function skeleton(P, put = null, hands = null) {
   const B = BODY, K = { knee: [], ankle: [], foot: [], shoulder: [], elbow: [], wrist: [], grip: [], short: [0, 0] };
   // legs: from each hip joint (at height 0 first), the knee and the ankle; the foot as flat as the ankle allows
   let low = Infinity, hip = 0;
-  const seated = P.seat != null && P.feet;
+  const seated = P.seat != null && P.feet, PL = !seated && P.plant;
   for (let i = 0; i < 2; i++) {
     const z = (i ? -1 : 1) * B.hipZ;
     let kx, ky, ax, ay;
-    if (seated) {
+    if (PL) {
+      // (relative to the hips, as the other ways: put at the plant's height below)
+      reach2([0, 0, 0], [PL.ankle[i][0], PL.ankle[i][1] - PL.hip, 0], B.thigh, B.shank, [1, 0, 0], _m, _e);
+      kx = _m[0]; ky = _m[1]; ax = _e[0]; ay = _e[1];
+    } else if (seated) {
       reach2([0, 0, 0], [P.feet[i], (P.footY || 0) + B.ankle - P.seat, 0], B.thigh, B.shank, [1, 0.6, 0], _m, _e);
       kx = _m[0]; ky = _m[1]; ax = _e[0]; ay = _e[1];
     } else {
       kx = Math.sin(P.th[i]) * B.thigh; ky = -Math.cos(P.th[i]) * B.thigh;
       ax = kx + Math.sin(P.sh[i]) * B.shank; ay = ky - Math.cos(P.sh[i]) * B.shank;
     }
-    const shA = Math.atan2(ax - kx, -(ay - ky)), p = Math.max(shA + FOOT_ROM[0], Math.min(shA + FOOT_ROM[1], P.foot?.[i] ?? 0));
+    const p = footPitch([kx, ky], [ax, ay], PL ? PL.foot[i] : P.foot?.[i] ?? 0);
     const c = Math.cos(p), s = Math.sin(p);
     const toeY = ay + B.footFront * s - B.ankle * c, heelY = ay - B.footBack * s - B.ankle * c;
     low = Math.min(low, toeY, heelY, ky - JOINT_R.knee);
     K.knee.push([kx, ky, z]); K.ankle.push([ax, ay, z]); K.foot.push(p);
   }
-  hip = seated ? P.seat : -low;
+  // (planted: at the plant's height – lifted only if a blend would push a sole or knee into the ground)
+  hip = seated ? P.seat : PL ? Math.max(PL.hip, -low) : -low;
   for (let i = 0; i < 2; i++) { K.knee[i][1] += hip; K.ankle[i][1] += hip; }
   K.hip = hip; K.ground = seated ? null : 0;
   // trunk: the pelvis tips a third of the lean, the chest the whole lean; the head stays nearer upright (eyes ahead).
@@ -385,7 +462,8 @@ export function skeleton(P, put = null, hands = null) {
     // arm's knuckles face forward)
     let gx = h?.[4] ?? 0, gy = h?.[5] ?? 0, gz = h?.[6] ?? (fx > 0.6 ? side : 0);
     if (h?.[4] == null && !(fx > 0.6)) gx = 1;
-    Q("glove", W[0], W[1], W[2], fx, fy, fz, gx, gy, gz, null);
+    // (body3d's fist is a left hand: the right one – index 0, the +z side – is its mirror image, a part of its own)
+    Q(i ? "glove" : "gloveR", W[0], W[1], W[2], fx, fy, fz, gx, gy, gz, null);
     K.shoulder.push(S); K.elbow.push(E); K.wrist.push(W); K.grip.push(G);
     out.push(G);
   }
@@ -412,9 +490,19 @@ function partGeometries() {
     head: [helmetGeometry(), true, false, 1], visor: [visorGeometry(), false, true, 1],
     thigh: [LIMB_GEO.thigh(), true, false, 2], shin: [LIMB_GEO.shin(), true, false, 2], uarm: [LIMB_GEO.uarm(), true, false, 2], farm: [LIMB_GEO.farm(), true, false, 2],
     joint: [new THREE.SphereGeometry(1, 8, 6), true, true, 6], boot: [shoeGeometry(), false, true, 2],
-    gloveFine: [fistGeometry(true), false, true, 2], gloveMid: [fistGeometry(false), false, true, 2],
+    gloveFine: [fistGeometry(true), false, true, 1], gloveMid: [fistGeometry(false), false, true, 1],
+    gloveFineR: [mirrorX(fistGeometry(true)), false, true, 1], gloveMidR: [mirrorX(fistGeometry(false)), false, true, 1],
     farBody: [farBodyGeometry(), true, false, 1],
   };
+}
+// A geometry's mirror image across x (a right hand from a left one): the positions and normals mirrored, each
+// triangle's winding turned back (an instance matrix with a negative determinant would leave three.js culling the
+// wrong faces – it decides that per mesh, not per instance)
+export function mirrorX(g) {
+  const p = g.attributes.position.array, n = g.attributes.normal.array;
+  for (let i = 0; i < p.length; i += 3) { p[i] = -p[i]; n[i] = -n[i]; }
+  for (let i = 0; i < p.length; i += 9) for (const a of [p, n]) for (let k = 0; k < 3; k++) { const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t; }
+  g.computeBoundingSphere(); return g;
 }
 // A whole figure standing, in one coarse geometry (~300 triangles): what stands for a person far away (CREW_LOD.body)
 function farBodyGeometry() {
@@ -521,7 +609,7 @@ export function crewMeshes(max = 120) {
   let lod = "mid", colour = col;
   // a part at its place in the person's frame, into the world through the person's matrix (mp)
   const put = (part, x, y, z, yx, yy, yz, xx, xy, xz, s) => {
-    const k = part === "glove" ? (lod === "near" ? "gloveFine" : "gloveMid") : alias[part] || part, b = body[k];
+    const k = part === "glove" ? (lod === "near" ? "gloveFine" : "gloveMid") : part === "gloveR" ? (lod === "near" ? "gloveFineR" : "gloveMidR") : alias[part] || part, b = body[k];
     if (!b || (lod === "far" && b.small) || counts[k] >= b.cap) return;
     partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
     const i = counts[k]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, colour);
@@ -647,7 +735,7 @@ function peopleShared() {
     // part → [geometry, colour role: "shirt" | "legs" | "skin" | "hair" | "dark" | "kit", per person]
     parts: { thigh: [S.parts.thigh[0], "legs", 2], shin: [S.parts.shin[0], "legs", 2], boot: [S.parts.boot[0], "dark", 2],
       pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], visor: [set, "kit", 1],
-      uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveMid[0], "skin", 2],   // (mittens: fingers on 67 seated people behind the consoles were ~240k triangles drawn from anywhere – v0.39 perf)
+      uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveMid[0], "skin", 1], gloveR: [S.parts.gloveMidR[0], "skin", 1],   // (mittens: fingers on 67 seated people behind the consoles were ~240k triangles drawn from anywhere – v0.39 perf)
       shoulder: [S.parts.joint[0], "shirt", 2], elbow: [S.parts.joint[0], "skin", 2], knee: [S.parts.joint[0], "legs", 2] },
     skin: ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"], hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
     mat: new THREE.MeshStandardMaterial({ roughness: 0.75 }), kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }),
@@ -685,7 +773,7 @@ export function peopleMeshes(people) {
   // the small parts (hands, joints, hair, headsets, necks, shoes) drawn only with the camera within PEOPLE_NEAR m of the
   // stand (its bounding sphere's surface): a pit wall seen from further away is torsos, heads and limbs (v0.39 perf –
   // 67 people at Suzuka were ~0.5 M triangles from anywhere)
-  for (const k of ["glove", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) {
+  for (const k of ["glove", "gloveR", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) {
     const m = meshes[k]?.m; if (!m) continue; const full = m.count, bs = m.boundingSphere;
     m.onBeforeRender = (r, sc, cam) => { m.count = bs && cam.position.distanceTo(_wc.copy(bs.center).applyMatrix4(m.matrixWorld)) - bs.radius > PEOPLE_NEAR ? 0 : full; };
   }
