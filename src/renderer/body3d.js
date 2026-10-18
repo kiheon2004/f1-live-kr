@@ -117,16 +117,50 @@ export function mergeSimple(gs) {
 
 // Two-bone reach (an arm or a leg): from the root S to the target T with bones L1, L2; the middle joint bent towards
 // the pole direction. Writes the middle joint into mid and the end (T, or as near as the bones reach) into end
-// (arrays [x, y, z]); returns how far short the end stays (0 when reached).
-export function reach2(S, T, L1, L2, pole, mid, end) {
+// (arrays [x, y, z]); returns how far the end stays from T (0 when reached: beyond the bones' reach, or inside the
+// nearest a folded limb can come, |L1 − L2|). Both bones always keep their lengths.
+// v0.39 lost them when the pole lay along the line to the target (a target straight ahead with the pole ahead too: an
+// arm of 0.33 + 0.26 m drawn 0.25 + 0.15 m – the fallback across the line was zero for a line along z) or the target
+// sat on the root, and it reported 0 for a target inside the folded reach. Now the elbow's (knee's) side comes from the
+// pole's part across the line, blended – as that part shrinks towards nothing (a pole along the line, either way) –
+// into a steady fallback: `hint` (e.g. last frame's middle joint, so a joint never flips between frames), else the
+// world axis most across the line. Near-parallel inputs therefore give nearly the same joint as exactly parallel ones.
+export const REACH_BLEND = 0.25;   // the pole's part across the line (of its length) under which the fallback blends in
+const _rf = [0, 0, 0];
+export function reach2(S, T, L1, L2, pole, mid, end, hint = null) {
   let dx = T[0] - S[0], dy = T[1] - S[1], dz = T[2] - S[2];
-  const d0 = Math.hypot(dx, dy, dz) || 1e-6, d = Math.min(L1 + L2 - 1e-4, Math.max(Math.abs(L1 - L2) + 1e-4, d0));
-  dx /= d0; dy /= d0; dz /= d0;
-  const a = (L1 * L1 - L2 * L2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
-  // the pole's part across the line
-  const pd = pole[0] * dx + pole[1] * dy + pole[2] * dz; let mx = pole[0] - pd * dx, my = pole[1] - pd * dy, mz = pole[2] - pd * dz;
-  let ml = Math.hypot(mx, my, mz); if (ml < 1e-6) { mx = -dy; my = dx; mz = 0; ml = Math.hypot(mx, my) || 1; }
-  mid[0] = S[0] + dx * a + (mx / ml) * h; mid[1] = S[1] + dy * a + (my / ml) * h; mid[2] = S[2] + dz * a + (mz / ml) * h;
+  const d0 = Math.hypot(dx, dy, dz);
+  // the line's direction: to the target; with the target on the root, across the pole (any way the limb can fold)
+  if (d0 > 1e-9) { dx /= d0; dy /= d0; dz /= d0; }
+  else { acrossOf(pole, 0, 1, 0, _rf); dx = _rf[0]; dy = _rf[1]; dz = _rf[2]; }
+  const lo = Math.abs(L1 - L2), hi = L1 + L2, d = Math.min(hi, Math.max(lo, d0));
+  const a = d > 1e-9 ? (L1 * L1 - L2 * L2 + d * d) / (2 * d) : 0, h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+  // the pole's part across the line, and the fallback blended in as it vanishes
+  const pl = Math.hypot(pole[0], pole[1], pole[2]) || 1, pd = (pole[0] * dx + pole[1] * dy + pole[2] * dz) / pl;
+  let mx = pole[0] / pl - pd * dx, my = pole[1] / pl - pd * dy, mz = pole[2] / pl - pd * dz;
+  const ml = Math.hypot(mx, my, mz);
+  if (ml < REACH_BLEND) {
+    if (hint) { _rf[0] = hint[0] - S[0]; _rf[1] = hint[1] - S[1]; _rf[2] = hint[2] - S[2]; }
+    const hd = hint ? _rf[0] * dx + _rf[1] * dy + _rf[2] * dz : 0;
+    let fx = hint ? _rf[0] - hd * dx : 0, fy = hint ? _rf[1] - hd * dy : 0, fz = hint ? _rf[2] - hd * dz : 0, fl = Math.hypot(fx, fy, fz);
+    if (fl < 1e-6) { acrossOf([dx, dy, dz], 0, 0, 0, _rf); fx = _rf[0]; fy = _rf[1]; fz = _rf[2]; fl = 1; }
+    const k = REACH_BLEND - ml;   // (linear: the joint swings round evenly as the pole's part shrinks, never in a snap)
+    mx += (fx / fl) * k; my += (fy / fl) * k; mz += (fz / fl) * k;
+  }
+  let nl = Math.hypot(mx, my, mz);
+  if (nl < 1e-9) { acrossOf([dx, dy, dz], 0, 0, 0, _rf); mx = _rf[0]; my = _rf[1]; mz = _rf[2]; nl = 1; }   // (pole and fallback cancelled out)
+  mid[0] = S[0] + dx * a + (mx / nl) * h; mid[1] = S[1] + dy * a + (my / nl) * h; mid[2] = S[2] + dz * a + (mz / nl) * h;
   end[0] = S[0] + dx * d; end[1] = S[1] + dy * d; end[2] = S[2] + dz * d;
-  return Math.max(0, d0 - d);
+  return Math.abs(d0 - d);
+}
+// a unit vector square to v (written into out): the preferred axis (px, py, pz) – else world up, else x – taken while it
+// is clearly across v (|cos| < 0.9), its part across v; the same for the same v every time (a deterministic choice, not
+// the previous frame's), and the same axis over the whole range around a pole's line (no switch at the exact centre)
+function acrossOf(v, px, py, pz, out) {
+  const vl = Math.hypot(v[0], v[1], v[2]) || 1, x = v[0] / vl, y = v[1] / vl, z = v[2] / vl;
+  let ax = px, ay = py, az = pz;
+  if (ax * ax + ay * ay + az * az < 0.5 || Math.abs(ax * x + ay * y + az * z) >= 0.9) { ax = 0; ay = 1; az = 0; }
+  if (Math.abs(y * ay + x * ax + z * az) >= 0.9) { ax = 1; ay = 0; az = 0; }
+  const dd = ax * x + ay * y + az * z; let ox = ax - dd * x, oy = ay - dd * y, oz = az - dd * z; const ol = Math.hypot(ox, oy, oz) || 1;
+  out[0] = ox / ol; out[1] = oy / ol; out[2] = oz / ol; return out;
 }

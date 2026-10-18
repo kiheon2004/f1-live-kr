@@ -4,7 +4,8 @@
 //   - each corner has its place on the lap (s, m) – matched in lap order, so a corner next to a parallel stretch is
 //     never put on that stretch (cornerStations);
 //   - riding with a car (chase, onboard, 1st person): the corners coming next along its own lap (≤ CORNERS.ahead m,
-//     at most CORNERS.next of them), gone once it has passed them; never one on another part of the lap, however near;
+//     at most CORNERS.next of them ahead – one just passed fades out on top and holds no place), gone once it has
+//     passed them; never one on another part of the lap, however near;
 //   - from the helicopter: the corners near what it looks at (a radius growing with its height); all of them only if
 //     the viewer asks for all;
 //   - off: none.
@@ -55,17 +56,20 @@ export function cornerTargets(stations, view) {
     }
     return out;
   }
-  // riding: the next corners along the car's own lap
-  const ahead = stations.map((k) => ({ k, a: aheadOf(k.s, view.carS, view.L) })).filter((o) => o.a > -CORNERS.passed - CORNERS.margin).sort((x, y) => x.a - y.a);
+  // riding: the next corners along the car's own lap. The limit (CORNERS.next) counts only the corners still ahead
+  // (a ≥ 0); one just passed fades out over CORNERS.passed m on top of them and never holds a place – v0.39 counted
+  // every corner within the passed margin, faded or not, so two corners 20–35 m behind (a chicane's) used both places
+  // and the next corner 100 m ahead never showed.
+  const ahead = stations.map((k) => ({ k, a: aheadOf(k.s, view.carS, view.L) })).filter((o) => o.a > -CORNERS.passed).sort((x, y) => x.a - y.a);
   let shown = 0;
   for (const k of stations) out.set(k.n, 0);
   for (const { k, a } of ahead) {
+    if (a < 0) { out.set(k.n, 1 - smooth01(-a / CORNERS.passed)); continue; }   // (passed: fading out over CORNERS.passed m)
     if (shown >= CORNERS.next) break;
     const was = (prev.get(k.n) || 0) > 0.01, far = CORNERS.ahead + (was ? CORNERS.margin : 0);
     if (a > far) break;
-    // (fading in over its last CORNERS.fadeIn m of range; out over the CORNERS.passed m after the car passed it)
-    const fin = 1 - smooth01((a - (far - CORNERS.fadeIn)) / CORNERS.fadeIn), fout = a < 0 ? 1 - smooth01(-a / CORNERS.passed) : 1;
-    out.set(k.n, Math.max(0, Math.min(fin, fout)));
+    // (fading in over its last CORNERS.fadeIn m of range)
+    out.set(k.n, Math.max(0, 1 - smooth01((a - (far - CORNERS.fadeIn)) / CORNERS.fadeIn)));
     shown++;
   }
   return out;

@@ -23,7 +23,7 @@ import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, 
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
-import { stepWheel, smearOf } from "./wheelspin.js";
+import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
 import { WheelScreens, screenModel } from "./wheelscreen.js";
 import { boardsFor, boardPlaces } from "./boards.js";
@@ -1387,7 +1387,13 @@ function rollWheels(c, st, est, F, t, v) {
   const fwd = Math.sin(c.yaw) * (v.x - W.pos.x) + Math.cos(c.yaw) * (v.z - W.pos.z) >= 0 ? 1 : -1;
   const speed = st ? st.vs : (est?.pit ? est.vs : c.speed * (moved ? fwd : 1));
   const dts = W.t == null ? 0 : (t - W.t) / 1000;
-  const fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }), ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved });
+  // (the telemetry's odometer where the car has speed data – one measure on every path; else from the path)
+  const src = app().src, tel = src?.car?.[c.num];
+  const trk = src?.tracks?.cars?.[c.num]; if (W.stillTrk !== trk) { W.stillTrk = trk; W.still = stillFromTrack(trk); }
+  const odo = tel ? odometerAt(tel, t, W.still) : null;
+  let fa, ra;
+  if (odo != null) { fa = W.f.a = wrapAngle(odo / P.FR); ra = W.r.a = wrapAngle(odo / P.RR); W.f.t = W.r.t = t; }
+  else { fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }); ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved }); }
   W.pos.copy(v); W.has = true; W.t = t;
   (c.spinW || (c.spinW = [0, 0]))[0] = fa; c.spinW[1] = ra;
   setSmear(c.model, smearOf(speed / P.RR, app().rate ?? 1, !(dts >= 0) || dts > 1));
@@ -1567,8 +1573,9 @@ function updateCars(dt) {
       c.stab = null;
       c.model.rotation.set(c.pitch, c.yaw, c.roll + c.bump * 0.003, "YXZ");
     }
-    // wheels roll the distance gone over each axle's own radius (wheelspin.js: on the lap / the pit lane from where the
-    // car is – a pause, any speed, a seek: the same angle; elsewhere rolled on by the session's time); front wheels
+    // wheels roll the distance gone over each axle's own radius (wheelspin.js: the telemetry's odometer – one measure
+    // on the track, the pit lane and an estimated path, a pause, any speed, a seek: the same angle; without telemetry
+    // from where the car is on the lap / the lane, else rolled on by the session's time); front wheels
     // steer with the turning rate (Ackermann-ish: δ ≈ L·ω / v)
     rollWheels(c, st, est, F, A.t, v);
     // (the front tyres' slip angle on top, growing with the cornering force: an estimate, ~0.6° per g (0.01 rad); and a
