@@ -4218,6 +4218,9 @@ window.Map3D = {
     camera.position.set(x, y + h, z); camera.up.set(0, 0, -1); camera.near = 1; camera.far = Math.max(camera.far, h * 4); camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(x, y, z); camera.up.set(0, 1, 0);
     return "ok";
   },
+  // development: the helicopter camera let go of the car (as after a pan) at p looking at t – the user's free view, whose
+  // shadow area stays put (updateSun), unlike look()'s inspect camera
+  heliAt(px, py, pz, tx, ty, tz) { if (camMode !== "heli") setCam("heli"); heli.follow = false; controls.target.set(tx, ty, tz); camera.position.set(px, py, pz); controls.update(); return "ok"; },
   look(px, py, pz, tx, ty, tz, fov = 50) {
     setCam("heli"); controls.enabled = false; camMode = "inspect";
     camera.position.set(px, py, pz); camera.near = 0.3; camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(tx, ty, tz);
