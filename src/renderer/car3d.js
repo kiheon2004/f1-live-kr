@@ -1242,6 +1242,7 @@ export function setSmear(car, smear) {
 // the elbows, never stretches an arm. The sleeve's bones: the shoulder's turned so its +y runs to the elbow and its x is
 // the elbow's hinge (square to both bones), the elbow's turned about that hinge – the skin bends at the crease.
 const _S = [0, 0, 0], _W = [0, 0, 0], _E = [0, 0, 0], _T = [0, 0, 0], _V = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0), _A = new THREE.Vector3(), _F = new THREE.Vector3(), _H = new THREE.Vector3(), _Zb = new THREE.Vector3(), _M = new THREE.Matrix4(), _q = new THREE.Quaternion(), _qi = new THREE.Quaternion();
+const SHOULDER_REACH = 0.06;   // how far a shoulder can come forward (protraction: ~5–8 cm; M)
 function placeArms(u) {
   u.wheel.updateMatrix();
   for (const a of u.arms) {
@@ -1249,6 +1250,12 @@ function placeArms(u) {
     _V.set(wx * k, wy, wz).applyMatrix4(u.wheel.matrix); _W[0] = _V.x; _W[1] = _V.y; _W[2] = _V.z;
     _S[0] = sx * k; _S[1] = sy; _S[2] = sz;
     a.short = reach2(_S, _W, BODY.uarm, BODY.farm, [0.35 * k, -1, 0], _E, _T, a.elbow || null);
+    // (out of reach – a big lock: the shoulder comes forward towards the hand, up to SHOULDER_REACH, as a driver's does)
+    if (a.short > 0) {
+      const dx = _W[0] - _S[0], dy = _W[1] - _S[1], dz = _W[2] - _S[2], l = Math.hypot(dx, dy, dz), m = Math.min(SHOULDER_REACH, a.short + 0.001) / l;
+      _S[0] += dx * m; _S[1] += dy * m; _S[2] += dz * m;
+      a.short = reach2(_S, _W, BODY.uarm, BODY.farm, [0.35 * k, -1, 0], _E, _T, a.elbow || null);
+    }
     a.elbow = a.elbow || [0, 0, 0]; a.elbow[0] = _E[0]; a.elbow[1] = _E[1]; a.elbow[2] = _E[2];
     _A.set(_E[0] - _S[0], _E[1] - _S[1], _E[2] - _S[2]).normalize();       // the upper arm
     _F.set(_T[0] - _E[0], _T[1] - _E[1], _T[2] - _E[2]).normalize();       // the forearm
