@@ -539,3 +539,15 @@ test("the sign-in window's user agent is plain ASCII Chrome – no app name (Kor
   assert.ok(/^[\x20-\x7e]+$/.test(ua), "ASCII only"); assert.ok(!/Electron|LiveTiming|라이브/.test(ua)); assert.ok(/Chrome\/152\.0\.0\.0 Safari/.test(ua));
   assert.ok(/setUserAgent\(PLAIN_UA\)/.test(src));
 });
+
+// v0.37: the safety car's own Position entries (241–243) are never a competitor – not in the cars' tracks (laps, grid,
+// spacing, pit states, counts) – but its place on track is there to be drawn
+test("support cars: the safety car's positions kept apart from the field's", () => {
+  const { Replay } = require("../src/renderer/replay.js");
+  const P = (t, entries) => [t, entries];
+  const r = new Replay({ duration: 5000, topics: { Position: [P(1000, { 1: [100, 100, 0], 243: [500, 500, 0] }), P(2000, { 1: [110, 100, 0], 243: [520, 500, 0] })] } });
+  assert.deepStrictEqual(Object.keys(r.positionsAt(1500)), ["1"]);
+  assert.deepStrictEqual(Object.keys(r.tracks.cars), ["1"]);
+  assert.deepStrictEqual(Object.keys(r.supportAt(1500)), ["243"]);
+  assert.ok(Math.abs(r.supportAt(1500)["243"][0] - 510) < 2);
+});

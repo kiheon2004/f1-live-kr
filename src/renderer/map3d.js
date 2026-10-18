@@ -11,9 +11,12 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
+import { supportPlan, supportModels } from "./support.js";
+import { makeSupportCar } from "./support3d.js";
+import { makeFlag } from "./flag3d.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
-import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE } from "./crew.js";
+import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, skeleton } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
@@ -1550,6 +1553,7 @@ function updateCars(dt) {
   scaleForView();
   updateWheelScreens(src, A.t);
   updateStartLights(src, A.t);
+  updateSupport(src, A.t);
 }
 // The standing starts as shown: race control's, each at the moment the field set off by its telemetry where that differs
 // from the race clock's (fieldLaunch) – the clock isn't always lights out; live: as the clock says, nothing ahead
@@ -1572,6 +1576,104 @@ function shownStarts(src, t) {
     if (s.standing !== true) return f ? { ...s, t: f.t, standing: true, from: "field" } : s;
     return f && Math.abs(f.t - s.t) > 3000 ? { ...s, t: f.t, from: "field" } : s;
   });
+}
+// The support cars and the rear-of-grid official (support.js: what each does at the moment shown – the safety car from
+// its own feed or parked at the pit exit; the medical car and the official reproductions, said so on screen). Parts of
+// the world (freed with it); everything placed from the moment shown – the same after a seek, at any speed.
+function supportCtx(src, t) {
+  const W = world; if (!W) return null;
+  if (W.support?.src === src) return W.support;
+  const group = new THREE.Group(); group.name = "support"; W.group.add(group);
+  return (W.support = { src, group, cars: {}, crew: null, flag: null, starts: new Map() });
+}
+const toScene = (p, c0) => ({ x: p[0] * DM - c0.x, z: -(p[1] * DM - c0.z) });
+function groundY(x, z) { const [s] = world.grid.nearest(x, z, 3); return s ? s.p.y : 0; }
+// a point on the pit lane u m along it (and its direction)
+function laneAt(u) {
+  const L = world.pitLane; if (!L) return null;
+  let i = 1; while (i < L.cum.length - 1 && L.cum[i] < u) i++;
+  const a = L.pts[i - 1], b = L.pts[i], f = Math.max(0, Math.min(1, (u - L.cum[i - 1]) / Math.max(1e-6, L.cum[i] - L.cum[i - 1])));
+  return { x: a.x + (b.x - a.x) * f, z: a.z + (b.z - a.z) * f, dx: b.x - a.x, dz: b.z - a.z };
+}
+function placeSupportCar(SP, key, id, where, lightsOn, tsec) {
+  let c = SP.cars[key];
+  if (!c || c.id !== id) { if (c) { SP.group.remove(c.obj); disposeGroup(c.obj); } c = SP.cars[key] = { id, obj: makeSupportCar(id) }; SP.group.add(c.obj); }
+  if (!where) { c.obj.visible = false; return; }
+  c.obj.visible = true; c.obj.position.set(where.x, groundY(where.x, where.z), where.z); c.obj.rotation.set(0, Math.atan2(where.dx, where.dz), 0);
+  c.obj.userData.setLights(lightsOn, tsec);
+}
+function updateSupport(src, t) {
+  if (!world || !src || !world.grid) return;
+  const A = app(), SP = supportCtx(src, t); if (!SP) return;
+  const isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || "");
+  const starts = isRace ? shownStarts(src, t) : [], start = starts[0] || null, c0 = world.center;
+  // the medical car follows the last car off the grid: the starter with the highest grid place (pit-lane starters and
+  // cars out left aside), its own path a moment behind; its lap ends at the pit entry
+  let st = start && start.standing === true ? SP.starts.get(start.t) : null;
+  if (start && start.standing === true && !st) {
+    const S = startState(src, t), ctx = startCtxAt(S, start.t);
+    let last = null, g = 0;
+    for (const num of Object.keys(src.state.DriverList || {})) { const k = ctx ? carKind(S.hist, ctx, num, start.t) : null; if (k?.kind === "grid" && k.g > g) { g = k.g; last = num; } }
+    const trk = last ? src.tracks?.cars?.[last] : null, ent = world.pitLane ? laneAt(0) : null;
+    let lap1End = null;
+    if (trk && ent) for (let i = 0; i < trk.n; i++) { if (trk.t[i] < start.t + 40000) continue; if (trk.t[i] > start.t + 200000) break; const q = toScene([trk.x[i], trk.y[i]], c0); if (Math.hypot(q.x - ent.x, q.z - ent.z) < 30) { lap1End = trk.t[i]; break; } }
+    st = { last, lap1End }; SP.starts.set(start.t, st);
+  }
+  const status = src.state.TrackStatus?.Status ?? null;
+  const plan = supportPlan({ t, status, sc: src.supportAt ? (src.isLive ? src.supportAt() : src.supportAt(t)) : {}, start, lap1End: st?.lap1End ?? null, race: isRace });
+  const models = supportModels(A.sessionYear?.() || 0, venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key ?? null, sessionDate());
+  const scId = models.sc || "neutralSc", medId = models.medical || "neutralMedical", tsec = t / 1000;
+  // the safety car: on track (its feed's place, heading from its last half second) or parked at the pit exit
+  const exitU = world.pitLane ? world.pitLane.exitU : null;
+  const parkedAt = (back) => { if (exitU == null) return null; const a = laneAt(Math.max(0, exitU - back)); return a; };
+  if (plan.sc?.mode === "track") {
+    const p = toScene(plan.sc.pos, c0), q0 = (src.isLive ? src.supportAt(t - 500) : src.supportAt(t - 500))?.[plan.sc.num], q = q0 ? toScene(q0, c0) : null;
+    placeSupportCar(SP, "sc", scId, { x: p.x, z: p.z, dx: q ? p.x - q.x : SP.scDir?.dx ?? 0, dz: q ? p.z - q.z : SP.scDir?.dz ?? 1 }, true, tsec);
+    if (q && Math.hypot(p.x - q.x, p.z - q.z) > 0.3) SP.scDir = { dx: p.x - q.x, dz: p.z - q.z };
+  } else placeSupportCar(SP, "sc", scId, plan.sc ? parkedAt(4) : null, false, tsec);
+  // the medical car
+  let med = null;
+  const trk = st?.last ? src.tracks?.cars?.[st.last] : null;
+  if (plan.medical?.mode === "following" && trk) {
+    const a = [0, 0, 0], b = [0, 0, 0];
+    if (src.tracks.at(st.last, t - plan.medical.lag, a) && src.tracks.at(st.last, t - plan.medical.lag - 400, b)) { const p = toScene(a, c0), q = toScene(b, c0); med = { x: p.x, z: p.z, dx: p.x - q.x || 1e-6, dz: p.z - q.z }; }
+  } else if (plan.medical?.mode === "gridRear" && trk) {
+    const a = [0, 0, 0], b = [0, 0, 0];
+    if (src.tracks.at(st.last, start.t - 3000, a) && src.tracks.at(st.last, start.t + 2500, b)) { const p = toScene(a, c0), q = toScene(b, c0), d = Math.hypot(q.x - p.x, q.z - p.z) || 1, f = { x: (q.x - p.x) / d, z: (q.z - p.z) / d }; med = { x: p.x - f.x * 13, z: p.z - f.z * 13, dx: f.x, dz: f.z }; SP.gridBack = { x: p.x - f.x * 5.5, z: p.z - f.z * 5.5, f }; }   // (the official just behind the last row, the medical car behind them – estimates)
+  } else if (plan.medical) med = parkedAt(14);
+  placeSupportCar(SP, "med", medId, med, plan.medical?.mode === "following", tsec);
+  // the rear-of-grid official: behind the last row with a green flag, then off to the side of the track
+  if (plan.official && SP.gridBack) {
+    if (!SP.crew) { SP.crew = crewMeshes(2); SP.group.add(SP.crew.group); SP.flag = makeFlag("green"); SP.group.add(SP.flag.group); }
+    const { f } = SP.gridBack, side = { x: f.z, z: -f.x }, [sn] = world.grid.nearest(SP.gridBack.x, SP.gridBack.z, 3);
+    const edge = sn ? Math.max(sn.L ?? 7, -(sn.R ?? -7)) + 2.5 : 9;
+    const k = plan.official.phase === "leave" ? plan.official.f : 0;
+    const x = SP.gridBack.x + side.x * edge * k, z = SP.gridBack.z + side.z * edge * k, y = groundY(x, z);
+    // (facing the grid while waving – the starter's way –, then walking off sideways)
+    const face = plan.official.phase === "flag" ? f : side, yaw = Math.atan2(face.x, face.z) - Math.PI / 2;
+    const wave = plan.official.phase === "flag" ? Math.sin(tsec * 2 * Math.PI * 1.4) : 0;
+    const pose = plan.official.phase === "flag" ? { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.03, arm: [[0.15, 0.08, 0.2], [2.6 + 0.35 * wave, 0.25, 0.1]] } : walkPose(tsec * 6);
+    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose }], [], camera.position);
+    const h = skeleton(pose, () => {})[1], c = Math.cos(yaw), sn2 = Math.sin(yaw);
+    const hx = x + h[0] * c + h[2] * sn2, hz = z - h[0] * sn2 + h[2] * c;
+    SP.flag.group.visible = plan.official.phase === "flag";
+    if (SP.flag.group.visible) SP.flag.pose({ x: hx, y: y + h[1], z: hz }, { x: side.x, z: side.z }, tsec, 1, 0.3);
+    SP.officialShown = true;
+  } else if (SP.crew && SP.officialShown) { SP.crew.place([], [], camera.position); SP.flag.group.visible = false; SP.officialShown = false; }
+  SP.plan = plan; SP.models = models;
+  supportNote(plan, models);
+}
+function supportNote(plan, models) {
+  const parts = [];
+  if (plan.medical && plan.medical.mode !== "parked") parts.push("메디컬카: 위치 데이터가 없어 재현(마지막 차를 따라 첫 랩)");
+  if (plan.official) parts.push("그리드 후방 관계자: 재현(정확한 시각은 데이터에 없음)");
+  if (plan.sc?.mode === "track") parts.push("세이프티카: 실제 위치 데이터");
+  else if (plan.vsc) parts.push("VSC: 실제 세이프티카는 나오지 않아요");
+  if ((plan.sc?.mode === "track" || parts.length) && !models.sc) parts.push("지원 차량 제조사: 이 경기는 확인 안 됨(중립 표시)");
+  const text = parts.join(" · ") || null;
+  let el = document.getElementById("supportNote");
+  if (!el && text) { el = document.createElement("div"); el.id = "supportNote"; el.style.cssText = "position:absolute;left:12px;bottom:106px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:5"; document.getElementById("startLightNote")?.parentElement?.appendChild(el) || document.body.appendChild(el); }
+  if (el) { el.hidden = !text; if (text && el.textContent !== text) el.textContent = text; }
 }
 // the gantry's reds before a standing start (startplan.js startLights: a replay's estimate – the data has lights out only)
 function updateStartLights(src, t) {
@@ -3164,6 +3266,8 @@ window.Map3D = {
   },
   // development: the starts as the lights use them (race control's + the field's launch by telemetry)
   starts() { const src = app().src; if (!src) return "null"; const shown = shownStarts(src, app().t), S = startState(src, app().t); return JSON.stringify({ shown: shown.map((s) => ({ t: s.t, standing: s.standing, from: s.from || null })), launches: [...(S.launches || new Map())].map(([t, f]) => [t, f && { t: f.t, n: f.n, of: f.of }]) }); },
+  // development: the support cars and the official as placed this frame
+  support() { const SP = world?.support; if (!SP) return "null"; const pos = (k) => { const o = SP.cars[k]?.obj; return o?.visible ? o.position.toArray().map((v) => +v.toFixed(1)) : null; }; return JSON.stringify({ plan: SP.plan, models: SP.models, sc: pos("sc"), med: pos("med"), last: [...SP.starts.values()][0] || null, official: SP.officialShown || false, gridBack: SP.gridBack ? { x: +SP.gridBack.x.toFixed(1), z: +SP.gridBack.z.toFixed(1), f: [+SP.gridBack.f.x.toFixed(3), +SP.gridBack.f.z.toFixed(3)] } : null }); },
   pitCar(num) {
     const G = pitTeams.G, c = cars.get(String(num)); if (!G || !c) return JSON.stringify({ G: !!G, car: !!c });
     const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;

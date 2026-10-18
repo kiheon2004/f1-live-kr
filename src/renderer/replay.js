@@ -431,6 +431,7 @@
       // (positions per car as typed arrays from the archive – PositionTracks; a list of samples is taken too)
       if (topics.PositionTracks) { this.tracks = CarTracks.fromTracks(topics.PositionTracks); this.positions = null; }
       else { this.positions = topics.Position || []; this.tracks = CarTracks.fromSamples(this.positions); }
+      this.supportTracks = splitSupport(this.tracks);
       this.events = [];
       this.car = topics.CarData || {};
       for (const [topic, list] of Object.entries(topics)) {
@@ -482,6 +483,8 @@
     now() { return this.t; }
 
     positionsAt(t) { return this.tracks.all(t); }
+    // the safety car's place while it is on the track (Position's 241–243; none while it waits): { num: [x, y, z] }
+    supportAt(t) { return this.supportTracks ? this.supportTracks.all(t) : {}; }
     // the same into reused arrays, with velocities (dm/ms) – for drawing every frame without garbage
     positionsInto(t, into, vels) { return this.tracks.all(t, into, vels); }
     laps(num, t = this.t) { return this.tracker.laps(num, t); }
@@ -541,6 +544,12 @@
   // actually sampled. Position at any time comes from a cubic Hermite curve whose tangents respect the
   // uneven gaps between samples, so speed and heading change smoothly – no hesitation at each sample, no
   // holding still when a sample leaves a car out. Gaps over 4 s (garage, data holes) are not bridged.
+  // The support cars' entries in Position: the safety car sends its place as "241"–"243" (one of them with real
+  // coordinates while it is out, the others at 0, 0, 0; nothing while it waits at the pit exit – 21 cached sessions with a
+  // safety car, none without; v0.37 research). Never a competitor: kept out of the cars' tracks (laps, grid, smoothing,
+  // pit states, spacing) in a track set of their own.
+  const SUPPORT_NUMS = new Set(["241", "242", "243"]);
+  function splitSupport(tr) { const s = new CarTracks(); for (const n of Object.keys(tr.cars)) if (SUPPORT_NUMS.has(n)) { s.cars[n] = tr.cars[n]; delete tr.cars[n]; } return s; }
   class CarTracks {
     constructor() { this.cars = {}; }
     // (from per-car typed arrays as the archive makes them: used as they are)
@@ -755,7 +764,7 @@
     resetHistory() {
       this.tracker = new LapTracker(); this.pitLog = new PitLog(); this.statusLog = new StatusLog(); this.tyreLog = new TyreLog();
       this.positions = []; this.lapMarks = []; this.trail = {}; this.lapShape = null; this.lapShapeAt = 0;
-      this.tracks = new CarTracks();
+      this.tracks = new CarTracks(); this.supportTracks = new CarTracks();
       this.car = {};
     }
     // A full picture from the server (on connect and every reconnect). It goes through the delay queue
@@ -805,6 +814,7 @@
           const cars = {};
           for (const [n, e] of Object.entries(p.Entries || {})) {
             if (!(e.X || e.Y)) continue;
+            if (SUPPORT_NUMS.has(n)) { this.supportTracks.push(n, at - (last - Date.parse(p.Timestamp)), [e.X, e.Y, e.Z || 0]); continue; }
             cars[n] = [e.X, e.Y, e.Z || 0];
             // Longer per-car trail (only while moving) so the circuit can be traced once a full lap is in.
             const tr = this.trail[n] || (this.trail[n] = []), prev = tr[tr.length - 1];
@@ -814,7 +824,7 @@
           this.positions.push([ts, cars]);
           for (const [n, q] of Object.entries(cars)) this.tracks.push(n, ts, q);
         }
-        this.tracks.trim(at - 120e3);
+        this.tracks.trim(at - 120e3); this.supportTracks.trim(at - 120e3);
         const cutoff = at - 120e3;   // keep two minutes of samples
         while (this.positions.length && this.positions[0][0] < cutoff) this.positions.shift();
         return;
@@ -890,6 +900,7 @@
     msAt(utc) { return utc - this.skew; }
     // a small lag so we interpolate between real samples
     positionsAt(t = this.t) { return this.tracks.all(t - 600); }
+    supportAt(t = this.t) { return this.supportTracks.all(t - 600); }
     positionsInto(t, into, vels) { return this.tracks.all(t - 600, into, vels); }
     laps(num, t = this.t) { return this.tracker.laps(num, t); }
     raceLapAt(ms) { return lapAtMs(this.lapMarks, ms); }
@@ -913,7 +924,7 @@
     }
   }
 
-  const API = { Replay, LiveSource, CarTracks, LapTracker, PitLog, StatusLog, TyreLog, merge, newMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
+  const API = { Replay, LiveSource, CarTracks, SUPPORT_NUMS, LapTracker, PitLog, StatusLog, TyreLog, merge, newMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
     pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);

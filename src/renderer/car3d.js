@@ -787,3 +787,4 @@ export function wheelParts(season, teamName) {
   const p = profileFor(season, teamName), t = template(p);
   return { key: p.key, front: t.front, rear: t.rear, FR: p.FR, RR: p.RR, FW: p.FW, RW: p.RW, FZ: p.FZ, RZ: p.RZ, FX: p.W / 2 - p.FW / 2, RX: p.W / 2 - p.RW / 2, W: p.W };
 }
+export { loft, smoothSections, softBox, merge, boxAt };
