@@ -3652,7 +3652,9 @@ window.Map3D = {
       let xa = Infinity, xb = -Infinity, za = Infinity, zb = -Infinity; for (const [a, c] of P) { xa = Math.min(xa, a); xb = Math.max(xb, a); za = Math.min(za, c); zb = Math.max(zb, c); }
       for (let x = xa + 1.5; x < xb; x += 3) for (let z = za + 1.5; z < zb; z += 3) if (inside(x, z, P)) S.push([x, z]);
       // (as buildings.js stands it: footing() on the drawn ground – or, before v0.39, the lowest corner's groundAt)
-      const ft = footing(S.map(([a, c]) => R.terrainAt(a, c))); let base = ft.floor, corner = Infinity; for (const [a, c] of P) corner = Math.min(corner, R.groundAt(a, c));
+      const ft = footing(S.map(([a, c]) => R.terrainAt(a, c))); let corner = Infinity; for (const [a, c] of P) corner = Math.min(corner, R.groundAt(a, c));
+      if (!R.info?.footing?.n) { ft.floor = corner; ft.plinth = 0; }   // (the fix off – Map3D.groundFix(false): the lowest corner, no plinth)
+      const base = ft.floor;
       let tMin = Infinity, tMax = -Infinity, gMin = Infinity, gMax = -Infinity, at = null;
       for (const [a, c] of S) { const t = R.terrainAt(a, c), g = R.groundAt(a, c); if (t > tMax) { tMax = t; at = [a, c]; } tMin = Math.min(tMin, t); gMin = Math.min(gMin, g); gMax = Math.max(gMax, g); }
       // (what the ground round it is to the level yards – scenery.js keepOut – within 12 m of the outline)
