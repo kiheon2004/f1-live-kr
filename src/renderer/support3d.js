@@ -160,6 +160,22 @@ function wheelGeometry(r, w, spokes, rimHex, edgeHex = null) {
   const g = merge(parts); g.computeVertexNormals(); return g;
 }
 
+// A soft shadow on the ground under a car L × W: darkest under the body, fading out ~0.3 m beyond it (the vertices'
+// alpha – no texture). Its own geometry and material (freed with the car: dispose.js); it casts and takes no shadow.
+export function contactShadow(L, W) {
+  const a0 = Math.max(0.2, L / 2 - 0.25), b0 = Math.max(0.2, W / 2 - 0.25), a1 = L / 2 + 0.3, b1 = W / 2 + 0.3, y = 0.03;
+  const pos = [], col = [];
+  for (const [a, b, al] of [[a0, b0, 0.5], [a1, b1, 0]]) for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { pos.push(sx * b, y, sz * a); col.push(0, 0, 0, al); }
+  // the inner rectangle (0–3), and a ring of four quads out to the outer one (4–7); faces up
+  const idx = [0, 2, 1, 0, 3, 2];
+  for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; idx.push(i, j, 4 + j, i, 4 + j, 4 + i); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 4)); g.setIndex(idx);
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }));
+  m.name = "contactShadow"; m.userData.contactShadow = true;
+  return m;
+}
+
 // One car: a Group, its front along +z, standing on y = 0. userData: { spec, lamps: [materials], wheels: [spin groups],
 // setLights(on, phase), setSpin(front, rear) }
 export function makeSupportCar(id) {
@@ -255,14 +271,19 @@ export function makeSupportCar(id) {
   for (const [m, list] of byMat) {
     for (const g of list) for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal") g.deleteAttribute(k);
     const mesh = new THREE.Mesh(merge(list), m); for (const g of list) g.dispose();
-    mesh.castShadow = true; group.add(mesh);
+    group.add(mesh);
   }
+  // (no car casts into the sun's shadow map: that map is drawn again only when the area it covers moves – map3d.js
+  // updateSun –, so a support car driving off left its shadow on the ground where the map was last drawn, and drew none
+  // where it went – seen at Monza 2026, the safety car leaving the pit exit under a still camera (v0.40). Like the race
+  // cars: a soft contact shadow under it instead)
+  group.add(contactShadow(L, W));
   // the wheels: each its own pivot at the axle, turning about x (setSpin)
   const wheelM = mat({ color: "#ffffff", vertexColors: true, roughness: 0.6, metalness: 0.4 }), wheels = [];
   const geoF = wheelGeometry(spec.RF, spec.RF * 0.75, spec.spokes || 5, spec.rim, spec.rimEdge), geoR = wheelGeometry(spec.RR, spec.RR * 0.85, spec.spokes || 5, spec.rim, spec.rimEdge);
   for (const [x, z, front] of [[spec.TF / 2, Wp.zf, true], [-spec.TF / 2, Wp.zf, true], [spec.TR / 2, Wp.zr, false], [-spec.TR / 2, Wp.zr, false]]) {
     const pivot = new THREE.Group(); pivot.position.set(x, front ? spec.RF : spec.RR, z);
-    const m = new THREE.Mesh(front ? geoF : geoR, wheelM); if (x < 0) m.scale.x = -1; m.castShadow = true; pivot.add(m); group.add(pivot); wheels.push(pivot);
+    const m = new THREE.Mesh(front ? geoF : geoR, wheelM); if (x < 0) m.scale.x = -1; pivot.add(m); group.add(pivot); wheels.push(pivot);
   }
   group.userData = { spec, lamps, wheels,
     // on: flashing (deployed / out on track); phase: the session's time (s) – the same moment, the same lamps
