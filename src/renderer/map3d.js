@@ -32,6 +32,7 @@ import { tunnelLight } from "./tunnel.js";
 import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
 import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
+import { footing } from "./footing.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -1341,6 +1342,7 @@ function gridCar(c, num, v, ctx) {
   c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
+let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // the wheels' angles (front, rear) and how much their markings smear this frame (car3d.js setSmear)
 function rollWheels(c, st, est, F, t, v, frameS) {
@@ -2425,7 +2427,7 @@ async function loadGeo(w) {
     const circ = A.circuitKey?.() != null ? await window.api.trackCircuit(A.circuitKey(), A.sessionYear?.() || null).catch(() => null) : null;
     if (job !== geoJob || world !== w) return;
     const corners = (circ?.corners || []).map((k) => ({ n: k.n, x: k.x * DM - w.center.x, z: -(k.y * DM - w.center.z) }));
-    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners,
+    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners, groundOld: devGroundOld,
       facilities: opts.facilities, year: A.sessionYear?.() || null, venue: venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
     if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
@@ -3653,6 +3655,60 @@ window.Map3D = {
   },
   // development: the map's buildings and stand outlines within r m of (lat, lon) or a listed stand's ends – kind, name,
   // height, area, distance, whether the grandstands treat it as an obstacle (area > 900 m² or over 14 m)
+  // development: the level yards and footings on (true) or off (false – as before v0.39); resolves once rebuilt
+  groundFix(on = true) {
+    devGroundOld = !on; rebuild(); const t0 = performance.now();
+    return new Promise((res) => { const t = setInterval(() => { if (world?.real?.info || performance.now() - t0 > 150e3) { clearInterval(t); res(world?.real ? `rebuilt (${on ? "fix" : "old"}) ${Math.round(performance.now() - t0)} ms` : "timeout"); } }, 400); });
+  },
+  // development: groundDiag's counts over the whole map (no list)
+  groundDiagAll() { const R = world?.real; if (!R?.scene) return "no map"; const [la, lo] = R.scene.center || R.geo.toLL(0, 0), d = JSON.parse(this.groundDiag(la, lo, 1e5, 0)); delete d.list; return JSON.stringify(d); },
+  // development: pick the n buildings nearest the track (within maxD m) most buried by the drawn ground – the cameras
+  // for groundCam(k) – and keep them, so the same cameras can be used with the fix off and on
+  groundCams(n = 3, maxD = 400) {
+    const R = world?.real; if (!R?.scene) return "no map";
+    const [la, lo] = R.scene.center || R.geo.toLL(0, 0), d = JSON.parse(this.groundDiag(la, lo, 1e5, 2000));
+    const near = d.list.filter((b) => !b.modelled && b.kind !== "grandstand" && b.trackD < maxD && b.h > 2.5).slice(0, n);
+    window.__gndCams = near.map((b) => ({ ll: b.ll, worst: b.worstAt, name: b.name, kind: b.kind, size: b.size }));
+    return JSON.stringify(near);
+  },
+  // development: look at kept building k (groundCams) from its buried side, h m up
+  groundCam(k = 0, h = 1.7) {
+    const c = window.__gndCams?.[k], R = world?.real; if (!c || !R) return "none";
+    const [x, z] = R.geo.fromLL(...c.ll), [wx, wz] = R.geo.fromLL(...c.worst); let dx = wx - x, dz = wz - z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    const dist = Math.max(22, c.size * 0.9), [la, lo] = R.geo.toLL(x + dx * dist, z + dz * dist);
+    return this.lookLLAt(la, lo, h, c.ll[0], c.ll[1], h > 10 ? 0 : 2, 60);
+  },
+  // development: how the map's buildings within r m of (lat, lon) meet the drawn ground. Per building: the base its walls
+  // start from (buildings.js: the lowest groundAt at its corners), the drawn terrain's lowest/highest point over the
+  // footprint (corners, every 2 m along the edges, a 3 m grid inside – the mesh's own triangles, not groundAt), how deep
+  // the terrain covers the walls (buried = terrain max − base) and the largest gap under them (gap = base − terrain min)
+  groundDiag(lat, lon, r = 150, top = 30) {
+    const R = world?.real; if (!R?.scene || !R.terrainAt) return "no map";
+    const [x0, z0] = R.geo.fromLL(lat, lon), out = [];
+    const inside = (x, z, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > z) !== (P[j][1] > z) && x < ((P[j][0] - P[i][0]) * (z - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; };
+    for (const b of R.scene.buildings) {
+      let P = b.pts.map(R.geo.xz); if (P.length > 3 && P[0][0] === P[P.length - 1][0] && P[0][1] === P[P.length - 1][1]) P = P.slice(0, -1);
+      let cx = 0, cz = 0; for (const [a, c] of P) { cx += a; cz += c; } cx /= P.length; cz /= P.length;
+      if (Math.hypot(cx - x0, cz - z0) > r || P.length < 3) continue;
+      const S = [...P];
+      for (let i = 0; i < P.length; i++) { const [ax, az] = P[i], [bx, bz] = P[(i + 1) % P.length], n = Math.ceil(Math.hypot(bx - ax, bz - az) / 2); for (let k = 1; k < n; k++) S.push([ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n]); }
+      let xa = Infinity, xb = -Infinity, za = Infinity, zb = -Infinity; for (const [a, c] of P) { xa = Math.min(xa, a); xb = Math.max(xb, a); za = Math.min(za, c); zb = Math.max(zb, c); }
+      for (let x = xa + 1.5; x < xb; x += 3) for (let z = za + 1.5; z < zb; z += 3) if (inside(x, z, P)) S.push([x, z]);
+      // (as buildings.js stands it: footing() on the drawn ground – or, before v0.39, the lowest corner's groundAt)
+      const ft = footing(S.map(([a, c]) => R.terrainAt(a, c))); let corner = Infinity; for (const [a, c] of P) corner = Math.min(corner, R.groundAt(a, c));
+      if (!R.info?.footing?.n) { ft.floor = corner; ft.plinth = 0; }   // (the fix off – Map3D.groundFix(false): the lowest corner, no plinth)
+      const base = ft.floor;
+      let tMin = Infinity, tMax = -Infinity, gMin = Infinity, gMax = -Infinity, at = null;
+      for (const [a, c] of S) { const t = R.terrainAt(a, c), g = R.groundAt(a, c); if (t > tMax) { tMax = t; at = [a, c]; } tMin = Math.min(tMin, t); gMin = Math.min(gMin, g); gMax = Math.max(gMax, g); }
+      // (what the ground round it is to the level yards – scenery.js keepOut – within 12 m of the outline)
+      const ko = {}; if (R.padKeepOut) for (let x = xa - 12; x <= xb + 12; x += 4) for (let z = za - 12; z <= zb + 12; z += 4) { let dd = Infinity; for (let i = 0; i < P.length; i++) { const A = P[i], B = P[(i + 1) % P.length], ex = B[0] - A[0], ez = B[1] - A[1], l = ex * ex + ez * ez, t = l ? Math.max(0, Math.min(1, ((x - A[0]) * ex + (z - A[1]) * ez) / l)) : 0; dd = Math.min(dd, Math.hypot(x - A[0] - ex * t, z - A[1] - ez * t)); } if (dd > 12 && !inside(x, z, P)) continue; const k = R.padKeepOut(x, z) || "free"; ko[k] = (ko[k] || 0) + 1; }
+      const f = (v) => +v.toFixed(2);
+      const tr = world.grid.nearest(cx, cz, 12);
+      out.push({ yard: R.padWhy?.(b) ?? null, trackD: tr?.[0] ? Math.round(tr[1]) : 1e4, size: Math.round(Math.max(xb - xa, zb - za)), ko, name: b.name || null, kind: b.kind || null, h: b.h, min: b.min || 0, est: !!b.est, d: Math.round(Math.hypot(cx - x0, cz - z0)), ll: R.geo.toLL(cx, cz).map((v) => +v.toFixed(6)), n: S.length,
+        modelled: !!R.landmarks?.skip?.(b), base: f(base), lowestCorner: f(corner), plinth: f(ft.plinth), terrain: [f(tMin), f(tMax)], groundAt: [f(gMin), f(gMax)], buried: f(tMax - base), gap: f(ft.plinth ? 0 : base - tMin), worstAt: R.geo.toLL(...at).map((v) => +v.toFixed(6)) });
+    }
+    return JSON.stringify({ cell: R.terrainCell?.map((v) => +v.toFixed(1)), pads: R.info?.pads, footing: R.info?.footing, n: out.length, buried1m: out.filter((b) => b.buried > 1).length, buried1mNear: out.filter((b) => b.buried > 1 && b.trackD < 400 && !b.modelled).length, nearTrack: out.filter((b) => b.trackD < 400).length, list: out.sort((a, b) => b.buried - a.buried).slice(0, top) });
+  },
   mapNear(lat, lon, r = 120) {
     const R = world?.real; if (!R?.scene) return "no map";
     const [x, z] = R.geo.fromLL(lat, lon), out = [];

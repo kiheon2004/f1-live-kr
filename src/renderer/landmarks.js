@@ -226,6 +226,51 @@ const SPECS = [
       add(cylBetween(new THREE.Vector3(mx, base + 88, mz), new THREE.Vector3(cx + (mx - cx) * 0.75, base + 49, cz + (mz - cz) * 0.75), 0.25, mastM));
     }
   } },
+
+  // ---------- Monza (research: v039/research/monza_buildings.md, 2026-10-18) ----------
+  // The podium (since 2002): a round deck "projecting over the track like an open hand" (ACI poster, 2023), on a
+  // central column over the pit wall at the south end of the pit building, joined to it by a footbridge over the pit
+  // lane (OSM ways 219396377 "Podio" – circle Ø ~11 m – and 219396384, the bridge, ~7 m, both layer 1 – H); a thick red
+  // tubular ring round the deck's edge and a steel railing (Commons "Podio Monza 2011.jpg" – H for the shape). The
+  // deck's height, ~9.5 m (about level with the pit building's terrace), the column and the backdrop are read off
+  // photos – L. (No sponsor panels: a plain backdrop.)
+  { venue: [39], loc: ["Monza"], match: (b) => /^podio$/i.test(b.name || ""), build({ pts, base, groundAt, add, toTrack }) {
+    const [cx, cz] = centroid(pts); let rad = 0; for (const [x, z] of pts) rad = Math.max(rad, Math.hypot(x - cx, z - cz));
+    rad = Math.min(7, Math.max(4.5, rad));
+    const [tx, tz] = toTrack(cx, cz), g = Math.max(base, groundAt(cx, cz)), deck = g + 9.5;
+    const grey = std({ color: 0xc9cbcd, roughness: 0.55 }), red = std({ color: 0xc8102e, roughness: 0.45, metalness: 0.2 }), steel = std({ color: 0x8d9296, roughness: 0.4, metalness: 0.6 });
+    // the column under the deck's middle: the OSM circle's centre is ~8 m off the track's centre line, on the pit wall
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.75, deck - g, 16), grey); col.position.set(cx, g + (deck - g) / 2, cz); add(col);
+    const slab = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad * 0.92, 0.7, 40), grey); slab.position.set(cx, deck - 0.35, cz); add(slab);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(rad, 0.32, 10, 48), red); ring.rotation.x = Math.PI / 2; ring.position.set(cx, deck - 0.1, cz); add(ring);
+    const rail = new THREE.Mesh(new THREE.TorusGeometry(rad - 0.2, 0.05, 6, 48), steel); rail.rotation.x = Math.PI / 2; rail.position.set(cx, deck + 1.1, cz); add(rail);
+    for (let k = 0; k < 24; k++) { const a = (k / 24) * Math.PI * 2; add(cylBetween(new THREE.Vector3(cx + Math.cos(a) * (rad - 0.2), deck, cz + Math.sin(a) * (rad - 0.2)), new THREE.Vector3(cx + Math.cos(a) * (rad - 0.2), deck + 1.1, cz + Math.sin(a) * (rad - 0.2)), 0.04, steel)); }
+    // the backdrop on the deck's pit-building half, and the footbridge to the building (away from the track)
+    const ang = Math.atan2(-tz, -tx), back = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.6, rad * 1.5), grey);
+    back.position.set(cx - tx * rad * 0.55, deck + 1.8, cz - tz * rad * 0.55); back.rotation.y = -ang; add(back);
+    // three flag poles behind the backdrop (~8 m – photo 2011, L)
+    for (const o of [-0.45, 0, 0.45]) { const px = cx - tx * rad * 0.7 + tz * rad * o * 1.5, pz = cz - tz * rad * 0.7 - tx * rad * o * 1.5; add(cylBetween(new THREE.Vector3(px, deck, pz), new THREE.Vector3(px, deck + 8, pz), 0.06, steel)); }
+    const br = new THREE.Mesh(new THREE.BoxGeometry(8, 0.6, 2.6), grey); br.position.set(cx - tx * (rad + 3.6), deck - 0.3, cz - tz * (rad + 3.6)); br.rotation.y = -ang; add(br);
+  } },
+  // The Hospitality Building at the pit exit (OSM way 194458105, 90 × 29 m – H): ground + 1st + 2nd floor ("Race
+  // Club" on the 1st and 2nd floors overlooking the grid and the pit lane – monzanet hospitality brochure 2026 – H),
+  // glazed storeys in silver frames under a thin flat roof (photos – M): the map's block, drawn with ribbon glazing
+  { venue: [39], loc: ["Monza"], group: (bs) => bs.filter((b) => /^hospitality building$/i.test(b.name || "")), keep: true, look: { ribbon: true }, build() {} },
+  // The two 1955 timing towers on the main straight, hospitality since 1997 (ACI poster 2023; monzanet "Tower" package
+  // 2026 – H): Torre Sud by the finish line, Torre Nord towards the first chicane (OSM nodes 2396630532 / 2396630508 –
+  // points only). A square tower with rounded corners: a concrete pier at the foot, a grey metal band, three storeys of
+  // continuous blue-green curtain wall, a recessed glazed top floor, a flat roof (photos – M); ~9 × 9 m, ~21 m high – L.
+  ...[["sud", [45.6162, 9.28064]], ["nord", [45.62144, 9.28133]]].map(([, at]) => ({ venue: [39], loc: ["Monza"], at, clear: 6, build({ x, z, base, add }) {
+    const glass = std({ color: 0x5f8f8c, roughness: 0.15, metalness: 0.5 }), conc = std({ color: 0xbdb9b1, roughness: 0.8 }), band = std({ color: 0x8e9398, roughness: 0.5, metalness: 0.4 });
+    const block = (y0, h, w, m, r = 1.6) => { const sh = new THREE.Shape(), a = w / 2 - r; sh.moveTo(-a, -w / 2); sh.lineTo(a, -w / 2); sh.absarc(a, -a, r, -Math.PI / 2, 0); sh.lineTo(w / 2, a); sh.absarc(a, a, r, 0, Math.PI / 2); sh.lineTo(-a, w / 2); sh.absarc(-a, a, r, Math.PI / 2, Math.PI); sh.lineTo(-w / 2, -a); sh.absarc(-a, -a, r, Math.PI, Math.PI * 1.5);
+      const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 4 }); g.rotateX(-Math.PI / 2); const m3 = new THREE.Mesh(g, m); m3.position.set(x, y0, z); add(m3); };
+    block(base, 4.2, 4.5, conc, 0.8);          // the pier with its stair
+    block(base + 4.2, 2.2, 9, band);           // metal-clad band
+    block(base + 6.4, 10.2, 9, glass);         // three glazed storeys
+    for (const y of [9.8, 13.2, 16.6]) block(base + y, 0.25, 9.1, band);   // floor edges
+    block(base + 16.6, 3.6, 7.6, glass);       // recessed top floor
+    block(base + 20.2, 0.5, 8, band);          // the roof
+  } })),
 ];
 
 // scene, gf, groundAt, location, toTrack(x, z) → unit direction to the nearest track point.
@@ -247,9 +292,10 @@ export function buildLandmarks({ scene, gf, groundAt, location, venue = null, to
       } else if (spec.group) {
         const items = spec.group(scene.buildings).map(item);
         if (!items.length) continue;
-        for (const it of items) { if (!spec.keep) skip.add(it.b); else restyle.set(it.b, { glass: true }); }
+        const look = spec.look || { glass: true };
+        for (const it of items) { if (!spec.keep) skip.add(it.b); else restyle.set(it.b, look); }
         // unnamed parts of the same building (inside its outline) take the same look
-        if (spec.keep) for (const b of scene.buildings) { if (restyle.has(b)) continue; const c = centroid(b.pts.map(gf.xz)); if (items.some((it) => inPoly(c[0], c[1], it.pts) || edgeDist(c[0], c[1], it.pts) < 6)) restyle.set(b, { glass: true }); }
+        if (spec.keep) for (const b of scene.buildings) { if (restyle.has(b)) continue; const c = centroid(b.pts.map(gf.xz)); if (items.some((it) => inPoly(c[0], c[1], it.pts) || edgeDist(c[0], c[1], it.pts) < 6)) restyle.set(b, look); }
         const c = centroid(items.flatMap((it) => it.pts)); spots.push([c[0], c[1], 160]);
         spec.build({ items, groundAt, add });
       } else {

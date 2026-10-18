@@ -528,7 +528,8 @@ function pitBuilding(ctx, p) {
   // (a height worked out from a number of floors – levels × 3.2 m in scene.js – is no measured height either)
   const fromLevels = (b) => b.lv != null && Math.abs(b.h - b.lv * 3.2) < 0.06;
   let parts = recs.map((r) => {
-    const guessed = (!!r.b.est || fromLevels(r.b)) && p.height;
+    // (p.heightOverMap: the map's height is known to include something drawn separately – Monza's GP canopies, PIT_LOOKS)
+    const guessed = (!!p.heightOverMap || !!r.b.est || fromLevels(r.b)) && p.height;
     return { ...r, uv: r.pts.map(toUV), min: r.b.min || 0, h: guessed ? p.height : r.b.h, rh: !guessed && r.b.roof && r.b.roof !== "flat" ? r.b.rh || 0 : 0, guessed };
   });
   const flip = () => { u = [-u[0], -u[1]]; v = [-v[0], -v[1]]; parts = parts.map((q) => ({ ...q, uv: q.uv.map(([a, b]) => [-a, -b]) })); };
@@ -1257,9 +1258,21 @@ export const PIT_HEIGHTS = {
   9: { h: 15, est: true, src: "COTA pit building: 3 storeys – 3 × ~5 m" },
   63: { h: 13, est: true, src: "Sakhir: partly 3, partly 2 storeys (pre-opening figures) – ~12–14 m" },
   7: { h: 10, est: true, src: "Spa pit building (2007): two storeys – ~9–11 m" },
-  39: { h: 9.5, est: true, src: "Monza: 2 levels + roof terrace (the GP's Paddock Club tent on the roof not drawn) – ~9–10 m" },
+  39: { h: 10, est: true, src: "Monza: 2 levels + roof terrace at ~10 m (research 2026-10-18; the GP's Paddock Club canopies on it: PIT_LOOKS) – ~9–10 m" },
   55: { h: 10, est: true, src: "Zandvoort main building: 2 storeys + roof deck – ~9–11 m" },
   144: { h: 9, est: true, src: "Baku temporary pit building: two storeys (2016 reports) – ~8–10 m" },
+};
+// What a venue's map-built pit building looks like where photos show it (merged into the generic spec's params):
+// Monza's Palazzina Box (1989; research v039/research/monza_buildings.md §3.1): two storeys and a roof terrace (Il Giorno
+// 2026-02-09 – H), the first floor's glazing leaning out over the pit lane against glare (dilei.it – H), a railing on
+// the terrace and, every GP weekend, a long run of white tensile canopies on steel masts over it (Paddock Club – photos
+// "Monza pitlane.jpg", Commons – H for the canopies, their size L). (The leaning glazing was tried with the slopedGlass
+// band – Spielberg's – and left out: in the app it read as one dull slab over the first floor's glass ribbons.) Terrace ~10 m up, canopies to ~15–16 m (L–M). The
+// map's 15.1 m for the building (Overture, no OSM height) reads as the building with its canopies – so the walls stop
+// at the terrace (heightOverMap) and the canopies stand on it. Not the 2027 rebuild (an extra floor from Nov 2026).
+export const PIT_LOOKS = {
+  39: { heightOverMap: true, roofRail: 1.1, tents: { spacing: 11.5, peak: 3.8, lift: 1.4, cover: 0.86 },
+    src: "Monza: 2 storeys + roof terrace (Il Giorno 2026-02-09), GP-weekend canopies on it (Commons photos) – heights estimated" },
 };
 export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, boxes = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
@@ -1313,6 +1326,7 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#8e9196", fascia: "fasciaWhite",
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
       pitWall: lay?.pitWall || PLAIN_PIT_WALL, ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : {}),
+      ...(venue && PIT_LOOKS[venue.key] ? { ...PIT_LOOKS[venue.key], lookFrom: PIT_LOOKS[venue.key].src } : {}),
     },
     ...(lay ? { layout: lay.src, toTrack } : {}),
   };

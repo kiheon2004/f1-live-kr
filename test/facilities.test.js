@@ -500,7 +500,9 @@ test("generic pit building: the venue's researched height where the map gives no
   const args = (key) => ({ venue: { key }, location: "X", year: 2026, pit, toScene: ([X, Y]) => [X / 10, Y / 10], toTrack: () => [0, 1], registry: [] });
   const lv = F.genericPitSpec(args(152)), mz = F.genericPitSpec(args(39)), sh = F.genericPitSpec(args(49));
   assert.strictEqual(lv.params.height, 19.5); assert.ok(!/^estimate/.test(lv.params.heightFrom));
-  assert.strictEqual(mz.params.height, 9.5); assert.ok(/^estimate/.test(mz.params.heightFrom));
+  assert.strictEqual(mz.params.height, 10); assert.ok(/^estimate/.test(mz.params.heightFrom));
+  // (Monza: the map's height includes the GP canopies – the researched terrace height stands over it, the canopies drawn)
+  assert.ok(mz.params.heightOverMap && mz.params.tents);
   assert.ok(sh.params.heightFrom == null, "Shanghai: nothing found – the generic estimate");
   assert.strictEqual(F.genericPitSpec(args(22)).params.height, 12, "Monaco: its own layout");
 });

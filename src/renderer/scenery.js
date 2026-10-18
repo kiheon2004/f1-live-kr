@@ -12,6 +12,7 @@ import { buildStands } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
+import { padPlan, polyDist } from "./footing.js";
 import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./facilities.js";
 import { START_DATA } from "./startdata.js";
@@ -660,7 +661,8 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // no circuit is, so the sea stays at least 1.2 m below the lowest point of the lap.
   const seaLevel = demOk && coast.length ? Math.min((scene.sea ?? 0) + offset, lowTrack - 1.2) : null;
   let seaCells = 0;
-  const groundAt = (x, z) => {
+  // (groundBase: before the level yards round the buildings – groundAt, below, is the drawn ground with them)
+  const groundBase = (x, z) => {
     let h = demOk ? dem(...gf.toLL(x, z)) : null, sea = false;
     if (h != null && seaLevel != null) {
       // (heights here are before the offset: the sea floor 3 m under the surface, land 0.4 m above it)
@@ -684,19 +686,69 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3), uvs = new Float32Array((nx + 1) * (nz + 1) * 2), idx = [];
   for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
     const k = j * (nx + 1) + i, x = ext.x0 + (W * i) / nx, z = ext.z0 + (H * j) / nz;
-    pos[k * 3] = x; pos[k * 3 + 1] = groundAt(x, z); pos[k * 3 + 2] = z;
+    pos[k * 3] = x; pos[k * 3 + 1] = groundBase(x, z); pos[k * 3 + 2] = z;
     uvs[k * 2] = i / nx; uvs[k * 2 + 1] = 1 - j / nz;
   }
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const a = j * (nx + 1) + i, b = a + 1, e = a + nx + 1, f = e + 1; idx.push(a, e, b, b, e, f); }
-  // height of the drawn terrain surface (the grid's triangles), for things that must lie on it
-  const terrainAt = (x, z) => {
+  // a value given per grid vertex, read across the grid's triangles (as the mesh draws them)
+  const onGrid = (arr, stride, off) => (x, z) => {
     const fi = ((x - ext.x0) / W) * nx, fj = ((z - ext.z0) / H) * nz;
     const i = Math.max(0, Math.min(nx - 1, Math.floor(fi))), j = Math.max(0, Math.min(nz - 1, Math.floor(fj))), u = fi - i, v = fj - j;
-    const y = (ii, jj) => pos[(jj * (nx + 1) + ii) * 3 + 1];
+    const y = (ii, jj) => arr[(jj * (nx + 1) + ii) * stride + off];
     // triangles a-e-b and b-e-f (a = i,j; b = i+1,j; e = i,j+1; f = i+1,j+1)
     return u + v <= 1 ? y(i, j) + (y(i + 1, j) - y(i, j)) * u + (y(i, j + 1) - y(i, j)) * v
       : y(i + 1, j + 1) + (y(i, j + 1) - y(i + 1, j + 1)) * (1 - u) + (y(i + 1, j) - y(i + 1, j + 1)) * (1 - v);
   };
+  // height of the drawn terrain surface (the grid's triangles), for things that must lie on it
+  const terrainAt = onGrid(pos, 3, 1);
+  // Level yards round the map's buildings (footing.js padPlan – why: there): the grid's vertices by a footprint levelled
+  // to the middle of the ground under it, never where the yard would reach the track and its run-off (30 m beyond
+  // the tarmac's measured edge), the circuit's other mapped tarmac (pit lane, escape roads), a river or the sea.
+  // What lies on the ground afterwards follows: groundAt is the old ground plus the yards' change, read across the
+  // same triangles.
+  let pads = null, padKeepOut = null, padWhy = null;
+  const dY = new Float32Array((nx + 1) * (nz + 1));
+  // (not on street circuits: there the buildings stand along the very streets the cars use, on real slopes (Monaco,
+  // Baku's old town), the yards changed the ground right beside the kerbs and took seconds over thousands of buildings
+  // (Baku: 4.1 s) – the footing alone stands them level there)
+  if (opts.buildings !== false && !opts.groundOld && !opts.street && scene.buildings.length) {
+    const t0 = performance.now(), CELL = 40, cells = new Map();
+    const put = (x, z, o) => { const k = `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`; let c = cells.get(k); if (!c) cells.set(k, (c = [])); c.push(o); };
+    for (const l of scene.lines) {
+      if (l.k !== "raceway" && l.k !== "river") continue;
+      const q = l.pts.map(gf.xz), r = (l.w || 8) / 2 + 8;
+      for (let i = 1; i < q.length; i++) {
+        const sg = { a: q[i - 1], b: q[i], r, water: l.k === "river" }, n = Math.max(1, Math.ceil(Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]) / (CELL / 2)));
+        const seen = new Set();
+        for (let k = 0; k <= n; k++) for (const dx of [-r, 0, r]) for (const dz of [-r, 0, r]) {
+          const x = q[i - 1][0] + ((q[i][0] - q[i - 1][0]) * k) / n + dx, z = q[i - 1][1] + ((q[i][1] - q[i - 1][1]) * k) / n + dz, key = `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
+          if (!seen.has(key)) { seen.add(key); put(x, z, sg); }
+        }
+      }
+    }
+    const waters = scene.areas.filter((a) => a.k === "water").map((a) => { const q = a.pts.map(gf.xz); let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of q) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { q, x0: x0 - 8, x1: x1 + 8, z0: z0 - 8, z1: z1 + 8 }; });
+    // (water areas by the same cells – the big ones, over 2 km across, are asked everywhere)
+    const wCells = new Map(), bigWaters = waters.filter((w) => w.x1 - w.x0 > 2000 || w.z1 - w.z0 > 2000);
+    for (const w of waters) { if (bigWaters.includes(w)) continue; for (let i = Math.floor(w.x0 / CELL); i <= Math.floor(w.x1 / CELL); i++) for (let j = Math.floor(w.z0 / CELL); j <= Math.floor(w.z1 / CELL); j++) { const k = `${i},${j}`; if (!wCells.has(k)) wCells.set(k, [...bigWaters]); wCells.get(k).push(w); } }
+    const segD = (x, z, a, b) => { const ex = b[0] - a[0], ez = b[1] - a[1], l = ex * ex + ez * ez, t = l ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / l)) : 0; return Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t); };
+    // (in: the point is inside a building's outline – no run-off or lane there: only the tarmac's own edge is kept)
+    const keepOut = (x, z, inn = false) => {
+      const [s, d] = nearTrack(x, z);
+      if (isSea(x, z)) return "water";
+      for (const w of wCells.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`) || bigWaters) if (x > w.x0 && x < w.x1 && z > w.z0 && z < w.z1 && polyDist(x, z, w.q) < 8) return "water";
+      let tarmac = s && d < Math.max(s.L ?? 7, -(s.R ?? -7)) + (inn ? 4 : 30);
+      for (const sg of cells.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`) || []) if (segD(x, z, sg.a, sg.b) < (inn ? sg.r - 6.5 : sg.r)) { if (sg.water) return "water"; tarmac = true; }
+      return tarmac ? "tarmac" : false;
+    };
+    padKeepOut = keepOut;
+    const padded = scene.buildings.filter((b) => b.kind !== "grandstand" && !(b.min > 3)), fps = padded.map((b) => b.pts.map(gf.xz));
+    const plan = padPlan({ x0: ext.x0, z0: ext.z0, W, H, nx, nz }, (k) => pos[k * 3 + 1], terrainAt, fps, keepOut);
+    for (const [k, t] of plan.targets) { dY[k] = t - pos[k * 3 + 1]; pos[k * 3 + 1] = t; }
+    padWhy = new WeakMap(padded.map((b, i) => [b, plan.why[i] ?? null]));
+    pads = { yards: plan.pads, vertices: plan.targets.size, skipped: plan.skipped, ms: Math.round(performance.now() - t0) };
+  }
+  const padAt = pads?.vertices ? onGrid(dY, 1, 0) : () => 0;
+  const groundAt = (x, z) => groundBase(x, z) + padAt(x, z);
   const tg = new THREE.BufferGeometry();
   tg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   tg.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
@@ -829,7 +881,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
     lm = combine(lm, fac);
     if (lm.group) group.add(lm.group);
-    bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm, raise: tplan?.raise }, corridor, inStand);
+    bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm, raise: tplan?.raise, terrainAt: opts.groundOld ? null : terrainAt }, corridor, inStand);
     if (bld) group.add(bld);
   }
   const tun = tplan?.list.length ? buildTunnels(tplan, terrainAt) : null;
@@ -907,12 +959,14 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     geo: gf,   // the frame's maps (F1 metres / lat-lon ↔ scene), for placing things by their real position
     scene,     // (development: the map data it was built from – Map3D.mapNear)
     landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
-    info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
+    info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, pads, footing: bld?.userData.footing ?? null, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped, raisedOver: bld.userData.overTrack, overTunnel: bld.userData.raised } : null,
       tunnels: tplan?.info || null,
       trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,
+    // (development: the drawn terrain's height – its grid triangles, not groundAt – and its cell size: Map3D.groundDiag)
+    terrainAt, terrainCell: [W / nx, H / nz], padKeepOut, padWhy: (b) => padWhy?.get(b) ?? null,
   };
 }
 
