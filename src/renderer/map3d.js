@@ -11,7 +11,7 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
-import { supportPlan, supportModels, followTarget, medicalLap1, SUPPORT } from "./support.js";
+import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
@@ -1959,8 +1959,9 @@ function updateSupport(src, t) {
   // the medical car
   let med = null;
   const slotBack = () => {
-    // (behind the last row: the last starter's grid slot as measured (grid.js) – or, without it, that car's own place)
-    const g = st?.last ? world.gridModel?.slots.get(+carKindG(src, start, st.last)) : null;
+    // (behind the last row: the last painted grid box as measured (grid.js) – support.js gridRearSlot –, or, without it, the
+    // last starter's own place)
+    const g = st?.last ? world.gridModel?.slots.get(gridRearSlot(+carKindG(src, start, st.last), world.gridModel?.slots)) : null;
     if (g) return { x: g.x, z: g.z, f: { x: g.tx, z: g.tz } };
     const trk = st?.last ? src.tracks?.cars?.[st.last] : null, a = [0, 0, 0], b = [0, 0, 0];
     if (trk && src.tracks.at(st.last, start.t - 3000, a) && src.tracks.at(st.last, start.t + 2500, b)) { const p = toScene(a, c0), q = toScene(b, c0), d = Math.hypot(q.x - p.x, q.z - p.z) || 1; return { x: p.x, z: p.z, f: { x: (q.x - p.x) / d, z: (q.z - p.z) / d } }; }

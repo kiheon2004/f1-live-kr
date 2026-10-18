@@ -168,3 +168,16 @@ test("moving things stay out of the static shadow map (v0.40): support cars and 
   const f = makeFlag("yellow"), casters = []; f.group.traverse((o) => { if (o.castShadow) casters.push(o.type); });
   assert.deepStrictEqual(casters, [], "a flag casts into the shadow map");
 });
+
+test("the medical car lines up behind the last painted grid box, not inside an empty one (v0.40)", async () => {
+  // (Monza 2026: 22 boxes, the last two cars started from the pit lane – the last starter is in box 20, and 13 m behind
+  // it is box 22's paint; Singapore 2025 likewise with box 20 of 20 empty)
+  const { gridRearSlot } = await import("../src/renderer/support.js");
+  const boxes = (n) => new Map(Array.from({ length: n }, (_, i) => [i + 1, { x: 0, z: -8 * i }]));
+  assert.strictEqual(gridRearSlot(20, boxes(22)), 22, "pit-lane starters' boxes stay empty: behind box 22");
+  assert.strictEqual(gridRearSlot(19, boxes(20)), 20);
+  assert.strictEqual(gridRearSlot(20, boxes(20)), 20, "a full grid: behind the last starter's box, as before");
+  assert.strictEqual(gridRearSlot(20, new Map()), 20, "no grid model: the last starter's");
+  assert.strictEqual(gridRearSlot(20, null), 20);
+  assert.strictEqual(gridRearSlot(null, boxes(22)), 22, "the last starter's box unknown: the last box");
+});
