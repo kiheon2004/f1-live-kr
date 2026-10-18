@@ -15,6 +15,7 @@
 import * as THREE from "./vendor/three.module.js";
 import { peopleMeshes } from "./crew.js";
 import { driverPanel, paintPanel } from "./pitscreens.js";
+import { teamKey } from "./pitorder.js";
 
 const STOP_MIN = 1500, STOP_MAX = 8000, LONG = 20000, STILL = 0.8;
 // (a standstill cut in two by a small move – a nudge, the data jumping a little – is one: runs that follow each other
@@ -351,9 +352,12 @@ export class PitInference {
 // overrides: confirmed garages for the session ([{ team, slots: [k], source }]) – drawn as given, not estimated.
 // Returns [{ team, colour, centre, box, boxOff, from, link, estimated, slots: [k], drivers: [{ num, tla, label, u,
 // slot, from }] }], sorted along the garages.
+// A driver's board: the car's number and the surname as the session's driver list gives them (Latin letters, up to 11 –
+// else the three-letter code), e.g. "4  NORRIS"
+export const boardLabel = (num, d) => { const n = d?.RacingNumber || num, ln = String(d?.LastName || "").toUpperCase(); return `${n}  ${/^[A-Z' .-]{2,11}$/.test(ln) ? ln : d?.Tla || n}`; };
 const Q = 0.5, q = (v) => (v == null ? null : Math.round(v / Q) * Q);
 export function allocatePlaces(slots, pitch, drivers, places, overrides = []) {
-  const members = (team) => Object.entries(drivers || {}).filter(([, d]) => d?.TeamName === team).map(([num, d]) => ({ num, tla: d.Tla || num, label: `${d.Tla || num}  ${d.RacingNumber || num}` }));
+  const members = (team) => Object.entries(drivers || {}).filter(([, d]) => d?.TeamName === team).map(([num, d]) => ({ num, tla: d.Tla || num, label: boardLabel(num, d) }));
   const colourOf = (team) => { const d0 = Object.values(drivers || {}).find((d) => d?.TeamName === team); return /^[0-9a-f]{6}$/i.test(d0?.TeamColour || "") ? "#" + d0.TeamColour : "#9aa0a6"; };
   const fixed = new Map((overrides || []).filter((o) => o?.team && o.slots?.length).map((o) => [o.team, o]));
   const list = places.filter((p) => p.ok && !fixed.has(p.team)).map((p) => {
@@ -364,8 +368,13 @@ export function allocatePlaces(slots, pitch, drivers, places, overrides = []) {
   for (const o of fixed.values()) {
     const ss = o.slots.filter((k) => bySlot.has(k)); ss.forEach((k) => used.add(k));
     const uc = ss.length ? ss.reduce((a, k) => a + bySlot.get(k).uc, 0) / ss.length : 0;
-    list.push({ team: o.team, colour: colourOf(o.team), centre: uc, box: null, boxOff: null, from: "confirmed", link: "confirmed", estimated: false, source: o.source || null, slots: ss,
-      drivers: members(o.team).map((m) => ({ ...m, u: q(uc), from: "confirmed" })) });
+    // (the garages are the drawing's; the box in the lane is still where the cars stop – the session's stops or the
+    // order's measured box –, and a driver seen working in their own garage keeps it)
+    // (a box known only from the order – another season's measured boxes, or between them – is put in front of the
+    // drawing's garages: the drawings put each team's box there; a box seen in the session's own stops stays where it was)
+    const p = places.find((x) => x.ok && x.team === o.team), boxU = p?.from !== "box" ? null : p.published && ss.length ? uc : p.u;
+    list.push({ team: o.team, colour: colourOf(o.team), centre: uc, box: boxU == null ? null : q(boxU), boxOff: p?.from === "box" ? q(p.off ?? 6) : null, from: "confirmed", link: "confirmed", estimated: false, source: o.source || null, slots: ss,
+      drivers: members(o.team).map((m) => (p?.from === "garage" && p.own?.[m.num] ? { ...m, u: q(p.own[m.num].u), from: "garage" } : { ...m, u: q(uc), from: "confirmed" })) });
   }
   const inferred = list.filter((t) => !t.slots);
   for (let i = 0; i < inferred.length; i++) {
@@ -417,13 +426,28 @@ export function workSpaces(slots, drivers) {
 
 // A driver's board across their work space: 1.76 m at most, 0.42 of the bay, and – a bay shared by `parts` drivers – 0.9 of
 // their own part (v0.38: three in one 5 m bay had 1.67 m apart and 1.76 m boards, overlapping)
-export const boardWidth = (bayWidth, parts = 1) => Math.min(1.76, bayWidth * 0.42, (bayWidth / Math.max(1, parts)) * 0.9);
+// v0.39: on the bay's header across the opening – 3.6 m at most (0.45 m high at the atlas row's 8:1), 0.8 of the bay
+export const boardWidth = (bayWidth, parts = 1) => Math.min(3.6, bayWidth * 0.8, (bayWidth / Math.max(1, parts)) * 0.9);
 
 // Confirmed garage allocations, kept apart from the inference: where a session's real allocation is published (the
 // FIA's or a team's garage plan), it's recorded here with its source and drawn as given (link: "confirmed"), never
 // estimated from stops. None is recorded yet: every allocation drawn is an estimate.
 //   { facility: "silverstone-wing", year: 2026, session: "<path>" | null (the whole event), source, teams: [{ team, slots: [k] }] }
 export const GARAGE_OVERRIDES = [];
+// The garages the FIA's drawing gives each team of the session (the pit building's bays carry the drawing's owners –
+// facilities.js / garageplans.js): [{ team (the session's name), slots: [k], source }]. A garage split between two teams
+// is neither's here (it stays neutral: which half is whose isn't drawn); a team the drawing doesn't name gets nothing.
+export function planOverrides(G, drivers) {
+  if (!G?.plan || !G.slots.some((s) => s.bay)) return [];
+  const names = [...new Set(Object.values(drivers || {}).map((d) => d?.TeamName).filter(Boolean))], out = [];
+  for (const team of names) {
+    const k = teamKey(team), alt = k === "Audi" ? "Kick Sauber" : k === "Kick Sauber" ? "Audi" : null;
+    const own = (b) => b?.teams?.length === 1 && b.owners.length === 1 && (teamKey(b.teams[0]) === k || (alt && teamKey(b.teams[0]) === alt && !names.some((n) => teamKey(n) === alt)));
+    const slots = G.slots.filter((s) => own(s.bay)).map((s) => s.k);
+    if (slots.length) out.push({ team, slots, source: G.plan.src || "FIA pit lane drawing" });
+  }
+  return out;
+}
 export const overridesFor = (facility, year, session = null, list = GARAGE_OVERRIDES) =>
   list.filter((o) => o.facility === facility && o.year === year && (!o.session || o.session === session)).flatMap((o) => o.teams.map((t) => ({ ...t, source: o.source })));
 
@@ -456,7 +480,16 @@ function shared() {
   // a workbench (top and legs' box) and an engineers' desk with two screens on a stand
   const bench = merge([Object.assign(new THREE.BoxGeometry(1.8, 0.06, 0.7)).translate(0, 0.92, 0), new THREE.BoxGeometry(1.7, 0.85, 0.6).translate(0, 0.45, 0)]);
   const screens = merge([new THREE.BoxGeometry(1.4, 0.75, 0.7).translate(0, 0.375, 0), new THREE.BoxGeometry(0.62, 0.38, 0.04).translate(-0.33, 1.15, 0.1), new THREE.BoxGeometry(0.62, 0.38, 0.04).translate(0.33, 1.15, 0.1), new THREE.BoxGeometry(0.05, 0.3, 0.05).translate(0, 0.9, 0.1)]);
-  SHARED = { tyres: mark(tyres), blankets: mark(blankets), cabinet: mark(cabinet), jack: mark(jack), sign: mark(sign), bench: mark(bench), screens: mark(screens),
+  // (v0.39) the car's overhead boom: a beam out from the back wall (+z: towards the opening) with its coiled lines
+  // hanging from the far end; a tyre trolley (deck on castors, a handle); a wheel gun in its wall bracket; a screen
+  const cyl = (r, h, x, y, z) => { const c = new THREE.CylinderGeometry(r, r, h, 6, 1); c.translate(x, y, z); return c; };
+  const boom = merge([new THREE.BoxGeometry(0.14, 0.14, 4.2).translate(0, 0, 2.1), new THREE.BoxGeometry(0.5, 0.3, 0.12).translate(0, 0, 0.06),
+    cyl(0.035, 2.2, -0.12, -1.1, 3.6), cyl(0.035, 2.0, 0.1, -1.0, 4.0), cyl(0.05, 0.5, 0, -0.25, 4.15), cyl(0.025, 1.6, 0.18, -0.8, 2.6)]);
+  const trolley = merge([new THREE.BoxGeometry(0.82, 0.06, 0.82).translate(0, 0.13, 0), ...[[-0.33, -0.33], [0.33, -0.33], [-0.33, 0.33], [0.33, 0.33]].map(([x, z]) => new THREE.BoxGeometry(0.07, 0.1, 0.07).translate(x, 0.05, z)),
+    new THREE.BoxGeometry(0.04, 0.9, 0.04).translate(-0.38, 0.6, -0.38), new THREE.BoxGeometry(0.04, 0.9, 0.04).translate(0.38, 0.6, -0.38), new THREE.BoxGeometry(0.8, 0.04, 0.04).translate(0, 1.05, -0.38)]);
+  const gun = merge([new THREE.BoxGeometry(0.1, 0.16, 0.32).translate(0, 0, 0), cyl(0.045, 0.16, 0, 0, 0.22).rotateX(Math.PI / 2), new THREE.BoxGeometry(0.05, 0.16, 0.06).translate(0, -0.14, -0.05), new THREE.BoxGeometry(0.3, 0.04, 0.1).translate(0, 0.12, -0.12)]);
+  const monitor = merge([new THREE.BoxGeometry(1.0, 0.6, 0.05)]);
+  SHARED = { boom: mark(boom), trolley: mark(trolley), gun: mark(gun), monitor: mark(monitor), tyres: mark(tyres), blankets: mark(blankets), cabinet: mark(cabinet), jack: mark(jack), sign: mark(sign), bench: mark(bench), screens: mark(screens),
     screen: Object.assign(new THREE.MeshStandardMaterial({ color: "#15181c", roughness: 0.3, metalness: 0.2 }), { userData: { shared: true } }),
     rubber: Object.assign(new THREE.MeshStandardMaterial({ color: "#1a1b1d", roughness: 0.85 }), { userData: { shared: true } }),
     grey: Object.assign(new THREE.MeshStandardMaterial({ color: "#7a8086", roughness: 0.5, metalness: 0.4 }), { userData: { shared: true } }) };
@@ -502,6 +535,18 @@ export function paintPitScreens(rows, lap) {
     g.textAlign = "right"; g.fillText(gap || "", W - 8, y + 6); g.textAlign = "left";
   });
   SCREEN.tex.needsUpdate = true;
+}
+
+// A team's garage lining (v0.39): a light or dark base, its colour as a band – low, high, the middle of the wall or as
+// upright stripes – and the panels' joints at a spacing of its own, so no two teams' garages are one copy recoloured.
+// Mercedes: dark (photos – Commons: Mercedes garage, Austrian GP 2018; British GP 2021: black walls, coloured light strips).
+// The others: chosen from the team's name (the same every time) – an estimate; no source per team and season was found.
+const STYLE_BASES = ["#e4e6e8", "#c7cbcf", "#8d939a", "#26292d"], STYLE_BANDS = ["low", "high", "split", "stripes"];
+export function garageStyle(team) {
+  const k = teamKey(team) || String(team || ""), h = hashStr(k);
+  if (k === "Mercedes") return { base: "#1b1d20", dark: true, band: "high", seams: 1.2, from: "photo (2018, 2021)" };
+  const bi = h % STYLE_BASES.length;
+  return { base: STYLE_BASES[bi], dark: bi === 3, band: STYLE_BANDS[(h >>> 4) % STYLE_BANDS.length], seams: [0.9, 1.2, 1.5][(h >>> 8) % 3], from: "estimate" };
 }
 
 // The labels of one layer in one texture: a row per team (its name on its colour) and per driver (code and number).
@@ -602,39 +647,88 @@ export function teamLayer(garages, teams, drivers, season = null) {
     if (seat.enclosed) for (const a of [-L / 2 - 0.02, L / 2 + 0.02]) boxQ(panels, at(a, 0.05, deck + 1.5), A, up, O, 0.03, 2.4, 1.7, dark, 12);
     t.wallStand = { seats: N, from: seat.from };
   };
-  const inst = { tyres: [], cabinet: [], jack: [], bench: [], screens: [] };
+  const inst = { tyres: [], cabinet: [], jack: [], bench: [], screens: [], boom: [], trolley: [], gun: [], monitor: [] }, boards = [];
+  const floor = { pos: [], col: [], nor: [] }, lights = { pos: [], nor: [] };
   const col = new THREE.Color();
   for (const t of teams) {
     col.set(t.colour);
     const ss = t.slots.map((k) => bySlot.get(k)).filter(Boolean).sort((a, b) => a.uc - b.uc);
+    const st = garageStyle(t.team);
     for (const s of ss) {
       const along = new THREE.Vector3(s.along[0], 0, s.along[1]), up = new THREE.Vector3(0, 1, 0), out = new THREE.Vector3(-s.inward[0], 0, -s.inward[1]);
-      // the team's colour on the back wall (lower two thirds) and a stripe along the ceiling's edge
-      quad(panels, at(s, s.depth - 0.03, 0, s.ceil * 0.36), along.clone().multiplyScalar(s.width - 0.2), up.clone().multiplyScalar(s.ceil * 0.66), out, null, col);
-      // the side walls panelled in the team's colour up to 2.4 m (teams line their garages), a dark skirting under it
-      const inw = new THREE.Vector3(s.inward[0], 0, s.inward[1]), dark = col.clone().multiplyScalar(0.35);
-      for (const side of [-1, 1]) {
-        const n = along.clone().multiplyScalar(-side), w = side * (s.width / 2 - 0.03), len = s.depth - 0.6;
-        quad(panels, at(s, 0.3 + len / 2, w, 1.35), inw.clone().multiplyScalar(len), up.clone().multiplyScalar(2.1), n, null, col);
-        quad(panels, at(s, 0.3 + len / 2, w, 0.15), inw.clone().multiplyScalar(len), up.clone().multiplyScalar(0.3), n, null, dark);
-      }
-      // a light rig hanging under the ceiling across the garage
-      quad(panels, at(s, s.depth * 0.55, 0, s.ceil - 0.6), along.clone().multiplyScalar(s.width - 0.6), inw.clone().multiplyScalar(0.35), new THREE.Vector3(0, -1, 0), null, new THREE.Color("#2b2f33"));
-      // equipment, by what the garage is for – a depiction (which garage holds what isn't in the data): the team's two
-      // outer garages are its cars' (tyre stacks under blankets along the walls, a bench at the back, the jack by the
-      // door), any between them engineering and spares (cabinets, a desk of screens; no tyres). How many and where,
-      // varied a little from garage to garage by a hash of the team and the garage – the same each time it's drawn
-      // (a bay with a driver's work space is a car's; the others engineering and spares – nobody's name on them)
-      const role = (t.spaces || []).some((w) => w.slot === s.k) ? "car" : "engineering";
+      const inw = new THREE.Vector3(s.inward[0], 0, s.inward[1]), down = new THREE.Vector3(0, -1, 0);
+      // What the garage is for – a depiction (which bay holds what isn't in any drawing): a bay with a driver's work space
+      // is that car's, the others the team's engineering and spares (nobody's name on them).
+      const space = (t.spaces || []).find((w) => w.slot === s.k), role = space ? "car" : "engineering";
       const r = rng(hashStr(t.team + ":" + s.k)), tc = col.clone();
+      // The walls: the team's panelling (garageStyle: a light or dark base, the team's colour as a band – low, high or as
+      // upright stripes –, panel joints at the team's spacing), a dark skirting; over the facility's own back wall and
+      // kick panels. Lower 2.9 m: teams line their garages to about head height and leave the building above (photos).
+      const base = new THREE.Color(st.base), seam = base.clone().multiplyScalar(st.dark ? 1.6 : 0.78), skirt = new THREE.Color(st.dark ? "#0d0f11" : "#3a3f45");
+      const H = Math.min(2.9, s.ceil - 0.4), wallQ = (c, ax, n, w2, ye, hgt, colr) => quad(panels, c, ax.clone().multiplyScalar(w2), up.clone().multiplyScalar(hgt), n, null, colr);
+      // (the band and stripes stand 1 cm proud of the base, the joints 2 cm: coplanar quads flickered – v0.39 screenshots)
+      const lining = (centreAt0, ax, n, len) => {
+        const centreAt = (y) => centreAt0(y).addScaledVector(n, 0.01);
+        wallQ(centreAt0(H / 2 + 0.15), ax, n, len, 0, H - 0.3, base);
+        wallQ(centreAt(0.15), ax, n, len, 0, 0.3, skirt);
+        if (st.band === "low") wallQ(centreAt(0.95), ax, n, len, 0, 0.5, col);
+        else if (st.band === "high") { wallQ(centreAt(H - 0.25), ax, n, len, 0, 0.5, col); wallQ(centreAt(H - 0.6), ax, n, len, 0, 0.06, col); }
+        else if (st.band === "split") wallQ(centreAt(0.3 + (H - 0.3) * 0.3), ax, n, len, 0, (H - 0.3) * 0.6, col);
+      };
+      // (back wall)
+      const back = (y) => at(s, s.depth - 0.035, 0, y);
+      lining(back, along, out, s.width - 0.12);
+      if (st.band === "stripes") for (const f of [-0.3, 0.3]) quad(panels, at(s, s.depth - 0.05, f * s.width, H / 2 + 0.15), along.clone().multiplyScalar(0.35), up.clone().multiplyScalar(H - 0.3), out, null, col);
+      for (let x = -s.width / 2 + st.seams; x < s.width / 2 - 0.2; x += st.seams) quad(panels, at(s, s.depth - 0.055, x, H / 2 + 0.15), along.clone().multiplyScalar(0.025), up.clone().multiplyScalar(H - 0.3), out, null, seam);
+      // (side walls, from just inside the opening to the back)
+      for (const side of [-1, 1]) {
+        const n = along.clone().multiplyScalar(-side), w = side * (s.width / 2 - 0.035), len = s.depth - 0.7;
+        lining((y) => at(s, 0.6 + len / 2, w, y), inw, n, len);
+        for (let d = 0.6 + st.seams; d < s.depth - 0.2; d += st.seams) quad(panels, at(s, d, w - side * 0.02, H / 2 + 0.15), inw.clone().multiplyScalar(0.025), up.clone().multiplyScalar(H - 0.3), n, null, seam);
+      }
+      // The floor: sealed epoxy (light grey, a dark one for a dark garage), on a car's bay its work position marked out –
+      // a box of lines the size of a car (5.7 × 2.1 m; 2026: 3.4 m wheelbase, 1.9 m wide) with the team's colour along
+      // both sides (Mercedes, Austrian GP 2018: a stripe along the bay) – kept clear: the car is the session's own, shown
+      // where it is, never a copy parked here.
+      const fy = 0.016, floorCol = new THREE.Color(st.dark ? "#3b3f44" : "#c9ccce");
+      quad(floor, at(s, s.depth / 2 + 0.1, 0, fy), along.clone().multiplyScalar(s.width - 0.08), inw.clone().multiplyScalar(s.depth - 0.25), up, null, floorCol);
+      const carL = Math.min(5.7, s.depth - 1.6), cw = 2.1, cd = 0.7 + carL / 2, cx = space ? space.w || 0 : 0;
+      const line = (c, ax, ay, colr) => quad(floor, c, ax, ay, up, null, colr), white = new THREE.Color(st.dark ? "#d8dadc" : "#f4f4f2"), yel = new THREE.Color("#e2b100");
+      if (role === "car" && s.width / ((t.drivers.filter((d) => d.slot === s.k).length) || 1) >= cw + 0.3) {
+        for (const sd of [-1, 1]) line(at(s, cd, cx + sd * cw / 2, fy + 0.008), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.06), white);
+        for (const dd of [-1, 1]) line(at(s, cd + dd * carL / 2, cx, fy + 0.008), along.clone().multiplyScalar(cw), inw.clone().multiplyScalar(0.06), white);
+        for (const sd of [-1, 1]) line(at(s, cd, cx + sd * (cw / 2 + 0.22), fy + 0.008), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.12), col);
+      }
+      // (the opening's edge: a yellow line along the front, where the garage meets the pit lane – photos)
+      line(at(s, 0.35, 0, fy + 0.008), along.clone().multiplyScalar(s.width - 0.1), inw.clone().multiplyScalar(0.08), yel);
+      // The ceiling: the team's dark ceiling panel and lit strips across it (the building's own lights are behind it)
+      quad(panels, at(s, s.depth / 2 + 0.4, 0, s.ceil - 0.08), along.clone().multiplyScalar(s.width - 0.1), inw.clone().multiplyScalar(s.depth - 0.9), down, null, new THREE.Color(st.dark ? "#121417" : "#5d636a"));
+      for (let d = 1.4; d < s.depth - 0.5; d += 1.8) quad(lights, at(s, d, 0, s.ceil - 0.1), along.clone().multiplyScalar(s.width * 0.7), inw.clone().multiplyScalar(0.12), down, null, null);
+      const yaw = yawIn(s), sideRoom = (s.width - (role === "car" ? cw + 0.3 : 0)) / 2;
       if (role === "car") {
-        for (const side of [-1, 1]) { const n = 2 + Math.floor(r() * 3); for (let i = 0; i < n; i++) { const d = 1.8 + i * 0.85 + r() * 0.15; if (d < s.depth - 1.0) inst.tyres.push([at(s, d, side * (s.width / 2 - 0.55 - r() * 0.15), 0), r() * 3, tc]); } }
-        inst.bench.push([at(s, s.depth - 0.45, (r() - 0.5) * s.width * 0.3, 0), yawIn(s), tc]);
-        inst.jack.push([at(s, 1.2 + r() * 0.5, (r() < 0.5 ? -1 : 1) * s.width * (0.18 + r() * 0.1), 0), yawIn(s) + (r() - 0.5) * 0.4, null]);
+        // A car's bay. Overhead: the boom carrying the car's air, power and data lines out over it from the back wall,
+        // its coiled lines hanging to the car (photos 2018, 2021: spiral lines from the ceiling to the car). By the walls:
+        // tyre sets on their trolleys under blankets, the wheel guns on the wall, the front and rear jacks by the door,
+        // a bench and the tool cabinets at the back, a screen on the back wall (dark: no team data is shown).
+        inst.boom.push([at(s, s.depth - 0.1, cx, s.ceil - 0.55), yaw, null, [1, 1, Math.min(1.2, (s.depth - cd + 0.6) / 4.2)]]);
+        // tyres: along a wall where there's room beside the car, else in a row across the back
+        const stacks = 2 + Math.floor(r() * 2);
+        if (sideRoom >= 0.8) for (let i = 0; i < stacks * 2; i++) { const sd = i % 2 ? 1 : -1, d = 1.7 + Math.floor(i / 2) * 0.95 + r() * 0.1; if (d < s.depth - 1.4) { const p = at(s, d, sd * (s.width / 2 - 0.45), 0); inst.trolley.push([p, yaw, null]); inst.tyres.push([p.clone().setY(p.y + 0.16), r() * 3, tc]); } }
+        else for (let i = 0; i < stacks; i++) { const x = (i - (stacks - 1) / 2) * 0.95; const p = at(s, s.depth - 1.55, x, 0); inst.trolley.push([p, yaw, null]); inst.tyres.push([p.clone().setY(p.y + 0.16), r() * 3, tc]); }
+        inst.bench.push([at(s, s.depth - 0.42, (r() - 0.5) * 0.4 - s.width * 0.18, 0), yaw, tc]);
+        inst.cabinet.push([at(s, s.depth - 0.36, s.width * 0.26, 0), yaw, tc, [Math.min(1, (s.width * 0.42) / 1.5), 1, 1]]);
+        inst.monitor.push([at(s, s.depth - 0.08, 0, 1.95), yaw, null]);
+        if (sideRoom >= 0.35) for (const sd of [-1, 1]) inst.gun.push([at(s, 2.6 + r() * 0.4, sd * (s.width / 2 - 0.12), 1.15), yaw + sd * Math.PI / 2, null]);
+        // jacks by the door, either side of the car's way in and out
+        if (sideRoom >= 0.45) inst.jack.push([at(s, 1.0, (r() < 0.5 ? -1 : 1) * (s.width / 2 - 0.35), 0), yaw + Math.PI / 2, null]);
       } else {
-        const n = 2 + Math.floor(r() * 2); for (let i = 0; i < n; i++) inst.cabinet.push([at(s, s.depth - 0.5, (i - (n - 1) / 2) * 1.65, 0), yawIn(s), tc]);
-        inst.screens.push([at(s, s.depth * 0.5, (r() - 0.5) * s.width * 0.25, 0), yawIn(s) + Math.PI, tc]);
-        if (r() < 0.6) inst.cabinet.push([at(s, 1.6 + r(), (r() < 0.5 ? -1 : 1) * (s.width / 2 - 0.5), 0), yawIn(s) + Math.PI / 2, tc]);
+        // Engineering and spares: engineers' desks of screens (dark), cabinets along the back, a parts trolley
+        const n = Math.max(1, Math.min(3, Math.floor((s.width - 0.4) / 1.6)));
+        for (let i = 0; i < n; i++) inst.cabinet.push([at(s, s.depth - 0.36, (i - (n - 1) / 2) * 1.6, 0), yaw, tc]);
+        inst.screens.push([at(s, s.depth * 0.5, (r() - 0.5) * Math.max(0, s.width - 2) * 0.4, 0), yaw + Math.PI, tc]);
+        if (s.depth > 6) inst.screens.push([at(s, s.depth * 0.5 - 1.4, (r() - 0.5) * Math.max(0, s.width - 2) * 0.4, 0), yaw + Math.PI, tc]);
+        inst.monitor.push([at(s, s.depth - 0.08, -s.width * 0.22, 1.95), yaw, null]); inst.monitor.push([at(s, s.depth - 0.08, s.width * 0.22, 1.95), yaw, null]);
+        if (s.width > 3.2) inst.trolley.push([at(s, 1.9 + r(), (r() < 0.5 ? -1 : 1) * (s.width / 2 - 0.55), 0), yaw, null]);
       }
     }
     // the team's name over its garages (on the front, just under the band above the openings)
@@ -646,13 +740,25 @@ export function teamLayer(garages, teams, drivers, season = null) {
     quad(panels, mid.clone().addScaledVector(out, -0.01), along.clone().multiplyScalar(span), new THREE.Vector3(0, 0.6, 0), out, null, col);
     const lw = Math.min(span, 4.8);
     quad(labels, mid, along.clone().multiplyScalar(lw), new THREE.Vector3(0, lw / 8, 0), out, lab.uv(t.row));
-    // each driver's board, hanging inside at the front of their own work space (one each – workSpaces); a driver without
-    // one (no bay for the team) gets none
-    // (a bay split between several drivers: each board within its own part – boardWidth)
+    // Each bay's header: a panel hung across the top of the opening, just inside it (behind the rolled-up shutter's box,
+    // under the lintel) – where the photos show a team's header board (Commons: AlphaTauri and Mercedes garages, British
+    // GP 2021; Mercedes, Austrian GP 2018). On a car's bay it carries that driver's number and name (one board each –
+    // workSpaces; a bay split between drivers: each within its own part – boardWidth), on the others the team's name. Its
+    // lower edge 0.98 m under the opening's top: seen under the lintel from 7 m out in the pit lane at 9 m up, and from
+    // the helicopter. A driver without a work space (no bay for the team) gets no board.
+    // (v0.38's boards were 0.22 m high, 0.9 m in and 0.55 m under the opening's top: a few pixels from the pit lane,
+    // behind the lintel from above – Map3D.boardsDiag)
+    for (const s of ss) {
+      const hy = s.height - 0.7, hd = 0.68, dark = col.clone().multiplyScalar(0.22).lerp(new THREE.Color("#121417"), 0.55);
+      quad(panels, at(s, hd + 0.02, 0, hy), along.clone().multiplyScalar(s.width - 0.1), new THREE.Vector3(0, 0.6, 0), out, null, dark);
+      quad(panels, at(s, hd + 0.015, 0, hy - 0.33), along.clone().multiplyScalar(s.width - 0.1), new THREE.Vector3(0, 0.06, 0), out, null, col);
+      if (!t.drivers.some((d) => d.slot === s.k)) { const lw = Math.min(s.width * 0.6, 2.6); quad(labels, at(s, hd, 0, hy), along.clone().multiplyScalar(lw), new THREE.Vector3(0, lw / 8, 0), out, lab.uv(t.row)); }
+    }
     for (const d of t.drivers) {
       const s = d.slot != null ? bySlot.get(d.slot) : null; if (!s) continue;
-      const bw = boardWidth(s.width, t.drivers.filter((x) => x.slot === d.slot).length);
-      quad(labels, at(s, 0.9, d.w || 0, s.height - 0.55), along.clone().multiplyScalar(bw), new THREE.Vector3(0, bw / 8, 0), out, lab.uv(d.row));
+      const bw = boardWidth(s.width, t.drivers.filter((x) => x.slot === d.slot).length), c = at(s, 0.68, d.w || 0, s.height - 0.7);
+      quad(labels, c, along.clone().multiplyScalar(bw), new THREE.Vector3(0, bw / 8, 0), out, lab.uv(d.row));
+      boards.push({ num: d.num, team: t.team, slot: s.k, p: [c.x, c.y, c.z], n: [out.x, out.y, out.z], w: bw, h: bw / 8, label: rows[d.row]?.text });
     }
   }
   // the team's box painted in the pit lane where its cars stopped (yellow, as in the photos), and its stand on the
@@ -689,16 +795,20 @@ export function teamLayer(garages, teams, drivers, season = null) {
     teamScreens.push({ team, colour: tq.t.colour, drivers: (tq.t.drivers || []).slice(0, 2).map((d) => ({ num: d.num, tla: d.tla })), cv, tex, key: null, at: -1e9 });
   }
   group.userData.teamScreens = teamScreens;
+  group.userData.boards = boards;
   if (people.length) group.add(peopleMeshes(people));
   if (marks.pos.length) mesh(marks, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }), "boxMarks");
   // instanced equipment
-  const instanced = (geo, mat, list, name, coloured) => {
+  // (the small things – floor markings, ceiling strips, booms, guns, trolleys, screens – in a group of their own shown only
+  // close by: facilities.js hides "pitTeamsNear" beyond 120 m, the rest of the layer beyond 300 m)
+  const near = new THREE.Group(); near.name = "pitTeamsNear";
+  const instanced = (geo, mat, list, name, coloured, into = group) => {
     if (!list.length) return;
     const im = new THREE.InstancedMesh(geo, mat, list.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1);
     const grey = new THREE.Color("#9aa0a6");
-    list.forEach(([p, yaw, c], i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw); m4.compose(p, q, sc); im.setMatrixAt(i, m4); if (coloured) im.setColorAt(i, c || grey); });
+    list.forEach(([p, yaw, c, k], i) => { q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw); sc.set(...(k || [1, 1, 1])); m4.compose(p, q, sc); im.setMatrixAt(i, m4); if (coloured) im.setColorAt(i, c || grey); });
     im.computeBoundingSphere();
-    im.name = name; group.add(im);
+    im.name = name; into.add(im);
   };
   instanced(S.tyres, S.rubber, inst.tyres, "tyres");
   instanced(S.blankets, new THREE.MeshStandardMaterial({ roughness: 0.8 }), inst.tyres, "blankets", true);
@@ -706,7 +816,42 @@ export function teamLayer(garages, teams, drivers, season = null) {
   instanced(S.jack, S.grey, inst.jack, "jacks");
   instanced(S.bench, new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.35 }), inst.bench, "benches", true);
   instanced(S.screens, S.screen, inst.screens, "screens");
+  instanced(S.boom, S.grey, inst.boom, "booms", false, near);
+  instanced(S.trolley, S.grey, inst.trolley, "trolleys", false, near);
+  instanced(S.gun, S.rubber, inst.gun, "wheelGuns", false, near);
+  instanced(S.monitor, S.screen, inst.monitor, "wallScreens", false, near);
+  if (floor.pos.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(floor.pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(floor.nor, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(floor.col, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })); m.name = "garageFloors"; m.receiveShadow = true; near.add(m); }
+  if (lights.pos.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(lights.pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(lights.nor, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: "#eef2f7" })); m.name = "garageLights"; near.add(m); }
+  if (near.children.length) group.add(near);
   return group;
+}
+
+// Why each driver's name board is or isn't made (Map3D.boardsDiag; pure – tested): G the pit building's garages (or
+// null), hasPositions (the session's position data), drivers (DriverList), nums (every car number the session names),
+// teams (allocatePlaces' result), evidence (PitInference's per team), layerKey / keyNow (the key the drawn layer was
+// made for / the allocation's now), boards (Map num → the layer's board). → [{ num, code, team, status: "created" |
+// "excluded", reason, slot }]
+export function boardStatus({ G, hasPositions, drivers, nums, teams, evidence = [], layerKey = null, keyNow = null, boards = new Map() }) {
+  return nums.map((num) => {
+    const d = drivers?.[num], r = { num, code: d?.Tla || null, team: d?.TeamName || null, status: "excluded", reason: null, slot: null };
+    const t = teams.find((x) => x.team === d?.TeamName), td = t?.drivers.find((x) => x.num === num);
+    if (!G) r.reason = "no pit building with garages in this world (map buildings only, or the facilities setting off)";
+    else if (!G.slots?.length) r.reason = "the pit building has no garages";
+    else if (!hasPositions) r.reason = "no position data yet";
+    else if (!d) r.reason = "not in the session's driver list";
+    else if (!d.TeamName) r.reason = "no team in the driver list";
+    else if (!t) { const e = evidence.find((x) => x.team === d.TeamName); r.reason = "team not allocated" + (e ? `: ${e.reason}` : ": no stops or long stays of the team seen yet, no drawing or order for it"); }
+    else if (!td) r.reason = "not among the team's drivers in the allocation (driver list changed – the next check rebuilds)";
+    else if (td.slot == null) r.reason = "no work space (the team has no bay)";
+    else if (!G.slots.some((s) => s.k === td.slot)) r.reason = "its bay isn't in this pit building (stale allocation)";
+    else if (layerKey !== keyNow) r.reason = "allocation key stale: the layer is from an older allocation";
+    else if (!boards.has(num)) r.reason = "the layer has no board for it (atlas row / layer missing)";
+    else { r.status = "created"; r.reason = "on bay " + td.slot + (t.link === "confirmed" ? " (FIA drawing's garages)" : " (estimated garages)"); }
+    r.slot = td?.slot ?? null;
+    return r;
+  });
 }
 
 // A key for an allocation (to rebuild only when it changes)

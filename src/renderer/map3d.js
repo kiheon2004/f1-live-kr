@@ -21,7 +21,7 @@ import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, walkPhase, flagPose, flagHold } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
-import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, paintPitScreens, updateTeamScreens } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen } from "./car3d.js";
 import { stepWheel, smearOf } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
@@ -215,7 +215,9 @@ function updatePitTeams(force = false) {
     places = [...pub.filter((b) => !seen.has(b.team)).map((b) => { pitLaneAt(b.u, o); const pr = G.project(o.x, o.z); return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: true, how: b.how, season: b.season }; }), ...r.places.filter((p) => !pub.some((b) => b.team === p.team) || seen.has(p.team))];
   }
   pitTeams.order = pub;
-  const teams = allocatePlaces(G.slots, G.pitch, drivers, places, overridesFor(G.facility, A.sessionYear?.() || null, session));
+  // (the FIA drawing's garages for the event, where the pit building was built from it – confirmed; else the estimate)
+  const plan = planOverrides(G, drivers);
+  const teams = allocatePlaces(G.slots, G.pitch, drivers, places, plan.length ? plan : overridesFor(G.facility, A.sessionYear?.() || null, session));
   // (a box is painted where a car stands in it – LANES.box out from the garages –, not on the feed's line, which runs
   // anywhere across the lane: pitlane.js)
   { const pm = pitModelFor(G); for (const t of teams) if (t.box != null) t.boxOff = pm.at(t.box).boxC; }
@@ -223,7 +225,7 @@ function updatePitTeams(force = false) {
   pitTeams.info = { evidence: r.evidence, live: !!src.isLive };
   // (how many garages a team has and which driver's is which are estimates: the data shows only where the cars stopped)
   const est = teams.filter((t) => t.estimated);
-  pitTeamNote(!teams.length ? null : pub ? "팀 박스 순서: 전년도 컨스트럭터 순위(F1 배정 규칙, 실제 피트 스톱으로 확인) · 차고 칸 수는 추정" : !est.length ? "팀 차고: 공개된 배치 자료" : (est.some((t) => t.from === "box") ? "팀 차고 위치: 피트 스톱 위치로 추정" : "팀 차고 위치: 반복 정차 위치로 추정") + (src.isLive ? "" : " (현재 재생 시점까지)") + " · 칸 수·배정은 추정");
+  pitTeamNote(!teams.length ? null : plan.length ? `팀 차고: FIA 피트 레인 배치도(${G.plan.season}${G.plan.layoutFrom !== G.plan.season ? ", 위치는 " + G.plan.layoutFrom + "년 피트 박스 기준" : ""}) · 칸 폭·차량 작업 칸은 추정` : pub ? "팀 박스 순서: 전년도 컨스트럭터 순위(F1 배정 규칙, 실제 피트 스톱으로 확인) · 차고 칸 수는 추정" : !est.length ? "팀 차고: 공개된 배치 자료" : (est.some((t) => t.from === "box") ? "팀 차고 위치: 피트 스톱 위치로 추정" : "팀 차고 위치: 반복 정차 위치로 추정") + (src.isLive ? "" : " (현재 재생 시점까지)") + " · 칸 수·배정은 추정");
   const key = allocationKey(teams);
   if (key === pitTeams.key) return;
   clearPitTeams();
@@ -495,6 +497,35 @@ function pitTeamNote(text) {
   let el = document.getElementById("pitTeamNote");
   if (!el && text) { el = document.createElement("div"); el.id = "pitTeamNote"; el.style.cssText = "position:absolute;left:12px;bottom:40px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:3"; host?.appendChild(el); }
   if (el) { el.textContent = text || ""; el.hidden = !text; }
+}
+// (Map3D.boardsDiag – a pure function of the pit building, the session's data, the layer and the camera: boardStatus
+// in garages.js says why each board is or isn't there; this adds what only the scene can say)
+function boardsDiag() {
+  let fac = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!fac && o.userData?.garages) fac = o; });
+  const A = app(), src = A?.src, G = fac?.userData.garages || null, drivers = src?.state?.DriverList || {};
+  const nums = [...new Set([...Object.keys(drivers), ...Object.keys(src?.state?.TimingData?.Lines || {})])].filter((n) => /^\d+$/.test(n));
+  const layer = pitTeams.group, boards = new Map((layer?.userData.boards || []).map((b) => [b.num, b]));
+  const keyNow = pitTeams.teams ? allocationKey(pitTeams.teams) : null;
+  const base = boardStatus({ G, hasPositions: !!src?.tracks?.cars, drivers, nums, teams: pitTeams.teams || [], evidence: pitTeams.info?.evidence || [], layerKey: pitTeams.key, keyNow, boards });
+  const cam = camera.position, rc = new THREE.Raycaster(), v = new THREE.Vector3(), targets = [world?.real?.group.getObjectByName("facilities"), world?.real?.group.getObjectByName("barriers"), world?.group.getObjectByName("syntheticWalls")].filter(Boolean);
+  rc.camera = camera;
+  for (const r of base) {
+    const b = boards.get(r.num); if (!b || r.status !== "created") continue;
+    const p = new THREE.Vector3(...b.p), d = p.distanceTo(cam);
+    let vis = true; for (let o = layer; o; o = o.parent) if (!o.visible) vis = false;
+    r.dist = Math.round(d);
+    // (its height on screen in pixels: the board's height over the distance, the view's vertical field)
+    r.px = Math.round((b.h / (2 * d * Math.tan((camera.fov * Math.PI) / 360))) * renderer.domElement.height);
+    if (!vis) { r.status = "hidden"; r.reason = d > 300 ? "LOD: the teams' layer shows within 300 m of the garages" : "layer hidden"; continue; }
+    if ((cam.x - p.x) * b.n[0] + (cam.y - p.y) * b.n[1] + (cam.z - p.z) * b.n[2] <= 0) { r.status = "hidden"; r.reason = "faces away from the camera (seen from inside or behind the building)"; continue; }
+    v.copy(p).project(camera); if (Math.abs(v.x) > 1 || Math.abs(v.y) > 1 || v.z > 1) { r.status = "off-screen"; r.reason = "outside the view"; continue; }
+    rc.set(cam.clone(), p.clone().sub(cam).normalize()); rc.far = d - 0.05;
+    const hit = rc.intersectObjects(targets, true).find((h) => h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh && h.object.name !== "teamLabels");
+    if (hit) { let o = hit.object, n = []; while (o && n.length < 2) { if (o.name) n.push(o.name); o = o.parent; } r.status = "occluded"; r.reason = "behind " + (n.join("<") || hit.object.type); r.hit = +hit.distance.toFixed(1); continue; }
+    if (r.px < 6) { r.status = "tiny"; r.reason = `${r.px} px high at ${r.dist} m`; continue; }
+    r.status = "visible";
+  }
+  return { facility: G?.facility || null, plan: G?.plan || world?.real?.info?.garagePlan || null, slots: G?.slots.length || 0, layer: !!layer, key: pitTeams.key === keyNow ? "current" : "stale", drivers: base };
 }
 // development: the current allocation (teams, their garages and how each driver's place is known)
 function pitTeamsInfo() {
@@ -2658,7 +2689,7 @@ function floodlights(samples, covered = null) {
 function warmShaders() {
   if (!renderer?.compileAsync) return;
   const hidden = [];
-  world?.group.traverse((o) => { if (!o.visible && (o.name === "garageInteriors" || o.name === "pitTeams")) { hidden.push(o); o.visible = true; } });
+  world?.group.traverse((o) => { if (!o.visible && (o.name === "garageInteriors" || o.name === "pitTeams" || o.name === "pitTeamsNear")) { hidden.push(o); o.visible = true; } });
   try { renderer.compileAsync(scene, camera).catch(() => {}); } finally { for (const o of hidden) o.visible = false; }
 }
 
@@ -3809,7 +3840,9 @@ window.Map3D = {
     let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
     if (!G) return "no garages";
     const s = G.slots[Math.max(0, Math.min(G.slots.length - 1, k))], [ix, iz] = s.inward;
-    return this.look(s.front[0] - ix * back + s.along[0] * side, s.floor + h, s.front[1] - iz * back + s.along[1] * side, s.front[0] + ix * 3, s.floor + 2, s.front[1] + iz * 3, fov);
+    // (returns the camera as a Map3D.look call: the same view again in another build – before / after pictures)
+    const a = [s.front[0] - ix * back + s.along[0] * side, s.floor + h, s.front[1] - iz * back + s.along[1] * side, s.front[0] + ix * 3, s.floor + 2, s.front[1] + iz * 3, fov].map((x) => +x.toFixed(2));
+    this.look(...a); return `Map3D.look(${a.join(", ")})`;
   },
   // development: look down at the paddock behind garage k (from beyond it, over the units towards the building)
   viewPaddock(k = 20, out = 70, h = 30, fov = 50) {
@@ -3909,6 +3942,11 @@ window.Map3D = {
     return JSON.stringify(out);
   },
   // development: how many facility models stand in the current world, and what the renderer holds
+  // development: every driver's name board – made or not, and why (the whole chain: the pit building, its garages,
+  // position data, the driver list, the team's garages, the driver's work space, the layer and its key, the board's row
+  // in the label atlas, the layer's distance LOD, which way it faces, what stands between it and the camera, its size
+  // on screen). → { facility, plan, layer, drivers: [{ num, code, team, status, reason, slot, px, hit }] }
+  boardsDiag() { updatePitTeams(true); return JSON.stringify(boardsDiag()); },
   pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: pitTeams.info?.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
   facilityState() {
     const g = world?.real?.group; let n = 0; g?.traverse((o) => { if (o.userData?.facility) n++; });

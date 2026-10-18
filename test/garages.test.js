@@ -320,5 +320,5 @@ test("work spaces: the driver list's order, a substitute, ties – deterministic
     assert.ok(xs[0] - bw / 2 >= -width / 2 && xs[xs.length - 1] + bw / 2 <= width / 2, "inside the bay");
     assert.strictEqual(new Set(xs).size, n);
   }
-  assert.strictEqual(G.boardWidth(8, 1), 1.76);
+  assert.strictEqual(G.boardWidth(8, 1), 3.6);
 });

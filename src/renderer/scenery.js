@@ -16,7 +16,9 @@ import { padPlan, polyDist } from "./footing.js";
 import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./facilities.js";
 import { START_DATA } from "./startdata.js";
-import { PIT_BOXES } from "./pitorder.js";
+import { PIT_BOXES, STANDINGS, teamKey } from "./pitorder.js";
+import { layoutFor } from "./garageplans.js";
+import { pathFrame } from "./pitlane.js";
 import { planTunnels, buildTunnels } from "./tunnel.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
@@ -788,7 +790,19 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // the pit building mapped so, no stand
   const toTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); if (!s) return [1, 0]; const dx = s.p.x - x, dz = s.p.z - z, l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
   const edgeOfTrack = sideEdge;
-  const generic = opts.buildings !== false ? genericPitSpec({ venue: opts.venue, location: scene.location, year: opts.year, pit: START_DATA[opts.venue?.key]?.pit, toScene: ([X, Y]) => gf.xz([X * 0.1, Y * 0.1]), toTrack, trackEdge: edgeOfTrack, boxes: PIT_BOXES[opts.venue?.key]?.boxes }) : null;
+  // (the FIA drawing's garages for this event, placed by the measured boxes – garageplans.js; the boxes of the session's
+  // season, else the nearest season's: v0.38 keyed PIT_BOXES by season and this still read PIT_BOXES[key].boxes – always
+  // nothing, so a picked pit building ran between the limiter lines less 40 m, not along the boxes)
+  const pitData = START_DATA[opts.venue?.key]?.pit, layout = pitData && opts.year ? layoutFor(opts.venue?.key, opts.year, PIT_BOXES, STANDINGS, teamKey) : null;
+  const bySeason = PIT_BOXES[opts.venue?.key], boxSeason = bySeason && Object.keys(bySeason).map(Number).sort((a, b) => Math.abs(a - (opts.year || 0)) - Math.abs(b - (opts.year || 0)) || b - a)[0];
+  let bays = null;
+  if (layout?.bays) {
+    const fr = pathFrame(pitData.path.map(([X, Y]) => gf.xz([X * 0.1, Y * 0.1]))), P = (u) => { const q = fr.at(u); return [q.x, q.z]; };
+    bays = { list: layout.bays.map((b) => ({ a: P(b.u0), b: P(b.u1), bay: { n: b.n, owners: b.owners, teams: b.teams, label: b.label, garage: b.garage, section: b.section } })),
+      src: layout.plan.src, meta: { src: layout.plan.src, conf: layout.plan.conf, note: layout.plan.note || null, season: layout.from.plan, layoutFrom: layout.from.layout, resid: +layout.fit.resid.toFixed(2) } };
+  }
+  const garagePlan = layout ? (layout.why ? { why: layout.why } : bays.meta) : { why: "no pit data or season" };
+  const generic = opts.buildings !== false ? genericPitSpec({ venue: opts.venue, location: scene.location, year: opts.year, pit: pitData, toScene: ([X, Y]) => gf.xz([X * 0.1, Y * 0.1]), toTrack, trackEdge: edgeOfTrack, boxes: bySeason?.[boxSeason]?.boxes, layout: layout?.bays ? layout : null }) : null;
   for (const b of scene.buildings) delete b.asPitBuilding;   // (a record reused from an earlier build starts clean)
   if (generic && opts.facilities !== false) generic.pick(scene.buildings, gf);
 
@@ -876,9 +890,30 @@ async function buildReal(api, scene, world, opts, onStep, own) {
       }
       return best <= max ? best : Infinity;
     };
-    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, barrierRay, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false, registry: generic ? [...FACILITIES, generic] : FACILITIES,
+    const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, barrierRay, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false, registry: generic ? [...FACILITIES, generic] : FACILITIES, bays,
       readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
+    // The terrain under the pit building's garages and its pit lane laid under their floor: the elevation grid (~10 m
+    // cells) knows nothing of a level pit complex cut into a slope, and where the ground rises behind the lane (Monaco:
+    // the harbour slope, v0.39 screenshots) it stood up inside the garages and across the lane, hiding the garages and
+    // the cars in them. Only vertices from the back of the garages to the lane's far side are lowered, to 0.1 m under
+    // the floor there – nothing is raised, nothing else moves.
+    if (fac?.group) fac.group.traverse((o) => {
+      const G = o.userData?.garages; if (!G) return;
+      let n = 0; const cell = Math.max(W / nx, H / nz);
+      for (let k = 0; k < pos.length / 3; k++) {
+        const x = pos[k * 3], z = pos[k * 3 + 2], p = G.project(x, z);
+        if (p.u < G.gStart - 6 || p.u > G.gEnd + 6) continue;
+        const far = (G.wallFace?.(Math.max(G.gStart, Math.min(G.gEnd, p.u))) ?? 12) + 2;
+        // (to a grid cell behind the garages' back wall: a vertex left high there tilts the triangles into the garage –
+        // v0.39 Monaco, a mound inside every garage; not the track's own vertices: those the ground already holds under it)
+        if (p.off < -(G.depth + cell * 1.05) || p.off > far || trackDist(x, z) < (opts.trackW || 14) / 2 + 1) continue;
+        const f = G.floorAt(Math.max(G.gStart, Math.min(G.gEnd, p.u))) - 0.1;
+        if (pos[k * 3 + 1] > f) { pos[k * 3 + 1] = f; n++; }
+      }
+      if (n) { tg.attributes.position.needsUpdate = true; tg.computeVertexNormals(); tg.computeBoundingSphere(); }
+      G.terrainLowered = n;
+    });
     lm = combine(lm, fac);
     if (lm.group) group.add(lm.group);
     bld = buildingsMesh(scene, gf, groundAt, { night: false, location: scene.location, landmarks: lm, raise: tplan?.raise, terrainAt: opts.groundOld ? null : terrainAt }, corridor, inStand);
@@ -962,7 +997,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, pads, footing: bld?.userData.footing ?? null, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped, raisedOver: bld.userData.overTrack, overTunnel: bld.userData.raised } : null,
       tunnels: tplan?.info || null,
-      trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], region: bld?.userData.region,
+      trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], garagePlan, region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,
     // (development: the drawn terrain's height – its grid triangles, not groundAt – and its cell size: Map3D.groundDiag)
