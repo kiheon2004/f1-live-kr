@@ -8,9 +8,10 @@
 // sends no car out – none is made up.
 // Medical car: no data at all – a reproduction, said so: behind the last row while the field stands on the grid, after
 // the start following the last car round the first lap, into the pit lane at its end, parked at the pit exit after.
-// The rear-of-grid official: not in the regulations (marshal practice in flag guides): once the field stands, a marshal
-// behind the last row waves a green flag to the starter and leaves the track before the lights – no time in the data:
-// a reproduction of the order only, ahead of the lights' own estimate; it never moves the start.
+// The rear-of-grid official (FIA Appendix H 2026 2.5.5 g): once the field stands, a marshal at the back of the grid –
+// behind a barrier opening near it, or as far from the track's edge as possible – waves the green flag to tell the
+// starter all cars are stationary; then steps back before the lights. No time in the data: a reproduction of the order
+// only, ahead of the lights' own estimate; it never moves the start.
 // None of them is a competitor: not in the standings, lap counts, grid or driver counts (they never enter those paths).
 
 export const SUPPORT = {

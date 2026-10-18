@@ -1769,11 +1769,15 @@ function updateSupport(src, t) {
   // the rear-of-grid official: behind the last row with a green flag, then off to the side of the track
   if (plan.official && SP.gridBack) {
     if (!SP.crew) { SP.crew = crewMeshes(2); SP.group.add(SP.crew.group); SP.flag = makeFlag("green"); SP.group.add(SP.flag.group); }
-    const { f } = SP.gridBack, side = { x: f.z, z: -f.x }, [sn] = world.grid.nearest(SP.gridBack.x, SP.gridBack.z, 3);
-    const edge = sn ? Math.max(sn.L ?? 7, -(sn.R ?? -7)) + 2.5 : 9;
-    const k = plan.official.phase === "leave" ? plan.official.f : 0;
-    const x = SP.gridBack.x + side.x * edge * k, z = SP.gridBack.z + side.z * edge * k, y = groundY(x, z);
-    // (facing the grid while waving – the starter's way –, then walking off sideways)
+    // (Appendix H 2026 2.5.5 g: the marshal "behind a barrier opening located in close proximity to the back of the grid"
+    // – or as far from the track's edge as possible: off the track at its side, never on it; which side's opening isn't
+    // known – the side with more room; then stepping back as the lights come)
+    const { f } = SP.gridBack, [sn] = world.grid.nearest(SP.gridBack.x, SP.gridBack.z, 3);
+    if (!SP.offSide) { const room = (sg) => { const e = sn ? (sg > 0 ? sn.L ?? 7 : -(sn.R ?? -7)) : 7, [q, dd] = world.grid.nearest(SP.gridBack.x + f.z * sg * (e + 6), SP.gridBack.z - f.x * sg * (e + 6), 2); return q ? dd : 99; }; SP.offSide = room(1) >= room(-1) ? 1 : -1; }
+    const sg = SP.offSide, side = { x: f.z * sg, z: -f.x * sg }, edge = sn ? (sg > 0 ? sn.L ?? 7 : -(sn.R ?? -7)) : 7;
+    const out = edge + 2.2 + (plan.official.phase === "leave" ? 2.5 * plan.official.f : 0);
+    const x = SP.gridBack.x + side.x * out, z = SP.gridBack.z + side.z * out, y = groundY(x, z);
+    // (facing the grid while waving – the starter's way –, then turning away)
     const face = plan.official.phase === "flag" ? f : side, yaw = Math.atan2(face.x, face.z) - Math.PI / 2;
     const wave = plan.official.phase === "flag" ? Math.sin(tsec * 2 * Math.PI * 1.4) : 0;
     const pose = plan.official.phase === "flag" ? { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.03, arm: [[0.15, 0.08, 0.2], [2.6 + 0.35 * wave, 0.25, 0.1]] } : walkPose(tsec * 6);
