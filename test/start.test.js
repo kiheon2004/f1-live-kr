@@ -284,3 +284,27 @@ test("start lights: lights out where the field set off, by its telemetry", async
   const rolling = {}; for (let i = 0; i < 20; i++) rolling[i] = { t: [0, 400000], v: [150, 150] };
   assert.strictEqual(fieldLaunch(rolling, { t: 10000 }), null, "no standstill: nothing found");
 });
+
+// v0.37 (review of v0.36, B): set-offs were counted, not cars – one car stopping and going twice within 3 s made two
+test("start lights: the field's launch counts distinct cars, sustained moves only; pit starters and the next start apart", async () => {
+  const { fieldLaunch } = await import("../src/renderer/startplan.js");
+  const series = (f) => { const t = [], v = []; for (let ms = 0; ms <= 60000; ms += 250) { t.push(ms); v.push(f(ms)); } return { t, v }; };
+  const still = () => series(() => 0);
+  // four cars: one stops and goes twice (2 s still each time), the others never move → no launch
+  const twice = { a: series((ms) => (ms < 20000 ? 0 : ms < 21000 ? 120 : ms < 23500 ? 0 : 120)), b: still(), c: still(), d: still() };
+  assert.strictEqual(fieldLaunch(twice, { t: 10000 }, { minCars: 1 }), null, "one car twice is not half the field");
+  // the same four setting off together → a launch of 4 distinct cars
+  const go = {}; for (const k of ["a", "b", "c", "d"]) go[k] = series((ms) => (ms < 20000 + k.charCodeAt(0) * 10 ? 0 : 150));
+  const L = fieldLaunch(go, { t: 10000 }, { minCars: 1 });
+  assert.deepStrictEqual([L.t, L.n, L.of], [21000, 4, 4]);   // (the first 250 ms sample after the earliest)
+  // creeping forward (5 km/h for a second, then still) isn't a start
+  const creep = {}; for (const k of ["a", "b", "c", "d"]) creep[k] = series((ms) => (ms >= 20000 && ms < 21000 ? 5 : 0));
+  assert.strictEqual(fieldLaunch(creep, { t: 10000 }, { minCars: 1 }), null);
+  // two of four set off, the other two are pit-lane starters (skipped): 2 of 2
+  const pit = { a: go.a, b: go.b, c: still(), d: still() };
+  assert.strictEqual(fieldLaunch(pit, { t: 10000 }, { minCars: 2, skip: (n) => n === "c" || n === "d" }).n, 2);
+  // a launch after the next start's moment belongs to that start
+  assert.strictEqual(fieldLaunch(go, { t: 10000 }, { minCars: 1, until: 15000 }), null);
+  // too few cars seen: unsure, no time
+  assert.strictEqual(fieldLaunch({ a: go.a, b: go.b }, { t: 10000 }), null);
+});

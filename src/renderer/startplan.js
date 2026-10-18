@@ -263,22 +263,41 @@ export function startLights(starts, t, { hold = 2, live = false } = {}) {
 // When the field actually set off at a standing start, by the cars' own telemetry: the earliest moment at which most of
 // the cars standing still (≥ 2 s) move off within `spread` ms of one another, from `before` ms ahead of the race clock's
 // start (s.t) to `after` ms past it – the race clock can run long before the lights (Sepang 2026: ~6 min behind the safety
-// car first). → { t, n } (the launch, cars in it) or null when the data doesn't show one (then the clock's moment stands).
-export function fieldLaunch(cars, s, { before = 5000, after = 12 * 60000, spread = 3000, share = 0.5 } = {}) {
-  const offs = [];
-  for (const car of Object.values(cars || {})) {
+// car first). → { t, n, of, nums } (the launch, the distinct cars in it, of the cars seen) or null when the data doesn't
+// show one clearly (then the clock's moment stands – nothing is made up).
+export function fieldLaunch(cars, s, { before = 5000, after = 12 * 60000, until = Infinity, spread = 3000, share = 0.5, minCars = 3, skip = null, go = 30, hold = 3000 } = {}) {
+  // Each car's set-offs: from a standstill of 2 s or more, then moving on – its telemetry speed (km/h) above `go` within
+  // `hold` ms and still moving at the end of it (creeping forward a few metres isn't a start). A car is counted once in a
+  // moment however many times it set off (v0.36 counted set-offs: one car starting twice in 3 s passed for two – review
+  // of v0.36, B). skip(num): cars not in the field's start (pit-lane starters, retired); a car without samples in the
+  // window counts neither way.
+  const lo = s.t - before, hi = Math.min(s.t + after, until), cands = [];
+  let n = 0;
+  for (const [num, car] of Object.entries(cars || {})) {
+    if (skip?.(num)) continue;
     const T = car?.t, V = car?.v; if (!T?.length) continue;
-    let still = null;
+    let any = false, still = null;
     for (let i = 0; i < T.length; i++) {
-      if (T[i] < s.t - before - 5000) continue; if (T[i] > s.t + after) break;
-      if (V[i] <= PLAN.still) { if (still == null) still = T[i]; }
-      else { if (still != null && T[i] - still >= 2000 && T[i] >= s.t - before) offs.push(T[i]); still = null; }   // (every set-off: the field's is the one they share)
+      if (T[i] < lo - 5000) continue; if (T[i] > hi) break;
+      any = true;
+      if (V[i] <= PLAN.still) { if (still == null) still = T[i]; continue; }
+      if (still != null && T[i] - still >= 2000 && T[i] >= lo) {
+        // (sustained: over `go` within `hold`, and not stopped again at its end)
+        let k = i, top = 0; while (k + 1 < T.length && T[k + 1] - T[i] <= hold) { k++; top = Math.max(top, V[k]); }
+        if (top > go && V[k] > PLAN.still) cands.push({ num, t: T[i], still: T[i] - still });
+      }
+      still = null;
     }
+    if (any) n++;
   }
-  const n = Object.keys(cars || {}).length; if (!n || !offs.length) return null;
-  offs.sort((a, b) => a - b);
-  for (let i = 0; i < offs.length; i++) { let j = i; while (j + 1 < offs.length && offs[j + 1] - offs[i] <= spread) j++; if (j - i + 1 >= n * share) return { t: offs[i], n: j - i + 1 }; }
+  if (n < minCars || !cands.length) return null;
+  cands.sort((a, b) => a.t - b.t);
+  // (the earliest moment `share` of the cars seen – distinct cars – set off within `spread` of each other)
+  for (let i = 0; i < cands.length; i++) {
+    const who = new Set(); for (let j = i; j < cands.length && cands[j].t - cands[i].t <= spread; j++) who.add(cands[j].num);
+    if (who.size >= Math.max(minCars, n * share)) return { t: cands[i].t, n: who.size, of: n, nums: [...who] };
+  }
   // (Sepang 2026: the cars left one by one behind the safety car when the clock started, then stood on the grid and set
-  // off together 6.5 min later – the moment they share is the start)
+  // off together 6.5 min later – the moment they share is the start). Not enough distinct cars: no time – unsure.
   return null;
 }

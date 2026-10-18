@@ -1551,6 +1551,28 @@ function updateCars(dt) {
   updateWheelScreens(src, A.t);
   updateStartLights(src, A.t);
 }
+// The standing starts as shown: race control's, each at the moment the field set off by its telemetry where that differs
+// from the race clock's (fieldLaunch) – the clock isn't always lights out; live: as the clock says, nothing ahead
+function shownStarts(src, t) {
+  const S = startState(src, t);
+  if (!S.launches) S.launches = new Map();
+  const all = S.hist.starts(src.isLive ? t : Infinity);
+  return all.map((s, k) => {
+    // (a restart race control doesn't name: standing only if the field is seen setting off together from standstill)
+    if (src.isLive || s.standing === false) return s;
+    // (only the cars starting from the grid count – not a car out, nor at the race's first start a pit-lane starter; at a
+    // restart after a red flag the field itself waits in the pit lane (Monaco 2026), so none is left out for that – and
+    // up to the next start)
+    if (!S.launches.has(s.t)) {
+      const ctx = startCtxAt(S, s.t), first = k === 0;
+      const skip = (num) => { const kd = ctx ? carKind(S.hist, ctx, num, s.t).kind : null; return kd === "out" || (first && kd === "pit"); };
+      S.launches.set(s.t, fieldLaunch(src.car, s, { until: all[k + 1]?.t ?? Infinity, skip }));
+    }
+    const f = S.launches.get(s.t);
+    if (s.standing !== true) return f ? { ...s, t: f.t, standing: true, from: "field" } : s;
+    return f && Math.abs(f.t - s.t) > 3000 ? { ...s, t: f.t, from: "field" } : s;
+  });
+}
 // the gantry's reds before a standing start (startplan.js startLights: a replay's estimate – the data has lights out only)
 function updateStartLights(src, t) {
   const lamps = world?.group.getObjectByName("grid")?.userData.lamps;
@@ -1558,17 +1580,7 @@ function updateStartLights(src, t) {
   if (!lamps || !src) { const el = document.getElementById("startLightNote"); if (el) el.hidden = true; return; }
   // (a replay's standing starts at the moment the field set off by its telemetry where that differs from the race clock's
   // – the clock isn't always lights out; live: as the clock says, nothing ahead)
-  const S = startState(src, t);
-  if (!S.launches) S.launches = new Map();
-  const starts = S.hist.starts(src.isLive ? t : Infinity).map((s) => {
-    // (a restart race control doesn't name: standing only if the field is seen setting off together from standstill)
-    if (src.isLive || s.standing === false) return s;
-    if (!S.launches.has(s.t)) S.launches.set(s.t, fieldLaunch(src.car, s));
-    const f = S.launches.get(s.t);
-    if (s.standing !== true) return f ? { ...s, t: f.t, standing: true, from: "field" } : s;
-    return f && Math.abs(f.t - s.t) > 3000 ? { ...s, t: f.t, from: "field" } : s;
-  });
-  const L = startLights(starts, t, { live: !!src.isLive });
+  const L = startLights(shownStarts(src, t), t, { live: !!src.isLive });
   lamps.forEach((m, i) => { const on = i < L.lit; if ((m.emissiveIntensity > 0.5) !== on) { m.emissiveIntensity = on ? 1.1 : 0.04; m.color.set(on ? 0x500000 : 0x180505); m.emissive.set(on ? 0xff0a00 : 0xff2a1a); } });
   const note = L.est ? "출발 신호: 데이터에는 소등 시각만 있어요 – 빨간불이 켜지는 시점은 추정(1초 간격, 소등 2초 전 5개 점등)" : null;
   let el = document.getElementById("startLightNote");
@@ -3150,6 +3162,8 @@ window.Map3D = {
     const lifted = [...cars.values()].filter((c) => c.lifted).map((c) => ({ num: c.num, y: +c.model.position.y.toFixed(3), wheels: c.model.userData.wheels.map((w) => (w.visible ? 1 : 0)).join(""), pos: c.pos.toArray().map((v) => +v.toFixed(3)), raw: c.raw?.toArray().map((v) => +v.toFixed(3)), yaw: +c.yaw.toFixed(4) }));
     return JSON.stringify({ t: app().t, instances: n, hash: h, lifted, note: document.getElementById("pitWorkNote")?.hidden === false ? document.getElementById("pitWorkNote").textContent : null });
   },
+  // development: the starts as the lights use them (race control's + the field's launch by telemetry)
+  starts() { const src = app().src; if (!src) return "null"; const shown = shownStarts(src, app().t), S = startState(src, app().t); return JSON.stringify({ shown: shown.map((s) => ({ t: s.t, standing: s.standing, from: s.from || null })), launches: [...(S.launches || new Map())].map(([t, f]) => [t, f && { t: f.t, n: f.n, of: f.of }]) }); },
   pitCar(num) {
     const G = pitTeams.G, c = cars.get(String(num)); if (!G || !c) return JSON.stringify({ G: !!G, car: !!c });
     const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;
