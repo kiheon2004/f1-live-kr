@@ -240,7 +240,7 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
     const f = -sd * Math.PI / 2, [h0, h1] = byRight(f, [0.32, sd * 0.5], [-0.02, sd * 0.52]), sw2 = ss(0, 0.6, steady);
     figures.push([0.15, sd * 1.35, f, blendPose("ready", "reach", steady * 0.6), null, sw2 > 0 ? [[h0[0], h0[1], 0.66, sw2, 1, 0, 0], [h1[0], h1[1], 0.64, sw2, 1, 0, 0]] : null]);
   }
-  // the release: a light on the gantry, worked by the chief mechanic (formula1.com 2025: no lollipop since 2010s) – he
+  // the release: a light on the gantry, worked by the chief mechanic (formula1.com 2025: the lollipop long replaced by the light) – he
   // stands at the box's front corner looking up the lane (where: L), stepping back beside the car as it drops
   figures.push([3.6 - 3.0 * clear, -left * (2.15 + 0.15 * clear), left > 0 ? Math.PI * 0.75 : -Math.PI * 0.75, "stand", null, null]);
   // the spare rear jack (Mercedes, "up to 22", 2023; formula1.com 2025: the back-up rear jack beside the car with its jack
@@ -384,15 +384,25 @@ POSES.walk = walkPose(0);
 // metres moved: each foot planted while the body passes over it, then lifted and put down ahead (SHUFFLE.step a step,
 // eased in and out over the first and last steps so the feet start and end where the pose has them). Estimated (M: the
 // crouched side-steps of the jack men in the stop photos and videos – formula1.com, 2024–25).
-export const SHUFFLE = { step: 0.34, lift: 0.06 };
+export const SHUFFLE = { step: 0.34, side: 0.18, lift: 0.06 };
 export function shuffle(P, ux, uz, d, total) {
   P = poseOf(P); const base = plantOf(P), st = SHUFFLE.step, ul = Math.hypot(ux, uz) || 1;
   const e = Math.min(1, d / st, Math.max(0, total - d) / st);
+  // (mostly sideways: the leading foot steps out, then the other closes up to it – the feet never cross; each moves
+  // 2·side a cycle while the body moves side per half)
+  const lateral = Math.abs(uz) > 0.4 * ul, lead = uz > 0 ? 0 : 1, a = SHUFFLE.side;
   const ankle = base.ankle.map(([x, y, z = 0], i) => {
-    const v = (((d / (2 * st) + i * 0.5) % 1) + 1) % 1;
     let off, lift = 0;
-    if (v < 0.5) off = (st / 2) * (1 - 4 * v);
-    else { const w = (v - 0.5) * 2, sm = w * w * (3 - 2 * w); off = -st / 2 + st * sm; lift = SHUFFLE.lift * Math.sin(Math.PI * w); }
+    if (lateral) {
+      const v = (((d / (2 * a)) % 1) + 1) % 1, mine = (i === lead) === (v < 0.5), w = (v % 0.5) * 2, sm = w * w * (3 - 2 * w);
+      // (relative to the hips: the moving foot from its place out by a – or in, the trailing one – the planted one back)
+      off = (i === lead ? 1 : -1) * a * (mine ? (i === lead ? sm : 1 - sm) : (i === lead ? 1 - w : w));
+      if (mine) lift = SHUFFLE.lift * Math.sin(Math.PI * w);
+    } else {
+      const v = (((d / (2 * st) + i * 0.5) % 1) + 1) % 1;
+      if (v < 0.5) off = (st / 2) * (1 - 4 * v);
+      else { const w = (v - 0.5) * 2, sm = w * w * (3 - 2 * w); off = -st / 2 + st * sm; lift = SHUFFLE.lift * Math.sin(Math.PI * w); }
+    }
     return [x + (ux / ul) * off * e, y + lift * e, z + (uz / ul) * off * e];
   });
   // (the hips no higher than lets each leg reach its foot)

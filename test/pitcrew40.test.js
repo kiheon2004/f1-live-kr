@@ -197,3 +197,11 @@ test("a car of another shape moves its crew: the gunners at its hubs, the jacks 
   assert.ok(Math.abs(jacks(b)[0].a - jacks(a)[0].a - 0.2) < 1e-9 && Math.abs(jacks(b)[1].a - jacks(a)[1].a + 0.1) < 1e-9);
   assert.ok(Math.abs(jacks(c)[0].a - jacks(b)[0].a - 0.25) < 1e-9 && Math.abs(jacks(c)[1].a - jacks(b)[1].a + 0.1) < 1e-9, "the profile's own lift points");
 });
+
+test("stepping sideways (the jack men, the wing man clearing the way): the feet never cross", async () => {
+  const { stopChoreo, skeleton } = await C();
+  for (const left of [1, -1]) for (let s = -0.5; s < 3; s += 0.02) {
+    const L = stopChoreo({ wait: 0, D: 2.4 }, s, D26, left);
+    for (const [i, f] of L.figures.entries()) { const j = skeleton(f[3]).joints; assert.ok(j.ankle[0][2] - j.ankle[1][2] > 0.08, `figure ${i} at ${s.toFixed(2)}: ankles ${(j.ankle[0][2] - j.ankle[1][2]).toFixed(3)} apart`); }
+  }
+});
