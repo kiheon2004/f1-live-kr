@@ -319,7 +319,7 @@ function template(prof) {
 
 // The halo (both eras: the hoop from rear mounts on the chassis up round the driver's head, the centre pillar down to
 // the chassis ahead of the cockpit), its fairing thicker than the titanium tube under it.
-function halo(p) {
+export function halo(p) {
   // (2026 footage: the hoop reads wide and flat from the T-cam. v0.22: its top bar ~6 % of the frame's height in the
   // Singapore and Barcelona pole-lap frames, its top edge at ~0.43 – the fairing ~9 cm across, ~4.5 cm thick, the top
   // at 0.91 m; it was 12 × 6 cm and 0.935 m, 8 % and 0.38 on screen)

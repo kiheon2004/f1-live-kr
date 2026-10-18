@@ -295,3 +295,30 @@ test("team layer: a driver's name on their work space only; the box mark one per
   assert.ok(t.slots.length > t.drivers.length, "the team's area keeps its bays");
   assert.strictEqual(t.spaces.length, t.drivers.length);
 });
+
+// v0.38: the work spaces don't depend on the list's order; a substitute changes the key; split halves never overlap
+test("work spaces: the driver list's order, a substitute, ties – deterministic, and the key follows", async () => {
+  const G = await load();
+  const bays = (n, w = 8.4) => Array.from({ length: n }, (_, i) => ({ k: 100 + i, uc: i * w, width: w - 0.5 }));
+  const slotsF = bays(4), drivers = (list) => Object.fromEntries(list.map(([n, team]) => [n, { TeamName: team, Tla: "D" + n, RacingNumber: n, TeamColour: "ff0000" }]));
+  const place = { team: "A", u: 12.6, off: 6, from: "box", ok: true, n: 3 };
+  const a = G.allocatePlaces(slotsF, 8.4, drivers([["16", "A"], ["44", "A"]]), [place]);
+  const b = G.allocatePlaces(slotsF, 8.4, drivers([["44", "A"], ["16", "A"]]), [place]);
+  assert.strictEqual(G.allocationKey(a), G.allocationKey(b), "list order: same allocation");
+  const sub = G.allocatePlaces(slotsF, 8.4, drivers([["16", "A"], ["38", "A"]]), [place]);
+  assert.notStrictEqual(G.allocationKey(sub), G.allocationKey(a), "a substitute: the key changes");
+  assert.ok(G.allocationKey(sub).includes("38="), "the substitute's own board");
+  // equal distances (seen exactly between two bays): the same answer whichever comes first
+  const tie1 = G.workSpaces(bays(3), [{ num: "5", u: 4.2, from: "garage" }, { num: "6", u: 4.2, from: "garage" }]);
+  const tie2 = G.workSpaces(bays(3), [{ num: "6", u: 4.2, from: "garage" }, { num: "5", u: 4.2, from: "garage" }]);
+  assert.deepStrictEqual(tie1.sort((x, y) => x.num - y.num), tie2.sort((x, y) => x.num - y.num));
+  // a bay split in two (and in three): the boards (0.42 of the bay's width at most, centred on each part) don't overlap
+  for (const n of [2, 3, 4]) {
+    const ws = G.workSpaces(bays(1, 5.5), Array.from({ length: n }, (_, i) => ({ num: String(i + 1), from: "box" }))), width = 5.0, bw = G.boardWidth(width, n);
+    const xs = ws.map((w) => w.w).sort((p, q) => p - q);
+    for (let i = 1; i < xs.length; i++) assert.ok(xs[i] - xs[i - 1] >= bw, `boards overlap: ${xs} (${bw} m wide)`);
+    assert.ok(xs[0] - bw / 2 >= -width / 2 && xs[xs.length - 1] + bw / 2 <= width / 2, "inside the bay");
+    assert.strictEqual(new Set(xs).size, n);
+  }
+  assert.strictEqual(G.boardWidth(8, 1), 1.76);
+});

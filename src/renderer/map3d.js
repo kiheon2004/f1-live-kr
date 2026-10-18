@@ -16,7 +16,7 @@ import { makeSupportCar } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
-import { harbourFor, layoutYachts, yachtMeshes } from "./harbour.js";
+import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, skeleton } from "./crew.js";
@@ -1623,8 +1623,8 @@ function buildMarshals(src) {
     D.posts.map(([id, X, Y]) => { const q = sceneOf(X, Y); return { id, i: lapIndexOf(q.x, q.z) }; }), n);
   // then what can be drawn: each behind the barrier at its place (the map's along-track place; its side from the map's
   // label – an inference; how far out: the barrier found by a ray from the track's edge – an estimate)
-  let guessed = 0, skipped = 0;
-  const place = (X, Y, side, i) => {
+  let guessed = 0, skipped = 0, lane = 0;
+  const place = (X, Y, side, i, panel = false) => {
     const s = W.samples[i]; if (!s) return null;
     const sg = side === "R" ? 1 : -1, edge = edgeOf(s, sg);
     const from = new THREE.Vector3(s.p.x + s.nor.x * edge, s.p.y + 0.6, s.p.z + s.nor.z * edge), dir = new THREE.Vector3(s.nor.x * sg, 0, s.nor.z * sg);
@@ -1632,8 +1632,11 @@ function buildMarshals(src) {
     const hit = targets.length ? ray.intersectObjects(targets, true)[0] : null;
     // (no barrier drawn within 90 m: nobody is stood in the run-off on a guess – not drawn, counted; its sector stays)
     if (!hit) { guessed++; return null; }
-    const off = hit.distance + 1.6;
-    const x = s.p.x + s.nor.x * (edge + sg * off), z = s.p.z + s.nor.z * (edge + sg * off);
+    let off = hit.distance + 1.6, x = s.p.x + s.nor.x * (edge + sg * off), z = s.p.z + s.nor.z * (edge + sg * off);
+    // (behind the pit wall is the pit lane – v0.38: a panel stood in its fast lane: a panel goes on the wall itself, a post
+    // isn't stood there)
+    const ln = W.pitLane ? laneNearest(x, z) : null;
+    if (ln && ln.d < 7.5) { if (!panel) { lane++; return null; } off = hit.distance + 0.3; x = s.p.x + s.nor.x * (edge + sg * off); z = s.p.z + s.nor.z * (edge + sg * off); }
     // (not on another stretch of the track: not drawn there)
     const [o, d] = W.grid.nearest(x, z, 2);
     if (o && Math.min(Math.abs(o.i - s.i), n - Math.abs(o.i - s.i)) > 20 && d < Math.max(edgeOf(o, 1), -edgeOf(o, -1)) + 2) { skipped++; return null; }
@@ -1642,11 +1645,11 @@ function buildMarshals(src) {
     return { x, z, y: s.p.y, i: s.i, face: { x: fx / fl, z: fz / fl }, along: { x: s.tan.x, z: s.tan.z } };
   };
   const lights = D.lights.map(([nn, X, Y, side]) => { const q = sceneOf(X, Y); return { n: +nn, X, Y, side, i: lapIndexOf(q.x, q.z) }; });
-  const panels = lights.map((l) => { const q = place(l.X, l.Y, l.side, l.i); return q && { n: l.n, ...q }; }).filter(Boolean);
+  const panels = lights.map((l) => { const q = place(l.X, l.Y, l.side, l.i, true); return q && { n: l.n, ...q }; }).filter(Boolean);
   const posts = D.posts.map(([id, X, Y, side], k) => { const lp = map.posts[k], q = place(X, Y, side, lp.i); return q && { id, ...q, sector: lp.sector, prev: lp.prev, first: !!lp.first }; }).filter(Boolean);
   const season = A.sessionYear?.() || null;
   const info = { venue: key, season: D.season, sameSeason: D.season === season, map: D.map, url: D.url, sectors: map.bounds.length, mirrors: map.mirrors.length,
-    posts: posts.length, panels: panels.length, ofPosts: D.posts.length, ofPanels: D.lights.length, noBarrier: guessed, onTrack: skipped,
+    posts: posts.length, panels: panels.length, ofPosts: D.posts.length, ofPanels: D.lights.length, noBarrier: guessed, onTrack: skipped, pitLane: lane,
     where: { along: `FIA ${D.season} circuit map, fitted to a lap (~5–8 m)`, side: "the map label's side (inferred)", out: "behind the barrier found by a ray (estimate)" } };
   return { posts, panels, map, data: D, info };
 }
@@ -1842,7 +1845,8 @@ function updateSupport(src, t) {
   const lastS = src.supportLast ? (src.isLive ? src.supportLast() : src.supportLast(t)) : {};
   const ages = {}; let scLast = null;
   for (const [n, s] of Object.entries(lastS)) { ages[n] = t - s.t; if (!scLast || s.t > scLast.t) scLast = { num: n, t: s.t, x: s.x, y: s.y }; }
-  if (scLast && P) { const q = toScene([scLast.x, scLast.y], c0), ln = laneNearest(q.x, q.z); scLast.laneU = ln && ln.d < 25 ? ln.u : null; }
+  if (scLast && P) { const q = toScene([scLast.x, scLast.y], c0), ln = laneNearest(q.x, q.z); scLast.laneU = ln && ln.d < 25 ? ln.u : null; scLast.laneD = ln ? +ln.d.toFixed(1) : null; scLast.at = [+q.x.toFixed(1), +q.z.toFixed(1)]; }
+  SP.scLast = scLast;
   const plan = supportPlan({ t, status, sc: sup, ages, scRecent: statusWas(src, t, "4", 6000), scLast, parkU: exitU, start, lap1: st?.lap1 || null, lap: +(src.state.LapCount?.CurrentLap || 0) || null, race: isRace });
   const models = supportModels(A.sessionYear?.() || 0, venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key ?? null, sessionDate());
   const scId = models.sc || "neutralSc", medId = models.medical || "neutralMedical", tsec = t / 1000;
@@ -3546,10 +3550,20 @@ window.Map3D = {
   // development: the starts as the lights use them (race control's + the field's launch by telemetry)
   starts() { const src = app().src; if (!src) return "null"; const shown = shownStarts(src, app().t), S = startState(src, app().t); return JSON.stringify({ shown: shown.map((s) => ({ t: s.t, standing: s.standing, from: s.from || null })), launches: [...(S.launches || new Map())].map(([t, f]) => [t, f && { t: f.t, n: f.n, of: f.of }]) }); },
   // development: the support cars and the official as placed this frame
-  support() { const SP = world?.support; if (!SP) return "null"; const pos = (k) => { const o = SP.cars[k]?.obj; return o?.visible ? o.position.toArray().map((v) => +v.toFixed(1)) : null; }; return JSON.stringify({ plan: SP.plan, models: SP.models, sc: pos("sc"), med: pos("med"), last: [...SP.starts.values()][0] || null, official: SP.officialShown || false, gridBack: SP.gridBack ? { x: +SP.gridBack.x.toFixed(1), z: +SP.gridBack.z.toFixed(1), f: [+SP.gridBack.f.x.toFixed(3), +SP.gridBack.f.z.toFixed(3)] } : null }); },
+  support() { const SP = world?.support; if (!SP) return "null"; const pos = (k) => { const o = SP.cars[k]?.obj; return o?.visible ? o.position.toArray().map((v) => +v.toFixed(1)) : null; }; return JSON.stringify({ plan: SP.plan, models: SP.models, sc: pos("sc"), med: pos("med"), last: [...SP.starts.values()][0]?.last || null, order: [...SP.starts.values()][0]?.order || null, official: SP.officialShown || false, officialAt: SP.officialAt || null, scLast: SP.scLast || null, medFollows: SP.medFollows || null, lap1: [...SP.starts.values()][0]?.lap1 || null, lane: world.pitLane ? { entry: [laneAt(0).x, laneAt(0).z].map((v) => +v.toFixed(1)), exit: [laneAt(world.pitLane.exitU).x, laneAt(world.pitLane.exitU).z].map((v) => +v.toFixed(1)), len: +world.pitLane.len.toFixed(1), exitU: +world.pitLane.exitU.toFixed(1) } : null, gridBack: SP.gridBack ? { x: +SP.gridBack.x.toFixed(1), z: +SP.gridBack.z.toFixed(1), f: [+SP.gridBack.f.x.toFixed(3), +SP.gridBack.f.z.toFixed(3)] } : null }); },
   // development: the marshal posts as placed, their flags now
   marshals() { const M = world?.marshals; if (!M) return "null"; return JSON.stringify({ info: M.info, state: M.state, flags: [...M.flags].filter(([, f]) => f.group.visible).length, N: world.samples.length, bounds: M.map?.bounds.map((b) => [b.n, b.i]), mirrors: M.map?.mirrors.map((b) => [b.n, b.i]), logical: M.map?.posts.map((p) => [p.id, p.i, p.sector, p.first ? 1 : 0]), panels: M.panels.map((p) => [p.n, p.sig ?? null, p.cell, +p.x.toFixed(1), +p.z.toFixed(1), p.i]), posts: M.posts.slice(0, 80).map((p) => [p.id, p.sector, +p.x.toFixed(1), +p.z.toFixed(1), +groundY(p.x, p.z).toFixed(1), p.first ? 1 : 0, p.i]) }); },
   // development: the harbour's yachts as laid out (per zone: count, lengths)
+  // development: the camera on a marshal post (its id) or a light panel ("P" + number) from the track a little before it –
+  // returns the look() arguments used (to frame the same view in another build)
+  viewMarshal(id, back = 24, h = 4, fov = 45) {
+    const M = world?.marshals; if (!M) return "no marshals";
+    const p = /^P\d+$/.test(id) ? M.panels.find((q) => "P" + q.n === id) : M.posts.find((q) => q.id === id); if (!p) return "not drawn";
+    const sm = world.samples[p.i], y = groundY(p.x, p.z), a = [sm.p.x - sm.tan.x * back, sm.p.y + h, sm.p.z - sm.tan.z * back, p.x, y + 1.6, p.z, fov];
+    window.Map3D.look(...a); return JSON.stringify(a.map((v) => +v.toFixed(2)));
+  },
+  // development: pairs of yachts whose hulls overlap (oriented rectangles; margin m each side) and hulls over land
+  harbourCheck(margin = 0) { const H = world?.harbour; if (!H?.list) return JSON.stringify({ yachts: 0 }); const L = H.list, pairs = []; for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) if (hullsOverlap(L[i], L[j], margin)) pairs.push([L[i].zone, L[j].zone, Math.round(L[i].L), Math.round(L[j].L), +Math.hypot(L[i].x - L[j].x, L[i].z - L[j].z).toFixed(1)]); let land = 0; for (const y of L) { const ux = Math.sin(y.yaw), uz = Math.cos(y.yaw); for (const f of [-0.3, 0, 0.5]) for (const s of [-0.5, 0.5]) if (!world.real.isSea(y.x + ux * f * y.L - uz * s * y.B, y.z + uz * f * y.L + ux * s * y.B)) land++; } return JSON.stringify({ yachts: L.length, overlaps: pairs.length, pairs: pairs.slice(0, 20), landPoints: land }); },
   harbour() { const H = world?.harbour; if (!H?.list) return JSON.stringify({ yachts: 0 }); const z = {}; for (const y of H.list) { const e = z[y.zone] || (z[y.zone] = { n: 0, L: [] }); e.n++; e.L.push(Math.round(y.L)); } return JSON.stringify({ yachts: H.list.length, seaY: +world.real.seaLevel.toFixed(2), zones: z, first: H.list.slice(0, 3).map((y) => [+y.x.toFixed(1), +y.z.toFixed(1)]) }); },
   pitCar(num) {
     const G = pitTeams.G, c = cars.get(String(num)); if (!G || !c) return JSON.stringify({ G: !!G, car: !!c });

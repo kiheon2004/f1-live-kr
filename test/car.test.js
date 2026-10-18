@@ -141,3 +141,26 @@ test("car shapes: the date decides between a season's specs; without one, no par
   const h = (d) => shapeFor(2026, "Haas F1 Team", d)?.id ?? null;
   assert.deepStrictEqual([h("2026-05-03"), h("2026-05-22"), h("2026-09-06"), h(null)], ["vf26", "vf26b", "vf26b", null]);
 });
+
+// v0.38: the halo checked against the head and the driver's eye on every profile – nothing through the helmet or the
+// mirrors, the pillar narrower than the eyes are apart where the eye's line meets it, the eye inside the hoop
+test("halo: clear of the helmet and mirrors on every profile; the pillar under the eyes' spacing at eye height", async () => {
+  const C = await import("../src/renderer/car3d.js");
+  for (const [key, P] of Object.entries(C.PROFILES)) {
+    const g = C.halo(P), pos = g.attributes.position, [hx, hy, hz] = P.helmet, [sx, sy, sz] = P.helmetSize || [0.13, 0.14, 0.155];
+    let inHelmet = 0, inMirror = 0, minE = Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const e = Math.hypot((x - hx) / (sx + 0.02), (y - hy) / (sy + 0.02), (z - hz) / (sz + 0.02)); minE = Math.min(minE, e); if (e < 1) inHelmet++;
+      if (Math.abs(Math.abs(x) - 0.5) < 0.1 && Math.abs(y - 0.68) < 0.05 && Math.abs(z - 0.52) < 0.05) inMirror++;
+    }
+    assert.strictEqual(inHelmet, 0, `${key}: halo within 2 cm of the helmet (closest ${minE.toFixed(2)})`);
+    assert.strictEqual(inMirror, 0, `${key}: halo through a mirror`);
+    // the pillar where the eye's horizontal line meets it (the vertices within 1 cm of eye height, ahead of the eye)
+    const [, ey, ez] = P.eye, xs = [];
+    for (let i = 0; i < pos.count; i++) if (Math.abs(pos.getY(i) - ey) < 0.01 && pos.getZ(i) > ez + 0.3 && Math.abs(pos.getX(i)) < 0.1) xs.push(pos.getX(i));
+    if (xs.length) { const w = Math.max(...xs) - Math.min(...xs); assert.ok(w < 0.063, `${key}: pillar ${w.toFixed(3)} m wide at eye height`); }
+    g.computeBoundingBox();
+    assert.ok(g.boundingBox.max.y > ey + 0.1, `${key}: the hoop over the eye`);
+  }
+});

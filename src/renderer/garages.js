@@ -415,6 +415,10 @@ export function workSpaces(slots, drivers) {
   return out;
 }
 
+// A driver's board across their work space: 1.76 m at most, 0.42 of the bay, and – a bay shared by `parts` drivers – 0.9 of
+// their own part (v0.38: three in one 5 m bay had 1.67 m apart and 1.76 m boards, overlapping)
+export const boardWidth = (bayWidth, parts = 1) => Math.min(1.76, bayWidth * 0.42, (bayWidth / Math.max(1, parts)) * 0.9);
+
 // Confirmed garage allocations, kept apart from the inference: where a session's real allocation is published (the
 // FIA's or a team's garage plan), it's recorded here with its source and drawn as given (link: "confirmed"), never
 // estimated from stops. None is recorded yet: every allocation drawn is an estimate.
@@ -638,9 +642,11 @@ export function teamLayer(garages, teams, drivers, season = null) {
     quad(labels, mid, along.clone().multiplyScalar(lw), new THREE.Vector3(0, lw / 8, 0), out, lab.uv(t.row));
     // each driver's board, hanging inside at the front of their own work space (one each – workSpaces); a driver without
     // one (no bay for the team) gets none
+    // (a bay split between several drivers: each board within its own part – boardWidth)
     for (const d of t.drivers) {
       const s = d.slot != null ? bySlot.get(d.slot) : null; if (!s) continue;
-      quad(labels, at(s, 0.9, d.w || 0, s.height - 0.55), along.clone().multiplyScalar(Math.min(1.76, s.width * 0.42)), new THREE.Vector3(0, Math.min(1.76, s.width * 0.42) / 8, 0), out, lab.uv(d.row));
+      const bw = boardWidth(s.width, t.drivers.filter((x) => x.slot === d.slot).length);
+      quad(labels, at(s, 0.9, d.w || 0, s.height - 0.55), along.clone().multiplyScalar(bw), new THREE.Vector3(0, bw / 8, 0), out, lab.uv(d.row));
     }
   }
   // the team's box painted in the pit lane where its cars stopped (yellow, as in the photos), and its stand on the

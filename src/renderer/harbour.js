@@ -44,6 +44,19 @@ export const harbourFor = (venueKey, season) => venueKey === 22 && (season === 2
 export const beamOf = (L) => (L < 20 ? L / 3.5 : L < 30 ? L / 4.2 : L / 5.2 + 0.6);
 const inPoly = (x, z, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, zi] = P[i], [xj, zj] = P[j]; if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi + 1e-12) + xi) c = !c; } return c; };
 
+// Two hulls as oriented rectangles (centre x, z; bow direction yaw as rotation.y; length L, beam B) overlap, with `margin`
+// m of clearance each side – the separating-axis test on both hulls' axes (v0.38: the earlier check took the second hull
+// as lying the first one's way – fine side by side on one quay, not where quays meet at an angle or piers face each other)
+export function hullsOverlap(a, b, margin = 0) {
+  const ax = [[Math.sin(a.yaw), Math.cos(a.yaw)], [Math.cos(a.yaw), -Math.sin(a.yaw)]], bx = [[Math.sin(b.yaw), Math.cos(b.yaw)], [Math.cos(b.yaw), -Math.sin(b.yaw)]];
+  const ha = [a.L / 2 + margin, a.B / 2 + margin], hb = [b.L / 2 + margin, b.B / 2 + margin], dx = b.x - a.x, dz = b.z - a.z;
+  for (const [ux, uz] of [...ax, ...bx]) {
+    const ra = Math.abs(ax[0][0] * ux + ax[0][1] * uz) * ha[0] + Math.abs(ax[1][0] * ux + ax[1][1] * uz) * ha[1];
+    const rb = Math.abs(bx[0][0] * ux + bx[0][1] * uz) * hb[0] + Math.abs(bx[1][0] * ux + bx[1][1] * uz) * hb[1];
+    if (Math.abs(dx * ux + dz * uz) > ra + rb) return false;
+  }
+  return true;
+}
 // The yachts: toScene(lat, lon) → [x, z]; isSea(x, z) → bool (the map's sea); seed. → [{ x, z, yaw (bow direction as
 // rotation.y), L, B, zone }] – deterministic.
 export function layoutYachts({ toScene, isSea, seed = 22 }) {
@@ -59,7 +72,9 @@ export function layoutYachts({ toScene, isSea, seed = 22 }) {
       if (!(stern && a < -L / 2 + 5) && !isSea(x, z)) return false;
       if (fair.some((P) => inPoly(x, z, P))) return false;
     }
-    return !hulls.some((h) => Math.hypot(h.x - cx, h.z - cz) < (h.L + L) / 2 && Math.abs((cx - h.x) * -uz + (cz - h.z) * ux) < (h.B + B) / 2 + 0.8 && Math.abs((cx - h.x) * ux + (cz - h.z) * uz) < (h.L + L) / 2);
+    // (0.4 m each side: 0.8 m between hulls at the closest)
+    const me = { x: cx, z: cz, yaw: Math.atan2(ux, uz), L, B };
+    return !hulls.some((h) => hullsOverlap(h, me, 0.4));
   };
   for (const b of MONACO_BERTHS) {
     const [ax, az] = toScene(...b.a), [bx, bz] = toScene(...b.b), dx = bx - ax, dz = bz - az, D = Math.hypot(dx, dz); if (D < 5) continue;
@@ -73,14 +88,14 @@ export function layoutYachts({ toScene, isSea, seed = 22 }) {
       const L = b.len[0] + (b.len[1] - b.len[0]) * Math.pow(rnd(), 1.4), B = beamOf(L);
       if (b.moor === "side") {
         const cx = ax + tx * (u + L / 2) + nx * (B / 2 + 1.5), cz = az + tz * (u + L / 2) + nz * (B / 2 + 1.5);
-        if (u + L <= D && clear(cx, cz, tx, tz, L, B)) { out.push({ x: cx, z: cz, yaw: Math.atan2(tx, tz), L, B, zone: b.id }); hulls.push({ x: cx, z: cz, L, B }); }
+        if (u + L <= D && clear(cx, cz, tx, tz, L, B)) { out.push({ x: cx, z: cz, yaw: Math.atan2(tx, tz), L, B, zone: b.id }); hulls.push({ x: cx, z: cz, yaw: Math.atan2(tx, tz), L, B }); }
         u += L + b.gap; continue;
       }
       // stern-to: the stern 1.5 m off the quay (the passerelle), the bow out over the water; shortened to fit if needed
       let placed = false;
       for (let LL = L; LL >= b.len[0] && !placed; LL *= 0.85) {
         const BB = beamOf(LL), cx = ax + tx * (u + BB / 2) + nx * (1.5 + LL / 2), cz = az + tz * (u + BB / 2) + nz * (1.5 + LL / 2);
-        if (clear(cx, cz, nx, nz, LL, BB, true)) { out.push({ x: cx, z: cz, yaw: Math.atan2(nx, nz), L: LL, B: BB, zone: b.id }); hulls.push({ x: cx, z: cz, L: LL, B: BB }); placed = true; u += BB + b.gap; }
+        if (clear(cx, cz, nx, nz, LL, BB, true)) { out.push({ x: cx, z: cz, yaw: Math.atan2(nx, nz), L: LL, B: BB, zone: b.id }); hulls.push({ x: cx, z: cz, yaw: Math.atan2(nx, nz), L: LL, B: BB }); placed = true; u += BB + b.gap; }
       }
       if (!placed) u += 4;
     }
