@@ -155,7 +155,7 @@ test("halo: clear of the helmet and mirrors on every profile; the pillar under t
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
       const e = Math.hypot((x - hx) / (sx + 0.02), (y - hy) / (sy + 0.02), (z - hz) / (sz + 0.02)); minE = Math.min(minE, e); if (e < 1) inHelmet++;
-      if (Math.abs(Math.abs(x) - 0.5) < 0.1 && Math.abs(y - 0.68) < 0.05 && Math.abs(z - 0.52) < 0.05) inMirror++;
+      if (Math.abs(Math.abs(x) - 0.5) < 0.1 && Math.abs(y - 0.68) < 0.05 && Math.abs(z - 0.52 - (P.ck || 0)) < 0.05) inMirror++;
     }
     assert.strictEqual(inHelmet, 0, `${key}: halo within 2 cm of the helmet (closest ${minE.toFixed(2)})`);
     assert.strictEqual(inMirror, 0, `${key}: halo through a mirror`);
@@ -165,5 +165,43 @@ test("halo: clear of the helmet and mirrors on every profile; the pillar under t
     if (xs.length) { const w = Math.max(...xs) - Math.min(...xs); assert.ok(w < 0.063, `${key}: pillar ${w.toFixed(3)} m wide at eye height`); }
     g.computeBoundingBox();
     assert.ok(g.boundingBox.max.y > ey + 0.1, `${key}: the hoop over the eye`);
+  }
+});
+
+// v0.39: the cars rebuilt from race photos – the cockpit where hub-aligned side photos put it, the wings within the
+// era's rules, the draw calls and triangles within the budget (20+ cars on screen), liveries by season and date
+test("cars v0.39: cockpit place, wing spans, draw-call and triangle budget", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js");
+  for (const [season, team] of [[2025, "Ferrari"], [2025, "Red Bull Racing"], [2025, "Haas F1 Team"], [2026, "Mercedes"], [2026, "Cadillac"], [2027, "Unknown"]]) {
+    const car = C.makeCar({ teamName: team, teamColour: "888888", number: 7, season }), u = car.userData, P = u.profile;
+    // the helmet's middle 1.40–1.65 m behind the front axle (photos: 1.45–1.62 m), the T-cam behind and over it
+    const back = P.FZ - P.helmet[2]; assert.ok(back > 1.4 && back < 1.65, `${season} ${team}: helmet ${back.toFixed(2)} m behind the front axle`);
+    assert.ok(P.tcam[2] < P.helmet[2] - 0.3 && P.tcam[1] > P.helmet[1] + 0.25, "T-cam behind and over the helmet");
+    // draw calls: v0.38 drew 35 meshes close up (33 for 2026), 27 at mid range – at most +30 %; triangles under 60k a car
+    let near = 0, tris = 0; car.traverseVisible((o) => { if (o.isMesh) { near++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+    C.setDetail(car, "mid"); let mid = 0; car.traverseVisible((o) => { if (o.isMesh) mid++; });
+    assert.ok(near <= 45 && mid <= 35, `${season} ${team}: ${near} meshes near, ${mid} mid`);
+    assert.ok(tris < 60000, `${season} ${team}: ${Math.round(tris)} triangles`);
+    // the wings: 2026 front-wing profiles and endplates within |y| ≤ 0.68 m, rear wing within 0.575 m (C3.10 / C3.11)
+    const fw = new THREE.Box3().setFromBufferAttribute(u.fwPivot.children[0].geometry.attributes.position), rw = new THREE.Box3().setFromBufferAttribute(u.rwPivot.children[0].geometry.attributes.position);
+    if (P.era === "2026") { assert.ok(fw.max.x <= 0.69 && rw.max.x <= 0.58, `2026 wings ${fw.max.x.toFixed(3)} / ${rw.max.x.toFixed(3)}`); }
+    else assert.ok(fw.max.x <= 1.0 && rw.max.x <= 0.52, `2022 wings ${fw.max.x.toFixed(3)} / ${rw.max.x.toFixed(3)}`);
+    // the moving flaps' pivots at their leading edges (2022–25: the front flaps never move – their endplates ride with them)
+    car.updateMatrixWorld(true);
+    for (const pv of P.era === "2026" ? [u.fwPivot, u.rwPivot] : [u.rwPivot]) { const bb = new THREE.Box3().setFromObject(pv.children[0]); assert.ok(Math.abs(bb.max.z - pv.position.z) < 0.1 && Math.abs(bb.min.y - pv.position.y) < 0.1, `pivot ${pv.position.toArray()} vs flap ${bb.max.toArray().map((v) => v.toFixed(3))}`); }
+  }
+});
+test("cars v0.39: liveries by season and date; the painted parts' livery mapping stays in the texture", async () => {
+  const C = await import("../src/renderer/car3d.js");
+  assert.notStrictEqual(C.liveryFor("Ferrari", null, 2025), C.liveryFor("Ferrari", null, 2026), "SF-25 and SF-26 liveries differ");
+  assert.strictEqual(C.liveryFor("Ferrari", null, 2025).finish, "matte"); assert.notStrictEqual(C.liveryFor("Ferrari", null, 2026).finish, "matte");
+  const cad = (d) => C.liveryFor("Cadillac", null, 2026, d).base;
+  assert.notStrictEqual(cad("2026-05-03"), cad("2026-07-05"), "Cadillac's livery changed at the Austrian GP");
+  assert.strictEqual(cad(null), cad("2026-03-08"), "no date: the livery the season started with");
+  assert.strictEqual(C.liveryFor("Nobody", "123456", 2026).base, "#123456");
+  for (const season of [2025, 2026]) {
+    const car = C.makeCar({ teamName: "McLaren", teamColour: "FF8000", number: 4, season }), g = car.children[0].geometry, uv = g.attributes.uv.array;
+    let bad = 0; for (const v of uv) if (!(v >= 0 && v <= 1)) bad++;
+    assert.strictEqual(bad, 0, `${season}: painted UVs outside the texture`);
   }
 });
