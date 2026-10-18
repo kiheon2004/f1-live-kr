@@ -647,7 +647,7 @@ function peopleShared() {
     // part → [geometry, colour role: "shirt" | "legs" | "skin" | "hair" | "dark" | "kit", per person]
     parts: { thigh: [S.parts.thigh[0], "legs", 2], shin: [S.parts.shin[0], "legs", 2], boot: [S.parts.boot[0], "dark", 2],
       pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], visor: [set, "kit", 1],
-      uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveFine[0], "skin", 2],
+      uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveMid[0], "skin", 2],   // (mittens: fingers on 67 seated people behind the consoles were ~240k triangles drawn from anywhere – v0.39 perf)
       shoulder: [S.parts.joint[0], "shirt", 2], elbow: [S.parts.joint[0], "skin", 2], knee: [S.parts.joint[0], "legs", 2] },
     skin: ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"], hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
     mat: new THREE.MeshStandardMaterial({ roughness: 0.75 }), kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }),
@@ -658,6 +658,8 @@ function peopleShared() {
 }
 // people: [{ x, y, z, yaw (as crewAt's: the geometry's +x turned to face), shirt, pose, seed, hands (the figure's
 // frame) }] → a Group (its instanced meshes own nothing shared: the geometries and materials are; disposeGroup leaves them)
+export const PEOPLE_NEAR = 120;
+const _wc = new THREE.Vector3();
 export function peopleMeshes(people) {
   const P = peopleShared(), group = new THREE.Group(); group.name = "pitWallPeople";
   if (!people.length) return group;
@@ -680,5 +682,12 @@ export function peopleMeshes(people) {
     }, f.hands || null);
   }
   for (const [k, e] of Object.entries(meshes)) { e.m.count = counts[k]; e.m.instanceMatrix.needsUpdate = true; if (e.m.instanceColor) e.m.instanceColor.needsUpdate = true; e.m.computeBoundingSphere(); }
+  // the small parts (hands, joints, hair, headsets, necks, shoes) drawn only with the camera within PEOPLE_NEAR m of the
+  // stand (its bounding sphere's surface): a pit wall seen from further away is torsos, heads and limbs (v0.39 perf –
+  // 67 people at Suzuka were ~0.5 M triangles from anywhere)
+  for (const k of ["glove", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) {
+    const m = meshes[k]?.m; if (!m) continue; const full = m.count, bs = m.boundingSphere;
+    m.onBeforeRender = (r, sc, cam) => { m.count = bs && cam.position.distanceTo(_wc.copy(bs.center).applyMatrix4(m.matrixWorld)) - bs.radius > PEOPLE_NEAR ? 0 : full; };
+  }
   return group;
 }

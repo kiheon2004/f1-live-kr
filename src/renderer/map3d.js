@@ -3939,6 +3939,12 @@ window.Map3D = {
     const a = st(s), b = st(s + ahead), at = (x, oo, hh) => [x.x + x.ox * oo, x.y + hh, x.z + x.oz * oo];
     return this.look(...at(a, o, h), ...at(b, o, ho), fov);
   },
+  // development: the biggest meshes (visible, by triangles) under a part of the real map: [name path, tris, instances]
+  bigMeshes(part = "landmarks", n = 15) {
+    const g = world?.real?.group.children.find((c) => c.name === part); if (!g) return "no " + part;
+    const out = []; g.traverse((o) => { if (!o.isMesh) return; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (!v) return; const ix = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count; const path = []; for (let p = o; p && p !== g; p = p.parent) path.push(p.name || p.type); out.push([path.reverse().join("/"), Math.round((ix / 3) * (o.isInstancedMesh ? o.count : 1)), o.isInstancedMesh ? o.count : 1]); });
+    return JSON.stringify(out.sort((a, b) => b[1] - a[1]).slice(0, n));
+  },
   sceneStats() {
     const out = {}, add = (k, o) => { const r = out[k] || (out[k] = { objects: 0, meshes: 0, visibleMeshes: 0, tris: 0 }); r.objects++; if (o.isMesh || o.isPoints || o.isSprite || o.isLine) { r.meshes++; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (v) { r.visibleMeshes++; const g = o.geometry; if (g?.attributes?.position) r.tris += Math.round(((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1)); } } };
     scene.traverse((o) => { let top = o, sub = null; while (top.parent && top.parent !== scene) { sub = top; top = top.parent; } const name = top === world?.group ? "world/" + (sub ? (sub === world.real?.group ? "real" : sub.name || sub.type) : "-") : top.name || top.type; add(name, o); });
