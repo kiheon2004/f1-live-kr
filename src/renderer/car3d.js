@@ -737,12 +737,15 @@ function body2022(p) {
   // rear wing: the main plane a shallow spoon (lower in the middle), the DRS flap over it, both turning down at the tips
   // into rounded endplates; one pylon from the crash structure, the DRS actuator over it; the beam wing under
   const rwSpan = 1.0, tip = (e) => 0.07 * Math.pow(sstep(0.82, 1, e), 1.5);
-  const rwMain = wingSpan(rwSpan, (e) => [0.775 + 0.035 * e * e - tip(e), -2.1 - 0.02 * e, 0.3, 0.04, 0.1]);
-  const rwFlap = wingSpan(rwSpan - 0.01, (e) => [0.915 + 0.015 * e * e - tip(e), -2.3 - 0.01 * e, 0.2, 0.026, 0.45]);
+  // (v0.40: the wing, its endplates and pylon 0.1 m further forward – FIA 2025 Technical Regulations Issue 03 App. §27–29
+  // (read from the PDF 2026-10-19): the profiles between XR +140 and +555 (the tips to +680), the endplates' volume to
+  // XR +680; the model's endplates reached XR +775 and the flap's trailing edge XR +680)
+  const rwMain = wingSpan(rwSpan, (e) => [0.775 + 0.035 * e * e - tip(e), -2.0 - 0.02 * e, 0.3, 0.04, 0.1]);
+  const rwFlap = wingSpan(rwSpan - 0.01, (e) => [0.915 + 0.015 * e * e - tip(e), -2.2 - 0.01 * e, 0.2, 0.026, 0.45]);
   // (the endplates' lower rear corner cut away, their tops rounding over into the elements – photos of SF-25, MCL39)
-  const ep = [[-2.02, 0.54], [-2.03, 0.8], [-2.07, 0.88], [-2.16, 0.93], [-2.3, 0.95], [-2.5, 0.945], [-2.575, 0.9], [-2.57, 0.73], [-2.4, 0.7], [-2.2, 0.62], [-2.12, 0.54]];
+  const ep = [[-1.96, 0.54], [-1.95, 0.8], [-1.97, 0.88], [-2.06, 0.93], [-2.2, 0.95], [-2.4, 0.945], [-2.475, 0.9], [-2.47, 0.73], [-2.3, 0.7], [-2.1, 0.62], [-2.04, 0.54]];
   const rwPlates = merge([plate(ep, rwSpan / 2 + 0.006, 0.012), plate(ep, -rwSpan / 2 - 0.006, 0.012)]);
-  const rwPylon = merge([plate([[-2.24, 0.33], [-2.17, 0.55], [-2.13, 0.76], [-2.33, 0.76], [-2.36, 0.58], [-2.44, 0.4], [-2.46, 0.33]], 0, 0.014), softBox(0.04, 0.06, 0.14, 0, 0.86, -2.24, 0.4)]);
+  const rwPylon = merge([plate([[-2.18, 0.33], [-2.09, 0.55], [-2.03, 0.76], [-2.23, 0.76], [-2.28, 0.58], [-2.4, 0.4], [-2.44, 0.33]], 0, 0.014), softBox(0.04, 0.06, 0.14, 0, 0.86, -2.14, 0.4)]);
   const beam = merge([wingSpan(0.88, (e) => [0.36, -2.3, 0.14, 0.02, 0.15], 10), wingSpan(0.84, (e) => [0.435, -2.42, 0.12, 0.018, 0.4], 10)]);
   const susp = suspension(p, (S?.fsusp ?? "pull") === "pull", S?.rsusp === "pull");
   // mirrors on the inlets' top, stays to the chassis's side
@@ -757,7 +760,7 @@ function body2022(p) {
     paintExtra: [paintUV(halo(p), true), rwPlates, ...M.heads],
     carbon: metricUV(merge([...floor, fw0, fwPlates, rwPylon, beam, ...susp, ...corners(p), ...M.stays, fin, tcamPod, inlets, airbox, exhaust, ...mirrorGlass([0.5, 0.68, 0.52 + ck], [0.16, 0.065, 0.06]), ...shapeParts(S, p, fwSpan, 2.68, 0.35, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge([...fwF, ...fwEnds]), rwFlaps: rwFlap,   // (2022–25 flaps never move: the endplates go with them)
-    fwPivot: [0.13, 2.68], rwPivot: [0.92, -2.3], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
+    fwPivot: [0.13, 2.68], rwPivot: [0.92, -2.2], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
     lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: null,
   };
 }
@@ -1189,11 +1192,14 @@ vec3 carSky(vec3 d, float r) {
   return mix(mix(dn, up, smoothstep(-w, w, y)), vec3(0.3, 0.33, 0.37), r * r);
 }`;
 const skied = new WeakSet();
-function skyLit(m) {
+// (k: how much of it a material takes – carbon less: its lacquer is thinner and the floor's top, facing the sky, read
+// pale grey in the app where photos show it near black; the halo is carbon too and must stay dark in the T-cam's view)
+function skyLit(m, k = 1) {
   if (!m || skied.has(m)) return m;
   skied.add(m);
+  const u = k === 1 ? CAR_SKY : { get value() { return CAR_SKY.value * k; } };
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uCarSky = CAR_SKY;
+    sh.uniforms.uCarSky = u;
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>" + SKY_GLSL).replace("#include <lights_fragment_maps>", `
 #if defined( RE_IndirectSpecular )
   if (uCarSky > 0.0) radiance += uCarSky * carSky(inverseTransformDirection(reflect(-geometryViewDir, geometryNormal), viewMatrix), material.roughness);
@@ -1222,15 +1228,15 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // reflections, dropped frames on the GPU – measured; the colour map costs next to nothing)
   // (v0.40: lacquered carbon, a dielectric – metalness 0.15 dulled its colour under the sky and gave it no sheen; it now
   // takes the sky's reflection like a varnished part)
-  const carbon = mat("carbon", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, map: cm.colour, roughness: 0.45, metalness: 0 })));
+  const carbon = mat("carbon", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, map: cm.colour, roughness: 0.45, metalness: 0 }), 0.35));
   // the rear wing's elements and the front wing's flaps in the livery's colours (v0.38: the top colour on both)
   const wingPaint = skyLit(new THREE.MeshStandardMaterial({ color: l.wing || (l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top), roughness: matte ? 0.55 : 0.24, metalness: 0.05 }));
   const fwPaint = skyLit(new THREE.MeshStandardMaterial({ color: l.fw || l.wing || l.base, roughness: matte ? 0.55 : 0.24, metalness: 0.05 }));
-  const carbonThin = mat("carbonThin", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.42, metalness: 0, side: THREE.DoubleSide })));
+  const carbonThin = mat("carbonThin", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.42, metalness: 0, side: THREE.DoubleSide }), 0.35));
   // (rubber: matte, a faint sheen at grazing angles; the wheel's black parts satin, its metal parts – the rim's lip, the
   // nut, the hub – metal that now has a sky to reflect: without one a metalness of 0.85 drew them near black)
-  const tyreMat = mat("tyre", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.88, metalness: 0 })));
-  const coverMat = mat("cover", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.2 })));
+  const tyreMat = mat("tyre", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.88, metalness: 0 }), 0.6));
+  const coverMat = mat("cover", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.2 }), 0.6));
   const lipMat = mat("lip", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.32, metalness: 0.85 })));
   const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));
   const visorMat = mat("visor", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 })));
