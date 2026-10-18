@@ -376,10 +376,43 @@ export function allocatePlaces(slots, pitch, drivers, places, overrides = []) {
   }
   for (const t of list) {
     t.drivers.sort((a, b) => a.u - b.u || a.num.localeCompare(b.num));
-    const own = t.slots.map((k) => bySlot.get(k)).filter(Boolean);
-    for (const d of t.drivers) d.slot = own.length ? own.reduce((p, s) => (Math.abs(s.uc - d.u) < Math.abs(p.uc - d.u) ? s : p)).k : null;
+    t.spaces = workSpaces(t.slots.map((k) => bySlot.get(k)).filter(Boolean), t.drivers);
+    for (const d of t.drivers) { const w = t.spaces.find((x) => x.num === d.num); d.slot = w ? w.slot : null; d.w = w ? w.w : 0; }
   }
   return list.filter((t) => t.slots.length).sort((a, b) => a.centre - b.centre);
+}
+
+// Each driver's own car work space in the team's garages – exactly one each, never two drivers in one (v0.37: at a race
+// both drivers' boards went on the garage nearest the shared box, and every outer garage looked like a car's). The
+// building's bays, the team's area, a driver's work space and the team's pit box are different things: the bays are the
+// building's (never cut to the number of drivers – the Silverstone Wing keeps its 41), the area is the team's estimated
+// share of them, and a work space is where one car is worked on – a whole bay, or half of one where the team has fewer
+// bays than drivers (Monaco's narrow garages). The pit box in the lane stays one per team.
+//   slots: the team's bays (sorted along the garages, { k, uc, width }); drivers: [{ num, u (where seen working, or the
+//   shared box), from }]. Who works in which space isn't in the data: drivers seen in their own garage (practice,
+//   qualifying: from "garage") get the nearest free space; otherwise – a race's shared box – the spaces go to the drivers
+//   in their racing numbers' order from one end of the area to the other (stable: positions never move them), the outer
+//   bays first (the cars' garages; any bays between are engineering and spares, unnamed). → [{ num, slot, w (m along
+//   the bay from its centre), est: true }]
+export function workSpaces(slots, drivers) {
+  const ss = [...slots].sort((a, b) => a.uc - b.uc), n = drivers.length;
+  if (!ss.length || !n) return [];
+  // the spaces: whole bays (any of them, for a driver seen in their own; the outer ones first for the rest), or – fewer
+  // bays than drivers – bays split in two
+  let spaces;
+  if (ss.length >= n) { const order = []; for (let i = 0, j = ss.length - 1; i <= j; i++, j--) { order.push(ss[i]); if (j !== i) order.push(ss[j]); } spaces = order.map((s, rank) => ({ slot: s.k, uc: s.uc, w: 0, rank })); }
+  else { const per = Math.ceil(n / ss.length); spaces = []; for (const s of ss) for (let i = 0; i < per; i++) spaces.push({ slot: s.k, uc: s.uc + (i - (per - 1) / 2) * (s.width / per), w: (i - (per - 1) / 2) * (s.width / per), rank: spaces.length }); }
+  const out = [], taken = new Set(), placed = new Set();
+  const byNum = (a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true });
+  // (seen in their own garage: the nearest pairs first)
+  const pairs = []; for (const d of drivers) if (d.from === "garage" && Number.isFinite(d.u)) spaces.forEach((sp, i) => pairs.push([Math.abs(sp.uc - d.u), d, i]));
+  pairs.sort((a, b) => a[0] - b[0] || byNum(a[1], b[1]));
+  for (const [, d, i] of pairs) { if (placed.has(d.num) || taken.has(i)) continue; placed.add(d.num); taken.add(i); out.push({ num: d.num, slot: spaces[i].slot, w: spaces[i].w, est: true }); }
+  // (the rest – a shared box, no own place seen: by racing number, outer bays first, then along the area)
+  const rest = drivers.filter((d) => !placed.has(d.num)).sort(byNum);
+  const left = spaces.map((sp, i) => i).filter((i) => !taken.has(i)).sort((a, b) => spaces[a].rank - spaces[b].rank).slice(0, rest.length).sort((a, b) => spaces[a].uc - spaces[b].uc);
+  rest.forEach((d, i) => { const sp = spaces[left[i]]; if (sp) out.push({ num: d.num, slot: sp.slot, w: sp.w, est: true }); });
+  return out;
 }
 
 // Confirmed garage allocations, kept apart from the inference: where a session's real allocation is published (the
@@ -581,7 +614,8 @@ export function teamLayer(garages, teams, drivers, season = null) {
       // outer garages are its cars' (tyre stacks under blankets along the walls, a bench at the back, the jack by the
       // door), any between them engineering and spares (cabinets, a desk of screens; no tyres). How many and where,
       // varied a little from garage to garage by a hash of the team and the garage – the same each time it's drawn
-      const k = ss.indexOf(s), role = ss.length >= 3 && k > 0 && k < ss.length - 1 ? "engineering" : "car";
+      // (a bay with a driver's work space is a car's; the others engineering and spares – nobody's name on them)
+      const role = (t.spaces || []).some((w) => w.slot === s.k) ? "car" : "engineering";
       const r = rng(hashStr(t.team + ":" + s.k)), tc = col.clone();
       if (role === "car") {
         for (const side of [-1, 1]) { const n = 2 + Math.floor(r() * 3); for (let i = 0; i < n; i++) { const d = 1.8 + i * 0.85 + r() * 0.15; if (d < s.depth - 1.0) inst.tyres.push([at(s, d, side * (s.width / 2 - 0.55 - r() * 0.15), 0), r() * 3, tc]); } }
@@ -602,12 +636,12 @@ export function teamLayer(garages, teams, drivers, season = null) {
     quad(panels, mid.clone().addScaledVector(out, -0.01), along.clone().multiplyScalar(span), new THREE.Vector3(0, 0.6, 0), out, null, col);
     const lw = Math.min(span, 4.8);
     quad(labels, mid, along.clone().multiplyScalar(lw), new THREE.Vector3(0, lw / 8, 0), out, lab.uv(t.row));
-    // each driver's board, hanging inside at the front of the garage nearest where they work
-    t.drivers.forEach((d, i) => {
-      const s = (d.slot != null && bySlot.get(d.slot)) || ss.reduce((p, q) => (Math.abs(q.uc - d.u) < Math.abs(p.uc - d.u) ? q : p));
-      const shift = t.drivers.length > 1 && t.drivers.every((x) => x.from === "box") ? (i - (t.drivers.length - 1) / 2) * 1.9 : 0;
-      quad(labels, at(s, 0.9, shift, s.height - 0.55), along.clone().multiplyScalar(1.76), new THREE.Vector3(0, 0.22, 0), out, lab.uv(d.row));
-    });
+    // each driver's board, hanging inside at the front of their own work space (one each – workSpaces); a driver without
+    // one (no bay for the team) gets none
+    for (const d of t.drivers) {
+      const s = d.slot != null ? bySlot.get(d.slot) : null; if (!s) continue;
+      quad(labels, at(s, 0.9, d.w || 0, s.height - 0.55), along.clone().multiplyScalar(Math.min(1.76, s.width * 0.42)), new THREE.Vector3(0, Math.min(1.76, s.width * 0.42) / 8, 0), out, lab.uv(d.row));
+    }
   }
   // the team's box painted in the pit lane where its cars stopped (yellow, as in the photos), and its stand on the
   // pit wall walkway opposite (a roofed desk with screens) – both only where the box is known
@@ -668,7 +702,7 @@ export function teamLayer(garages, teams, drivers, season = null) {
 // (every value teamLayer draws from: the team, its colour and garages, where its box is drawn and how far out, each
 // driver's board – its text and garage)
 export const allocationKey = (teams) => teams.map((t) => [t.team, t.colour, t.from, t.link, t.slots.join(","), t.box ?? "", t.boxOff ?? "",
-  t.drivers.map((d) => `${d.num}=${d.label ?? d.tla}@${d.slot ?? ""}`).join("+")].join(":")).join("|");
+  t.drivers.map((d) => `${d.num}=${d.label ?? d.tla}@${d.slot ?? ""}${d.w ? "/" + d.w.toFixed(2) : ""}`).join("+")].join(":")).join("|");
 
 // The teams' own pit wall panels of a layer (teamLayer's group): get(num) → { line, app, car } for that driver now.
 // Repainted when what they show changed, at most every `every` ms; returns how many were painted.

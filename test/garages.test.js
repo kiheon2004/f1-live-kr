@@ -262,3 +262,36 @@ test("standstill (live): looks an hour apart aren't one hour standing – only w
   m = G.mergeEvents(m, [ev(2500, 61000, { open: false })]);
   assert.strictEqual(m.length, 1); assert.strictEqual(m[0].obs, undefined); assert.strictEqual(G.seenOf(m[0]), 64000);
 });
+
+// v0.37: one work space per driver, never shared, never more than the drivers; the bays themselves stay the building's
+test("work spaces: exactly one per driver, none shared; spare bays unnamed; split bays when there are fewer bays than drivers", async () => {
+  const G = await load();
+  const bays = (n, w = 8.4) => Array.from({ length: n }, (_, i) => ({ k: 100 + i, uc: i * w, width: w - 0.5 }));
+  // a race: both at the shared box → the two outer bays, by racing number; bays between unnamed
+  const race = G.workSpaces(bays(5), [{ num: "16", u: 17, from: "box" }, { num: "44", u: 17, from: "box" }]);
+  assert.deepStrictEqual(race.map((w) => [w.num, w.slot]), [["16", 100], ["44", 104]]);
+  assert.strictEqual(new Set(race.map((w) => w.slot + ":" + w.w)).size, 2, "no two drivers in one space");
+  // the order doesn't follow positions: the same drivers in the other order give the same spaces
+  assert.deepStrictEqual(G.workSpaces(bays(5), [{ num: "44", u: 17, from: "box" }, { num: "16", u: 17, from: "box" }]).sort((a, b) => a.slot - b.slot), race);
+  // practice: each seen in their own garage keeps it, even a middle one; two seen near the same bay don't share it
+  const prac = G.workSpaces(bays(5), [{ num: "1", u: 8.2, from: "garage" }, { num: "2", u: 8.6, from: "garage" }]);
+  // (2 is the nearer to bay 101 – 0.2 m against 0.2 m plus a hair – so 1 takes its next nearest, 100)
+  assert.deepStrictEqual(Object.fromEntries(prac.map((w) => [w.num, w.slot])), { 1: 100, 2: 101 });
+  assert.notStrictEqual(prac[0].slot, prac[1].slot);
+  // one bay for two drivers (narrow garages): halves of it, side by side
+  const one = G.workSpaces(bays(1, 5.5), [{ num: "10", u: 0, from: "box" }, { num: "7", u: 0, from: "box" }]);
+  assert.deepStrictEqual(one.map((w) => [w.num, w.slot, Math.sign(w.w)]), [["7", 100, -1], ["10", 100, 1]]);
+  // a third driver (a substitute in the session's list) still gets a space of their own; none without bays
+  assert.strictEqual(new Set(G.workSpaces(bays(2), [{ num: "1", from: "box" }, { num: "2", from: "box" }, { num: "3", from: "box" }]).map((w) => w.slot + ":" + w.w)).size, 3);
+  assert.deepStrictEqual(G.workSpaces([], [{ num: "1" }]), []);
+  assert.ok(race.every((w) => w.est === true), "an estimate: who works where isn't in the data");
+});
+
+test("team layer: a driver's name on their work space only; the box mark one per team", async () => {
+  const G = await load();
+  const t = G.allocatePlaces(slots, 8.4, D, [{ team: "A", u: -76.3, off: 6, from: "box", ok: true, n: 3 }])[0];
+  const named = t.drivers.map((d) => d.slot);
+  assert.strictEqual(new Set(named).size, t.drivers.length, "each driver in a different bay");
+  assert.ok(t.slots.length > t.drivers.length, "the team's area keeps its bays");
+  assert.strictEqual(t.spaces.length, t.drivers.length);
+});
