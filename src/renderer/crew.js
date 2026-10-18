@@ -559,7 +559,7 @@ function partGeometries() {
     head: [helmetGeometry(), true, false, 1], visor: [visorGeometry(), false, true, 1],
     // (marshals and officials: no helmet – orange overalls, gloves, a hat; Motorsport UK 2025, F1 Singapore 2025 – a bare
     // face and a cap in the overalls' colour)
-    face: [headGeometry(), "skin", false, 1], cap: [capGeometry(), true, false, 1],
+    face: [headGeometry(), "skin", false, 1], cap: [capGeometry(), true, false, 1], brows: [browsGeometry(), false, true, 1],
     thigh: [LIMB_GEO.thigh(), true, false, 2], shin: [LIMB_GEO.shin(), true, false, 2], uarm: [LIMB_GEO.uarm(), true, false, 2], farm: [LIMB_GEO.farm(), true, false, 2],
     joint: [new THREE.SphereGeometry(1, 12, 8), true, true, 6], boot: [shoeGeometry(), false, true, 2],
     gloveFine: [fistGeometry(true), false, true, 1], gloveMid: [fistGeometry(false), false, true, 1],
@@ -573,6 +573,16 @@ function yokedChest() {
   const bar = new THREE.CapsuleGeometry(0.058, 2 * BODY.shoulderZ, 4, 12).rotateX(Math.PI / 2).scale(0.85, 0.9, 1).translate(-0.016, BODY.chestShoulder + 0.004, 0);
   const trap = new THREE.CapsuleGeometry(0.05, 2 * BODY.shoulderZ - 0.12, 4, 10).rotateX(Math.PI / 2).scale(0.9, 0.8, 1).translate(-0.02, BODY.chestShoulder + 0.04, 0);
   return mergeSimple([chestGeometry(), bar, trap]);
+}
+// Brows and eyes on a bare head (about its centre, facing +x): two dark strokes over two dark dots – enough for a face to
+// read as one at a few metres
+export function browsGeometry() {
+  const parts = [];
+  for (const sd of [1, -1]) {
+    parts.push(new THREE.CapsuleGeometry(0.0045, 0.026, 2, 6).rotateX(Math.PI / 2).rotateY(sd * 0.25).translate(0.09, 0.03, sd * 0.032));
+    parts.push(new THREE.SphereGeometry(0.0075, 8, 6).scale(0.6, 0.8, 1).translate(0.091, 0.012, sd * 0.031));
+  }
+  return mergeSimple(parts);
 }
 // A cap: the crown over the head's top and a peak ahead (about the head's centre, facing +x)
 function capGeometry() {
@@ -702,6 +712,7 @@ export function crewMeshes(max = 120) {
     if (!b || (lod === "far" && b.small) || counts[k] >= b.cap) return;
     partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
     const i = counts[k]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, b.team === "skin" ? skin : colour);
+    if (k === "face" && lod !== "far" && counts.brows < body.brows.cap) body.brows.mesh.setMatrixAt(counts.brows++, m4);   // (the same head's brows and eyes)
   };
   // a jack: its base where m4 says, the lever tilted up by tilt about its pivot
   const putJack = (tilt) => {
@@ -824,7 +835,7 @@ function peopleShared() {
   PEOPLE = {
     // part → [geometry, colour role: "shirt" | "legs" | "skin" | "hair" | "dark" | "kit", per person]
     parts: { thigh: [S.parts.thigh[0], "legs", 2], shin: [S.parts.shin[0], "legs", 2], boot: [S.parts.boot[0], "dark", 2],
-      pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], visor: [set, "kit", 1],
+      pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], brows: [S.parts.brows[0], "dark", 1], visor: [set, "kit", 1],
       uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveMid[0], "skin", 1], gloveR: [S.parts.gloveMidR[0], "skin", 1],   // (mittens: fingers on 67 seated people behind the consoles were ~240k triangles drawn from anywhere – v0.39 perf)
       shoulder: [S.parts.joint[0], "shirt", 2], elbow: [S.parts.joint[0], "skin", 2], knee: [S.parts.joint[0], "legs", 2] },
     skin: SKIN, hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
@@ -856,6 +867,7 @@ export function peopleMeshes(people) {
       const e = meshes[part]; if (!e) return;
       partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
       const i = counts[part]++; e.m.setMatrixAt(i, m4);
+      if (part === "head") { meshes.brows.m.setMatrixAt(counts.brows++, m4); meshes.brows.m.setColorAt(counts.brows - 1, cDark); }
       if (e.role !== "kit") e.m.setColorAt(i, e.role === "shirt" ? cShirt : e.role === "legs" ? cLegs : e.role === "skin" ? cSkin : e.role === "hair" ? cHair : cDark);
     }, f.hands || null);
   }
@@ -863,7 +875,7 @@ export function peopleMeshes(people) {
   // the small parts (hands, joints, hair, headsets, necks, shoes) drawn only with the camera within PEOPLE_NEAR m of the
   // stand (its bounding sphere's surface): a pit wall seen from further away is torsos, heads and limbs (v0.39 perf –
   // 67 people at Suzuka were ~0.5 M triangles from anywhere)
-  for (const k of ["glove", "gloveR", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) {
+  for (const k of ["glove", "gloveR", "brows", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) {
     const m = meshes[k]?.m; if (!m) continue; const full = m.count, bs = m.boundingSphere;
     m.onBeforeRender = (r, sc, cam) => { m.count = bs && cam.position.distanceTo(_wc.copy(bs.center).applyMatrix4(m.matrixWorld)) - bs.radius > PEOPLE_NEAR ? 0 : full; };
   }
