@@ -284,28 +284,47 @@ function carbonMaps() {
 // markings averaged round the wheel – what a fast wheel looks like on camera (one smooth ring).
 // Angles in degrees round the wheel, radii as a share of the decal's outer radius (the tread's shoulder).
 export const SIDEWALL = {
-  // the band: arcs between the words, at r 0.80–0.865
-  band: { r: [0.8, 0.865], arcs: [[14, 76], [104, 166], [194, 256], [284, 346]] },
-  // the words: two long (at 90° and 270°), two short (0°, 180°) – lettering-sized blocks, r 0.81–0.855
-  words: [{ at: 90, span: 26, n: 7 }, { at: 270, span: 26, n: 7 }, { at: 0, span: 22, n: 6 }, { at: 180, span: 22, n: 6 }],
+  // radii as a share of the decal's outer radius (≈ the tyre's R − 12 mm: R 0.86–0.90 → ~0.89–0.93 here); angles
+  // clockwise from 12 o'clock seen from outside the wheel (wheels_tyres.md §4, measured off race photos, ±10°)
   inner: 0.7,
+  // 2022–25: "PIRELLI" at 0°, a continuous arc +32…+140°, "P ZERO" at 180°, an arc 220…328°; lettering r 0.74–0.88 R
+  2022: { arcs: [[32, 140, 0.885, 0.93], [220, 328, 0.885, 0.93]], words: [[-28, 28, 0.765, 0.905, 7], [145, 215, 0.765, 0.905, 6]], dashes: [], chequers: [] },
+  // 2026 (Pirelli's new graphics, 9 Dec 2025): "P ZERO" −20…+55°, a train of dashes +60…+140° then a two-row chequered
+  // block +140…+165°, "PIRELLI" +185…+222°, dashes +225…+280°, chequers +280…+318°
+  2026: { arcs: [], words: [[-20, 55, 0.765, 0.87, 6], [185, 222, 0.765, 0.89, 7]], dashes: [[60, 140, 0.9], [225, 280, 0.9]], chequers: [[140, 165, 0.84, 0.94], [280, 318, 0.84, 0.94]] },
 };
-function sidewallCanvas(avg = false) {
-  const N = 512, c = canvas(N, N), g = c.getContext("2d"), R = N / 2, cx = R, cy = R, rad = (d) => (d * Math.PI) / 180;
-  g.clearRect(0, 0, N, N); g.fillStyle = "#fff"; g.strokeStyle = "#fff";
-  const [b0, b1] = SIDEWALL.band.r;
-  for (const [a0, a1] of SIDEWALL.band.arcs) { g.beginPath(); g.arc(cx, cy, R * b1, rad(a0), rad(a1)); g.arc(cx, cy, R * b0, rad(a1), rad(a0), true); g.closePath(); g.fill(); }
+// wheel nuts' colours a race photo shows (wheels_tyres.md §3): Williams 2025 green with an orange-red collar (Zandvoort
+// 2025-08-30), Ferrari 2026 yellow (Barcelona 2026, F1.com Tech Weekly) – others not checked: anodised grey
+export const NUTS = { fw47: { c: [0.18, 0.62, 0.3], ring: [0.85, 0.3, 0.15] }, sf26: { c: [0.95, 0.8, 0.1] }, default: { c: [0.5, 0.52, 0.55] } };
+function sidewallCanvas(era = "2022", avg = false) {
+  const L = SIDEWALL[era] || SIDEWALL[2022];
+  const N = 512, c = canvas(N, N), g = c.getContext("2d"), R = N / 2, cx = R, cy = R, rad = (d) => ((d - 90) * Math.PI) / 180;
+  g.clearRect(0, 0, N, N); g.fillStyle = "#fff";
+  const sector = (a0, a1, r0, r1) => { g.beginPath(); g.arc(cx, cy, R * r1, rad(a0), rad(a1)); g.arc(cx, cy, R * r0, rad(a1), rad(a0), true); g.closePath(); g.fill(); };
+  for (const [a0, a1, r0, r1] of L.arcs) sector(a0, a1, r0, r1);
+  // the dashes: short ones growing longer, then a thin solid line (2026)
+  for (const [a0, a1, r] of L.dashes) {
+    let a = a0, k = 0; const solidFrom = a0 + (a1 - a0) * 0.7;
+    while (a < solidFrom) { const len = 2 + k * 0.9, gap = 2.2; sector(a, Math.min(solidFrom, a + len), r - 0.012, r + 0.012); a += len + gap; k++; }
+    sector(solidFrom, a1, r - 0.007, r + 0.007);
+  }
+  // the chequered blocks: two rows of alternating squares
+  for (const [a0, a1, r0, r1] of L.chequers) {
+    const n = 6, step = (a1 - a0) / n, rm = (r0 + r1) / 2;
+    for (let i = 0; i < n; i++) sector(a0 + i * step, a0 + (i + 1) * step, i % 2 ? r0 : rm, i % 2 ? rm : r1);
+  }
   // the lettering: upright strokes and bars of letter size along the arc (abstract – no word is spelled)
-  for (const w of SIDEWALL.words) {
-    const step = w.span / w.n;
-    for (let i = 0; i < w.n; i++) {
-      const a = w.at - w.span / 2 + step * (i + 0.5), kind = (i * 7 + w.n) % 3;
-      g.save(); g.translate(cx + Math.cos(rad(a)) * R * 0.832, cy + Math.sin(rad(a)) * R * 0.832); g.rotate(rad(a) + Math.PI / 2);
-      const h = R * 0.05, wd = (step / 360) * Math.PI * 2 * R * 0.832 * 0.72;
-      g.fillRect(-wd / 2, -h / 2, wd * 0.28, h);                          // a stem
-      if (kind !== 1) g.fillRect(-wd / 2, -h / 2, wd, h * 0.24);          // a top bar
-      if (kind === 2) g.fillRect(-wd / 2, -h * 0.06, wd * 0.8, h * 0.2);   // a middle bar
-      if (kind !== 0) g.fillRect(wd / 2 - wd * 0.28, -h / 2, wd * 0.28, h); // a second stem
+  for (const [a0, a1, r0, r1, n] of L.words) {
+    const step = (a1 - a0) / n, rm = (r0 + r1) / 2, h = R * (r1 - r0);
+    for (let i = 0; i < n; i++) {
+      const a = a0 + step * (i + 0.5), kind = (i * 7 + n) % 3;
+      g.save(); g.translate(cx + Math.cos(rad(a)) * R * rm, cy + Math.sin(rad(a)) * R * rm); g.rotate(rad(a) + Math.PI / 2);
+      const wd = (step / 360) * Math.PI * 2 * R * rm * 0.74, sw = Math.max(2, wd * 0.26);
+      g.fillRect(-wd / 2, -h / 2, sw, h);                         // a stem
+      if (kind !== 1) g.fillRect(-wd / 2, -h / 2, wd, h * 0.22);   // a top bar
+      if (kind === 2) g.fillRect(-wd / 2, -h * 0.08, wd * 0.8, h * 0.18);
+      if (kind !== 0) g.fillRect(wd / 2 - sw, -h / 2, sw, h);      // a second stem
+      if (kind === 0) g.fillRect(-wd / 2, h / 2 - h * 0.22, wd, h * 0.22);   // a foot
       g.restore();
     }
   }
@@ -317,19 +336,19 @@ function sidewallCanvas(avg = false) {
   g.putImageData(img, 0, 0);
   return c;
 }
-function sidewallMaps() {
-  const mk = (avg) => () => { const t = new THREE.CanvasTexture(sidewallCanvas(avg)); t.anisotropy = 8; t.colorSpace = THREE.SRGBColorSpace; return t; };
-  return { map: sharedTex("sidewall", mk(false)), avg: sharedTex("sidewallAvg", mk(true)) };
+function sidewallMaps(era = "2022") {
+  const mk = (avg) => () => { const t = new THREE.CanvasTexture(sidewallCanvas(era, avg)); t.anisotropy = 8; t.colorSpace = THREE.SRGBColorSpace; return t; };
+  return { map: sharedTex("sidewall" + era, mk(false)), avg: sharedTex("sidewallAvg" + era, mk(true)) };
 }
 // The sidewall's material: the markings smeared round the wheel by the angle it turns in a frame (uniform smear, rad –
 // car3d setSmear): sampled along the arc, and the averaged ring once it has turned well over a word in a frame.
-export function sidewallMaterial(color = 0xf2c230) {
-  const M = sidewallMaps();
+export function sidewallMaterial(color = 0xf2c230, era = "2022") {
+  const M = sidewallMaps(era === "2026" ? "2026" : "2022");
   const m = new THREE.MeshBasicMaterial({ color, map: M.map, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   if (!M.map) return m;
   const smear = { value: 0 }, avg = { value: M.avg };
   m.userData.smear = smear;
-  m.customProgramCacheKey = () => "sidewall";
+  m.customProgramCacheKey = () => "sidewall";   // (one program for both eras: the maps are uniforms)
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uSmear = smear; sh.uniforms.avgMap = avg;
     sh.fragmentShader = "uniform float uSmear;\nuniform sampler2D avgMap;\n" + sh.fragmentShader.replace("#include <map_fragment>", `
@@ -648,8 +667,46 @@ function wheels(p) {
   // the sidewall's markings: a ring from the rim's lip to the shoulder, just off the rubber (its UVs the plane's: the
   // texture's middle at the axle – SIDEWALL's angles and radii)
   const band = (r, w) => { const out = r - 0.012, g = new THREE.RingGeometry(out * SIDEWALL.inner, out, 72, 1); g.rotateY(Math.PI / 2); g.translate(w / 2 + 0.004, 0, 0); return both(g); };
-  const lip = (w) => { const g = new THREE.TorusGeometry(0.247, 0.012, 6, 40); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.012, 0, 0); return both(g); };
-  const cover = (r, w) => { const g = new THREE.CircleGeometry(0.245, 32); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.016, 0, 0); const mark = boxAt(0.004, 0.2, 0.04, w / 2 - 0.012, 0.1, 0); const hub = new THREE.CylinderGeometry(0.05, 0.05, 0.02, 16); hub.rotateZ(Math.PI / 2); hub.translate(w / 2 - 0.006, 0, 0); return both(merge([g, mark, hub])); };
+  // The rim's face (v0.39, docs/research/wheels_tyres.md – FIA 2025 Art. 3.13.7 / 10.7, 2026 C10.7.5; race photos):
+  //   2022–25: the standard wheel cover – a flat matte-black disc to the rim's lip (Ø 490.6 mm), fixed to the rim (it turns
+  //     with it), a ring of ~10 small fasteners near its edge, a valve hole, a central opening (~⅓ of its diameter) showing
+  //     the hub and the coloured wheel nut;
+  //   2026: no cover – the mandatory annular outboard disc (inner Ø 310 mm, Issue 14) to the lip (Ø 496 mm), and inside it
+  //     the team's own rim: spokes (a show car's ~14 twin spokes – team designs differ; an estimate) over dark closing
+  //     panels, the hub and the nut (≤ Ø 105 mm, 6-sided here).
+  // Vertex colours (the materials white): one mesh for the black parts, one for the metal ones – no more draw calls
+  // than the plain disc had. NUTS: the nut's colour where a race photo shows a team's (else an anodised grey).
+  const era26 = p.era === "2026", lipR = era26 ? 0.248 : 0.2453, nut = NUTS[p.variant] || NUTS.default;
+  const tint = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute("color", new THREE.BufferAttribute(a, 3)); return g; };
+  const onFace = (g, x, rad = 0, ang = 0) => { g.translate(0, rad, 0); g.rotateX(ang); g.translate(x, 0, 0); return g; };
+  const axleCyl = (r1, r2, len, seg, x, rad = 0, ang = 0) => { const g = new THREE.CylinderGeometry(r1, r2, len, seg); g.rotateZ(-Math.PI / 2); return onFace(g, x, rad, ang); };
+  const lip = (w) => {
+    const g = new THREE.TorusGeometry(lipR, 0.012, 6, 40); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.012, 0, 0);
+    const parts = [tint(g.toNonIndexed(), [0.54, 0.56, 0.59])];
+    const face = w / 2 - (era26 ? 0.014 : 0.016);
+    if (!era26) for (let i = 0; i < 10; i++) parts.push(tint(axleCyl(0.008, 0.008, 0.006, 8, face + 0.002, 0.219, (i / 10) * Math.PI * 2).toNonIndexed(), [0.42, 0.44, 0.47]));
+    parts.push(tint(axleCyl(0.006, 0.006, 0.016, 8, face + 0.006, era26 ? 0.2 : 0.19, 0.31).toNonIndexed(), [0.75, 0.77, 0.8]));   // the valve
+    // the hub, and the nut on it: six flats, a collar in the second colour where there is one
+    parts.push(tint(axleCyl(0.066, 0.07, 0.03, 20, w / 2 - 0.07).toNonIndexed(), [0.2, 0.21, 0.23]));
+    parts.push(tint(axleCyl(0.046, 0.0525, 0.05, 6, w / 2 - 0.035).toNonIndexed(), nut.c));
+    parts.push(tint(axleCyl(0.054, 0.054, 0.012, 20, w / 2 - 0.058).toNonIndexed(), nut.ring || nut.c));
+    return both(merge(parts));
+  };
+  const cover = (r, w) => {
+    const parts = [];
+    if (!era26) {
+      const d = new THREE.RingGeometry(0.08, lipR - 0.003, 40, 1); d.rotateY(Math.PI / 2); d.translate(w / 2 - 0.016, 0, 0); parts.push(tint(d.toNonIndexed(), [0.07, 0.075, 0.085]));
+      const well = new THREE.CylinderGeometry(0.08, 0.08, 0.05, 24, 1, true); well.rotateZ(-Math.PI / 2); well.translate(w / 2 - 0.041, 0, 0); parts.push(tint(well.toNonIndexed(), [0.05, 0.05, 0.055]));
+    } else {
+      const d = new THREE.RingGeometry(0.155, lipR - 0.002, 40, 1); d.rotateY(Math.PI / 2); d.translate(w / 2 - 0.014, 0, 0); parts.push(tint(d.toNonIndexed(), [0.07, 0.075, 0.085]));
+      const panel = new THREE.CircleGeometry(0.155, 28); panel.rotateY(Math.PI / 2); panel.translate(w / 2 - 0.055, 0, 0); parts.push(tint(panel.toNonIndexed(), [0.035, 0.035, 0.04]));
+      // seven twin spokes from the hub out to the disc's edge
+      for (let i = 0; i < 7; i++) for (const o of [-0.09, 0.09]) {
+        const b = new THREE.BoxGeometry(0.02, 0.1, 0.016); b.rotateZ(0.0); onFace(b, w / 2 - 0.04, 0.108, (i / 7) * Math.PI * 2 + o); parts.push(tint(b.toNonIndexed(), [0.2, 0.21, 0.23]));
+      }
+    }
+    return both(merge(parts));
+  };
   const out = { front: { tyre: tyre(p.FR, p.FW), band: band(p.FR, p.FW), lip: lip(p.FW), cover: cover(p.FR, p.FW) }, rear: { tyre: tyre(p.RR, p.RW), band: band(p.RR, p.RW), lip: lip(p.RW), cover: cover(p.RR, p.RW) } };
   if (p.era === "2022") {
     // the deflector over the front tyre: an arc plate a few cm above the tread, from the top towards the front
@@ -747,13 +804,13 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const wingPaint = new THREE.MeshStandardMaterial({ color: l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top, roughness: matte ? 0.5 : 0.3, metalness: 0.05 });
   const carbonThin = mat("carbonThin", () => new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.45, metalness: 0.15, side: THREE.DoubleSide }));
   const tyreMat = mat("tyre", () => new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.9, metalness: 0 }));
-  const coverMat = mat("cover", () => new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.35, metalness: 0.6 }));
-  const lipMat = mat("lip", () => new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.3, metalness: 0.9 }));
+  const coverMat = mat("cover", () => new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.45, metalness: 0.35 }));
+  const lipMat = mat("lip", () => new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.3, metalness: 0.85 }));
   const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));
   const visorMat = mat("visor", () => new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 }));
   const screenMat = mat("screen", () => new THREE.MeshBasicMaterial({ map: wheelScreen(), toneMapped: false }));
   const buttonMat = mat("buttons", () => new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 0.4, metalness: 0.5 }));
-  const bandMat = sidewallMaterial(0xf2c230);
+  const bandMat = sidewallMaterial(0xf2c230, prof.era);
   const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
   const helmetMat = new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 });
   const gloveMat = new THREE.MeshStandardMaterial({ color: l.base, roughness: 0.8, metalness: 0 });

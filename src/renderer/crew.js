@@ -256,7 +256,7 @@ function mergeGeo(gs) {
   const pos = [], nor = [], col = [];
   for (const [g0, c] of gs) {
     const g = g0.index ? g0.toNonIndexed() : g0, p = g.attributes.position.array, n = g.attributes.normal.array;
-    for (const v of p) pos.push(v); for (const v of n) nor.push(v); for (let i = 0; i < p.length / 3; i++) col.push(c[0], c[1], c[2]);
+    for (const v of p) pos.push(v); for (const v of n) nor.push(v); const own = g.attributes.color; for (let i = 0; i < p.length / 3; i++) own ? col.push(own.getX(i), own.getY(i), own.getZ(i)) : col.push(c[0], c[1], c[2]);
     if (g !== g0) g.dispose(); g0.dispose();
   }
   const m = new THREE.BufferGeometry(); m.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); m.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); m.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
@@ -281,8 +281,8 @@ function shared() {
   if (SHARED) return SHARED;
   const parts = partGeometries();
   SHARED = { parts, kit: kitParts(), teamMat: new THREE.MeshStandardMaterial({ roughness: 0.65 }), darkMat: new THREE.MeshStandardMaterial({ color: "#16181b", roughness: 0.45 }),
-    kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }), bandMat: sidewallMaterial(0xffffff) };
-  for (const x of [SHARED.teamMat, SHARED.darkMat, SHARED.kitMat, SHARED.bandMat]) x.userData.shared = true;
+    kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }), bandMat: sidewallMaterial(0xffffff), bandMat26: sidewallMaterial(0xffffff, "2026") };
+  for (const x of [SHARED.teamMat, SHARED.darkMat, SHARED.kitMat, SHARED.bandMat, SHARED.bandMat26]) x.userData.shared = true;
   for (const [g] of Object.values(parts)) g.userData.shared = true;
   for (const g of Object.values(SHARED.kit)) g.userData.shared = true;
   return SHARED;
@@ -316,7 +316,7 @@ export function crewMeshes(max = 120) {
       if (!parts || wheel?.key === parts.key) return;
       if (wheel) { for (const m of [wheel.front, wheel.rear]) { group.remove(m); m.geometry.dispose(); m.dispose(); } for (const m of [wheel.frontBand, wheel.rearBand]) { group.remove(m); m.dispose(); } }
       const g = wheelKit(parts);
-      wheel = { key: parts.key, front: mk(g.front, S.kitMat, 64, false), rear: mk(g.rear, S.kitMat, 64, false), frontBand: mk(g.frontBand, S.bandMat, 64, true), rearBand: mk(g.rearBand, S.bandMat, 64, true) };
+      wheel = { key: parts.key, front: mk(g.front, S.kitMat, 64, false), rear: mk(g.rear, S.kitMat, 64, false), frontBand: mk(g.frontBand, /^2026/.test(parts.key) ? S.bandMat26 : S.bandMat, 64, true), rearBand: mk(g.rearBand, /^2026/.test(parts.key) ? S.bandMat26 : S.bandMat, 64, true) };
     },
     place(list, loose = [], cam = null) {
       for (const k of Object.keys(body)) counts[k] = 0;

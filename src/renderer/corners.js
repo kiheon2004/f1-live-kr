@@ -73,6 +73,7 @@ export function cornerTargets(stations, view) {
 const smooth01 = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 // alpha eased toward its target over CORNERS.fade s (dt: the frame's seconds)
 export function easeAlpha(a, target, dt) { const k = 1 - Math.exp(-Math.max(0, dt) / CORNERS.fade); return a + (target - a) * k; }
-// on-screen size (the sprite's scale, a share of the screen's height) at distance d (m): ~2.6 m across, kept between
-// ~1.8 % and ~4.2 % of the screen (never a dot, never a blot)
-export function cornerScale(d, fovDeg) { const h = 2 * Math.max(1, d) * Math.tan((fovDeg * Math.PI) / 360); return Math.max(0.018, Math.min(0.042, 2.6 / h)); }
+// on-screen size (the sprite's scale) at distance d (m): ~4 m across, kept between 0.026 and 0.05 (the old fixed size
+// was 0.032; v0.39's first 0.018 read as a dot on screen)
+export const CORNER_SIZE = { m: 4, min: 0.026, max: 0.05 };
+export function cornerScale(d, fovDeg) { const h = 2 * Math.max(1, d) * Math.tan((fovDeg * Math.PI) / 360); return Math.max(CORNER_SIZE.min, Math.min(CORNER_SIZE.max, CORNER_SIZE.m / h)); }

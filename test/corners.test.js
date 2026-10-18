@@ -64,5 +64,5 @@ test("corner numbers: off shows none; all shows every one; the helicopter those 
   // eased, not switched
   const a = easeAlpha(0, 1, 1 / 60); assert.ok(a > 0 && a < 0.2);
   // on screen: never a dot, never a blot
-  assert.strictEqual(cornerScale(3000, 60), 0.018); assert.strictEqual(cornerScale(2, 60), 0.042);
+  assert.strictEqual(cornerScale(3000, 60), 0.026); assert.strictEqual(cornerScale(2, 60), 0.05);
 });

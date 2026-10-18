@@ -61,4 +61,6 @@ test("wheels: front and rear their own radius; the smear is the frame's turning 
   assert.ok(Math.abs(smearOf(200, 1 / 60) - 200 / 60) < 1e-9);
   assert.ok(Math.abs(smearOf(200, 4 / 60) - 4 * smearOf(200, 1 / 60)) < 1e-9, "4× playback: 4× the smear");
   assert.strictEqual(smearOf(200, 30), 200 * 0.2);
+  // a slow frame (0.1 s at 1×) is not a longer exposure: the smear stays the shutter's
+  assert.ok(Math.abs(smearOf(200, 0.1, 0.1) - 200 / 60) < 1e-9);
 });

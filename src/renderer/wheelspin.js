@@ -37,7 +37,12 @@ export function stepWheel(w, { t, r, along = null, speed = 0, moved = null }) {
   w.a = wrapAngle(w.a + (speed * dts) / r);
   return w.a;
 }
-// How much the wheel's markings smear on screen: the angle it turns while a frame is shown (rad) – what a camera's
-// shutter sees (TV: ~1/100 s). ω: rad per session second; dts: the session's time the frame stands for (s: the screen's
-// frame time × the playback speed – 0 paused; a seek's jump is not a frame's: capped)
-export function smearOf(omega, dts) { return Math.abs(omega) * Math.max(0, Math.min(0.2, dts || 0)); }
+// How much the wheel's markings smear on screen: the angle it turns while a camera's shutter is open (rad). The shutter
+// here: 1/60 s of the session's time × the playback speed – not the frame's own time (a slow frame is not a longer
+// exposure: at 10 fps a wheel at 20 km/h smeared into a ring). ω: rad per session second; dts: the session's time this
+// frame stands for (s; 0 paused); frameS: the screen's frame time (s). A seek's jump is not a frame's: capped.
+export const SHUTTER = 1 / 60;
+export function smearOf(omega, dts, frameS = SHUTTER) {
+  const t = Math.max(0, Math.min(0.2, dts || 0)) * Math.min(1, SHUTTER / Math.max(1e-3, frameS));
+  return Math.abs(omega) * t;
+}
