@@ -93,7 +93,16 @@ export function makeSupportCar(id) {
   const tex = door(spec.label, spec.role === "medical" && spec.body === "#d9dde1" ? "#c41230" : "#ffffff");
   const labelM = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }); labelM.userData.ownedTextures = [tex];
   for (const s of [1, -1]) { const p = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.19), labelM); p.position.set(s * (W * 0.47 + 0.004), floor + (belt - floor) * 0.62, -0.05); p.rotation.y = s * Math.PI / 2; group.add(p); }
-  for (const o of group.children) { o.castShadow = true; o.receiveShadow = false; }
+  // (one mesh per material: the parts' transforms baked in – a car is a handful of draw calls, not two dozen)
+  const byMat = new Map(); for (const o of group.children) { o.updateMatrix(); const l = byMat.get(o.material) || []; l.push(o); byMat.set(o.material, l); }
+  group.clear();
+  for (const [m, list] of byMat) {
+    const gs = list.map((o) => { const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrix); o.geometry.dispose(); return g; });
+    const uv = gs.every((g) => g.attributes.uv);
+    for (const g of gs) { for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && !(uv && k === "uv")) g.deleteAttribute(k); if (!g.attributes.normal) g.computeVertexNormals(); }
+    const mesh = new THREE.Mesh(merge(gs), m); for (const g of gs) g.dispose();
+    mesh.castShadow = true; mesh.receiveShadow = false; group.add(mesh);
+  }
   group.userData = { spec, lamps,
     // on: flashing (deployed / out on track); phase: the session's time (s) – the same moment, the same lamps
     setLights(on, phase) { const k = on ? (Math.floor(phase * 3) % 2 ? 1 : 0.15) : 0.05; lamps.forEach((m, i) => { const v = on ? (i % 2 ? 1.15 - k : k) * 2.2 : 0.05; if (Math.abs(m.emissiveIntensity - v) > 1e-3) m.emissiveIntensity = v; }); } };

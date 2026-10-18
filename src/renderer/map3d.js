@@ -1648,15 +1648,19 @@ function updateMarshals(src, t) {
     if (!W.real) { W.marshals = null; return; }   // (behind the real map's barriers only)
     const M = buildMarshals(src), group = new THREE.Group(); group.name = "marshals";
     const crew = crewMeshes(Math.max(2, M.posts.length * MARSHAL.per)); group.add(crew.group);
-    // the light panels: a post and a panel facing the cars coming (their colours their own materials: few)
-    const poleG = new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6).translate(0, 1.1, 0), boxG = new THREE.BoxGeometry(0.7, 0.5, 0.12).translate(0, 2.3, 0);
-    const poleM = new THREE.MeshStandardMaterial({ color: "#6c7178", roughness: 0.6 }), frameM = new THREE.MeshStandardMaterial({ color: "#16181b", roughness: 0.5 });
-    for (const p of M.panels) {
-      const g = new THREE.Group(); g.position.set(p.x, groundY(p.x, p.z), p.z); g.rotation.y = Math.atan2(p.face.x, p.face.z);
-      const face = new THREE.MeshStandardMaterial({ color: "#0b0c0d", emissive: PANEL_COLOURS.off, emissiveIntensity: 1, roughness: 0.4 });
-      const lamp = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.4).translate(0, 2.3, 0.061), face);
-      g.add(new THREE.Mesh(poleG, poleM), new THREE.Mesh(boxG, frameM), lamp); p.lamp = face; group.add(g);
-    }
+    // the light panels: a post and a panel facing the cars coming – two instanced meshes for all of them (the panel's face
+    // unlit, its colour per instance: the sector's signal)
+    const body = new THREE.BufferGeometry().copy(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6).translate(0, 1.1, 0).toNonIndexed());
+    const box = new THREE.BoxGeometry(0.7, 0.5, 0.12).translate(0, 2.3, 0).toNonIndexed();
+    const merged = new THREE.BufferGeometry(); for (const k of ["position", "normal"]) { const a1 = body.attributes[k].array, a2 = box.attributes[k].array, arr = new Float32Array(a1.length + a2.length); arr.set(a1); arr.set(a2, a1.length); merged.setAttribute(k, new THREE.BufferAttribute(arr, 3)); }
+    body.dispose(); box.dispose();
+    const np = Math.max(1, M.panels.length);
+    const frames = new THREE.InstancedMesh(merged, new THREE.MeshStandardMaterial({ color: "#2b2e33", roughness: 0.55 }), np);
+    const faces = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.6, 0.4).translate(0, 2.3, 0.061), new THREE.MeshBasicMaterial({ color: "#ffffff" }), np);
+    faces.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(np * 3), 3);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), yAx = new THREE.Vector3(0, 1, 0), off = new THREE.Color(PANEL_COLOURS.off);
+    M.panels.forEach((p, i) => { q.setFromAxisAngle(yAx, Math.atan2(p.face.x, p.face.z)); m4.compose(new THREE.Vector3(p.x, groundY(p.x, p.z), p.z), q, one); frames.setMatrixAt(i, m4); faces.setMatrixAt(i, m4); faces.setColorAt(i, off); p.slot = i; });
+    frames.count = faces.count = M.panels.length; frames.castShadow = true; group.add(frames, faces); M.faces = faces;
     W.group.add(group);
     W.marshals = { real: W.real, src, group, crew, ...M, flags: new Map(), key: null };
   }
@@ -1687,7 +1691,7 @@ function updateMarshals(src, t) {
   // the panels: their sector's state (the flashing of a double yellow from the session's time)
   for (const p of MS.panels) {
     const here = state.red ? "red" : state.sectors.get(p.n) === "DOUBLE YELLOW" ? (Math.floor(tsec * 2) % 2 ? "double" : "off") : state.sectors.has(p.n) || state.sc || state.vsc ? "yellow" : "off";
-    const c = PANEL_COLOURS[here]; if (p.lampColour !== c) { p.lamp.emissive.set(c); p.lampColour = c; }
+    const c = PANEL_COLOURS[here]; if (p.lampColour !== c) { MS.faces.setColorAt(p.slot, new THREE.Color(c)); MS.faces.instanceColor.needsUpdate = true; p.lampColour = c; }
   }
   MS.state = { red: state.red, sc: state.sc, vsc: state.vsc, sectors: [...state.sectors] };
   // (what the posts show rests on: race control's sector flags; where they stand: the FIA map – of another season, said so)
