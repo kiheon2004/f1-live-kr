@@ -382,7 +382,9 @@ function pitWorkPolicy() {
 }
 const liftedCars = new Set();
 function pitPlanFor(num, src, policy, { t0, t1 = null, input }) {
-  const tyres = src.tyreChanges?.(num) || [];
+  // (the record: the session's whole tyre record; observed: only what had arrived by the moment shown – a correction sent
+  // later isn't seen early)
+  const tyres = (policy === "record" ? src.tyreChanges?.(num, Infinity) : src.tyreChanges?.(num, app().t)) || [];
   const stop = (policy === "record" ? src.pitStops?.(num, Infinity) : src.pitStops?.(num)) || [];
   const rec = stop.find((x) => x.stop && x.ms >= t0 && x.ms <= t0 + 120000);
   return stopPlan({ t: app().t, t0, t1, tyres, stopTime: rec?.stop ?? null, penalty: input?.penalty || null, timePen: input?.timePen || 0, policy });

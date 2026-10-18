@@ -107,41 +107,49 @@
   // arrives some 15 s after the car has left its box (Barcelona 2026, Hamilton: standstill 4145–4149 s, stint 1 sent at
   // 4163.9 s) – so during a stop a live feed never knows; a replay knows from the session's record.
   // A stint's first message can be corrected seconds later: Monaco 2025, Tsunoda's lap-1 stop – stint 1 sent as
-  // "UNKNOWN", TyresNotChanged "1" at 3481.4 s, then "HARD", new, TyresNotChanged "0" at 3486.4 s. Each correction is
-  // kept with the time it arrived (v0.35 kept the first message only: that stop showed no tyre change), and a stint is
-  // listed as it was known at t.
-  const tyreFields = (v, o = {}) => ({
-    compound: v.Compound || o.compound,
-    isNew: v.New != null ? v.New === "true" || v.New === true : o.isNew ?? false,
-    changed: v.TyresNotChanged != null ? !(v.TyresNotChanged === "1" || v.TyresNotChanged === 1) : o.changed ?? true,
-  });
+  // "UNKNOWN", TyresNotChanged "1" at 3481.4 s, then "HARD", new, TyresNotChanged "0" at 3486.4 s – and its fields can
+  // come apart: New / TyresNotChanged before any Compound (v0.36 dropped those: a stint opened later by its compound alone
+  // read as used tyres, changed). So each car's stint keeps every field's values with the time each arrived (internal),
+  // and a stint is listed (public) only from its first compound – each field as known at t, never a value sent later:
+  //   compound: as sent ("UNKNOWN" included – F1's own placeholder; nothing guessed) · isNew: false until New says so ·
+  //   changed: true unless TyresNotChanged "1"
+  // A whole list sent as an array (the session's reset, "Stints": []) drops the stints it doesn't hold from then on;
+  // "_deleted" (merge's deletion) drops the ones it names.
+  const NO_FIELDS = { isNew: false, changed: true };
+  const at = (h, t) => { let v; for (const [m, x] of h) { if (m > t) break; v = x; } return v; };
   class TyreLog {
     constructor() { this.cars = {}; }
+    stint(num, idx) {
+      const car = this.cars[num] || (this.cars[num] = new Map());
+      if (!car.has(idx)) car.set(idx, { idx, compound: [], isNew: [], changed: [], gone: [] });
+      return car.get(idx);
+    }
     feed(ms, topic, data) {
       if (topic !== "TimingAppData" || !data?.Lines) return;
       for (const [num, line] of Object.entries(data.Lines)) {
         const st = line?.Stints; if (!st || typeof st !== "object") continue;
+        const put = (h, v) => { if (h.length && h[h.length - 1][1] === v) return; h.push([ms, v]); };
+        if (Array.isArray(st)) for (const s of this.cars[num]?.values() || []) if (s.idx >= st.length) put(s.gone, true);
+        if (!Array.isArray(st) && Array.isArray(st._deleted)) for (const d of st._deleted) if (/^\d+$/.test(String(d)) && this.cars[num]?.has(+d)) put(this.cars[num].get(+d).gone, true);
         for (const [k, v] of Array.isArray(st) ? st.entries() : Object.entries(st)) {
           const idx = +k; if (!v || typeof v !== "object" || !Number.isFinite(idx)) continue;
-          const list = this.cars[num] || (this.cars[num] = []), had = list.find((x) => x.idx === idx);
-          if (had) {
-            if (v.Compound == null && v.New == null && v.TyresNotChanged == null) continue;
-            const last = had.fix[had.fix.length - 1][1], now = tyreFields(v, last);
-            if (now.compound !== last.compound || now.isNew !== last.isNew || now.changed !== last.changed) { had.fix.push([ms, now]); Object.assign(had, now); }
-            continue;
-          }
-          if (!v.Compound) continue;
-          const f = tyreFields(v);
-          list.push({ ms, idx, ...f, fix: [[ms, f]] });
+          const s = this.stint(num, idx);
+          if (s.gone.length && at(s.gone, ms)) put(s.gone, false);
+          if (v.Compound) put(s.compound, String(v.Compound));
+          if (v.New != null) put(s.isNew, v.New === "true" || v.New === true);
+          if (v.TyresNotChanged != null) put(s.changed, !(v.TyresNotChanged === "1" || v.TyresNotChanged === 1));
         }
       }
     }
-    // the stints created up to t (all of them: Infinity), each as it was known at t
+    // the stints known at t (all of them: Infinity) – each as it was known then: { ms (its compound's first arrival), idx,
+    // compound, isNew, changed }
     list(num, t = Infinity) {
-      return (this.cars[num] || []).filter((x) => x.ms <= t).map((x) => {
-        let f = x.fix[0][1]; for (const [m, v] of x.fix) { if (m > t) break; f = v; }
-        return { ms: x.ms, idx: x.idx, ...f };
-      });
+      const out = [];
+      for (const s of this.cars[num]?.values() || []) {
+        if (!s.compound.length || s.compound[0][0] > t || at(s.gone, t)) continue;
+        out.push({ ms: s.compound[0][0], idx: s.idx, compound: at(s.compound, t), isNew: at(s.isNew, t) ?? NO_FIELDS.isNew, changed: at(s.changed, t) ?? NO_FIELDS.changed });
+      }
+      return out.sort((a, b) => a.idx - b.idx);
     }
   }
 
