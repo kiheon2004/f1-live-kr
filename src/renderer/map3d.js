@@ -3781,7 +3781,8 @@ window.Map3D = {
   // development: face to face with post k's marshals (dist m in front of them, h up)
   viewPost(k = 0, dist = 4, h = 1.6, fov = 40) {
     const p = world?.marshals?.posts?.[k]; if (!p) return "no post";
-    const y = groundY(p.x, p.z); return window.Map3D.look(p.x + p.face.x * dist, y + h, p.z + p.face.z * dist, p.x, y + 1.2, p.z, fov) + " " + p.id;
+    const y = groundY(p.x, p.z), a = [p.x + p.face.x * dist, y + h, p.z + p.face.z * dist, p.x, y + 1.2, p.z, fov];
+    window.Map3D.look(...a); return p.id + " " + JSON.stringify(a.map((v) => +v.toFixed(2)));
   },
   viewMarshal(id, back = 24, h = 4, fov = 45) {
     const M = world?.marshals; if (!M) return "no marshals";
