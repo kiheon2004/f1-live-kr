@@ -117,3 +117,26 @@ test("medical car's lap 1 end from positions arriving bit by bit; the last car r
   // no car reaches the entry within the window (positions stop at 30 s, a replay): final, no time
   assert.deepStrictEqual(medicalLap1({ ...mk(Infinity), pos: (num, tau) => (tau > L + 30000 ? null : track[num](tau)) }), { t: null, final: true });
 });
+
+test("support car models (v0.39): each its own outline, the wheels in arches at the spec's wheelbase, separate turning pivots", async () => {
+  const { makeSupportCar, SUPPORT_CARS, sideOutline, wheelPlaces } = await import("../src/renderer/support3d.js");
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  for (const id of Object.keys(SUPPORT_CARS)) {
+    const s = SUPPORT_CARS[id], car = makeSupportCar(id), u = car.userData;
+    assert.strictEqual(u.wheels.length, 4, id);
+    const W = wheelPlaces(s);
+    assert.ok(Math.abs(W.zf - W.zr - s.WB) < 1e-9, id + " wheelbase");
+    // the body's box: the spec's length and width (±4 cm: bevels, mirrors not drawn), height ≤ spec + light bar
+    const box = new THREE.Box3(); car.children.filter((o) => o.isMesh).forEach((m) => box.expandByObject(m));
+    assert.ok(Math.abs(box.max.z - box.min.z - s.L) < 0.12, id + " length " + (box.max.z - box.min.z));
+    assert.ok(box.max.x - box.min.x <= s.W + 0.06 && box.max.x - box.min.x > s.W * 0.9, id + " width " + (box.max.x - box.min.x));
+    assert.ok(box.max.y < s.H + 0.16, id + " height " + box.max.y);
+    // an arch over each wheel: the outline's points over the axle sit above the tyre
+    const out = sideOutline(s), over = (z) => Math.min(...out.filter(([oz, oy]) => Math.abs(oz - z) < 0.05 && oy > 0.05 && oy < s.RF * 2 + 0.1).map(([, y]) => y));
+    assert.ok(over(W.zf) > s.RF * 2, id + " front arch"); assert.ok(over(W.zr) > s.RR * 2, id + " rear arch");
+    u.setSpin(1.2, 0.7);
+    assert.deepStrictEqual(u.wheels.map((w) => +w.rotation.x.toFixed(2)), [1.2, 1.2, 0.7, 0.7]);
+  }
+  // models differ: the SUV is tall, the 4-door long, the coupés short and low
+  assert.ok(SUPPORT_CARS.dbx707.H > 1.6 && SUPPORT_CARS.amgGt63s.L > 5 && SUPPORT_CARS.amgGtBlack.H < 1.3);
+});

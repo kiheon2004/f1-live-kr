@@ -1,114 +1,294 @@
-// The support cars' models: the safety car and the medical car of a season and event (support.js supportModels), in
-// the few things the sources give – body type, size, colours, where the lights are (docs/research/
-// support_cars_start.md: manufacturers' road-car figures, approximate; race-photo captions). Built from lofted sections
-// like the F1 cars (car3d.js); no maker's shape is copied – a body of its type, length, width and height in its livery.
-//   Mercedes-AMG safety cars (2022–): no roof light bar – light modules along the top of the windscreen and on the rear
-//   wing, orange (green when cars may pass); Aston Martin's: a roof bar; both medical cars: a roof bar (its colours not
-//   sourced: amber, an estimate).
+// The support cars' models: the safety car and the medical car of a season and event (support.js supportModels).
+// v0.39: each model its own shape, from the makers' figures and the race cars' photos (docs/research/
+// support_cars_start.md, ~/projects/f1kr-work/v039/research/support_models.md → docs/research/support_models.md):
+// length, width, height, wheelbase, tracks and tyre sizes from the road cars' spec sheets (the race cars sit a touch lower
+// and carry aero parts); the side outline – bonnet, windscreen, roof, tail – and where the lamps, grille, vents, wing and
+// light bars are from photos of the race cars (estimates, a few cm). No maker's badge, sponsor or logo is drawn: shapes
+// and colours only, the role on the plates ("SAFETY CAR" / "MEDICAL CAR", as the race cars' plates read).
+//   The body: its side outline (with the wheel arches cut out) pushed across the car's width, then narrowed along its
+//   length to the car's plan and rounded over the top (tumblehome); the glasshouse the same way, narrower at the roof.
+//   Wheels: each its own group, the tyre and the rim's spokes turning about the axle (setSpin – the distance the car has
+//   gone, map3d.js), so a moving car's wheels turn.
+//   Mercedes-AMG safety cars (2022–): no roof light bar – LED modules in the top band of the windscreen and along the rear
+//   wing's upper blade, orange (green when cars may pass); the Aston Martin safety cars: a roof bar; the medical cars: a
+//   roof bar on a fairing at the roof's rear edge (amber ends, X290 photo, Shanghai 2026), the DBX707 likewise (estimate).
 // Each car is its own group (a handful at most), freed with its world (dispose.js).
 import * as THREE from "./vendor/three.module.js";
-import { loft, softBox, merge, boxAt } from "./car3d.js";
+import { merge, boxAt, softBox } from "./car3d.js";
 
-// L × W × H (m), body type, colours, lights; label on the doors
+// L × W × H, wheelbase WB, front overhang FO, tracks TF/TR, tyre radii RF/RR (m, from the tyre sizes), ground clearance
+// GC; the side outline (u: share of the length from the nose; y: m) – `top`: the lower body's upper edge (nose, bonnet,
+// beltline, tail deck), `glass`: the glasshouse's outline over it (windscreen foot → roof → its rear end); `plan`: half
+// width as a share of W/2 along u; colours, lights, wing, spokes (count of spoke pairs), extras
 export const SUPPORT_CARS = {
-  amgGtBlack: { name: "Mercedes-AMG GT Black Series", role: "sc", type: "coupe", L: 4.55, W: 2.0, H: 1.26, body: "#c41230", accent: "#111214", lights: "screen", wing: true, label: "SAFETY CAR" },
-  amgGt63Pro: { name: "Mercedes-AMG GT 63 PRO 4MATIC+", role: "sc", type: "coupe", L: 4.73, W: 1.985, H: 1.355, body: "#141517", accent: "#c41230", lights: "screen", wing: true, label: "SAFETY CAR" },
-  vantage: { name: "Aston Martin Vantage", role: "sc", type: "coupe", L: 4.495, W: 1.98, H: 1.275, body: "#00473b", accent: "#c4e000", lights: "roof", wing: true, label: "SAFETY CAR" },
-  vantageS: { name: "Aston Martin Vantage S", role: "sc", type: "coupe", L: 4.495, W: 1.98, H: 1.275, body: "#00473b", accent: "#c4e000", lights: "roof", wing: true, label: "SAFETY CAR" },
-  amgGt63s: { name: "Mercedes-AMG GT 63 S 4MATIC+ 4-Door", role: "medical", type: "fourdoor", L: 5.055, W: 1.955, H: 1.45, body: "#c41230", accent: "#111214", lights: "roof", wing: false, label: "MEDICAL CAR" },
-  dbx707: { name: "Aston Martin DBX707", role: "medical", type: "suv", L: 5.04, W: 2.0, H: 1.68, body: "#00473b", accent: "#c4e000", lights: "roof", wing: false, label: "MEDICAL CAR" },
+  // Mercedes-AMG GT Black Series (C190): 4,551 × 2,007 × 1,284 mm, WB 2,630, tracks 1,693 / 1,683, 285/35 R19 / 335/30 R20,
+  // clearance 95 (auto motor und sport data sheet). Long bonnet (~45 %) with two big outlets, the cabin far back, a
+  // fastback to a short high tail, a two-tier wing on tall pylons over it (its top about roof height); race car: red,
+  // the roof black, lower body and aero black (Commons photos, Suzuka 6 Apr 2025 / 29 Mar 2026); black 5×2-spoke wheels
+  amgGtBlack: { name: "Mercedes-AMG GT Black Series", role: "sc", L: 4.551, W: 2.007, H: 1.284, WB: 2.63, FO: 0.892, TF: 1.693, TR: 1.683, RF: 0.341, RR: 0.355, GC: 0.1,
+    top: [[0, 0.57], [0.012, 0.62], [0.196, 0.745], [0.3, 0.82], [0.4, 0.895], [0.6, 0.9], [0.75, 0.9], [0.85, 0.89], [0.97, 0.873], [0.99, 0.833], [1, 0.713]],
+    glass: [[0.4, 0.895], [0.52, 1.2], [0.62, 1.284], [0.7, 1.24], [0.8, 1.1], [0.9, 0.96], [0.97, 0.88]],
+    plan: [[0, 0.78], [0.06, 0.9], [0.18, 1], [0.35, 0.97], [0.55, 0.93], [0.78, 1], [0.92, 0.97], [1, 0.86]],
+    body: "#cf1d22", roof: "#111214", lower: "#0e0f11", accent: "#111214", lights: "screen", wing: { y: 1.29, u: 0.93, two: true }, spokes: 5, rim: "#141516", roofW: 0.65,
+    grille: "panamericana", vents: "bonnet2", plate: "SAFETY CAR" },
+  // Mercedes-AMG GT 63 PRO 4MATIC+ Coupé (C192): 4,728 × 1,984 × 1,354 mm, WB 2,700, tracks 1,684 / 1,687, 295/30 ZR21 /
+  // 305/30 ZR21 (Mercedes technical data, 2023 / 2024). A 2+2 – the cabin longer and taller than the Black Series's, a
+  // long fastback to a liftback, two power domes on the bonnet, a fixed wing on the tailgate below roof height; race car
+  // (Mercedes, 23 Jul 2026): black with red graphics, LEDs in the front and the rear wing (an active flap)
+  amgGt63Pro: { name: "Mercedes-AMG GT 63 PRO 4MATIC+", role: "sc", L: 4.728, W: 1.984, H: 1.354, WB: 2.7, FO: 0.851, TF: 1.684, TR: 1.687, RF: 0.356, RR: 0.358, GC: 0.11,
+    top: [[0, 0.6], [0.012, 0.65], [0.18, 0.8], [0.28, 0.88], [0.35, 0.95], [0.55, 0.975], [0.75, 0.97], [0.88, 0.9], [0.97, 0.84], [0.99, 0.8], [1, 0.68]],
+    glass: [[0.35, 0.95], [0.46, 1.27], [0.54, 1.354], [0.64, 1.33], [0.76, 1.17], [0.88, 0.98], [0.96, 0.85]],
+    plan: [[0, 0.8], [0.06, 0.92], [0.18, 1], [0.38, 0.97], [0.58, 0.93], [0.8, 1], [0.93, 0.97], [1, 0.88]],
+    body: "#121315", roof: "#121315", lower: "#0b0c0d", accent: "#c8102e", rearBody: "#c8102e", lights: "screen", wing: { y: 1.3, u: 0.95, two: false, swan: true }, spokes: 5, rim: "#141516", roofW: 0.65,
+    grille: "panamericana", vents: "domes", plate: "SAFETY CAR", stripe: "#c8102e" },
+  // Aston Martin Vantage (2024): 4,495 × 1,980 × 1,275 mm, WB 2,705, tracks 1,665 / 1,655, 275/35 ZR21 / 325/30 ZR21. A long
+  // bonnet with a wide grille low in the nose, the cabin set back, a short fastback to a ducktail; the safety car: green,
+  // lime accents, a roof light bar, a fixed rear wing (estimate)
+  vantage: { name: "Aston Martin Vantage", role: "sc", L: 4.495, W: 1.98, H: 1.275, WB: 2.705, FO: 0.742, TF: 1.665, TR: 1.655, RF: 0.36, RR: 0.364, GC: 0.1,
+    top: [[0, 0.57], [0.012, 0.62], [0.165, 0.765], [0.25, 0.83], [0.33, 0.885], [0.55, 0.89], [0.71, 0.9], [0.85, 0.88], [0.97, 0.84], [0.99, 0.8], [1, 0.68]],
+    glass: [[0.33, 0.885], [0.45, 1.19], [0.55, 1.275], [0.64, 1.24], [0.75, 1.08], [0.88, 0.92], [0.96, 0.85]],
+    plan: [[0, 0.8], [0.06, 0.92], [0.18, 1], [0.38, 0.96], [0.56, 0.92], [0.8, 1], [0.93, 0.97], [1, 0.87]],
+    body: "#00473b", roof: "#00473b", lower: "#0e0f11", accent: "#c4e000", lights: "roof", wing: { y: 1.24, u: 0.95, two: false }, spokes: 5, rim: "#1a1b1d", roofW: 0.6,
+    grille: "wide", plate: "SAFETY CAR" },
+  vantageS: { name: "Aston Martin Vantage S", role: "sc", L: 4.495, W: 1.98, H: 1.275, WB: 2.705, FO: 0.742, TF: 1.665, TR: 1.655, RF: 0.36, RR: 0.364, GC: 0.1,
+    top: [[0, 0.57], [0.012, 0.62], [0.165, 0.765], [0.25, 0.83], [0.33, 0.885], [0.55, 0.89], [0.71, 0.9], [0.85, 0.88], [0.97, 0.84], [0.99, 0.8], [1, 0.68]],
+    glass: [[0.33, 0.885], [0.45, 1.19], [0.55, 1.275], [0.64, 1.24], [0.75, 1.08], [0.88, 0.92], [0.96, 0.85]],
+    plan: [[0, 0.8], [0.06, 0.92], [0.18, 1], [0.38, 0.96], [0.56, 0.92], [0.8, 1], [0.93, 0.97], [1, 0.87]],
+    body: "#00473b", roof: "#00473b", lower: "#0e0f11", accent: "#c4e000", lights: "roof", wing: { y: 1.24, u: 0.95, two: false }, spokes: 5, rim: "#1a1b1d", roofW: 0.6,
+    grille: "wide", plate: "SAFETY CAR" },
+  // Mercedes-AMG GT 63 S 4MATIC+ 4-Door Coupé (X290), the medical car 2022–: 5,054 × 1,953 × 1,447 mm, WB 2,951, tracks
+  // 1,669 / 1,664, 275/35 R21 / 315/30 R21 (auto motor und sport). Four doors, a fastback liftback with a short ducktail;
+  // race car (Commons, Shanghai 13 Mar 2026): red all over (the roof too), black aero and lower body, a roof bar at the
+  // roof's rear edge (amber ends), a fixed wing on the tailgate below it, black wheels
+  amgGt63s: { name: "Mercedes-AMG GT 63 S 4MATIC+ 4-Door", role: "medical", L: 5.054, W: 1.953, H: 1.447, WB: 2.951, FO: 0.96, TF: 1.669, TR: 1.664, RF: 0.363, RR: 0.367, GC: 0.12,
+    top: [[0, 0.63], [0.012, 0.68], [0.19, 0.8], [0.27, 0.88], [0.33, 0.94], [0.55, 0.955], [0.8, 0.96], [0.92, 0.95], [0.97, 0.926], [0.99, 0.886], [1, 0.766]],
+    glass: [[0.33, 0.94], [0.43, 1.33], [0.5, 1.447], [0.64, 1.42], [0.8, 1.2], [0.92, 1.0], [0.97, 0.93]],
+    plan: [[0, 0.8], [0.06, 0.92], [0.17, 1], [0.4, 0.98], [0.6, 0.96], [0.8, 1], [0.94, 0.96], [1, 0.86]],
+    body: "#cf1d22", roof: "#cf1d22", lower: "#0e0f11", accent: "#111214", lights: "bar", wing: { y: 1.02, u: 0.965, two: false }, spokes: 5, rim: "#141516", rimEdge: "#cf1d22", roofW: 0.75,
+    grille: "panamericana", vents: "domes", plate: "MEDICAL CAR", doors4: true },
+  // Aston Martin DBX707, medical car (2025 Aston rounds): 5,039 × 1,998 × 1,680 mm, WB 3,060, 285/40 YR22 / 325/35 YR22,
+  // clearance 175. An SUV: a high bonnet, a long flat roof, a sloping hatch; green, a roof bar (estimate)
+  dbx707: { name: "Aston Martin DBX707", role: "medical", L: 5.039, W: 1.998, H: 1.68, WB: 3.06, FO: 0.937, TF: 1.698, TR: 1.664, RF: 0.393, RR: 0.393, GC: 0.19,
+    top: [[0, 0.77], [0.012, 0.82], [0.186, 1.04], [0.25, 1.1], [0.31, 1.17], [0.55, 1.19], [0.8, 1.2], [0.9, 1.18], [0.97, 1.1], [0.99, 1.06], [1, 0.94]],
+    glass: [[0.31, 1.17], [0.43, 1.6], [0.5, 1.68], [0.75, 1.67], [0.84, 1.58], [0.9, 1.42], [0.94, 1.2]],
+    plan: [[0, 0.82], [0.06, 0.93], [0.17, 1], [0.4, 0.98], [0.6, 0.97], [0.8, 1], [0.95, 0.97], [1, 0.9]],
+    body: "#00473b", roof: "#00473b", lower: "#0e0f11", accent: "#c4e000", lights: "roof", wing: null, spokes: 5, rim: "#1a1b1d", roofW: 0.75,
+    grille: "wide", plate: "MEDICAL CAR", doors4: true },
   // (the maker not known for the event: a car of the role's usual type in neutral colours – said so in the info)
-  neutralSc: { name: "safety car (maker not sourced for this event)", role: "sc", type: "coupe", L: 4.55, W: 1.99, H: 1.27, body: "#9aa0a6", accent: "#2a2d31", lights: "roof", wing: true, label: "SAFETY CAR" },
-  // (a support car in the feed whose role isn't known – never seen so far: plain, no lights or role on the doors)
-  neutralSupport: { name: "support car (role not known)", role: "support", type: "coupe", L: 4.55, W: 1.99, H: 1.27, body: "#8a8f95", accent: "#2a2d31", lights: null, wing: false, label: "" },
-  neutralMedical: { name: "medical car (maker not sourced for this event)", role: "medical", type: "fourdoor", L: 5.05, W: 1.96, H: 1.45, body: "#d9dde1", accent: "#2a2d31", lights: "roof", wing: false, label: "MEDICAL CAR" },
+  neutralSc: { name: "safety car (maker not sourced for this event)", role: "sc", L: 4.55, W: 1.99, H: 1.27, WB: 2.66, FO: 0.95, TF: 1.68, TR: 1.67, RF: 0.35, RR: 0.355, GC: 0.1,
+    top: [[0, 0.59], [0.012, 0.64], [0.08, 0.7], [0.25, 0.8], [0.44, 0.9], [0.5, 0.92], [0.8, 0.95], [0.92, 0.97], [0.97, 0.93], [0.99, 0.89], [1, 0.77]],
+    glass: [[0.44, 0.9], [0.55, 1.19], [0.62, 1.27], [0.72, 1.24], [0.86, 1.04], [0.92, 0.97]],
+    plan: [[0, 0.8], [0.06, 0.92], [0.18, 1], [0.38, 0.96], [0.56, 0.93], [0.8, 1], [0.93, 0.97], [1, 0.87]],
+    body: "#9aa0a6", roof: "#9aa0a6", lower: "#2a2d31", accent: "#2a2d31", lights: "roof", wing: { y: 1.1, u: 0.94, two: false }, spokes: 5, rim: "#2a2d31", plate: "SAFETY CAR" },
+  // (a support car in the feed whose role isn't known – never seen so far: plain, no lights or role)
+  neutralSupport: { name: "support car (role not known)", role: "support", L: 4.55, W: 1.99, H: 1.27, WB: 2.66, FO: 0.95, TF: 1.68, TR: 1.67, RF: 0.35, RR: 0.355, GC: 0.1,
+    top: [[0, 0.59], [0.012, 0.64], [0.08, 0.7], [0.25, 0.8], [0.44, 0.9], [0.5, 0.92], [0.8, 0.95], [0.92, 0.97], [0.97, 0.93], [0.99, 0.89], [1, 0.77]],
+    glass: [[0.44, 0.9], [0.55, 1.19], [0.62, 1.27], [0.72, 1.24], [0.86, 1.04], [0.92, 0.97]],
+    plan: [[0, 0.8], [0.06, 0.92], [0.18, 1], [0.38, 0.96], [0.56, 0.93], [0.8, 1], [0.93, 0.97], [1, 0.87]],
+    body: "#8a8f95", roof: "#8a8f95", lower: "#2a2d31", accent: "#2a2d31", lights: null, wing: null, spokes: 5, rim: "#2a2d31", plate: "" },
+  neutralMedical: { name: "medical car (maker not sourced for this event)", role: "medical", L: 5.05, W: 1.96, H: 1.45, WB: 2.95, FO: 0.95, TF: 1.67, TR: 1.66, RF: 0.363, RR: 0.367, GC: 0.12,
+    top: [[0, 0.63], [0.012, 0.68], [0.08, 0.74], [0.22, 0.84], [0.33, 0.93], [0.38, 0.95], [0.8, 1.0], [0.93, 1.03], [0.97, 0.98], [0.99, 0.94], [1, 0.82]],
+    glass: [[0.33, 0.93], [0.44, 1.32], [0.52, 1.45], [0.66, 1.43], [0.84, 1.15], [0.94, 1.03]],
+    plan: [[0, 0.8], [0.06, 0.92], [0.17, 1], [0.4, 0.98], [0.6, 0.96], [0.8, 1], [0.94, 0.96], [1, 0.86]],
+    body: "#d9dde1", roof: "#d9dde1", lower: "#2a2d31", accent: "#2a2d31", lights: "bar", wing: null, spokes: 5, rim: "#2a2d31", plate: "MEDICAL CAR", doors4: true },
 };
 
-const SHAPES = {
-  // belt (beltline / W·H), cabin [rear z, front z] (× L from the middle), roof peak at, wheel radius, boxiness
-  coupe: { belt: 0.56, cab: [-0.2, 0.1], peak: -0.06, r: 0.345, pw: 4.5, hood: 0.78 },
-  fourdoor: { belt: 0.55, cab: [-0.3, 0.12], peak: -0.06, r: 0.36, pw: 4.5, hood: 0.8 },
-  suv: { belt: 0.58, cab: [-0.36, 0.17], peak: -0.1, r: 0.40, pw: 6, hood: 0.86 },
-};
-
-function door(text, colour) {
-  const c = document.createElement("canvas"); c.width = 512; c.height = 64;
-  const g = c.getContext("2d"); g.clearRect(0, 0, 512, 64);
-  g.fillStyle = colour; g.font = "700 46px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, 256, 34);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+// piecewise-linear lookup in [[u, v], …] (u ascending)
+export function lerpAt(list, u) {
+  if (u <= list[0][0]) return list[0][1];
+  for (let i = 1; i < list.length; i++) if (u <= list[i][0]) { const [u0, v0] = list[i - 1], [u1, v1] = list[i]; return v0 + ((v1 - v0) * (u - u0)) / (u1 - u0 || 1); }
+  return list[list.length - 1][1];
+}
+// The car's wheels: axle places (z, front +) and arch radii
+export function wheelPlaces(spec) {
+  const zf = spec.L / 2 - spec.FO, zr = zf - spec.WB;
+  return { zf, zr, archF: spec.RF + 0.035, archR: spec.RR + 0.035 };
+}
+// The lower body's side outline [[z, y]] (closed, counter-clockwise seen from +x): the top edge nose → tail, the tail down,
+// the sill back to the nose with the two arches cut out (half circles round the axles, reaching down to the sill)
+export function sideOutline(spec) {
+  const { L, GC } = spec, h = L / 2, Z = (u) => h - u * L, W = wheelPlaces(spec), sill = GC + 0.04, out = [];
+  const nose0 = lerpAt(spec.top, 0), tail0 = lerpAt(spec.top, 1);
+  // bottom from the tail to the nose, arches as arcs (the sill rising into them)
+  out.push([Z(1), sill + 0.12], [Z(1) + 0.08, sill]);
+  for (const [zc, ra, r] of [[W.zr, W.archR, spec.RR], [W.zf, W.archF, spec.RF]]) {
+    const dy = r - sill, a0 = dy < ra ? Math.acos(Math.max(-1, Math.min(1, dy / ra))) : 0;   // where the arch meets the sill
+    out.push([zc - Math.sin(a0) * ra, sill]);
+    for (let k = 1; k < 12; k++) { const a = -a0 + (2 * a0 * k) / 12; out.push([zc + Math.sin(a) * ra, r + Math.cos(a) * ra]); }
+    out.push([zc + Math.sin(a0) * ra, sill]);
+  }
+  out.push([Z(0) - 0.12, sill + 0.03], [Z(0), Math.min(nose0, sill + 0.2)]);
+  // the top edge nose → tail (counter-clockwise: back along the top)
+  const n = 40;
+  for (let k = 0; k <= n; k++) { const u = k / n; out.push([Z(u), lerpAt(spec.top, u)]); }
+  out.push([Z(1), Math.max(sill + 0.15, tail0 - 0.25)]);
+  return out;
 }
 
-// One car: a Group, its front along +z, standing on y = 0. userData: { spec, lamps: [materials], setLights(on, phase) }
+const COL = (h) => new THREE.Color(h);
+// A body part lofted along the car: at each u (share of the length from the nose) a rounded section from y = bot(u) to
+// top(u), half width hw(u), squareness pw, its upper half drawn in by `tumble` (the sides leaning in towards the top).
+// Smooth (indexed, shared normals); u from u0 to u1 in n steps, the ends capped.
+function loftBody(spec, { u0 = 0, u1 = 1, n = 90, ring = 28, bot, top, hw, pw = 5, tumble = 0 }) {
+  const L = spec.L, pos = [], idx = [];
+  for (let i = 0; i <= n; i++) {
+    const u = u0 + ((u1 - u0) * i) / n, z = L / 2 - u * L, b = bot(u), t = Math.max(b + 0.004, top(u)), cy = (b + t) / 2, hh = (t - b) / 2, w = hw(u);
+    for (let k = 0; k < ring; k++) {
+      const a = (k / ring) * Math.PI * 2 - Math.PI / 2, c = Math.cos(a), sn = Math.sin(a);
+      const yk = sn >= 0 ? Math.pow(sn, 2 / pw) : -Math.pow(-sn, 2 / pw), lean = 1 - tumble * Math.max(0, yk);
+      pos.push(w * lean * Math.sign(c) * Math.pow(Math.abs(c), 2 / pw), cy + hh * yk, z);
+    }
+  }
+  for (let i = 0; i < n; i++) for (let k = 0; k < ring; k++) { const a = i * ring + k, b2 = i * ring + ((k + 1) % ring), c = a + ring, d = b2 + ring; idx.push(a, c, b2, b2, c, d); }
+  for (const [i, flip] of [[0, false], [n, true]]) {
+    const base = pos.length / 3; let cx = 0, cy = 0, cz = 0; for (let k = 0; k < ring; k++) { cx += pos[(i * ring + k) * 3]; cy += pos[(i * ring + k) * 3 + 1]; cz += pos[(i * ring + k) * 3 + 2]; }
+    pos.push(cx / ring, cy / ring, cz / ring);
+    for (let k = 0; k < ring; k++) { const a = i * ring + k, b2 = i * ring + ((k + 1) % ring); idx.push(...(flip ? [base, b2, a] : [base, a, b2])); }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+// the lower body's underside along u: the sill, rising over the wheels into the arches
+export function bodyBottom(spec, u) {
+  const z = spec.L / 2 - u * spec.L, W = wheelPlaces(spec), sill = spec.GC + 0.04;
+  let y = sill + (u < 0.02 ? (0.02 - u) * 3 : 0) + (u > 0.985 ? (u - 0.985) * 4 : 0);
+  for (const [zc, ra, r] of [[W.zf, W.archF, spec.RF], [W.zr, W.archR, spec.RR]]) { const d = Math.abs(z - zc); if (d < ra) y = Math.max(y, r + Math.sqrt(ra * ra - d * d)); }
+  return y;
+}
+function plateTexture(text, fg = "#ffffff", bg = "#0e0f11") {
+  const c = document.createElement("canvas"); c.width = 256; c.height = 64; const g = c.getContext("2d");
+  g.fillStyle = bg; g.fillRect(0, 0, 256, 64); g.fillStyle = fg; g.font = "700 34px Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, 128, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+// a wheel: the tyre (rounded section) and the rim's face – `spokes` pairs of spokes, the hub – in one geometry (vertex
+// colours), the axle along x, its outer face at +x
+function wheelGeometry(r, w, spokes, rimHex, edgeHex = null) {
+  const rimR = r * 0.7, pts = [], rr = Math.min(0.05, w * 0.2);
+  pts.push(new THREE.Vector2(rimR, -w / 2 + 0.01));
+  for (let i = 0; i <= 6; i++) { const a = (i / 6) * Math.PI / 2; pts.push(new THREE.Vector2(r - rr + Math.sin(a) * rr, -w / 2 + rr - Math.cos(a) * rr)); }
+  for (let i = 0; i <= 6; i++) { const a = (i / 6) * Math.PI / 2; pts.push(new THREE.Vector2(r - rr + Math.cos(a) * rr, w / 2 - rr + Math.sin(a) * rr)); }
+  pts.push(new THREE.Vector2(rimR, w / 2 - 0.01));
+  const tyre = new THREE.LatheGeometry(pts, 28).rotateZ(Math.PI / 2).toNonIndexed();
+  const tint = (g, hex) => { const c = COL(hex), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3); g.setAttribute("color", new THREE.BufferAttribute(a, 3)); g.deleteAttribute("uv"); return g; };
+  const parts = [tint(tyre, "#141516")];
+  const face = w / 2 - 0.02;
+  const barrel = new THREE.CircleGeometry(rimR, 24).rotateY(Math.PI / 2).translate(face - 0.05, 0, 0).toNonIndexed(); parts.push(tint(barrel, "#0b0b0c"));
+  const lip = new THREE.TorusGeometry(rimR, 0.012, 5, 28).rotateY(Math.PI / 2).translate(face, 0, 0).toNonIndexed(); parts.push(tint(lip, edgeHex || rimHex));
+  for (let i = 0; i < spokes; i++) for (const o of [-0.13, 0.13]) {
+    const b = new THREE.BoxGeometry(0.018, rimR - 0.06, 0.03).translate(0, (rimR - 0.06) / 2 + 0.06, 0); b.rotateX((i / spokes) * Math.PI * 2 + o); b.translate(face - 0.012, 0, 0); parts.push(tint(b.toNonIndexed(), rimHex));
+  }
+  const hub = new THREE.CylinderGeometry(0.07, 0.075, 0.03, 16).rotateZ(Math.PI / 2).translate(face - 0.01, 0, 0).toNonIndexed(); parts.push(tint(hub, rimHex));
+  const g = merge(parts); g.computeVertexNormals(); return g;
+}
+
+// One car: a Group, its front along +z, standing on y = 0. userData: { spec, lamps: [materials], wheels: [spin groups],
+// setLights(on, phase), setSpin(front, rear) }
 export function makeSupportCar(id) {
-  const spec = SUPPORT_CARS[id] || SUPPORT_CARS.neutralSc, sh = SHAPES[spec.type], { L, W, H } = spec;
-  const belt = H * sh.belt, floor = 0.13, hl = L / 2;
+  const spec = SUPPORT_CARS[id] || SUPPORT_CARS.neutralSc, { L, W, H } = spec, h = L / 2, Z = (u) => h - u * L;
   const group = new THREE.Group(); group.name = "supportCar:" + id;
   const mat = (o) => new THREE.MeshStandardMaterial(o);
-  const bodyM = mat({ color: spec.body, roughness: 0.35, metalness: 0.45, side: THREE.DoubleSide }), accentM = mat({ color: spec.accent, roughness: 0.5, metalness: 0.3 });
-  const glassM = mat({ color: "#0d1117", roughness: 0.08, metalness: 0.6, side: THREE.DoubleSide }), tyreM = mat({ color: "#161718", roughness: 0.85 }), rimM = mat({ color: "#2a2c2f", roughness: 0.4, metalness: 0.7 });
-  // the body below the windows: rear → front, the bonnet sloping to the nose
-  const mid = (floor + belt) / 2, hh = (belt - floor) / 2;
-  // (squarish sections – a car's flat sides and deck –, the bonnet falling gently to a blunt nose; the sides inside the
-  // wheels' outer faces, so the wheels show)
-  const bw = W * 0.47;
-  const body = loft([
-    [-hl, mid + hh * 0.05, bw * 0.86, hh * 0.9, 0, sh.pw], [-hl + 0.2, mid + hh * 0.03, bw * 0.98, hh * 0.98, 0, sh.pw], [-hl + 1.0, mid, bw, hh, 0, sh.pw],
-    [hl - 1.0, mid - hh * 0.03, bw, hh * 0.97, 0, sh.pw], [hl - 0.45, mid - hh * 0.08, bw * 0.98, hh * 0.9, 0, sh.pw], [hl - 0.15, mid - hh * 0.12, bw * 0.93, hh * 0.8, 0, sh.pw],
-    [hl - 0.01, mid - hh * 0.15, bw * 0.84, hh * 0.68, 0, sh.pw],
-  ], 28);
-  // the cabin: dark glass with the body's colour on the roof
-  const [cr, cf] = sh.cab.map((k) => k * L), pz = sh.peak * L, top = H - 0.02;
-  const cabin = loft([
-    [cr - 0.25, belt + 0.02, W * 0.44, 0.03, 0, 3], [cr, belt + (top - belt) * 0.55, W * 0.42, (top - belt) * 0.5, 0, 3], [pz, belt + (top - belt) / 2, W * 0.4, (top - belt) / 2, 0, 3],
-    [cf, belt + (top - belt) * 0.42, W * 0.41, (top - belt) * 0.4, 0, 3], [cf + 0.55, belt + 0.03, W * 0.44, 0.03, 0, 3],
-  ], 24);
-  const roof = boxAt(W * 0.62, 0.035, Math.max(0.6, (cf - cr) * 0.75), 0, top - 0.005, pz);
-  group.add(new THREE.Mesh(body, bodyM), new THREE.Mesh(cabin, glassM), new THREE.Mesh(roof, bodyM));
-  // the lower sills and bumpers in the accent (the liveries' dark lower bodies and graphics)
-  const sx = W * 0.47 + 0.005;
-  group.add(new THREE.Mesh(merge([boxAt(0.02, 0.1, L * 0.42, sx, floor + 0.07, 0), boxAt(0.02, 0.1, L * 0.42, -sx, floor + 0.07, 0), boxAt(W * 0.62, 0.08, 0.02, 0, floor + 0.1, hl - 0.005), boxAt(W * 0.62, 0.1, 0.02, 0, floor + 0.12, -hl + 0.005)]), accentM));
-  // headlights, tail lights and the grille
-  const head = mat({ color: "#e8eef2", emissive: "#fff6e0", emissiveIntensity: 0.35, roughness: 0.2 }), tail = mat({ color: "#5a0a0a", emissive: "#ff1a1a", emissiveIntensity: 0.4, roughness: 0.3 });
-  const ny = mid + hh * 0.05, nz = hl - 0.06;
-  group.add(new THREE.Mesh(merge([boxAt(0.36, 0.07, 0.08, W * 0.3, ny + hh * 0.25, nz - 0.03, 0, 0, 0), boxAt(0.36, 0.07, 0.08, -W * 0.3, ny + hh * 0.25, nz - 0.03)]), head));
-  group.add(new THREE.Mesh(merge([boxAt(0.4, 0.05, 0.04, W * 0.3, mid + hh * 0.5, -hl + 0.02), boxAt(0.4, 0.05, 0.04, -W * 0.3, mid + hh * 0.5, -hl + 0.02)]), tail));
-  group.add(new THREE.Mesh(boxAt(W * 0.42, hh * 0.45, 0.03, 0, mid - hh * 0.25, hl - 0.01), accentM));
-  // wheels
-  const tyre = new THREE.CylinderGeometry(sh.r, sh.r, 0.27, 22).rotateZ(Math.PI / 2), rim = new THREE.CylinderGeometry(sh.r * 0.66, sh.r * 0.66, 0.275, 16).rotateZ(Math.PI / 2);
-  const wz = hl - 0.85, wx = W / 2 - 0.14;
-  for (const [x, z] of [[wx, wz], [-wx, wz], [wx, -wz + 0.1], [-wx, -wz + 0.1]]) { const a = new THREE.Mesh(tyre, tyreM), b = new THREE.Mesh(rim, rimM); a.position.set(x, sh.r, z); b.position.set(x * 1.002, sh.r, z); group.add(a, b); }
-  // a fixed rear wing on the safety cars
-  if (spec.wing) group.add(new THREE.Mesh(merge([boxAt(W * 0.82, 0.03, 0.3, 0, belt + 0.2, -hl + 0.32), boxAt(0.04, 0.18, 0.12, W * 0.28, belt + 0.1, -hl + 0.35), boxAt(0.04, 0.18, 0.12, -W * 0.28, belt + 0.1, -hl + 0.35)]), accentM));
-  // lights: their own materials (flashing: support state)
+  const bodyM = mat({ color: spec.body, roughness: 0.32, metalness: 0.45 }), lowerM = mat({ color: spec.lower, roughness: 0.55, metalness: 0.2 });
+  const roofM = spec.roof === spec.body ? bodyM : mat({ color: spec.roof, roughness: 0.35, metalness: 0.3 });
+  const accentM = spec.accent === spec.lower ? lowerM : mat({ color: spec.accent, roughness: 0.4, metalness: 0.3 });
+  const glassM = mat({ color: "#0b0e13", roughness: 0.06, metalness: 0.7 });
+  const parts = [];   // [geometry, material]
+  const add = (g, m) => parts.push([g, m]);
+  // the lower body (with the arches), and the black sill / bumper band along its bottom
+  const belt = lerpAt(spec.top, 0.6), plan = (u) => (lerpAt(spec.plan, u) * W) / 2;
+  // (the GT 63 PRO safety car: black at the front fading to red at the rear – Mercedes's photos, Hungary 2026; here two
+  // colours split at 0.62 of its length, the fade and the dash graphics not drawn)
+  const body = (u0, u1, m) => add(loftBody(spec, { u0, u1, n: Math.round(120 * (u1 - u0)), bot: (u) => bodyBottom(spec, u), top: (u) => lerpAt(spec.top, u), hw: plan, pw: 3.4, tumble: 0.14 }), m);
+  if (spec.rearBody) { body(0, 0.62, bodyM); body(0.62, 1, mat({ color: spec.rearBody, roughness: 0.32, metalness: 0.45 })); } else body(0, 1, bodyM);
+  const sill = spec.GC + 0.04, Wp = wheelPlaces(spec);
+  const sillLen = Wp.zf - Wp.zr - Wp.archF - Wp.archR - 0.04, sillZ = (Wp.zf - Wp.archF + Wp.zr + Wp.archR) / 2;
+  for (const s2 of [1, -1]) add(boxAt(0.03, 0.08, sillLen, s2 * plan(0.5) * 0.99, sill + 0.035, sillZ), lowerM);
+  add(boxAt(W * 0.8, 0.05, 0.14, 0, sill - 0.005, h - 0.1), lowerM);              // the splitter
+  add(boxAt(W * 0.78, 0.14, 0.08, 0, sill + 0.08, -h + 0.06), lowerM);            // the diffuser / rear apron
+  // the glasshouse over the beltline, narrower towards the roof; the roof panel a skin over its top
+  const gl = spec.glass, g0 = gl[0][0], g1 = gl[gl.length - 1][0], topAt = (u) => lerpAt(spec.top, u);
+  // (the glasshouse's width at the roof as a share of the body's – the AMG coupés ~0.65, the Vantage ~0.6, the 4-door and
+  // the DBX ~0.75 (photos, research §8) – from ~0.92 at the beltline)
+  const roofW = 0.92, lean = 1 - (spec.roofW || 0.7) / roofW;
+  add(loftBody(spec, { u0: g0, u1: g1, n: 60, ring: 24, bot: (u) => topAt(u) - 0.03, top: (u) => lerpAt(gl, u), hw: (u) => plan(u) * roofW, pw: 4, tumble: lean }), glassM);
+  const peakU = gl.reduce((a2, b2) => (b2[1] > a2[1] ? b2 : a2))[0], r0 = gl.find((q) => q[1] > spec.H - 0.12) || gl[1], r1 = [...gl].reverse().find((q) => q[1] > spec.H - 0.1) || gl[gl.length - 2];
+  add(loftBody(spec, { u0: r0[0], u1: r1[0], n: 24, ring: 20, bot: (u) => lerpAt(gl, u) - 0.06, top: (u) => lerpAt(gl, u) + 0.012, hw: (u) => plan(u) * (spec.roofW || 0.7) * 1.02, pw: 4, tumble: 0.1 }), roofM);
+  // the doors' gaps and the window frames: thin dark lines on the sides (where the doors are)
+  const dz0 = Z(gl[0][0] + 0.02), dz1 = spec.doors4 ? Z(peakU + 0.12) : Z(peakU + 0.06);
+  for (const s of [1, -1]) {
+    const xs = s * (W / 2 * lerpAt(spec.plan, 0.55) * 0.995 + 0.002);
+    for (const z of spec.doors4 ? [dz0, (dz0 + dz1) / 2, dz1] : [dz0, dz1]) add(boxAt(0.006, belt - sill - 0.08, 0.008, xs, (belt + sill) / 2 + 0.02, z), lowerM);
+  }
+  // nose: the grille (Panamericana: vertical slats in a trapezoid; Aston: a wide mesh opening), headlamps, plates
+  const ny = lerpAt(spec.top, 0.02), nz = h - 0.03;
+  if (spec.grille === "panamericana") { add(boxAt(W * 0.36, 0.2, 0.04, 0, ny - 0.17, nz - 0.01), lowerM); for (let i = 0; i < 13; i++) add(boxAt(0.012, 0.18, 0.05, -W * 0.16 + (W * 0.32 * i) / 12, ny - 0.17, nz + 0.005), mat({ color: "#7d8287", roughness: 0.25, metalness: 0.9 })); }
+  else if (spec.grille === "wide") add(boxAt(W * 0.5, 0.22, 0.04, 0, ny - 0.2, nz - 0.01), lowerM);
+  const head = mat({ color: "#dfe7ee", emissive: "#fff6e0", emissiveIntensity: 0.35, roughness: 0.15 }), tail = mat({ color: "#4a0808", emissive: "#ff1a1a", emissiveIntensity: 0.45, roughness: 0.3 });
+  // headlamps: slim swept units in the front corners, flush with the body (C190 / C192: narrow triangles up the wing;
+  // the Astons' wider ovals) – a thin strip a few mm proud of the surface
+  for (const s of [1, -1]) {
+    const u = 0.045, y = lerpAt(spec.top, u) - 0.06, x = plan(u) * 0.74;
+    add(boxAt(0.26, 0.035, 0.16, s * x, y, Z(u) - 0.02, -0.35, s * 0.42, 0), head);
+  }
+  // tail lamps: a thin strip across the top of the tail (Aston: full width; AMG: at the corners)
+  const ty = lerpAt(spec.top, 0.985) - 0.05;
+  if (/Aston/.test(spec.name)) add(boxAt(W * 0.8, 0.035, 0.03, 0, ty, -h + 0.03), tail);
+  else for (const s of [1, -1]) add(boxAt(W * 0.26, 0.04, 0.03, s * W * 0.32, ty, -h + 0.035), tail);
+  // bonnet: the Black Series's two big outlets, the others' power domes (dark lines)
+  if (spec.vents === "bonnet2") for (const s of [1, -1]) add(boxAt(W * 0.2, 0.012, 0.38, s * W * 0.14, lerpAt(spec.top, 0.22) + 0.005, Z(0.22), -0.12), lowerM);
+  if (spec.vents === "domes") for (const s of [1, -1]) add(boxAt(0.01, 0.012, L * 0.25, s * W * 0.2, lerpAt(spec.top, 0.2) + 0.006, Z(0.2), -0.1), accentM);
+  if (spec.stripe) for (const s of [1, -1]) add(boxAt(0.005, 0.05, L * 0.6, s * (W / 2 * 0.985), belt - 0.18, Z(0.5)), accentM);
+  // the rear wing: blade(s) on two pylons from the tailgate
+  if (spec.wing) {
+    const wz = Z(spec.wing.u), base = lerpAt(spec.top, spec.wing.u);
+    add(boxAt(W * 0.84, 0.025, 0.3, 0, spec.wing.y, wz, 0.12), lowerM);
+    if (spec.wing.two) add(boxAt(W * 0.84, 0.02, 0.2, 0, spec.wing.y - 0.09, wz + 0.12, 0.2), lowerM);
+    // (pylons from the tailgate to the blade – the GT 63 PRO's swan necks hang it from above: up past its leading edge)
+    for (const s of [1, -1]) { add(boxAt(0.02, spec.wing.y - base + (spec.wing.swan ? 0.05 : 0.02), 0.14, s * W * 0.26, (spec.wing.y + base) / 2 + (spec.wing.swan ? 0.025 : 0), wz + (spec.wing.swan ? 0.12 : 0.06)), lowerM); add(boxAt(0.012, 0.2, 0.38, s * W * 0.42, spec.wing.y - 0.04, wz), lowerM); }
+  }
+  // lights (their own materials: flashing – support state)
   const lamp = (c) => mat({ color: "#1b1b1b", emissive: c, emissiveIntensity: 0.05, roughness: 0.3 });
-  const lamps = [];
+  const lamps = [], lampParts = [];
   if (spec.lights === "screen") {
+    // the top band of the windscreen: black, LED modules each side; the rear wing's upper blade: a row of modules
     const o = lamp("#ff7a00"), gr = lamp("#22e05a"); lamps.push(o, gr);
-    group.add(new THREE.Mesh(boxAt(W * 0.28, 0.035, 0.05, -W * 0.15, top - 0.04, cf + 0.02), o), new THREE.Mesh(boxAt(W * 0.28, 0.035, 0.05, W * 0.15, top - 0.04, cf + 0.02), gr));
-    if (spec.wing) group.add(new THREE.Mesh(boxAt(W * 0.6, 0.03, 0.03, 0, belt + 0.22, -hl + 0.17), o));
-  } else if (spec.lights) {
+    const sw = gl[1], wy = sw[1] - 0.02, wz = Z(sw[0]) - 0.02;
+    add(boxAt(W * 0.6, 0.06, 0.04, 0, wy, wz, -0.9), lowerM);
+    for (const s of [1, -1]) { lampParts.push([boxAt(0.12, 0.03, 0.03, s * W * 0.22, wy, wz + 0.02, -0.9), o]); lampParts.push([boxAt(0.08, 0.03, 0.03, s * W * 0.1, wy, wz + 0.02, -0.9), gr]); }
+    if (spec.wing) lampParts.push([boxAt(W * 0.6, 0.02, 0.03, 0, spec.wing.y + 0.015, Z(spec.wing.u) - 0.14), o]);
+  } else if (spec.lights === "roof" || spec.lights === "bar") {
+    // a roof bar: on the roof's middle (Aston's safety car) or its rear edge on a fairing (the medical cars)
+    // (the Astons' bar at the front of the roof on a plinth, the medical X290's on a fairing at its rear edge – photos)
+    const atU = spec.lights === "bar" ? r1[0] - 0.03 : r0[0] + 0.03, by = lerpAt(gl, atU) + 0.05, bz = Z(atU);
     const a = lamp(spec.role === "sc" ? "#ff8a00" : "#ffb000"), b = lamp(spec.role === "sc" ? "#22e05a" : "#ffb000"); lamps.push(a, b);
-    group.add(new THREE.Mesh(softBox(W * 0.62, 0.07, 0.22, 0, top + 0.05, pz + 0.05), accentM));
-    group.add(new THREE.Mesh(boxAt(W * 0.28, 0.05, 0.2, -W * 0.15, top + 0.06, pz + 0.05), a), new THREE.Mesh(boxAt(W * 0.28, 0.05, 0.2, W * 0.15, top + 0.06, pz + 0.05), b));
+    add(softBox(W * 0.6, 0.06, 0.24, 0, by, bz, 0.3), lowerM);
+    lampParts.push([boxAt(W * 0.2, 0.05, 0.2, -W * 0.19, by + 0.012, bz), a], [boxAt(W * 0.2, 0.05, 0.2, W * 0.19, by + 0.012, bz), b]);
   }
-  // the role on both doors
-  if (spec.label) {
-  const tex = door(spec.label, spec.role === "medical" && spec.body === "#d9dde1" ? "#c41230" : "#ffffff");
-  const labelM = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }); labelM.userData.ownedTextures = [tex];
-  for (const s of [1, -1]) { const p = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.19), labelM); p.position.set(s * (W * 0.47 + 0.004), floor + (belt - floor) * 0.62, -0.05); p.rotation.y = s * Math.PI / 2; group.add(p); }
+  for (const pp of lampParts) add(...pp);
+  // plates front and rear with the role
+  if (spec.plate && typeof document !== "undefined") {
+    const tex = plateTexture(spec.plate), pm = new THREE.MeshBasicMaterial({ map: tex, toneMapped: true }); pm.userData.ownedTextures = [tex];
+    const pf = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.12), pm); pf.position.set(0, sill + 0.13, h + 0.005); group.add(pf);
+    const pr = new THREE.Mesh(new THREE.PlaneGeometry(0.52, 0.12), pm); pr.position.set(0, sill + 0.22, -h - 0.005); pr.rotation.y = Math.PI; group.add(pr);
+    if (spec.plate === "MEDICAL CAR") { const pb = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.2), new THREE.MeshBasicMaterial({ map: plateTexture("MEDICAL CAR", "#ffffff", spec.body), transparent: false })); pb.material.userData.ownedTextures = [pb.material.map]; pb.position.set(0, lerpAt(spec.top, 0.12) + 0.012, Z(0.12)); pb.rotation.x = -Math.PI / 2 + 0.14; group.add(pb); }
   }
-  // (one mesh per material: the parts' transforms baked in – a car is a handful of draw calls, not two dozen)
-  const byMat = new Map(); for (const o of group.children) { o.updateMatrix(); const l = byMat.get(o.material) || []; l.push(o); byMat.set(o.material, l); }
-  group.clear();
+  // (one mesh per material: the parts' transforms baked in – a car is a handful of draw calls)
+  const byMat = new Map(); for (const [g, m] of parts) { const l = byMat.get(m) || []; l.push(g.index ? g.toNonIndexed() : g); byMat.set(m, l); }
   for (const [m, list] of byMat) {
-    const gs = list.map((o) => { const g = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrix); o.geometry.dispose(); return g; });
-    const uv = gs.every((g) => g.attributes.uv);
-    for (const g of gs) { for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && !(uv && k === "uv")) g.deleteAttribute(k); if (!g.attributes.normal) g.computeVertexNormals(); }
-    const mesh = new THREE.Mesh(merge(gs), m); for (const g of gs) g.dispose();
-    mesh.castShadow = true; mesh.receiveShadow = false; group.add(mesh);
+    for (const g of list) for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal") g.deleteAttribute(k);
+    const mesh = new THREE.Mesh(merge(list), m); for (const g of list) g.dispose();
+    mesh.castShadow = true; group.add(mesh);
   }
-  group.userData = { spec, lamps,
+  // the wheels: each its own pivot at the axle, turning about x (setSpin)
+  const wheelM = mat({ color: "#ffffff", vertexColors: true, roughness: 0.6, metalness: 0.4 }), wheels = [];
+  const geoF = wheelGeometry(spec.RF, spec.RF * 0.75, spec.spokes || 5, spec.rim, spec.rimEdge), geoR = wheelGeometry(spec.RR, spec.RR * 0.85, spec.spokes || 5, spec.rim, spec.rimEdge);
+  for (const [x, z, front] of [[spec.TF / 2, Wp.zf, true], [-spec.TF / 2, Wp.zf, true], [spec.TR / 2, Wp.zr, false], [-spec.TR / 2, Wp.zr, false]]) {
+    const pivot = new THREE.Group(); pivot.position.set(x, front ? spec.RF : spec.RR, z);
+    const m = new THREE.Mesh(front ? geoF : geoR, wheelM); if (x < 0) m.scale.x = -1; m.castShadow = true; pivot.add(m); group.add(pivot); wheels.push(pivot);
+  }
+  group.userData = { spec, lamps, wheels,
     // on: flashing (deployed / out on track); phase: the session's time (s) – the same moment, the same lamps
-    setLights(on, phase) { const k = on ? (Math.floor(phase * 3) % 2 ? 1 : 0.15) : 0.05; lamps.forEach((m, i) => { const v = on ? (i % 2 ? 1.15 - k : k) * 2.2 : 0.05; if (Math.abs(m.emissiveIntensity - v) > 1e-3) m.emissiveIntensity = v; }); } };
+    setLights(on, phase) { const k = on ? (Math.floor(phase * 3) % 2 ? 1 : 0.15) : 0.05; lamps.forEach((m, i) => { const v = on ? (i % 2 ? 1.15 - k : k) * 2.2 : 0.05; if (Math.abs(m.emissiveIntensity - v) > 1e-3) m.emissiveIntensity = v; }); },
+    // the wheels' roll angles (rad): front, rear
+    setSpin(front, rear = front) { wheels.forEach((w, i) => { w.rotation.x = i < 2 ? front : rear; }); } };
   return group;
 }

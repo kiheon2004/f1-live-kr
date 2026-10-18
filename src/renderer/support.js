@@ -125,6 +125,7 @@ export function supportModels(season, venueKey, date = null) {
   if (season >= 2026) return { sc: date && date >= "2026-07-24" ? "amgGt63Pro" : "amgGtBlack", medical: "amgGt63s", from: "Mercedes-AMG at every 2026 round (Mercedes, Jan 2026); the GT 63 PRO safety car from the Hungarian GP" };
   if (season === 2025) {
     if (venueKey === 15) return { sc: "amgGtBlack", medical: "amgGt63s", from: "2025 Spanish GP: Mercedes (race photos)" };
+    if (venueKey === 46) return { sc: "amgGtBlack", medical: "amgGt63s", from: "2025 Japanese GP: the AMG GT Black Series in the race (Wikimedia Commons photo, 6 Apr 2025); the medical car assumed Mercedes's (paired)" };
     if (venueKey === 149) return { sc: "vantage", medical: "dbx707", from: "2025 Saudi Arabian GP: Aston Martin (race photos)" };
     if (venueKey === 55) return { sc: "vantageS", medical: "dbx707", from: "2025 Dutch GP: the Vantage S's debut (Aston Martin, 29 Aug 2025)" };
   }

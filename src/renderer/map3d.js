@@ -12,7 +12,7 @@ import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlot
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
 import { supportPlan, supportModels, followTarget, medicalLap1, SUPPORT } from "./support.js";
-import { makeSupportCar } from "./support3d.js";
+import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
@@ -1815,7 +1815,16 @@ function placeSupportCar(SP, key, id, where, lightsOn, tsec) {
   let c = SP.cars[key];
   if (!c || c.id !== id) { if (c) { SP.group.remove(c.obj); disposeGroup(c.obj); } c = SP.cars[key] = { id, obj: makeSupportCar(id) }; SP.group.add(c.obj); }
   if (!where) { c.obj.visible = false; return; }
-  c.obj.visible = true; c.obj.position.set(where.x, groundY(where.x, where.z), where.z); c.obj.rotation.set(0, Math.atan2(where.dx, where.dz), 0);
+  c.obj.visible = true;
+  // (the wheels roll the distance it moved at the session's time – wheelspin.js: still at a pause, nothing made up at a
+  // seek or a jump to another place)
+  const t = tsec * 1000, W = c.wheel || (c.wheel = { f: { a: null, t: null }, r: { a: null, t: null }, x: where.x, z: where.z, t });
+  const moved = Math.hypot(where.x - W.x, where.z - W.z), dts = (t - W.t) / 1000, sp = c.obj.userData.spec;
+  const fwd = Math.sin(Math.atan2(where.dx, where.dz)) * (where.x - W.x) + Math.cos(Math.atan2(where.dx, where.dz)) * (where.z - W.z) >= 0 ? 1 : -1;
+  const speed = dts > 0 ? (fwd * moved) / dts : 0;
+  c.obj.userData.setSpin?.(stepWheel(W.f, { t, r: sp.RF || 0.35, speed, moved }), stepWheel(W.r, { t, r: sp.RR || 0.35, speed, moved }));
+  W.x = where.x; W.z = where.z; W.t = t;
+  c.obj.position.set(where.x, groundY(where.x, where.z), where.z); c.obj.rotation.set(0, Math.atan2(where.dx, where.dz), 0);
   c.obj.userData.setLights(lightsOn, tsec);
 }
 // the nearest point of the pit lane to a scene point: { u (m along it), d (m off its line) }
@@ -3285,6 +3294,27 @@ function floodTest() {
 
 window.Map3D = {
   floodTest,
+  // development: look at a support car ("sc" | "med") from `dist` m at bearing `ang` (rad, 0 = from behind), `h` m up
+  viewSupport(key = "sc", dist = 7, h = 1.6, ang = 0.6, fov = 40) {
+    const o = world?.support?.cars?.[key]?.obj; if (!o?.visible) return "no " + key;
+    const yaw = o.rotation.y, a = yaw + Math.PI + ang, p = o.position;
+    return this.look(p.x + Math.sin(a) * dist, p.y + h, p.z + Math.cos(a) * dist, p.x, p.y + 0.6, p.z, fov) + " " + o.userData.spec.name;
+  },
+  // development: every support car model in a row on the lap line at fraction f (for comparing them); off: removed
+  showroom(f = 0.1, on = true, gap = 4) {
+    if (!world) return "no world";
+    const old = world.group.getObjectByName("showroom"); if (old) { world.group.remove(old); disposeGroup(old); }
+    if (!on) return "off";
+    const g = new THREE.Group(); g.name = "showroom"; const S = world.samples, i = Math.floor(f * S.length) % S.length, p = S[i].p, t = S[i].tan, n = S[i].nor;
+    Object.keys(SUPPORT_CARS).forEach((id, k) => { const c = makeSupportCar(id); c.position.set(p.x + n.x * (k - 4) * gap, p.y + 0.06, p.z + n.z * (k - 4) * gap); c.rotation.y = Math.atan2(t.x, t.z); g.add(c); });
+    world.group.add(g); world.showroom = { x: p.x, y: p.y, z: p.z, tx: t.x, tz: t.z, nx: n.x, nz: n.z, gap }; return JSON.stringify(world.showroom);
+  },
+  // development: look at showroom car k from `dist` m at bearing `ang` (rad; 0 = from its front, π/2 = its left side)
+  showroomView(k, ang = Math.PI / 2, dist = 7, h = 1.2, fov = 40) {
+    const r = world?.showroom; if (!r) return "no showroom";
+    const cx = r.x + r.nx * (k - 4) * r.gap, cz = r.z + r.nz * (k - 4) * r.gap, f = Math.atan2(r.tx, r.tz) + ang;
+    return this.look(cx + Math.sin(f) * dist, r.y + h, cz + Math.cos(f) * dist, cx, r.y + 0.55, cz, fov) + " " + Object.keys(SUPPORT_CARS)[k];
+  },
   // development: the corners' numbers now – [{ n, s, alpha, visible, d (m from the camera) }]
   cornerState() { const C = world?.corners; if (!C) return "no corners"; return JSON.stringify(C.list.map((k) => ({ n: k.n, s: Math.round(k.s), a: +k.alpha.toFixed(2), vis: k.sp.visible, d: Math.round(camera.position.distanceTo(k.sp.position)) }))); },
   // development: a car's wheels – the angle front / rear (rad), its place on the lap (m), its smear
