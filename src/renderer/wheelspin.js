@@ -51,11 +51,14 @@ export function stepWheel(w, { t, r, along = null, speed = 0, moved = null }) {
 //   still(t): true while the car stands by its positions (optional)
 export const ODO = { gap: 3000, span: 1000, still: 0.8 };   // ms between samples over which nothing is integrated; the
 // standing test: moved less than `still` m/s over the last `span` ms of positions
-export function odometer(car, still = null) {
+// (built only as far as asked – upTo: a session time; the samples up to just past it – so opening a replay doesn't
+// integrate 20 cars' whole race in one frame (~160 ms for Monza 2025); the values are the same however far it was built)
+export function odometer(car, still = null, upTo = Infinity) {
   if (!car?.t) return null;
-  const n = car.t.length;
+  let n = car.t.length;
+  if (upTo < Infinity && n && car.t[n - 1] > upTo) { let lo = 0, hi = n - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (car.t[m] > upTo) hi = m; else lo = m + 1; } n = Math.min(car.t.length, lo + 2); }
   let o = car.odo;
-  if (!o || o.n > n) o = car.odo = { d: ArrayBuffer.isView(car.t) ? new Float64Array(n) : [], n: 0 };
+  if (!o || o.n > car.t.length) o = car.odo = { d: ArrayBuffer.isView(car.t) ? new Float64Array(car.t.length) : [], n: 0 };
   const d = o.d; let i = o.n;
   if (i >= n) return o;
   if (i === 0) { d[0] = 0; i = 1; }
@@ -72,7 +75,7 @@ export function odometer(car, still = null) {
 // the odometer (m) at session time t – linear in the speed between samples (the trapezoid's partial area); null when
 // the car has no sample within ODO.gap of t (no telemetry: the path rules apply)
 export function odometerAt(car, t, still = null) {
-  const o = odometer(car, still); if (!o) return null;
+  const o = odometer(car, still, t); if (!o) return null;
   const T = car.t, d = o.d, n = Math.min(T.length, o.n);
   if (!n || T[0] > t) return null;
   let lo = 0, hi = n - 1;
