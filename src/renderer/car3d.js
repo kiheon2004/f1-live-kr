@@ -15,10 +15,11 @@
 //   2022      – 2022–2025 ground-effect cars: 3.6 m wheelbase (the rules' maximum; teams ran at or near it), 2.0 m
 //               wide, four-element front wing rising outboard, wheel deflectors over the front tyres, 18-inch wheels
 //               with covers, beam wing, DRS on the rear wing.
-// Team variants (only where the shape was checked against photos of that car; the rest of the field gets the era's
-// neutral shape in their colours): "rb21" – Red Bull RB21 (2025): letterbox sidepod inlet high and narrow, steep
-// downwash ramp, deep undercut, matte navy paint. Proportions are estimates from photos and the rules' limits, not team
-// measurements.
+// Team shapes: carshapes.js (nose, sidepod inlet / undercut / top, airbox, cooling, suspension per team and season).
+// v0.39: each era's car is built from the parts race photos show (body2022 / body2026 – see the comment above them).
+// It was checked against hub-aligned side photos and ¾ photos of 2025 / 2026 race cars (docs/research/cars_photos.md).
+// The cockpit moved 0.30–0.33 m forward to where those photos put it. The liveries are painted as side and plan
+// elevations (liveryTexture). Proportions are estimates from photos and the rules' limits, not team measurements.
 //
 // No sponsor or team logos are drawn (none are licensed for this app): liveries are the team's colour zones and the
 // car number. Helmets are in team colours, not the drivers' own designs.
