@@ -14,6 +14,9 @@ import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath
 import { supportPlan, supportModels } from "./support.js";
 import { makeSupportCar } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
+import { MARSHAL_DATA } from "./marshaldata.js";
+import { flagState, sectorOf, postSignal } from "./marshals.js";
+import { harbourFor, layoutYachts, yachtMeshes } from "./harbour.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, skeleton } from "./crew.js";
@@ -1554,6 +1557,8 @@ function updateCars(dt) {
   updateWheelScreens(src, A.t);
   updateStartLights(src, A.t);
   updateSupport(src, A.t);
+  updateMarshals(src, A.t);
+  updateHarbour(A.t);
 }
 // The standing starts as shown: race control's, each at the moment the field set off by its telemetry where that differs
 // from the race clock's (fieldLaunch) – the clock isn't always lights out; live: as the clock says, nothing ahead
@@ -1576,6 +1581,118 @@ function shownStarts(src, t) {
     if (s.standing !== true) return f ? { ...s, t: f.t, standing: true, from: "field" } : s;
     return f && Math.abs(f.t - s.t) > 3000 ? { ...s, t: f.t, from: "field" } : s;
   });
+}
+// Monaco's harbour in Grand Prix week (harbour.js: yachts along Port Hercule's quays – a reproduction of the form and
+// density, not of particular yachts): on the scene's sea surface, once the real map (its sea) is there; a part of it.
+function updateHarbour(t) {
+  const W = world, R = W?.real; if (!R) return;
+  if (W.harbour?.real !== R) {
+    W.harbour = { real: R, y: null };
+    const A = app(), key = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key;
+    if (harbourFor(key, A.sessionYear?.() || null) && R.seaLevel != null && R.isSea) {
+      const list = layoutYachts({ toScene: (la, lo) => R.geo.fromLL(la, lo), isSea: (x, z) => R.isSea(x, z) });
+      const y = yachtMeshes(list, R.seaLevel); y.group.name = "harbourYachts"; R.group.add(y.group);
+      W.harbour.y = y; W.harbour.list = list;
+    }
+  }
+  W.harbour.y?.update(t / 1000);
+}
+// Marshal posts (marshals.js, marshaldata.js: the FIA circuit map's posts and light panels for this circuit): two marshals
+// in orange behind the barrier at each post – the barrier as drawn (the map's or the generated one, found by a ray from the
+// track's edge outwards; none within 90 m: the post is left out, counted) – facing the cars coming, and the light panels on posts at
+// the barrier. Their flags from race control's sector flags and TrackStatus at the moment shown (the same after a seek;
+// waved from the session's time – still while paused). Built once the real map's barriers are there; a part of the world.
+const MARSHAL = { far: 650, flagFar: 380, per: 2 };
+function buildMarshals(src) {
+  const W = world, A = app(), key = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key;
+  const D = key != null ? MARSHAL_DATA[key] : null;
+  if (!D || !W.grid) return { posts: [], panels: [], data: null };
+  const c0 = W.center, n = W.samples.length, ray = new THREE.Raycaster(), up = new THREE.Vector3(0, 1, 0);
+  const targets = [W.real?.group.getObjectByName("barriers"), W.group.getObjectByName("syntheticWalls")].filter(Boolean);
+  let guessed = 0, skipped = 0;
+  const place = (X, Y, side) => {
+    const x0 = X * DM - c0.x, z0 = -(Y * DM - c0.z), [s] = W.grid.nearest(x0, z0, 6); if (!s) return null;
+    const sg = side === "R" ? 1 : -1, edge = edgeOf(s, sg);
+    const from = new THREE.Vector3(s.p.x + s.nor.x * edge, s.p.y + 0.6, s.p.z + s.nor.z * edge), dir = new THREE.Vector3(s.nor.x * sg, 0, s.nor.z * sg);
+    ray.set(from, dir); ray.far = 90;
+    const hit = targets.length ? ray.intersectObjects(targets, true)[0] : null;
+    // (no barrier drawn within 90 m: the post isn't stood in the run-off on a guess – left out, counted)
+    if (!hit) { guessed++; return null; }
+    const off = hit.distance + 1.6;
+    const x = s.p.x + s.nor.x * (edge + sg * off), z = s.p.z + s.nor.z * (edge + sg * off);
+    // (not on another stretch of the track: a post there is left out)
+    const [o, d] = W.grid.nearest(x, z, 2);
+    if (o && Math.min(Math.abs(o.i - s.i), n - Math.abs(o.i - s.i)) > 20 && d < Math.max(edgeOf(o, 1), -edgeOf(o, -1)) + 2) { skipped++; return null; }
+    // facing the cars coming (against the race's direction), turned a little to the track
+    const fx = -s.tan.x * 0.75 - s.nor.x * sg * 0.66, fz = -s.tan.z * 0.75 - s.nor.z * sg * 0.66, fl = Math.hypot(fx, fz);
+    return { x, z, y: s.p.y, i: s.i, face: { x: fx / fl, z: fz / fl }, along: { x: s.tan.x, z: s.tan.z }, estimated: false };
+  };
+  const panels = D.lights.map(([nn, X, Y, side]) => { const q = place(X, Y, side); return q && { n: +nn, ...q }; }).filter(Boolean);
+  const posts = D.posts.map(([id, X, Y, side]) => { const q = place(X, Y, side); return q && { id, ...q }; }).filter(Boolean);
+  for (const p of posts) p.sector = sectorOf(p.i, panels, n);
+  // the first post of each sector (the green goes there), the sector before each
+  const order = [...panels].sort((a, b) => a.i - b.i);
+  for (const p of posts) { const k = order.findIndex((q) => q.n === p.sector); p.prev = k >= 0 ? order[(k - 1 + order.length) % order.length].n : null; }
+  for (const sct of new Set(posts.map((p) => p.sector))) {
+    const ps = posts.filter((p) => p.sector === sct), pan = panels.find((q) => q.n === sct);
+    if (pan) ps.sort((a, b) => ((a.i - pan.i) % n + n) % n - (((b.i - pan.i) % n + n) % n)); if (ps[0]) ps[0].first = true;
+  }
+  const info = { venue: key, season: D.season, map: D.map, url: D.url, posts: posts.length, panels: panels.length, noBarrier: guessed, onTrack: skipped, of: D.posts.length + D.lights.length };
+  return { posts, panels, data: D, info };
+}
+const PANEL_COLOURS = { red: "#ff1a10", yellow: "#ffd200", double: "#ffd200", green: "#1fd15a", off: "#101214" };
+function updateMarshals(src, t) {
+  const W = world; if (!W?.grid || !src) return;
+  if (!W.marshals || W.marshals.real !== W.real || W.marshals.src !== src) {
+    if (W.marshals) { W.group.remove(W.marshals.group); disposeGroup(W.marshals.group); }
+    if (!W.real) { W.marshals = null; return; }   // (behind the real map's barriers only)
+    const M = buildMarshals(src), group = new THREE.Group(); group.name = "marshals";
+    const crew = crewMeshes(Math.max(2, M.posts.length * MARSHAL.per)); group.add(crew.group);
+    // the light panels: a post and a panel facing the cars coming (their colours their own materials: few)
+    const poleG = new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6).translate(0, 1.1, 0), boxG = new THREE.BoxGeometry(0.7, 0.5, 0.12).translate(0, 2.3, 0);
+    const poleM = new THREE.MeshStandardMaterial({ color: "#6c7178", roughness: 0.6 }), frameM = new THREE.MeshStandardMaterial({ color: "#16181b", roughness: 0.5 });
+    for (const p of M.panels) {
+      const g = new THREE.Group(); g.position.set(p.x, groundY(p.x, p.z), p.z); g.rotation.y = Math.atan2(p.face.x, p.face.z);
+      const face = new THREE.MeshStandardMaterial({ color: "#0b0c0d", emissive: PANEL_COLOURS.off, emissiveIntensity: 1, roughness: 0.4 });
+      const lamp = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.4).translate(0, 2.3, 0.061), face);
+      g.add(new THREE.Mesh(poleG, poleM), new THREE.Mesh(boxG, frameM), lamp); p.lamp = face; group.add(g);
+    }
+    W.group.add(group);
+    W.marshals = { real: W.real, src, group, crew, ...M, flags: new Map(), key: null };
+  }
+  const MS = W.marshals; if (!MS.posts.length) return;
+  const status = src.state.TrackStatus?.Status ?? null, state = flagState(src.messages || [], status);
+  const tsec = t / 1000, cam = camera.position, figures = [], used = new Set();
+  for (const [k, p] of MS.posts.entries()) {
+    const sig = postSignal(p, state, p.prev), dist = Math.hypot(p.x - cam.x, p.z - cam.z);
+    if (dist > MARSHAL.far) continue;
+    const y = groundY(p.x, p.z), yaw = Math.atan2(p.face.x, p.face.z) - Math.PI / 2;
+    for (let m = 0; m < MARSHAL.per; m++) {
+      const a = (m - (MARSHAL.per - 1) / 2) * 1.3, x = p.x + p.along.x * a, z = p.z + p.along.z * a;
+      const waving = sig && (m === 0 || sig === "double");
+      const w = Math.sin(tsec * 2 * Math.PI * 1.4 + k + m * 0.7);
+      const pose = waving ? { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.05, arm: [[0.15, 0.08, 0.2], [2.5 + 0.4 * w, 0.25, 0.15]] } : { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.02, arm: [[0.12, 0.1, 0.25], [0.12, 0.1, 0.25]] };
+      figures.push({ x, y, z, yaw, colour: "#ff6a13", pose });
+      if (waving && dist < MARSHAL.flagFar) {
+        const fk = k + ":" + m; used.add(fk);
+        let f = MS.flags.get(fk); if (!f) { f = makeFlag("yellow"); MS.flags.set(fk, f); MS.group.add(f.group); }
+        f.set(sig === "double" ? "yellow" : sig); f.group.visible = true;
+        const h = skeleton(pose, () => {})[1], c = Math.cos(yaw), sn = Math.sin(yaw);
+        f.pose({ x: x + h[0] * c + h[2] * sn, y: y + h[1], z: z - h[0] * sn + h[2] * c }, { x: -p.along.x, z: -p.along.z }, tsec, 1, k * 0.9 + m);
+      }
+    }
+  }
+  for (const [fk, f] of MS.flags) if (!used.has(fk)) f.group.visible = false;
+  MS.crew.place(figures, [], cam);
+  // the panels: their sector's state (the flashing of a double yellow from the session's time)
+  for (const p of MS.panels) {
+    const here = state.red ? "red" : state.sectors.get(p.n) === "DOUBLE YELLOW" ? (Math.floor(tsec * 2) % 2 ? "double" : "off") : state.sectors.has(p.n) || state.sc || state.vsc ? "yellow" : "off";
+    const c = PANEL_COLOURS[here]; if (p.lampColour !== c) { p.lamp.emissive.set(c); p.lampColour = c; }
+  }
+  MS.state = { red: state.red, sc: state.sc, vsc: state.vsc, sectors: [...state.sectors] };
+  // (what the posts show rests on: race control's sector flags; where they stand: the FIA map – of another season, said so)
+  const season = app().sessionYear?.() || null, mapNote = MS.info && MS.info.season !== season ? `, ${MS.info.season} FIA 지도 위치` : "";
+  MS.note = state.red || state.sc || state.sectors.size ? `마샬 깃발: 레이스 컨트롤 신호${mapNote}` : state.vsc ? "VSC: 라이트 패널만(깃발은 규정에 없음)" : status === "2" ? "황기: 구간 정보 없음 – 포스트에 표시 안 함" : null;
 }
 // The support cars and the rear-of-grid official (support.js: what each does at the moment shown – the safety car from
 // its own feed or parked at the pit exit; the medical car and the official reproductions, said so on screen). Parts of
@@ -1670,6 +1787,7 @@ function supportNote(plan, models) {
   if (plan.sc?.mode === "track") parts.push("세이프티카: 실제 위치 데이터");
   else if (plan.vsc) parts.push("VSC: 실제 세이프티카는 나오지 않아요");
   if ((plan.sc?.mode === "track" || parts.length) && !models.sc) parts.push("지원 차량 제조사: 이 경기는 확인 안 됨(중립 표시)");
+  if (world?.marshals?.note) parts.push(world.marshals.note);
   const text = parts.join(" · ") || null;
   let el = document.getElementById("supportNote");
   if (!el && text) { el = document.createElement("div"); el.id = "supportNote"; el.style.cssText = "position:absolute;left:12px;bottom:106px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:5"; document.getElementById("startLightNote")?.parentElement?.appendChild(el) || document.body.appendChild(el); }
@@ -3268,6 +3386,10 @@ window.Map3D = {
   starts() { const src = app().src; if (!src) return "null"; const shown = shownStarts(src, app().t), S = startState(src, app().t); return JSON.stringify({ shown: shown.map((s) => ({ t: s.t, standing: s.standing, from: s.from || null })), launches: [...(S.launches || new Map())].map(([t, f]) => [t, f && { t: f.t, n: f.n, of: f.of }]) }); },
   // development: the support cars and the official as placed this frame
   support() { const SP = world?.support; if (!SP) return "null"; const pos = (k) => { const o = SP.cars[k]?.obj; return o?.visible ? o.position.toArray().map((v) => +v.toFixed(1)) : null; }; return JSON.stringify({ plan: SP.plan, models: SP.models, sc: pos("sc"), med: pos("med"), last: [...SP.starts.values()][0] || null, official: SP.officialShown || false, gridBack: SP.gridBack ? { x: +SP.gridBack.x.toFixed(1), z: +SP.gridBack.z.toFixed(1), f: [+SP.gridBack.f.x.toFixed(3), +SP.gridBack.f.z.toFixed(3)] } : null }); },
+  // development: the marshal posts as placed, their flags now
+  marshals() { const M = world?.marshals; if (!M) return "null"; return JSON.stringify({ info: M.info, state: M.state, flags: [...M.flags].filter(([, f]) => f.group.visible).length, posts: M.posts.slice(0, 80).map((p) => [p.id, p.sector, +p.x.toFixed(1), +p.z.toFixed(1), p.estimated ? 1 : 0]) }); },
+  // development: the harbour's yachts as laid out (per zone: count, lengths)
+  harbour() { const H = world?.harbour; if (!H?.list) return JSON.stringify({ yachts: 0 }); const z = {}; for (const y of H.list) { const e = z[y.zone] || (z[y.zone] = { n: 0, L: [] }); e.n++; e.L.push(Math.round(y.L)); } return JSON.stringify({ yachts: H.list.length, seaY: +world.real.seaLevel.toFixed(2), zones: z, first: H.list.slice(0, 3).map((y) => [+y.x.toFixed(1), +y.z.toFixed(1)]) }); },
   pitCar(num) {
     const G = pitTeams.G, c = cars.get(String(num)); if (!G || !c) return JSON.stringify({ G: !!G, car: !!c });
     const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;

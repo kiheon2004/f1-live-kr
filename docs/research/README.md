@@ -12,6 +12,9 @@ picture's date (grandstands.json `img`).
 | wheels_cars_update.md | v0.36 check of wheels.md / cars202x.md against race-weekend sources: corrections, render-only claims, what changed in carshapes.js |
 | monaco_start_boards.md | facilities.js `PIT_LAYOUTS[22]`; startplan.js `startLights`; boards.js `BOARDS` |
 | halo.md | car3d.js `halo` (pillar width, hoop section), `PROFILES` eye positions (v0.37) |
+| marshals.md, flags.md | marshaldata.js (FIA circuit maps' posts and light panels), marshals.js (flag rules, the feed's Sector = light panel) |
+| support_cars_start.md | support.js, support3d.js (safety / medical car models by event, waiting places, the rear-of-grid flag; the safety car's own Position entries) |
+| monaco_harbour.md | harbour.js (Port Hercule quays, mooring zones, fairways, yacht proportions) |
 | monaco_pit.md | facilities.js `PIT_LAYOUTS[22]`, `genericPitSpec` (the garages' side; the v0.36 check) |
 | pitbuildings.md | facilities.js `PIT_HEIGHTS`; venues.js `STATUS_2026` notes (19 circuits' pit buildings, paddocks, landmarks) |
 | pitwall.md | garages.js `PIT_WALL_SEATS`, `pitWallStand` |
