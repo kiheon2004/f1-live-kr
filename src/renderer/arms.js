@@ -93,16 +93,25 @@ export function torsoPenetration(T, x, y, z, r) {
   }
   return pen;
 }
+// how deep a ball sits in boxes (the head's side pads: the left one given, mirrored for an arm at −x)
+export function boxPenetration(boxes, x, y, z, r) {
+  let pen = 0;
+  for (const [c, h] of boxes || []) {
+    const dx = Math.max(0, Math.abs(Math.abs(x) - c[0]) - h[0]), dy = Math.max(0, Math.abs(y - c[1]) - h[1]), dz = Math.max(0, Math.abs(z - c[2]) - h[2]), dd = Math.hypot(dx, dy, dz);
+    if (dd < r) pen = Math.max(pen, r - dd);
+  }
+  return pen;
+}
 // the sleeve's radius along the arm (body3d armSkin: upper arm ~5 cm, forearm narrowing to ~2.6 cm at the wrist)
 const ARM_R = (u) => (u < 0.5 ? 0.052 - 0.014 * u * 2 : 0.042 - 0.016 * (u - 0.5) * 2);
 // the deepest the arm (shoulder → elbow → wrist, 12 balls along it) goes into the car's body, and into the driver's
 // torso and thighs (the balls more than 0.14 m from the shoulder joint: nearer, the arm grows out of the torso)
 export function armPenetration(R, o, T = null) {
   let worst = 0;
-  for (let k = 1; k <= 12; k++) {
+  for (let k = 0; k <= 12; k++) {
     const u = k / 12, A = u <= 0.5 ? o.S : o.E, B = u <= 0.5 ? o.E : o.W, f = u <= 0.5 ? u * 2 : (u - 0.5) * 2;
     const x = A[0] + (B[0] - A[0]) * f, y = A[1] + (B[1] - A[1]) * f, z = A[2] + (B[2] - A[2]) * f, r = ARM_R(u);
-    worst = Math.max(worst, roomPenetration(R, x, y, z, r));
+    worst = Math.max(worst, roomPenetration(R, x, y, z, r), boxPenetration(T?.boxes, x, y, z, r));
     if (T && Math.hypot(x - o.S[0], y - o.S[1], z - o.S[2]) > 0.14) worst = Math.max(worst, torsoPenetration(T, x, y, z, r));
   }
   return worst;
@@ -214,7 +223,7 @@ export function armCost(o, fwd, up, roll = 0) {
 // ---------- the plan: every 2° of the wheel ----------
 export const PLAN_STEP = 2, PLAN_MAX = 90;
 // everything the plan's cost depends on besides the geometry: part of a baked plan's key (a change asks for a re-bake)
-export const PLAN_COST = JSON.stringify({ WRIST_COMFORT, WRIST_LIMIT, PRONATION, SHOULDER, ROLL, ELBOW_ROOM, PLAN_STEP, PLAN_MAX, W: "1+12exp(-(a/35)^2)", SW: [-120, 150], BESIDE: [35, 0.16] });
+export const PLAN_COST = JSON.stringify({ WRIST_COMFORT, WRIST_LIMIT, PRONATION, SHOULDER, ROLL, ELBOW_ROOM, PLAN_STEP, PLAN_MAX, W: "1+12exp(-(a/35)^2)", SW: [-120, 150], BESIDE: [91, 0.16] });
 const SW = { lo: -120 * D, hi: 150 * D };   // the swivel's range (the elbow from across the chest – a big lock's lower arm – to well up and out)
 const _o = armOut();
 const wrapRad = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
@@ -254,7 +263,7 @@ export function armGeo(base, grip, glove, rho) {
 // ahead most of all) – a pose there weighs up to 5× one at the lock, so the plan never buys a better hairpin with a
 // worse straight (v0.42's first whole-turn plan with the torso kept the lower arm crossed over the chest from the lock
 // right through straight ahead: the wrist bent 57° there)
-export const BESIDE = { a: 35 * D, x: 0.16 };
+export const BESIDE = { a: 91 * D, x: 0.16 };
 export const angleWeight = (a) => 1 + 12 * Math.exp(-(((a / D) / 35) ** 2));
 // ---------- the whole turn at once (offline: tools/arm-plans.js bakes it into armplans.js) ----------
 // Step by step from straight ahead (planArms) an arm can stay in a pose that is fine now but leads nowhere – v0.41's first
@@ -277,8 +286,10 @@ export function planArmsPath(geo, { swStep = 5 * D, rlStep = 2.5 * D, wSw = 4 * 
       for (let w = 0; w < sws.length; w++) {
         let bc = Infinity, bf = 0, bu = 0;
         for (let f = 0; f < fws.length; f++) for (let u = 0; u < ups.length; u++) { elbowAt(geo, sws[w], fws[f], ups[u], _o); const c = armCost(_o, fws[f], ups[u], rls[r]); if (c < bc) { bc = c; bf = f; bu = u; } }
-        // (within ±BESIDE of straight ahead the elbow stays out beside the body – the arm crosses over the chest only
-        // towards the lock, never for a small turn)
+        // (within ±BESIDE of straight ahead the elbow stays out beside the body. v0.42 measured both ways of the lower arm
+        // at a big lock on the meshes – crossing over the chest from ±65°: the sleeve 115 mm into the torso on the way
+        // across; staying beside the body: 90–99 mm into it at ±80–90° and the wrist extended ~85°. Neither is clean with
+        // the hands fixed on the grips; the arm stays beside the body over the whole ±90° – the smaller clash, no swing)
         if (Math.abs(a) < BESIDE.a) { armAt(geo, a, sws[w], fws[bf], ups[bu], _o, rls[r]); if (_o.E[0] < BESIDE.x) bc += 1e4 * (BESIDE.x - _o.E[0]); }
         const k = i * S + r * sws.length + w; cost[k] = bc * angleWeight(a); arg[2 * k] = bf; arg[2 * k + 1] = bu;
       }

@@ -8,7 +8,7 @@ const path = require("path"), fs = require("fs");
   const C = await R("car3d.js"), A = await R("arms.js"), B = await R("body3d.js");
   const D = Math.PI / 180, seen = new Map();
   for (const season of [2022, 2023, 2024, 2025, 2026]) for (const team of ["Red Bull Racing", "McLaren", "Ferrari", "Mercedes", "Aston Martin", "Alpine", "Williams", "Racing Bulls", "Kick Sauber", "Haas F1 Team", "Cadillac", "Audi", "RB"]) {
-    const g = C.armGeometry(season, team); if (!seen.has(g.key)) seen.set(g.key, g);
+    for (const date of [null, "2026-05-03", "2026-07-26"]) { const g = C.armGeometry(season, team, date); if (!seen.has(g.key)) seen.set(g.key, g); }
   }
   const out = {};
   for (const [key, g] of seen) {

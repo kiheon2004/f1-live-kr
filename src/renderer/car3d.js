@@ -25,7 +25,7 @@
 // car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
 import { shapeFor } from "./carshapes.js";
-import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, chestGeometry, pelvisGeometry, LIMB_GEO } from "./body3d.js";
+import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R } from "./body3d.js";
 import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST } from "./arms.js";
 import { ARM_PLANS } from "./armplans.js";
 import { wheelSpec, wheelParts as steeringParts, ledGeometry, teamWheel } from "./wheel3d.js";
@@ -960,10 +960,15 @@ function cockpit(p) {
   const [hx, hy, hz] = p.helmet;
   // the opening's rim (padded edge round it) and the headrest round the helmet's back and sides
   const rim = sweep([[0.26, 0.565, -0.32], [0.285, 0.575, -0.05], [0.27, 0.58, 0.25], [0.18, 0.585, 0.45], [0, 0.59, 0.5], [-0.18, 0.585, 0.45], [-0.27, 0.58, 0.25], [-0.285, 0.575, -0.05], [-0.26, 0.565, -0.32]], 0.03, 0.022, 48, 10);
-  const headrest = merge([softBox(0.09, 0.15, 0.36, 0.2, 0.62, -0.12, 0.25, 5), softBox(0.09, 0.15, 0.36, -0.2, 0.62, -0.12, 0.25, 5), softBox(0.42, 0.2, 0.1, 0, 0.64, -0.33, 0.25, 5)]);
+  // (v0.42: the side pads beside the helmet, over the shoulders – FIA 2025 Art 14.2: ≥ 95 mm thick above Z 545, ≥ 320 mm
+  // apart; research/cockpit.md – from the head's back to its front; they reached down to 0.545 m and 0.39 m forward, over
+  // the shoulders and the upper arms)
+  const [padC, padH] = headPads(p), padZ = padC[2] - (p.ck || 0), headrest = merge([softBox(padH[0] * 2, padH[1] * 2, padH[2] * 2, padC[0], padC[1], padZ, 0.25, 4), softBox(padH[0] * 2, padH[1] * 2, padH[2] * 2, -padC[0], padC[1], padZ, 0.25, 4), softBox(0.42, 0.2, 0.1, 0, 0.64, -0.33, 0.25, 4)]);
   // behind the helmet, the seat's top and the HANS' collar (dark); the tub itself is the chassis' fold (openLoft – v0.41's
   // flat dark slab lay under the closed paint)
-  const tub = softBox(0.38, 0.12, 0.22, 0, 0.6, -0.2, 0.3, 5);
+  // (v0.42: the HANS collar 0.26 m across behind the helmet's back – it was a 0.38 m block reaching forward over the
+  // shoulders, through which a raised arm passed at a big lock)
+  const [hC, hH] = hansBox(p), tub = softBox(hH[0] * 2, hH[1] * 2, hH[2] * 2, 0, hC[1], hC[2] - (p.ck || 0), 0.3, 4);
   // (v0.39: the cockpit ck further forward than these numbers – the helmet and mounts are the profile's own)
   const ck = p.ck || 0; for (const g of [rim, headrest, tub]) g.translate(0, 0, ck);
   // helmet: an egg a little longer than wide, its chin bar lower in front; the visor a band over its eyes
@@ -1002,6 +1007,11 @@ function cockpit(p) {
       flags: SW.flags, gloves: [left, right], glovesLo: [leftLo, rightLo], grip, arm: armSkin(), gauntlet: gauntletSkin(), at: [0, wy, wz], tilt, plan, shoulder },
   };
 }
+// the head's side pads (left one: centre and half sizes, the car's frame with the cockpit's shift) – drawn by cockpit(),
+// kept clear by the arms (arms.js)
+export const headPads = (p) => [[0.21, 0.655, p.helmet[2] - 0.04], [0.0475, 0.065, 0.12]];
+// the HANS collar behind the helmet (centre and half sizes)
+export const hansBox = (p) => [[0, 0.6, p.helmet[2] - (p.helmetSize?.[2] ?? 0.155) - 0.05], [0.13, 0.05, 0.07]];
 // The steering wheel's mount in the cockpit (the car's frame, before the cockpit's shift ck): its middle and its face's
 // tilt back from upright. v0.42: 0.3 rad (17°) – research/cockpit.md: 10–20° in photos (L); it was 0.42 (24°), which
 // laid the grips back along the rising forearms (the wrists bent ~40° to the little finger with the wheel straight).
@@ -1025,13 +1035,16 @@ export function driverTorso(shoulder) {
 function torsoGeometry(t) {
   // (the lathes' frame: +y up the spine, +x out of the chest, z across – into the car's: y → up, x → front, z → −x)
   const M = new THREE.Matrix4().makeBasis(t.front, t.up, new THREE.Vector3().crossVectors(t.front, t.up)).setPosition(t.L0);
-  const parts = [chestGeometry().applyMatrix4(M), pelvisGeometry().applyMatrix4(M)];
-  for (const [a, b] of t.thighs) { const g = LIMB_GEO.thigh(); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize())); g.translate(a.x, a.y, a.z); parts.push(g); }
+  // (body3d's chest and pelvis outlines, coarser: down in the tub, mostly under the arms and the wheel)
+  const chest = trunkGeometry([[-0.06, 0.118], [0, 0.13], [0.1, 0.136], [0.22, 0.154], [0.31, 0.164], [0.37, 0.157], [0.415, 0.127], [0.445, 0.07], [0.455, 0.03]], 0.68, 10);
+  const pelvis = trunkGeometry([[-0.22, 0.03], [-0.2, 0.09], [-0.16, 0.138], [-0.11, 0.152], [-0.05, 0.146], [0, 0.132], [0.06, 0.116]], 0.64, 10);
+  const parts = [chest.applyMatrix4(M), pelvis.applyMatrix4(M)];
+  for (const [a, b] of t.thighs) { const g = limbGeometry(BODY.thigh, 0.082, JOINT_R.knee - 0.002, 0.006, 0.25, 0.95, 8, 5); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize())); g.translate(a.x, a.y, a.z); parts.push(g); }
   return merge(parts);
 }
 // The driver's arm geometry for a car (season, team): the wheel's place and tilt, the shoulders, the left grip, the
 // glove's wrist and axes – and its key (with the arms' cost settings) for the baked plans (armplans.js)
-export function armGeometry(season, teamName) { const p = profileFor(season, teamName); return armGeometryOf(p, wheelSpec(p.wheel || null)); }
+export function armGeometry(season, teamName, date = null) { const p = profileFor(season, teamName, date); return armGeometryOf(p, wheelSpec(p.wheel || null)); }
 function armGeometryOf(p, W) {
   // (the shoulder joints: 0.21 m below the eyes (body3d proportions) and – v0.41 – under the back of the helmet, where
   // the HANS device's yoke lies on the shoulders behind the helmet (its collar behind the shell's back): the helmet's
@@ -1039,7 +1052,7 @@ function armGeometryOf(p, W) {
   // ~0.44 m to reach a 0.59 m arm into, folding the elbow down beside the rim and bending the rising hand ~60°.)
   const hz = (p.helmet?.[2] ?? p.eye[2] - 0.05) - (p.helmetSize?.[2] ?? 0.155);
   const base = { at: [0, WHEEL_MOUNT.y, WHEEL_MOUNT.z + (p.ck || 0)], tilt: WHEEL_MOUNT.tilt, shoulder: [0.19, p.eye[1] - 0.21, hz] };
-  base.torso = driverTorso(base.shoulder).capsule;
+  base.torso = driverTorso(base.shoulder).capsule; base.torso.boxes = [headPads(p), hansBox(p)];
   const grip = { c: [W.grip.x, 0, 0], up: [Math.sin(W.grip.tilt), Math.cos(W.grip.tilt), 0] }, glove = driverGlove(W.grip.r, 0).userData;
   // (v0.42: the cockpit's room – the arms kept out of the tub's walls, the rim and the chassis – in the plan and its key)
   base.room = roomOf(p);
@@ -1482,7 +1495,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
   g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
-    leds, flagLights, gloveFine, gloveLo, cockpit: false, wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat, gloveMat, suitMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
+    leds, flagLights, gloveFine, gloveLo, cockpit: false, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat, gloveMat, suitMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
 }
