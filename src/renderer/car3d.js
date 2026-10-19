@@ -34,7 +34,10 @@ import { paintScreen, screenModel } from "./wheelscreen.js";
 // H: height of the airbox top. src: where the numbers come from.
 export const PROFILES = {
   2026: {
-    era: "2026", FZ: 1.7, RZ: -1.7, FR: 0.353, RR: 0.355, FW: 0.28, RW: 0.375, W: 1.9, H: 0.95,
+    era: "2026", FZ: 1.7, RZ: -1.7, FR: 0.353, RR: 0.355, FW: 0.335, RW: 0.425, W: 1.9, H: 0.95,
+    // (v0.40: FW / RW the tyres' overall width, sidewall to sidewall. They were Pirelli's tread widths (280 / 375 mm) – the
+    // tyres drew ~5 cm narrow. The rims' mounting widths fell 20 / 28 mm from 2025 (C10.7.2: 315 / 401.3 mm against 335.3 / 429.3) and 2025's tyres were 345–375 / 440–470 mm
+    // overall (FIA 2025 Art. 10.8.1b): ~340 / ~425 mm – an estimate, the FIA 2026 text gives no tyre width (C10.8))
     // the broadcast T-cam, fitted to the 2026 onboard footage (Leclerc, Australian GP start – formula1.com, compared
     // only): the horizon, both front tyres' tops and the halo's top in one frame give the camera 1.10 m up, 0.46 m behind
     // the car's middle, looking down 15.5°, a 72° wide lens (16:9). Checked against two more (v0.22: Verstappen,
@@ -53,16 +56,18 @@ export const PROFILES = {
     // v0.22 fit had them): 1.12 m up, looking down 17.5°, 77.5° wide – the marks within 0.02 of the footage (the horizon
     // 0.15 for 0.17), the helmet now ~32 % of the frame's width (footage ~30 %; it was 39 %)
     ck: 0.30, tcam: [0.08, 1.12, -0.16], tcamPitch: 17.5, tcamYaw: -2, tcamHfov: 77.5, eye: [0, 0.75, 0.30], helmet: [0, 0.755, 0.25], helmetSize: [0.14, 0.145, 0.16],
-    src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre sizes from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm diameter; 25 mm / 30 mm narrower than 2025's 305 / 405 mm – motorsport.com) – the rest estimated",
+    src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre diameters from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm; the tread 25 / 30 mm narrower than 2025's 305 / 405 mm – motorsport.com), overall widths estimated (above) – the rest estimated",
   },
   2022: {
-    era: "2022", FZ: 1.8, RZ: -1.8, FR: 0.36, RR: 0.36, FW: 0.305, RW: 0.405, W: 2.0, H: 0.95,
+    era: "2022", FZ: 1.8, RZ: -1.8, FR: 0.36, RR: 0.36, FW: 0.36, RW: 0.455, W: 2.0, H: 0.95,
+    // (v0.40: FW / RW the tyres' overall width, the middle of the FIA's measured range – 345–375 / 440–470 mm, 2025
+    // Technical Regulations Art. 10.8.1b (H); they were Pirelli's tread widths, 305 / 405 mm)
     // (no footage of these cars compared: the 2026 lens and angle, the mount from photos of the airbox – estimates)
     // (v0.39: the cockpit 0.33 m further forward, ck – the helmet's middle 1.47–1.62 m behind the front axle in side photos
     // of the 2025 SF-25, MCL39 (Japanese GP 2025-04-05) and W16 (Italian GP 2025) lined up on their hubs; the model had it
     // 1.88 m back. The T-cam moved with it, with the 2026 lens and angle)
     ck: 0.33, tcam: [0, 1.07, -0.19], tcamPitch: 17.5, tcamHfov: 77.5, eye: [0, 0.745, 0.30], helmet: [0, 0.735, 0.25],
-    src: "2022–2025 F1 technical regulations: 3.6 m wheelbase max, 2.0 m width, 0.95 m height; 18-inch wheels, ~720 mm tyres (front ~305 mm, rear ~405 mm wide) – estimates; the rest from photos",
+    src: "2022–2025 F1 technical regulations: 3.6 m wheelbase max, 2.0 m width, 0.95 m height; 18-inch wheels, ~720 mm tyres (FIA: ≤ 725 mm; 345–375 / 440–470 mm wide overall) – the rest from photos",
   },
 };
 // Team profiles, apart from the era's car: what is known of one team's car in one season – so far its T-cam, where
@@ -121,7 +126,11 @@ function loft(sections, ring = 24, uRange = [-2.9, 2.9], capEnds = true) {
     const a = i * (ring + 1) + k, b = a + ring + 1;
     idx.push(a, b, a + 1, a + 1, b, b + 1);
   }
-  if (capEnds) for (const [i, flip] of [[0, true], [n - 1, false]]) {
+  // (v0.40: the caps were wound the wrong way – both faced into the loft, so the nose's tip, the sidepods' tails and the
+  // crash structure's end showed a hole with the inside of the far wall through it; the winding is reversed below with the
+  // sides', so each cap is written the other way round here)
+  // (capEnds "rear": the first section only – an open front for an inlet's recess, inletRecess)
+  if (capEnds) for (const [i, flip] of capEnds === "rear" ? [[0, false]] : [[0, false], [n - 1, true]]) {
     const base = pos.length / 3, [z, cy, , , cx = 0] = sections[i];
     pos.push(cx, cy, z); uv.push(...uv.slice(i * (ring + 1) * 2, i * (ring + 1) * 2 + 2));
     for (let k = 0; k < ring; k++) { const a = i * (ring + 1) + k; idx.push(...(flip ? [base, a + 1, a] : [base, a, a + 1])); }
@@ -235,6 +244,34 @@ function plate(outline, at, t = 0.012) {
   const s = new THREE.Shape(); outline.forEach(([z, y], i) => (i ? s.lineTo(z, y) : s.moveTo(z, y)));
   const g = new THREE.ExtrudeGeometry(s, { depth: t, bevelEnabled: false, curveSegments: 6 });
   g.rotateY(-Math.PI / 2); g.translate(at + t / 2, 0, 0);
+  return g;
+}
+// A bent plate (v0.40): a thin wall whose section across the car follows `path` ([x, y] points, bottom first) and which
+// runs along the car from front(y) to rear(y) (z of its leading and trailing edges at that height), `t` thick – the 2026
+// rear wing's endplate, one piece from its inboard lower part up the diagonal to its outboard upper part. Closed (both
+// faces, the edges, the top and the bottom), so it needs no double-sided material.
+function bentPlate(path, front, rear, t = 0.012, sub = 3) {
+  const P = [];
+  for (let i = 0; i < path.length - 1; i++) for (let k = 0; k < (i === path.length - 2 ? sub + 1 : sub); k++) { const u = k / sub, [x0, y0] = path[i], [x1, y1] = path[i + 1]; P.push([x0 + (x1 - x0) * u, y0 + (y1 - y0) * u]); }
+  const n = P.length, pos = [], quad = (a, b, c, d) => pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+  // each station: the normal to the path in the section's plane, the two faces ±t/2 along it, its leading and trailing z
+  const V = P.map(([x, y], i) => {
+    const [xa, ya] = P[Math.max(0, i - 1)], [xb, yb] = P[Math.min(n - 1, i + 1)], dx = xb - xa, dy = yb - ya, L = Math.hypot(dx, dy) || 1, nx = dy / L, ny = -dx / L;
+    const o = [x + (nx * t) / 2, y + (ny * t) / 2], q = [x - (nx * t) / 2, y - (ny * t) / 2], zf = front(y), zr = rear(y);
+    return { of: [o[0], o[1], zf], or: [o[0], o[1], zr], if: [q[0], q[1], zf], ir: [q[0], q[1], zr] };
+  });
+  for (let i = 0; i < n - 1; i++) {
+    const a = V[i], b = V[i + 1];
+    quad(a.of, a.or, b.or, b.of); quad(a.if, b.if, b.ir, a.ir);   // the two faces
+    quad(a.of, b.of, b.if, a.if); quad(a.or, a.ir, b.ir, b.or);   // the leading and trailing edges
+  }
+  quad(V[0].of, V[0].if, V[0].ir, V[0].or); quad(V[n - 1].of, V[n - 1].or, V[n - 1].ir, V[n - 1].if);   // bottom and top
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  // (the faces' winding depends on the path's direction: turned outwards by the first face's normal against the path's
+  // outer side)
+  g.computeVertexNormals();
+  const n0 = new THREE.Vector3().fromBufferAttribute(g.attributes.normal, 0), c = V[0], mid = [(c.of[0] + c.if[0]) / 2, (c.of[1] + c.if[1]) / 2];
+  if (n0.x * (c.of[0] - mid[0]) + n0.y * (c.of[1] - mid[1]) < 0) { const a = g.attributes.position.array; for (let i = 0; i < a.length; i += 9) for (let k = 0; k < 3; k++) [a[i + 3 + k], a[i + 6 + k]] = [a[i + 6 + k], a[i + 3 + k]]; g.computeVertexNormals(); }
   return g;
 }
 // Merge geometries (all converted to non-indexed, keeping uv when every part has one).
@@ -478,6 +515,30 @@ function wingSpan(span, at, segs = 28) {
   return g;
 }
 const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// The sidepod's inlet as an opening (v0.40): a loft's front section `s` left open (loft capEnds "rear"), the lip – a ring
+// from the section's edge in to `k` of it – and a duct going `depth` back, narrowing a little, closed by a dark wall.
+// It was a dark disc 4 mm in front of a closed pod: from any angle but head-on it read as paint. Returns { lip } (the
+// body's paint) and { duct } (dark). The ring follows loft's points, so the lip meets the pod's skin exactly.
+function inletRecess(s, k = 0.8, depth = 0.14, ring = 32) {
+  const [z, cy, hw, hh, cx = 0, pw = 2.6, tp = 0] = s;
+  const pt = (i, f, zz) => { const a = (i / ring) * Math.PI * 2 - Math.PI / 2, c = Math.cos(a), sn = Math.sin(a); return [cx + f * hw * (1 + tp * sn) * Math.sign(c) * Math.pow(Math.abs(c), 2 / pw), cy + f * hh * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / pw), zz]; };
+  const lipP = [], ductP = [], quad = (out, a, b, c, d) => out.push(...a, ...b, ...c, ...a, ...c, ...d);
+  const z1 = z - depth, k1 = k * 0.9, back = pt(0, 0, z1); back[1] = cy;
+  for (let i = 0; i < ring; i++) {
+    quad(lipP, pt(i, 1, z), pt(i + 1, 1, z), pt(i + 1, k, z), pt(i, k, z));
+    quad(ductP, pt(i, k, z), pt(i + 1, k, z), pt(i + 1, k1, z1), pt(i, k1, z1));
+    ductP.push(...[cx, cy, z1], ...pt(i + 1, k1, z1), ...pt(i, k1, z1));
+  }
+  const geo = (arr, wantZ) => {
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3)); g.computeVertexNormals();
+    // (faced forward: the lip and the duct's back wall towards +z, the duct's sides inwards – checked on the first face)
+    const n0 = new THREE.Vector3().fromBufferAttribute(g.attributes.normal, 0);
+    if (n0.z * wantZ < 0) { const a = g.attributes.position.array; for (let i = 0; i < a.length; i += 9) for (let q = 0; q < 3; q++) [a[i + 3 + q], a[i + 6 + q]] = [a[i + 6 + q], a[i + 3 + q]]; g.computeVertexNormals(); }
+    return g;
+  };
+  // (the duct's first face is a side wall slanting in towards the back: seen from the front it faces +z a little)
+  return { lip: geo(lipP, 1), duct: geo(ductP, 1) };
+}
 // a loft section's outline as a flat shape (the dark mouth of an inlet), scaled `k` about its middle, at z
 function mouth(s, k = 0.8, dz = 0.004, ring = 24) {
   const [z, cy, hw, hh, cx = 0, pw = 2.6, tp = 0] = s, pts = [];
@@ -531,6 +592,20 @@ function shapePods(pod, s) {
     return r;
   });
 }
+// v0.40: the sidepods joined to the body behind the cockpit. They were tubes standing off the chassis, and from above
+// (the T-cam, the helicopter) a dark valley ran between them and the engine cover down to the floor; race photos from
+// above (2025 RB21 / MCL39 / SF-25, Las Vegas 2025-11-22; 2026 RB22, China 2026-03-13 – docs/research/cars_photos.md)
+// show the pod's top running into the engine cover's flank with no gap behind the cockpit (beside it the inlet stands
+// off the chassis). Each section (loft format, one side's) keeps its outer face; its inner edge goes into the body
+// (x `inner`) between z0 (none) and z1 (all), the undercut's taper scaled to the same depth in metres. And every section
+// boxier (the superellipse's power at least `pw`): a flat top, a tight outer shoulder and a near-vertical flank over the
+// undercut, as the photos show – not the round tube the lower power drew.
+function blendPods(P, z0, z1, inner = 0.12, pw = 5) {
+  return P.map(([z, cy, hw, hh, cx = 0, p = 2.6, tp = 0]) => {
+    const t = sstep(z0, z1, z), outer = cx + hw, inn = (cx - hw) * (1 - t) + Math.min(inner, cx - hw) * t, hw2 = (outer - inn) / 2;
+    return [z, cy, hw2, hh, (outer + inn) / 2, Math.max(p, pw), (tp * hw) / hw2];
+  });
+}
 // the parts a shape adds: a cooling cannon or louvres, a serrated fin, the blades atop the front wing's endplates
 function shapeParts(s, p, fwSpan, fwZ, epTop, zb = (z) => z) {
   const out = [];
@@ -538,7 +613,8 @@ function shapeParts(s, p, fwSpan, fwZ, epTop, zb = (z) => z) {
   if (s.cooling === "cannon") out.push(softBox(0.1, 0.09, 0.3, 0, 0.44, -2.0, 0.6));
   if (s.cooling === "louvres") for (const k of [1, -1]) for (let i = 0; i < 5; i++) out.push(boxAt(0.1, 0.006, 0.022, 0.25 * k, 0.6 - i * 0.03, zb(-0.95 - i * 0.07), 0, 0, -0.35 * k));
   if (s.cooling === "split") for (const k of [1, -1]) out.push(softBox(0.06, 0.05, 0.18, 0.11 * k, 0.55, -1.55, 0.5));
-  if (s.fin === "serrated") for (let i = 0; i < 6; i++) out.push(boxAt(0.008, 0.035, 0.045, 0, 0.93 - i * 0.03, zb(-1.0 - i * 0.085), 0, 0.6));
+  // (v0.40: on the 2026 engine cover, high to the rear axle, the serrations stand on its top – they were buried in it)
+  if (s.fin === "serrated") for (let i = 0; i < 6; i++) out.push(boxAt(0.008, 0.035, 0.045, 0, (p.era === "2026" ? 1.0 - i * 0.012 : 0.93 - i * 0.03), zb(-1.0 - i * 0.085), 0, 0.6));
   if (s.blade) for (const k of [1, -1]) out.push(boxAt(0.1, 0.008, 0.42, (fwSpan / 2 - 0.045) * k, epTop, fwZ));
   return out;
 }
@@ -571,7 +647,7 @@ function floorParts(E) {
   const [dz0, dz1] = E.diffuser, dw = E.diffuserW, dh = E.diffuserH, dpts = [];
   for (let i = 0; i <= 8; i++) { const t = i / 8; dpts.push([dz0 + (dz1 - dz0) * t, y0 + (dh - y0) * Math.pow(t, 1.5)]); }
   out.push(plate([...dpts.map(([z, y]) => [z, y + 0.015]), ...dpts.slice().reverse().map(([z, y]) => [z, y - 0.005])], 0, dw * 2));
-  const wall = (x, shrink) => plate([[dz0, y0 - 0.03], [dz1, y0 - 0.03], ...dpts.slice().reverse().map(([z, y]) => [z, y + 0.02 - shrink * (y - y0)])], x, 0.012);
+  const wall = (x, shrink) => plate([[dz0, y0], [dz1, y0], ...dpts.slice().reverse().map(([z, y]) => [z, y + 0.02 - shrink * (y - y0)])], x, 0.012);
   for (const k of [1, -1]) out.push(wall(dw * k, 0), wall(dw * 0.62 * k, 0.35), wall(dw * 0.3 * k, 0.55));
   return out;
 }
@@ -640,8 +716,8 @@ function body2022(p) {
     [0.56, 0.41, 0.64, 0.115, 0.54, 3.2, 0.12], [0.42, 0.35, 0.665, 0.15, 0.53, 3, 0.3], [0.1, 0.29, 0.665, 0.17, 0.51, 2.8, 0.4], [-0.3, 0.24, 0.625, 0.165, 0.48, 2.7, 0.4],
     [-0.7, 0.2, 0.545, 0.14, 0.43, 2.6, 0.35], [-1.1, 0.17, 0.45, 0.11, 0.36, 2.6, 0.3], [-1.5, 0.15, 0.34, 0.075, 0.28, 2.5, 0.2], [-1.85, 0.15, 0.26, 0.04, 0.2],
   ], S), zp));
-  const podL = loft(smoothSections(P, 2).reverse(), 24);
-  const inlets = both(mouth(P[0], 0.8));
+  const PB = blendPods(P, ck - 0.2, ck - 0.55), inl = inletRecess(PB[0]), inlets = both(inl.duct);
+  const podL = loft(smoothSections(PB, 2).reverse(), 32, undefined, "rear");
   // the airbox's mouth over the driver's head, and the roll hoop's side intakes
   const airbox = mouth([-0.425 + ck, 0.85, S?.airbox === "rect" ? 0.1 : 0.075, 0.055, 0, S?.airbox === "oval" ? 2.2 : 2.8, S?.airbox === "rect" ? -0.1 : -0.55], 1, -0.005);
   const floor = floorParts({ floorPlan: [[0.12, 1.36], [0.5, 1.36], [0.62, 1.15], [0.82, 0.7], [0.86, 0.3], [0.86, -0.95], [0.8, -1.3], [0.62, -1.42], [0.56, -1.5], [0.53, -2.3]],
@@ -662,12 +738,15 @@ function body2022(p) {
   // rear wing: the main plane a shallow spoon (lower in the middle), the DRS flap over it, both turning down at the tips
   // into rounded endplates; one pylon from the crash structure, the DRS actuator over it; the beam wing under
   const rwSpan = 1.0, tip = (e) => 0.07 * Math.pow(sstep(0.82, 1, e), 1.5);
-  const rwMain = wingSpan(rwSpan, (e) => [0.775 + 0.035 * e * e - tip(e), -2.1 - 0.02 * e, 0.3, 0.04, 0.1]);
-  const rwFlap = wingSpan(rwSpan - 0.01, (e) => [0.915 + 0.015 * e * e - tip(e), -2.3 - 0.01 * e, 0.2, 0.026, 0.45]);
+  // (v0.40: the wing, its endplates and pylon 0.1 m further forward – FIA 2025 Technical Regulations Issue 03 App. §27–29
+  // (read from the PDF 2026-10-19): the profiles between XR +140 and +555 (the tips to +680), the endplates' volume to
+  // XR +680; the model's endplates reached XR +775 and the flap's trailing edge XR +680)
+  const rwMain = wingSpan(rwSpan, (e) => [0.775 + 0.035 * e * e - tip(e), -2.0 - 0.02 * e, 0.3, 0.04, 0.1]);
+  const rwFlap = wingSpan(rwSpan - 0.01, (e) => [0.855 + 0.015 * e * e - tip(e), -2.2 - 0.01 * e, 0.2, 0.026, 0.42]);   // (its trailing edge under Z 910: it stood at 1.01 m)
   // (the endplates' lower rear corner cut away, their tops rounding over into the elements – photos of SF-25, MCL39)
-  const ep = [[-2.02, 0.54], [-2.03, 0.8], [-2.07, 0.88], [-2.16, 0.93], [-2.3, 0.95], [-2.5, 0.945], [-2.575, 0.9], [-2.57, 0.73], [-2.4, 0.7], [-2.2, 0.62], [-2.12, 0.54]];
+  const ep = [[-1.96, 0.54], [-1.95, 0.8], [-1.97, 0.88], [-2.06, 0.93], [-2.2, 0.95], [-2.4, 0.945], [-2.475, 0.9], [-2.47, 0.73], [-2.3, 0.7], [-2.1, 0.62], [-2.04, 0.54]];
   const rwPlates = merge([plate(ep, rwSpan / 2 + 0.006, 0.012), plate(ep, -rwSpan / 2 - 0.006, 0.012)]);
-  const rwPylon = merge([plate([[-2.24, 0.33], [-2.17, 0.55], [-2.13, 0.76], [-2.33, 0.76], [-2.36, 0.58], [-2.44, 0.4], [-2.46, 0.33]], 0, 0.014), softBox(0.04, 0.06, 0.14, 0, 0.86, -2.24, 0.4)]);
+  const rwPylon = merge([plate([[-2.18, 0.33], [-2.09, 0.55], [-2.03, 0.76], [-2.23, 0.76], [-2.28, 0.58], [-2.4, 0.4], [-2.44, 0.33]], 0, 0.014), softBox(0.04, 0.06, 0.14, 0, 0.8, -2.14, 0.4)]);
   const beam = merge([wingSpan(0.88, (e) => [0.36, -2.3, 0.14, 0.02, 0.15], 10), wingSpan(0.84, (e) => [0.435, -2.42, 0.12, 0.018, 0.4], 10)]);
   const susp = suspension(p, (S?.fsusp ?? "pull") === "pull", S?.rsusp === "pull");
   // mirrors on the inlets' top, stays to the chassis's side
@@ -677,12 +756,12 @@ function body2022(p) {
   const fin = plate([[-0.8, 0.935], [-1.0, 0.93], [-1.65, 0.68], [-1.65, 0.6], [-0.8, 0.9]].map(([z, y]) => [zb(z), y]), 0, 0.008);
   const exhaust = new THREE.CylinderGeometry(0.045, 0.05, 0.14, 14, 1, true); exhaust.rotateX(Math.PI / 2); exhaust.translate(0, 0.43, -2.46);
   return {
-    body, pods: both(podL),
+    body, pods: both(merge([podL, inl.lip])),
     // (2022–25 halos are painted in the team's colours on most cars: with the body, the livery's zones decide)
     paintExtra: [paintUV(halo(p), true), rwPlates, ...M.heads],
     carbon: metricUV(merge([...floor, fw0, fwPlates, rwPylon, beam, ...susp, ...corners(p), ...M.stays, fin, tcamPod, inlets, airbox, exhaust, ...mirrorGlass([0.5, 0.68, 0.52 + ck], [0.16, 0.065, 0.06]), ...shapeParts(S, p, fwSpan, 2.68, 0.35, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge([...fwF, ...fwEnds]), rwFlaps: rwFlap,   // (2022–25 flaps never move: the endplates go with them)
-    fwPivot: [0.13, 2.68], rwPivot: [0.92, -2.3], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
+    fwPivot: [0.13, 2.68], rwPivot: [0.855, -2.2], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
     lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: null,
   };
 }
@@ -697,8 +776,8 @@ function body2026(p) {
     [2.86, 0.17, 0.25, 0.065, 0, 2.4, -0.1], [2.72, 0.165, 0.285, 0.09, 0, 2.5, -0.2], [2.4, 0.17, 0.35, 0.115, 0, 2.6, -0.26], [2.0, 0.18, 0.43, 0.145, 0, 2.6, -0.3],
     [1.6, 0.17, 0.52, 0.18, 0, 2.4, -0.3], [1.2, 0.12, 0.62, 0.235, 0, 2.1, -0.3], [0.8, 0.1, 0.675, 0.28, 0, 2.1, -0.28], [0.5, 0.1, 0.66, 0.295, 0, 2.3, -0.24],
     [0.3, 0.1, 0.575, 0.305, 0, 3, -0.2], [0.0, 0.1, 0.545, 0.31, 0, 3, -0.2], [-0.28, 0.1, 0.64, 0.31, 0, 2.8, -0.3],
-    [-0.37, 0.1, 0.93, 0.285, 0, 2.6, -0.55], [-0.48, 0.1, 0.995, 0.26, 0, 2.5, -0.62], [-0.7, 0.1, 0.99, 0.245, 0, 2.5, -0.6], [-0.9, 0.1, 0.96, 0.235, 0, 2.5, -0.55], [-1.2, 0.1, 0.85, 0.21, 0, 2.5, -0.45],
-    [-1.6, 0.13, 0.7, 0.155, 0, 2.5, -0.35], [-2.0, 0.18, 0.54, 0.1, 0, 2.5, -0.25], [-2.28, 0.22, 0.44, 0.065, 0, 2.4, -0.15], [-2.42, 0.245, 0.36, 0.045], [-2.595, 0.255, 0.33, 0.032],
+    [-0.37, 0.1, 0.93, 0.285, 0, 2.6, -0.55], [-0.48, 0.1, 0.995, 0.26, 0, 2.5, -0.62], [-0.7, 0.1, 0.99, 0.245, 0, 2.5, -0.6], [-0.9, 0.1, 0.96, 0.235, 0, 2.5, -0.55], [-1.2, 0.1, 0.94, 0.215, 0, 2.6, -0.42],
+    [-1.6, 0.13, 0.86, 0.17, 0, 2.6, -0.35], [-1.85, 0.16, 0.66, 0.125, 0, 2.5, -0.3], [-2.05, 0.19, 0.5, 0.095, 0, 2.5, -0.25], [-2.28, 0.22, 0.44, 0.065, 0, 2.4, -0.15], [-2.42, 0.245, 0.36, 0.045], [-2.52, 0.255, 0.33, 0.032],
   ];
   const zb = bodyShift(p), zp = podShift(p), ck = p.ck || 0;
   const body = loft(smoothSections(sec(zMap(shapeBody(C, S, 1.6), zb)), 2).reverse(), 32);
@@ -706,8 +785,8 @@ function body2026(p) {
     [0.55, 0.4, 0.62, 0.11, 0.52, 3.2, 0.12], [0.4, 0.34, 0.645, 0.14, 0.51, 3, 0.28], [0.05, 0.28, 0.645, 0.155, 0.49, 2.8, 0.38], [-0.35, 0.23, 0.6, 0.15, 0.46, 2.7, 0.38],
     [-0.75, 0.19, 0.52, 0.125, 0.41, 2.6, 0.32], [-1.15, 0.165, 0.43, 0.1, 0.34, 2.6, 0.28], [-1.5, 0.15, 0.33, 0.07, 0.27, 2.5, 0.2], [-1.78, 0.15, 0.26, 0.04, 0.2],
   ], S), zp));
-  const podL = loft(smoothSections(P, 2).reverse(), 24);
-  const inlets = both(mouth(P[0], 0.8));
+  const PB = blendPods(P, ck - 0.2, ck - 0.55), inl = inletRecess(PB[0]), inlets = both(inl.duct);
+  const podL = loft(smoothSections(PB, 2).reverse(), 32, undefined, "rear");
   const airbox = mouth([-0.385 + ck, 0.89, S?.airbox === "rect" ? 0.11 : 0.078, 0.058, 0, S?.airbox === "oval" ? 2.2 : 2.8, S?.airbox === "rect" ? -0.1 : -0.55], 1, -0.005);
   // the 2026 floor: narrower, flatter (smaller tunnels), the front boards outboard of the floor's front
   const floor = floorParts({ floorPlan: [[0.12, 1.25], [0.45, 1.25], [0.6, 1.0], [0.74, 0.55], [0.75, 0.2], [0.75, -0.9], [0.68, -1.25], [0.56, -1.33], [0.5, -1.45], [0.48, -2.22]],
@@ -718,20 +797,30 @@ function body2026(p) {
   // the main plane, the two flaps that open in straight-line mode; endplates in front of the tyres' inner half
   const fwSpan = 1.35, r = (e) => sstep(0.35, 1, e);
   const fw0 = wingSpan(fwSpan, (e) => [0.075 + 0.07 * r(e), 2.93 - 0.1 * r(e), 0.32 - 0.06 * r(e), 0.032, 0.06 + 0.08 * r(e)]);
-  const fwF = [wingSpan(fwSpan - 0.02, (e) => [0.15 + 0.08 * r(e), 2.58 - 0.08 * r(e), 0.17 + 0.03 * r(e), 0.026, 0.22 + 0.2 * r(e)]),
-    wingSpan(fwSpan - 0.03, (e) => [0.2 + 0.08 * r(e), 2.45 - 0.05 * r(e), 0.12 + 0.02 * r(e), 0.022, 0.38 + 0.2 * r(e)])];
+  const fwF = [wingSpan(fwSpan - 0.02, (e) => [0.15 + 0.08 * r(e), 2.58 - 0.08 * r(e), 0.17 + 0.03 * r(e), 0.026, 0.22 + 0.1 * r(e)]),
+    wingSpan(fwSpan - 0.03, (e) => [0.2 + 0.08 * r(e), 2.45 - 0.05 * r(e), 0.12 + 0.02 * r(e), 0.022, 0.38 + 0.1 * r(e)])];
   const epF = [[2.95, 0.075], [2.95, 0.2], [2.88, 0.3], [2.7, 0.365], [2.4, 0.375], [2.15, 0.33], [2.05, 0.2], [2.08, 0.075]];
   const fwPlates = merge([plate(epF, 0.63, 0.012), plate(epF, -0.63, 0.012)]);
   const pylons = merge([plate([[2.75, 0.12], [2.75, 0.2], [2.45, 0.27], [2.3, 0.27], [2.4, 0.12]], 0.075, 0.012), plate([[2.75, 0.12], [2.75, 0.2], [2.45, 0.27], [2.3, 0.27], [2.4, 0.12]], -0.075, 0.012)]);
   // rear wing (C3.11: up to three elements within |y| ≤ 0.575 m, z 0.725–0.88 m; endplates – the upper at |y| 0.535–0.575,
   // the lower inboard at |y| 0.345–0.375, z 0.25–0.425; no beam wing): the main plane and two flaps that open together
   const rwSpan = 1.12;
-  const rwMain = wingSpan(rwSpan, (e) => [0.78 + 0.02 * e * e, -1.9 - 0.02 * e, 0.26, 0.04, 0.12]);
-  const rwFlaps = merge([wingSpan(rwSpan - 0.02, (e) => [0.875 + 0.01 * e * e, -2.2, 0.17, 0.028, 0.42]), wingSpan(rwSpan - 0.04, (e) => [0.92 + 0.008 * e * e, -2.33, 0.11, 0.022, 0.62])]);
-  const epU = [[-1.85, 0.6], [-1.86, 0.88], [-1.95, 0.925], [-2.3, 0.925], [-2.42, 0.9], [-2.44, 0.64], [-2.3, 0.59]];
-  const epL = [[-1.95, 0.29], [-2.4, 0.29], [-2.44, 0.47], [-2.3, 0.64], [-2.12, 0.64], [-2.0, 0.47]];
-  const rwPlates = merge([plate(epU, rwSpan / 2 + 0.006, 0.012), plate(epU, -rwSpan / 2 - 0.006, 0.012), plate(epL, 0.36, 0.012), plate(epL, -0.36, 0.012),
-    ...[1, -1].map((k) => plate([[-2.3, 0.59], [-2.44, 0.64], [-2.3, 0.64]], 0.45 * k, 0.012))]);
+  // (v0.40: the elements within the profiles' volume, XR +165…+630 – App. §30, Issue 17, read from the PDF 2026-10-19: the
+  // flaps' trailing edge was at XR +740, behind it; the endplates may reach XR +750 and keep their place. The tips rise
+  // outboard as §30.2's plane asks – Z ≥ 785 at Y 575 against 725 inboard)
+  // (and under its top, Z 880 – ~0.92 m over the ground: the top flap's trailing edge was at 1.0 m)
+  const rwMain = wingSpan(rwSpan, (e) => [0.765 + 0.05 * e * e, -1.88 - 0.01 * e, 0.24, 0.04, 0.12]);
+  const rwFlaps = merge([wingSpan(rwSpan - 0.02, (e) => [0.81 + 0.03 * e * e, -2.09, 0.15, 0.026, 0.38]), wingSpan(rwSpan - 0.04, (e) => [0.87 + 0.015 * e * e, -2.205, 0.1, 0.02, 0.45])]);
+  // (v0.40: the endplate as the rules draw it – App. §31, Issue 17: in the X-plane its section runs from the lower part
+  // inboard (Y 345–375, Z 250–425) up a diagonal to the upper part outboard (Y 535–575, from Z 700 to 880), one piece; its
+  // leading edge from XR +375 at Z 250 forward to XR +160 at Z 700, its trailing edge from XR +625 back to XR +750 at
+  // Z 625 (§31.3 a/b). Race photos (RB22 Australia 2026-03-06, W17 / SF-26 Austria 2026-06-26) show that bent plate. It
+  // was two separate flat plates, upper and lower, with a small triangle between. Heights: Z + ~4 cm, the reference plane
+  // over the ground; the tops rounded off – an estimate)
+  const RZ = p.RZ, lerpY = (y, pts) => { for (let i = 0; i < pts.length - 1; i++) { const [y0, z0] = pts[i], [y1, z1] = pts[i + 1]; if (y <= y1) return z0 + ((z1 - z0) * Math.max(0, y - y0)) / (y1 - y0); } return pts[pts.length - 1][1]; };
+  const epPath = [[0.36, 0.29], [0.36, 0.465], [0.555, 0.74], [0.555, 0.9], [0.55, 0.925]];
+  const epFront = (y) => lerpY(y, [[0.29, RZ - 0.375], [0.74, RZ - 0.16], [0.9, RZ - 0.16], [0.925, RZ - 0.2]]), epRear = (y) => lerpY(y, [[0.29, RZ - 0.625], [0.665, RZ - 0.75], [0.9, RZ - 0.75], [0.925, RZ - 0.72]]);
+  const rwPlates = both(bentPlate(epPath, epFront, epRear));
   const rwPylon = merge([plate([[-2.12, 0.33], [-2.04, 0.55], [-1.98, 0.76], [-2.2, 0.76], [-2.26, 0.55], [-2.36, 0.4], [-2.38, 0.33]], 0, 0.014)]);
   const susp = suspension(p, S?.fsusp === "pull", S?.rsusp === "pull");
   // mirrors (C3.7.5: on stays from the chassis, the lateral safety light in the body; 2026 footage: larger and higher
@@ -739,15 +828,18 @@ function body2026(p) {
   const M = mirrorParts([0.56, 0.74, 0.48 + ck], [0.22, 0.085, 0.07], [0.27, 0.62, 0.5 + ck]);
   // the T-cam pod on the airbox (2026 photos: a black pod with its antennas well over the helmet); the lens at its front
   const tcamPod = merge([softBox(0.11, 0.075, 0.16, 0, 1.06, -0.58 + ck, 0.3), boxAt(0.006, 0.07, 0.03, 0.03, 1.12, -0.62 + ck), boxAt(0.006, 0.07, 0.03, -0.03, 1.12, -0.62 + ck)]);
-  const fin = plate([[-0.78, 0.985], [-0.98, 0.975], [-1.65, 0.68], [-1.65, 0.6], [-0.78, 0.95]].map(([z, y]) => [zb(z), y]), 0, 0.008);
+  const fin = plate([[-0.78, 0.99], [-0.98, 0.99], [-1.55, 0.93], [-1.75, 0.8], [-1.75, 0.72], [-0.78, 0.95]].map(([z, y]) => [zb(z), y]), 0, 0.008);
   const exhaust = new THREE.CylinderGeometry(0.045, 0.05, 0.14, 14, 1, true); exhaust.rotateX(Math.PI / 2); exhaust.translate(0, 0.42, -2.4);
   return {
-    body, pods: both(podL), paintExtra: [rwPlates, ...M.heads],
+    body, pods: both(merge([podL, inl.lip])), paintExtra: [rwPlates, ...M.heads],
     // (2026 halos are black carbon on every car in the footage and photos – not painted)
     carbon: metricUV(merge([...floor, fw0, pylons, fwPlates, boards, rwPylon, ...susp, ...corners(p), ...M.stays, tcamPod, fin, inlets, airbox, exhaust, halo(p), ...mirrorGlass([0.56, 0.74, 0.48 + ck], [0.22, 0.085, 0.07]), ...shapeParts(S, p, fwSpan, 2.5, 0.37, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge(fwF), rwFlaps,
-    fwPivot: [0.16, 2.5], rwPivot: [0.895, -2.2], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
-    lights: [boxAt(0.012, 0.05, 0.36, rwSpan / 2 + 0.014, 0.82, -2.15), boxAt(0.012, 0.05, 0.36, -rwSpan / 2 - 0.014, 0.82, -2.15), boxAt(0.06, 0.05, 0.02, 0, 0.29, -2.58)],
+    fwPivot: [0.16, 2.5], rwPivot: [0.81, -2.09], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
+    // (v0.40, C14.3 Issue 17: two lights in the endplates, lenses facing back – within 5° of the X-axis –, between Z 700
+    // and 870, and the middle one's rear face centred at Z 295–305 on Y = 0. They were 0.36 m strips along the endplates'
+    // outer faces, lit sideways: now upright strips at the endplates' trailing edges, a reference plane ~4 cm up)
+    lights: [boxAt(0.012, 0.13, 0.014, 0.555, 0.825, p.RZ - 0.755), boxAt(0.012, 0.13, 0.014, -0.555, 0.825, p.RZ - 0.755), boxAt(0.06, 0.05, 0.02, 0, 0.34, -2.51)],
     halo: null,
   };
 }
@@ -1086,6 +1178,47 @@ function helmetTexture(l) {
   return t;
 }
 
+// ---------- reflections by day (v0.40) ----------
+// By day the cars have no environment map (map3d.js: the PMREM sky over a car filling the cockpit cameras' screen dropped
+// frames on the GPU), so glossy paint, carbon, metal rims and visors showed only the sun's one highlight and read as
+// plastic. Each lit car material gets the sky as the app's day lights paint it, worked out in the shader – a few
+// arithmetic operations, no texture: the reflected ray's colour from the ground below the horizon (the hemisphere
+// light's ground colour), a bright horizon and the zenith's blue (its sky colour), the horizon's edge blurred and the
+// colours averaged with the surface's roughness. three.js's own BRDF then weighs it (Fresnel, roughness, metalness) as it
+// would an environment map's light – so paint shows the horizon along its flanks, the rims look metal, and matte paint
+// stays matte. Added to the indirect specular light ahead of the light maps' chunk: the night patches after it (map3d
+// nightLit's tunnel mask: radiance × 0.3 under the roof) still apply. Off (0) when a real environment map is given
+// (night: setCarEnvironment), so the two never add up; tone mapping and colour space are the renderer's, once.
+export const CAR_SKY = { value: 1 };
+const SKY_GLSL = `
+uniform float uCarSky;
+vec3 carSky(vec3 d, float r) {
+  // (linear RGB, after the app's day hemisphere light – sky 0xe3efff, ground 0x4a5a3a – with the horizon dimmed to what
+  // stands round a track – trees, stands, barriers – rather than open sky: an estimate, tuned on the turntable)
+  float w = 0.03 + 0.5 * r * r, y = d.y;
+  vec3 zen = vec3(0.3, 0.44, 0.72), hor = vec3(0.7, 0.74, 0.8), gnd = vec3(0.05, 0.06, 0.045);
+  vec3 up = mix(hor, zen, sqrt(max(y, 0.0))), dn = mix(hor * 0.32, gnd, smoothstep(0.0, 0.3, -y));
+  return mix(mix(dn, up, smoothstep(-w, w, y)), vec3(0.3, 0.33, 0.37), r * r);
+}`;
+const skied = new WeakSet();
+// (k: how much of it a material takes – carbon less: its lacquer is thinner and the floor's top, facing the sky, read
+// pale grey in the app where photos show it near black; the halo is carbon too and must stay dark in the T-cam's view)
+function skyLit(m, k = 1) {
+  if (!m || skied.has(m)) return m;
+  skied.add(m);
+  const u = k === 1 ? CAR_SKY : { get value() { return CAR_SKY.value * k; } };
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uCarSky = u;
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>" + SKY_GLSL).replace("#include <lights_fragment_maps>", `
+#if defined( RE_IndirectSpecular )
+  if (uCarSky > 0.0) radiance += uCarSky * carSky(inverseTransformDirection(reflect(-geometryViewDir, geometryNormal), viewMatrix), material.roughness);
+#endif
+#include <lights_fragment_maps>`);
+  };
+  m.customProgramCacheKey = () => "carSky";
+  return m;
+}
+
 // ---------- one car ----------
 const MAT = {};
 const mat = (key, make) => MAT[key] || (MAT[key] = Object.assign(make(), { userData: { shared: true } }));
@@ -1096,20 +1229,26 @@ export const TYRE_COLOURS = { SOFT: "#e8392f", MEDIUM: "#f2c230", HARD: "#eef0f2
 export function makeCar({ teamName, teamColour, number, season = null, date = null }) {
   const prof = profileFor(season, teamName, date), t = template(prof), l = liveryFor(teamName, teamColour, prof.season, date);
   const matte = l.finish === "matte";
-  const paint = new THREE.MeshStandardMaterial({ map: liveryTexture(l, number, prof), color: hasDom ? 0xffffff : l.base, roughness: matte ? 0.5 : 0.28, metalness: 0.05 });
+  // (v0.40 finishes: gloss paint is clear-coated – sharper than 0.28 drew it; matte paint (Red Bull 2025) a satin 0.55;
+  // the reflections are the sky's (skyLit) – estimates against race photos, not measured)
+  const paint = skyLit(new THREE.MeshStandardMaterial({ map: liveryTexture(l, number, prof), color: hasDom ? 0xffffff : l.base, roughness: matte ? 0.55 : 0.2, metalness: 0.05 }), 0.85);
   const cm = carbonMaps();
   // (the weave as colour only: a normal and roughness map over a car that fills the cockpit cameras' screen, with the
   // reflections, dropped frames on the GPU – measured; the colour map costs next to nothing)
-  const carbon = mat("carbon", () => new THREE.MeshStandardMaterial({ color: 0xffffff, map: cm.colour, roughness: 0.42, metalness: 0.15 }));
+  // (v0.40: lacquered carbon, a dielectric – metalness 0.15 dulled its colour under the sky and gave it no sheen; it now
+  // takes the sky's reflection like a varnished part)
+  const carbon = mat("carbon", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, map: cm.colour, roughness: 0.45, metalness: 0 }), 0.35));
   // the rear wing's elements and the front wing's flaps in the livery's colours (v0.38: the top colour on both)
-  const wingPaint = new THREE.MeshStandardMaterial({ color: l.wing || (l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top), roughness: matte ? 0.5 : 0.3, metalness: 0.05 });
-  const fwPaint = new THREE.MeshStandardMaterial({ color: l.fw || l.wing || l.base, roughness: matte ? 0.5 : 0.3, metalness: 0.05 });
-  const carbonThin = mat("carbonThin", () => new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.45, metalness: 0.15, side: THREE.DoubleSide }));
-  const tyreMat = mat("tyre", () => new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.9, metalness: 0 }));
-  const coverMat = mat("cover", () => new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.45, metalness: 0.35 }));
-  const lipMat = mat("lip", () => new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.3, metalness: 0.85 }));
+  const wingPaint = skyLit(new THREE.MeshStandardMaterial({ color: l.wing || (l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top), roughness: matte ? 0.55 : 0.24, metalness: 0.05 }));
+  const fwPaint = skyLit(new THREE.MeshStandardMaterial({ color: l.fw || l.wing || l.base, roughness: matte ? 0.55 : 0.24, metalness: 0.05 }));
+  const carbonThin = mat("carbonThin", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.42, metalness: 0, side: THREE.DoubleSide }), 0.35));
+  // (rubber: matte, a faint sheen at grazing angles; the wheel's black parts satin, its metal parts – the rim's lip, the
+  // nut, the hub – metal that now has a sky to reflect: without one a metalness of 0.85 drew them near black)
+  const tyreMat = mat("tyre", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.88, metalness: 0 }), 0.6));
+  const coverMat = mat("cover", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.2 }), 0.6));
+  const lipMat = mat("lip", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.32, metalness: 0.85 })));
   const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));
-  const visorMat = mat("visor", () => new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 }));
+  const visorMat = mat("visor", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 })));
   const screenMat = mat("screen", () => new THREE.MeshBasicMaterial({ map: wheelScreen(), toneMapped: false }));
   // the wheel's own materials (shared): grips' rubber, the matte black of the display's bezel and the light strip, the
   // buttons' and scales' coloured caps (vertex colours), anodised metal (hub, paddle pivots); the shift lights unlit
@@ -1121,7 +1260,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const ledMat = mat("wheelLed", () => new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
   const bandMat = sidewallMaterial(0xf2c230, prof.era);
   const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
-  const helmetMat = new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 });
+  const helmetMat = skyLit(new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 }));
   // the driver's gloves (fabric with darker grip print: vertex colours) and suit sleeves in the team's colour
   const gloveMat = new THREE.MeshStandardMaterial({ color: l.glove || l.base, vertexColors: true, roughness: 0.82, metalness: 0 });
   const suitMat = new THREE.MeshStandardMaterial({ color: l.suit || l.base, vertexColors: true, roughness: 0.86, metalness: 0 });
@@ -1280,6 +1419,7 @@ export function setDetail(car, lod) {
 // Reflections for the car's paint, carbon and visor: an environment map (the sky the scene shows) – the shared one is
 // never freed with a car.
 export function setCarEnvironment(car, env, intensity = 1) {
+  CAR_SKY.value = env ? 0 : 1;   // (v0.40: the shader's day sky only without an environment map – never both)
   car.traverse((o) => {
     const m = o.material; if (!m || !m.isMeshStandardMaterial) return;
     if (m.envMap !== env) { m.envMap = env; m.needsUpdate = true; }

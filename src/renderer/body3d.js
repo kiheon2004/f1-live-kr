@@ -290,7 +290,7 @@ function mergeColoured(gs) {
 // (vertex colours as driverGlove). Its bind pose is the straight arm (bones along +y).
 export const ARM_BLEND = 0.05;
 export function armSkin(fine = 1) {
-  const L1 = BODY.uarm, L2 = BODY.farm, len = L1 + L2, rings = fine ? 30 : 16, seg = fine ? 18 : 10;
+  const L1 = BODY.uarm, L2 = BODY.farm, len = L1 + L2, rings = fine ? 24 : 16, seg = fine ? 16 : 10;
   const radius = (y) => {
     if (y < L1) { const t = y / L1; return 0.054 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.45) / 0.25) ** 2)); }
     const t = (y - L1) / L2; return 0.043 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.25) / 0.25) ** 2));
