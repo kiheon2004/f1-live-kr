@@ -101,10 +101,20 @@ export function helmetGeometry() {
   g.computeVertexNormals(); return g;
 }
 export function visorGeometry() {
-  return new THREE.SphereGeometry(1, 16, 4, Math.PI - 0.95, 1.9, 1.2, 0.5).scale(0.153, 0.157, 0.133);
+  // (the face opening's whole height, brow to chin bar – the eye protection the rules require, tinted: F1 stop photos
+  // 2023–25; v0.39's narrow band read as a toy's)
+  return new THREE.SphereGeometry(1, 18, 6, Math.PI - 1.0, 2.0, 1.05, 0.78).scale(0.154, 0.158, 0.134);
 }
 // bare head (pit wall people): 0.197 × 0.155 m, 0.231 m chin to the top; hair over its top and back
-export const headGeometry = () => new THREE.SphereGeometry(1, 14, 10).scale(0.099, 0.116, 0.078);
+// (v0.40: the jaw narrowed under the cheekbones, a nose and ears – an egg alone read as a doll's head close by)
+export function headGeometry() {
+  const g = new THREE.SphereGeometry(1, 16, 12).scale(0.099, 0.116, 0.078), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const y = p.getY(i), k = Math.min(1, Math.max(0, (-0.01 - y) / 0.09)); p.setZ(i, p.getZ(i) * (1 - 0.22 * k)); if (p.getX(i) < 0) p.setX(i, p.getX(i) * (1 - 0.12 * k)); }
+  g.computeVertexNormals();
+  const nose = new THREE.ConeGeometry(0.016, 0.045, 8).rotateZ(Math.PI).scale(1, 1, 0.9).rotateZ(0.32).translate(0.097, -0.012, 0);
+  const ears = [1, -1].map((sd) => new THREE.SphereGeometry(1, 8, 6).scale(0.018, 0.03, 0.01).translate(-0.004, 0.0, sd * 0.077));
+  return mergeSimple([g, nose, ...ears]);
+}
 export const hairGeometry = () => new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, 1.25).scale(0.103, 0.12, 0.082).translate(-0.006, 0.004, 0);
 
 // geometries (position + normal) into one

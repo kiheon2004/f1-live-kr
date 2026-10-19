@@ -15,8 +15,12 @@
 //
 // Where they stand at a stop is the usual arrangement – three at each wheel (the gun, the old wheel off, the new one
 // on), the front and rear jacks, one at each end of the front wing, one steadying each side, the release controller by
-// the nose on the pit lane side – a depiction of a typical stop, not the team's own. All of it inside the inner lane
-// (pitlane.js crossSection keeps the room), none in the fast lane.
+// the nose on the pit lane side, a spare rear jack standing by – 20 round the car, 21 with the spare: Red Bull's chief
+// mechanic counts 20 roles (redbullracing.com, Feb 2022), Mercedes "up to 22" with spare jacks (2023), and formula1.com
+// (2025) says each team would give a different number – no source gives each team's own, so every team gets this
+// typical layout (not the team's own; the fire extinguisher and side-jack crews standing by in the garage aren't drawn:
+// where they stand isn't sourced). Research: ~/projects/f1kr-work/v040/research/pitstop.md (v0.40). All of it inside
+// the inner lane (pitlane.js crossSection keeps the room), none in the fast lane.
 // The car's frame: a along it (+ forward), b across (+ the car's left), from the model's origin between the axles.
 import * as THREE from "./vendor/three.module.js";
 import { sidewallMaterial } from "./car3d.js";
@@ -33,10 +37,11 @@ const WHEEL = (ax, ay) => {
 };
 export const STOP = [
   ...WHEEL(1.72, 1), ...WHEEL(1.72, -1), ...WHEEL(-1.72, 1), ...WHEEL(-1.72, -1),
-  [3.55, 0, Math.PI, "jack", "frontJack"], [-3.3, 0, 0, "jack", "rearJack"],
-  [2.75, 1.25, Math.PI * 0.85, "ready", null], [2.75, -1.25, -Math.PI * 0.85, "ready", null],   // the front wing's ends
+  [3.55, 0, Math.PI, "jack", "frontJack"], [-3.56, 0.89, -0.7, "jack", "rearJack"],              // (the rear one behind and to the side: stopChoreo)
+  [2.5, 1.3, Math.PI * 0.85, "ready", null], [2.5, -1.3, -Math.PI * 0.85, "ready", null],         // the front wing's ends
   [0.15, 1.35, -Math.PI / 2, "ready", null], [0.15, -1.35, Math.PI / 2, "ready", null],         // steadying at the sides
   [3.6, -2.15, Math.PI * 0.75, "stand", null],                                                   // the release controller
+  [-3.7, -1.75, Math.PI / 2, "stand", "rearJack"],                                               // the spare rear jack, standing by
 ];
 
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -68,8 +73,19 @@ export function crewLayout(phase, f, boxC, left = 1) {
 // on (0.75–1.1), done up (to 1.5), the gunner's arm up, the jacks drop (1.95–2.1), the car released. A wheel a few
 // hundredths of a second after another (four crews never move as one). A depiction of the usual sequence: the data has
 // only when the car stood and left, and – from the record – that a new set went on.
-export const CHANGE = { base: 2.3, lift: 0.07, liftF: [0.05, 0.3], liftR: [0.1, 0.35], drop: 1.95, dropFor: 0.15, gunIn: [0, 0.18],
-  off: [0.5, 0.85], away: [0.85, 1.25], on: [0.75, 1.1], back: [1.15, 1.5], signal: 1.5, wheelLag: [0, 0.05, 0.03, 0.08] };
+export const CHANGE = { base: 2.3, lift: 0.07, liftF: [0.05, 0.3], liftR: [0.25, 0.45], rearIn: [-0.08, 0.22], swivel: [0.8, 1.6], drop: 1.95, dropFor: 0.15, gunIn: [-0.12, 0.08], gunInR: [0.02, 0.22],
+  off: [0.5, 0.85], away: [0.85, 1.25], on: [0.75, 1.1], back: [1.15, 1.5], signal: 1.5, wheelLag: [0, 0.05, 0.03, 0.08], lagMax: 0.1, nutMax: 0.06 };
+// Each stop's own small differences between its four wheels (no two stops' crews move alike, the same stop always the
+// same – a seek shows it again): from the car's number and when it stood (stopSeed), each wheel a little behind the
+// first (up to lagMax s) and its nut a little slower to do up (up to nutMax) – estimates (M: in stop videos the four
+// gunners' arms go up within about a tenth of a second of each other). Everything stays inside the stop's own timings:
+// the last wheel is done (back + lagMax + nutMax = 1.66 s at the usual pace) before the jacks drop (1.95).
+export function stopSeed(num, t0) { let h = 2166136261; for (const ch of `${num}:${Math.round((t0 || 0) / 1000)}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; }
+const unit = (seed, k) => { let h = Math.imul(seed ^ Math.imul(k + 1, 0x9e3779b1), 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+export function wheelTimes(seed, C = CHANGE) {
+  if (seed == null) return C.wheelLag.map((lag) => ({ lag, nut: 0 }));
+  return [0, 1, 2, 3].map((i) => ({ lag: unit(seed, i) * C.lagMax, nut: unit(seed, i + 4) * C.nutMax }));
+}
 
 // The stop's own clock: seconds into the work from seconds since the car stood (s), the plan's wait (a time penalty
 // served at the stop: nobody touches the car until it has run) and its known length (D, s; null unknown) – a stop known
@@ -118,9 +134,11 @@ export function jackGripsAB(k, f) {
   const Ra = Math.sin(f), Rb = -Math.cos(f);
   return [[ca + Ra * JACK.half, cb + Rb * JACK.half, h, 1, Ra, Rb, 0], [ca - Ra * JACK.half, cb - Rb * JACK.half, h, 1, Ra, Rb, 0]];
 }
-// where the jacks engage (m from the axle lines: under the nose cone, the rear crash structure – estimates, M) and how
+// where the jacks engage (m from the axle lines: under the nose cone, the rear crash structure – estimates, M; a car
+// profile may give its own as JF / JR in the dimensions it hands over – car3d.js wheelParts – and the crew follows) and how
 // their men stand (from the jack's base to the man's hips), the lever's tilt ready / lifting (rad)
-export const JACKS = { front: 0.85, rear: 0.8, man: 1.38, tiltUp: 0.62, tiltDown: 0.25 };
+export const JACKS = { front: 0.85, rear: 0.8, man: 1.38, tiltUp: 0.62, tiltDown: 0.25, rearWait: [0.4, 1.3], rearAngle: 0.7, swivel: 1.1, clear: 0.9, upright: 1.25,
+  gunAside: [0.12, 0.2, 0.3] };   // (the gunner's step out and forward while the wheels change, his gun's way out – estimates, L)
 // carried in front of a walking man: a gun at the waist (its socket 0.56 m ahead), a wheel at the hips (its centre
 // 0.5 m ahead, axle along his way) – heights where straight-ish arms hold them (body3d proportions)
 const CARRY = { gun: [0.56, 0.95], wheel: [0.5, 0.86] };
@@ -135,26 +153,31 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   const { w, dropAt, down } = stopClock(plan, s, C), H = hubsOf(d), figures = [], kits = [];
   const liftF = C.lift * ss(C.liftF[0], C.liftF[1], w) * (1 - down), liftR = C.lift * ss(C.liftR[0], C.liftR[1], w) * (1 - down);
   const off = [false, false, false, false];
-  const standUp = ss(dropAt, dropAt + 0.3, s);
+  const standUp = ss(dropAt, dropAt + 0.3, s), WT = wheelTimes(plan.seed, C);
   H.forEach((h, i) => {
-    const t = w - C.wheelLag[i], sd = h.side, inward = sd > 0 ? -Math.PI / 2 : Math.PI / 2, hubH = h.r + (h.axle === "front" ? liftF : liftR), fb = Math.abs(h.face);
-    // the gun: crouched ready just out from the wheel, kneels at it as the car stops, the gun on the hub until the nuts
-    // are done up, the arm up, standing back once the jacks drop
-    const gk = ss(C.gunIn[0], C.gunIn[1], t);
-    const gPose = standUp > 0 ? blendPose("signal", "ready", standUp) : t >= C.signal ? blendPose("kneel", "signal", ss(C.signal, C.signal + 0.15, t)) : blendPose("ready", "kneel", gk);
-    const sig = standUp > 0 ? 1 - standUp : t >= C.signal ? ss(C.signal, C.signal + 0.15, t) : 0;
-    const gi = figures.length, gFig = [h.a, sd * (fb + lerp(0.98, 0.62, gk) + 0.3 * standUp), inward, gPose, null, null];
+    // (t: this wheel's own clock; tn: its nut's – done up a little later on some wheels)
+    const t = w - WT[i].lag, tn = t - WT[i].nut, sd = h.side, inward = sd > 0 ? -Math.PI / 2 : Math.PI / 2, hubH = h.r + (h.axle === "front" ? liftF : liftR), fb = Math.abs(h.face);
+    // the gun: crouched ready just out from the wheel, kneels at it as the car stops – a front one on the nut even as
+    // the car comes to rest, a rear one only once it stands (its nut sits deep in the dished wheel: formula1.com 2025) –,
+    // the gun drawn back out and up off the hub while the wheels change (the nut is captive in the wheel: it comes off
+    // with it), on again to do the new one up, the arm up, standing back once the jacks drop
+    const gIn = h.axle === "front" ? C.gunIn : C.gunInR, gk = ss(gIn[0], gIn[1], t);
+    const wd = ss(C.off[0] - 0.05, C.off[0] + 0.1, t) * (1 - ss(C.on[1] - 0.12, C.on[1] + 0.04, t));
+    const gPose = standUp > 0 ? blendPose("signal", "ready", standUp) : tn >= C.signal ? blendPose("kneel", "signal", ss(C.signal, C.signal + 0.15, tn)) : blendPose("ready", "kneel", gk);
+    const sig = standUp > 0 ? 1 - standUp : tn >= C.signal ? ss(C.signal, C.signal + 0.15, tn) : 0;
+    const gi = figures.length, gFig = [h.a + JACKS.gunAside[0] * wd, sd * (fb + lerp(0.98, 0.62, gk) + JACKS.gunAside[1] * wd + 0.3 * standUp), inward, gPose, null, null];
     figures.push(gFig);
-    const gunOn = gk * (1 - ss(C.back[1] - 0.1, C.back[1] + 0.1, t));
+    const gunOn = gk * (1 - ss(C.back[1] - 0.1, C.back[1] + 0.1, tn));
     // (off the hub the gun is in front of him – at his waist crouched, lower kneeling, at his hips once he stands)
     const gOut = lerp(0.98, 0.62, gk) + 0.3 * standUp, gOffH = standUp > 0 ? lerp(0.5, 0.86, standUp) : lerp(0.62, 0.5, gk);
-    const gun = { kind: "gun", a: h.a, b: sd * (fb + lerp(gOut - 0.5, 0.06, gunOn)), h: lerp(gOffH, hubH, gunOn), yaw: inward, flip: false, by: gi };
+    const gun = { kind: "gun", a: h.a + JACKS.gunAside[0] * wd, b: sd * (fb + lerp(gOut - 0.5, 0.06, gunOn) + JACKS.gunAside[2] * wd), h: lerp(gOffH, hubH, gunOn) + 0.06 * wd, yaw: inward, flip: false, by: gi };
     kits.push(gun); gFig[5] = gunGripsAB(gun, 1, 1 - sig);
     // the old wheel: off the car from `off`, pulled straight out, then carried back behind the gun (turned to face its
     // carrier, lifted to his hips)
     const reach = ss(C.off[0] - 0.15, C.off[0], t), pull = ss(C.off[0], C.off[1], t), away = ss(C.away[0], C.away[1], t);
     const oa = h.a - lerp(lerp(0.5, 0.3, reach), 1.05, away) - 0.2 * pull * (1 - away);
     const ob = sd * (fb + lerp(lerp(0.6, 0.3, reach), 1.2, away) + 0.35 * pull * (1 - away));
+    // (the wheel: straight out along the axle off the hub's spigot, then back to its carrier – behind the gunner)
     const oFace = inward + sd * 0.45;
     const oPose = t < C.off[0] - 0.15 ? "ready" : t < C.off[1] ? blendPose("ready", "reach", reach * (1 - ss(C.off[0] + 0.15, C.off[1], t))) : blendPose("reach", "carry", away);
     const oi = figures.length, oFig = [oa, ob, oFace, oPose, null, null];
@@ -163,11 +186,11 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
     if (t >= C.off[0]) {
       // from the hub out (still at its height), then held at the hips in front of its carrier
       const ha = oa + Math.cos(oFace) * CARRY.wheel[0], hb = ob + Math.sin(oFace) * CARRY.wheel[0];
-      const k = { kind: "old", axle: h.axle, a: lerp(h.a - 0.1 * pull, ha, away), b: lerp(h.b + sd * 0.5 * pull, hb, away), h: lerp(hubH, CARRY.wheel[1], away), yaw: oYaw * away, flip, by: oi };
+      const k = { kind: "old", axle: h.axle, a: lerp(h.a - 0.3 * ss(0.4, 1, pull), ha, away), b: lerp(h.b + sd * (0.24 * ss(0, 0.55, pull) + 0.2 * ss(0.4, 1, pull)), hb, away), h: lerp(hubH, CARRY.wheel[1], away), yaw: oYaw * away, flip, by: oi };
       kits.push(k); oFig[5] = wheelGrips(k, h.r, h.w, oa, ob, oFace);
     } else if (reach > 0) oFig[5] = wheelGrips({ a: h.a, b: h.b, h: hubH, yaw: 0, flip }, h.r, h.w, oa, ob, oFace, reach);   // (reaching for it on the car)
     // the new wheel: held ready ahead of the gun, onto the hub from `on`, fitted at its end; its carrier steps back
-    const fit = ss(C.on[0], C.on[1], t), back = ss(C.back[0], C.back[1], t), nFace = inward - sd * 0.4;
+    const fit = ss(C.on[0], C.on[1], t), back = ss(C.back[0], C.back[1], tn), nFace = inward - sd * 0.4;
     // (stepping back: ahead of the wheel, except on the fast lane's side – the car leaves that way – where it's behind)
     const na = h.a + lerp(lerp(0.65, 0.3, fit), sd === -left ? -0.7 : 0.85, back), nb = sd * (fb + lerp(lerp(0.65, 0.4, fit), sd === -left ? 1.65 : 1.0, back));   // (and out past the old wheel's man)
     const ni = figures.length, nFig = [na, nb, nFace, back > 0 ? blendPose("reach", "stand", back) : blendPose("carry", "reach", fit), null, null];
@@ -180,24 +203,51 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
     } else if (back < 1) nFig[5] = wheelGrips({ a: h.a, b: h.b, h: hubH, yaw: 0, flip }, h.r, h.w, na, nb, nFace, 1 - back);   // (letting go of it on the car)
     off[i] = t >= C.off[0] && t < C.on[1];
   });
-  // the jacks: in at the nose and the tail, the levers pulled down as the car goes up, back up as it drops; the front
-  // one pulled out to the garages' side with its man as soon as it is down (the car leaves through where he stands)
-  const aside = ss(dropAt, dropAt + 0.35, s), kF = liftF / C.lift, kR = liftR / C.lift;
-  const fj = { kind: "jack", a: d.FZ + JACKS.front + 0.2 * aside, b: left * 1.9 * aside, h: 0, yaw: 0, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kF), by: figures.length };
-  kits.push(fj); figures.push([fj.a + JACKS.man, fj.b, Math.PI, blendPose("jack", "jackDown", kF), null, jackGripsAB(fj, Math.PI)]);
-  const rj = { kind: "jack", a: d.RZ - JACKS.rear, b: 0, h: 0, yaw: Math.PI, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kR), by: figures.length };
-  kits.push(rj); figures.push([rj.a - JACKS.man, 0, 0, blendPose("jack", "jackDown", kR), null, jackGripsAB(rj, 0)]);
-  // the front wing's ends, steadying at the sides (hands on the car while it is up), the release controller
-  const steady = (liftF + liftR) / (2 * C.lift);
-  // (as the jacks drop, the ones on the fast lane's side ahead of the car – a wing man, the release controller – step
-  // back beside it: the car turns out through where they stood)
-  const wing = (sd) => (sd === -left ? [2.75 - 2.2 * aside, sd * (1.25 + 0.45 * aside)] : [2.75, sd * 1.25]);
-  figures.push([...wing(1), Math.PI * 0.85, "ready", null, null], [...wing(-1), -Math.PI * 0.85, "ready", null, null]);
+  // The front jack (formula1.com, "Anatomy of a pit stop", 2 Mar 2025 – 2024–25 cars): the nose meets it just before
+  // the car stands, the car is up by ~0.3 s; at ~0.8 s its man "engages the swivel and steps aside" – the car still up,
+  // the head still under the nose, the handle swung round it – and by ~1.6 s he is clear, ready to press the release; the
+  // car drops "while the jack is still swinging" and drives off over and past it. Which way he swings isn't said: here
+  // to the garages' side (away from the car's way out – an estimate, L), JACKS.swivel round (60–90° in photos, L); once
+  // it has dropped he pulls the jack out further that way.
+  const kF = liftF / C.lift, kR = liftR / C.lift, sw = ss(C.swivel[0], C.swivel[1], w), clear = ss(dropAt, dropAt + 0.35, s);
+  const psi = left * JACKS.swivel * sw, fa = d.FZ + (d.JF ?? JACKS.front) + 0.25 * clear, fbb = left * JACKS.clear * clear;
+  const fj = { kind: "jack", a: fa, b: fbb, h: 0, yaw: psi, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kF), by: figures.length }, ff = psi + Math.PI;
+  let fPose = blendPose("jack", "jackDown", kF);
+  if (sw > 0.001 && sw < 0.999) fPose = shuffle(fPose, 0, left, JACKS.man * JACKS.swivel * sw, JACKS.man * JACKS.swivel);   // (round the jack: to his right with the garages on the car's left)
+  else if (clear > 0.001 && clear < 0.999) fPose = shuffle(fPose, left * Math.sin(ff), -left * Math.cos(ff), JACKS.clear * clear, JACKS.clear);
+  kits.push(fj); figures.push([fa + Math.cos(psi) * JACKS.man, fbb + Math.sin(psi) * JACKS.man, ff, fPose, null, jackGripsAB(fj, ff)]);
+  // The rear jack (same source; Red Bull's sporting director, redbullracing.com 2021: it "has to wait until the car has
+  // come past to engage it"): waiting beside the box, out of the car's way, moving in once the car has passed – just
+  // before it stands – and lifting at ~0.4 s. Worked from behind the car and to one side, its handle at roughly 45° (the
+  // stop photos and McLaren's 2023 record-stop video, formula1.com; M) – here the garages' side (L).
+  const rIn = ss(C.rearIn[0], C.rearIn[1], w), rOut = 1 - rIn, ry = Math.PI - left * JACKS.rearAngle, rf = ry + Math.PI;
+  const rDa = JACKS.rearWait[0], rDb = -left * JACKS.rearWait[1];   // (the way in: from the wait to the place behind the car)
+  const ra = d.RZ - (d.JR ?? JACKS.rear) - rDa * rOut, rb = -rDb * rOut;
+  const rj = { kind: "jack", a: ra, b: rb, h: 0, yaw: ry, tilt: lerp(JACKS.tiltUp, JACKS.tiltDown, kR), by: figures.length };
+  let rPose = blendPose("jack", "jackDown", kR);
+  if (rIn > 0.001 && rIn < 0.999) { const L = Math.hypot(rDa, rDb); rPose = shuffle("jack", rDa * Math.cos(rf) + rDb * Math.sin(rf), rDa * Math.sin(rf) - rDb * Math.cos(rf), L * rIn, L); }
+  kits.push(rj); figures.push([ra + Math.cos(ry) * JACKS.man, rb + Math.sin(ry) * JACKS.man, rf, rPose, null, jackGripsAB(rj, rf)]);
+  // The front wing's adjusters (still at modern stops: two "wing-winders" with pre-set torque drivers – formula1.com
+  // 2025; Haas 2026, motorsport.com) beside the wing's ends, out of the swinging jack's way; as the car drops the one on
+  // the fast lane's side steps back and out beside the front wheel (the car turns out through where he stood).
+  const wing = (sd) => (sd === -left ? [d.FZ + 0.75 - 0.45 * clear, sd * (1.3 + 1.05 * clear)] : [d.FZ + 0.75, sd * 1.3]);
+  const wingPose = (sd) => (sd === -left && clear > 0.001 && clear < 0.999 ? shuffle("ready", -0.45 * Math.cos(sd * Math.PI * 0.85) + sd * 1.05 * Math.sin(sd * Math.PI * 0.85), -0.45 * Math.sin(sd * Math.PI * 0.85) - sd * 1.05 * Math.cos(sd * Math.PI * 0.85), 1.14 * clear, 1.14) : "ready");
+  figures.push([...wing(1), Math.PI * 0.85, wingPose(1), null, null], [...wing(-1), -Math.PI * 0.85, wingPose(-1), null, null]);
+  // the stabilisers: one each side, hands on the sidepod's top by the cockpit from just before the car stands until it
+  // drops (formula1.com 2025; they also wipe the visor and mirrors – not drawn)
+  const steady = ss(-0.1, 0.1, w) * (1 - down);
   for (const sd of [1, -1]) {
-    const f = -sd * Math.PI / 2, [h0, h1] = byRight(f, [0.32, sd * 0.5], [-0.02, sd * 0.52]), sw = ss(0, 0.6, steady);
-    figures.push([0.15, sd * 1.35, f, blendPose("ready", "reach", steady * 0.6), null, sw > 0 ? [[h0[0], h0[1], 0.66, sw, 1, 0, 0], [h1[0], h1[1], 0.64, sw, 1, 0, 0]] : null]);
+    const f = -sd * Math.PI / 2, [h0, h1] = byRight(f, [0.32, sd * 0.5], [-0.02, sd * 0.52]), sw2 = ss(0, 0.6, steady);
+    figures.push([0.15, sd * 1.35, f, blendPose("ready", "reach", steady * 0.6), null, sw2 > 0 ? [[h0[0], h0[1], 0.66, sw2, 1, 0, 0], [h1[0], h1[1], 0.64, sw2, 1, 0, 0]] : null]);
   }
-  figures.push([3.6 - 3.0 * aside, -left * (2.15 + 0.15 * aside), left > 0 ? Math.PI * 0.75 : -Math.PI * 0.75, s >= dropAt ? "signal" : "stand", null, null]);
+  // the release: a light on the gantry, worked by the chief mechanic (formula1.com 2025: the lollipop long replaced by the light) – he
+  // stands at the box's front corner looking up the lane (where: L), stepping back beside the car as it drops
+  figures.push([3.6 - 3.0 * clear, -left * (2.15 + 0.15 * clear), left > 0 ? Math.PI * 0.75 : -Math.PI * 0.75, "stand", null, null]);
+  // the spare rear jack (Mercedes, "up to 22", 2023; formula1.com 2025: the back-up rear jack beside the car with its jack
+  // upright on its wheels): standing by behind the rear wheel – on the fast lane's side here (formula1.com says the car's
+  // right; the garages' side is the working rear jack's way in; L)
+  const sa = d.RZ - 2.0, sb = -left * 1.75, sf = left * Math.PI / 2, sj = { kind: "jack", a: sa + Math.cos(sf) * 0.52, b: sb + Math.sin(sf) * 0.52, h: 0, yaw: sf + Math.PI, tilt: JACKS.upright, by: figures.length };
+  kits.push(sj); figures.push([sa, sb, sf, "stand", null, jackGripsAB(sj, sf)]);
   return { figures, kits, car: { lift: [liftF, liftR], off } };
 }
 // (a wheel's turn either way round – the one nearer its turn on the car)
@@ -250,16 +300,59 @@ export function changeWalk(phase, f, d, boxC, left = 1, C = CHANGE) {
 // spread (out to the side), elbow bend]. Index 0: the leg / arm on the figure's +z side. Optional: seat (the hips'
 // height, sitting) with feet [x, x] (the ankles' distance ahead, the soles at footY – the floor or a footrest), head
 // (the head's pitch).
+// Or planted (the crews' working poses): plant = { hip (the hip joints' height), ankle: [[x, y] × 2] (each ankle's place
+// under the hips: ahead, above the ground), foot: [pitch × 2] } – the legs reached to their ankles, so a pose says where
+// the feet and knees touch the ground and they stay there through a blend (v0.39 posed the working figures by angles
+// alone, the lowest point put on the ground: the kneeling gunner knelt 22 cm above it on one toe, the jack men's
+// front feet were 9–12 cm up). Written with stance() from where the soles and knees go.
+const FOOT_ROM = [-1.05, 0.44];   // the foot's pitch from flat, relative to the shin's angle (ankle ~65°–150° to the shin)
+const _sa = [0, 0, 0], _sb = [0, 0, 0];
+// a sole's lowest point (toe or heel) for an ankle at height ay with the foot at pitch p
+const soleLow = (ay, p) => Math.min(ay + BODY.footFront * Math.sin(p) - BODY.ankle * Math.cos(p), ay - BODY.footBack * Math.sin(p) - BODY.ankle * Math.cos(p));
+// the foot's pitch: as wanted, within the ankle's range for the shin from knee k to ankle a
+const footPitch = (k, a, want) => { const shA = Math.atan2(a[0] - k[0], -(a[1] - k[1])); return Math.max(shA + FOOT_ROM[0], Math.min(shA + FOOT_ROM[1], want)); };
+// a foot on the ground at x (the ankle's distance ahead of the hips) for hips at `hip`: the ankle's height that puts the
+// sole's lowest point on the ground with the foot as near the pitch wanted as the ankle allows (flat, or on its toes)
+function footOnGround(hip, x, want = 0) {
+  let ay = BODY.ankle, p = want;
+  for (let it = 0; it < 6; it++) {
+    reach2([0, hip, 0], [x, ay, 0], BODY.thigh, BODY.shank, [1, 0, 0], _sa, _sb);
+    p = footPitch(_sa, _sb, want); ay -= soleLow(ay, p);
+  }
+  return [x, ay, p];
+}
+// a knee on the ground at kx (ahead of the hips; its sphere touching), the shin back along the ground and the foot
+// stretched back on its toes' tip – how one kneels on a hard floor; the hips then at the thigh's length over the knee
+function kneeOnGround(kx) {
+  const ky = JOINT_R.knee, hip = ky + Math.sqrt(BODY.thigh ** 2 - kx * kx);
+  // (the shin's rise from the knee: the least that brings the toe's tip down to the ground, the foot pointed)
+  let lo = -0.2, hi = 0.8, a = 0, p = 0;
+  for (let it = 0; it < 30; it++) {
+    a = (lo + hi) / 2; const ax = kx - Math.cos(a) * BODY.shank, ay = ky + Math.sin(a) * BODY.shank; p = footPitch([kx, ky], [ax, ay], -3);
+    if (soleLow(ay, p) > 0) hi = a; else lo = a;
+  }
+  return { hip, leg: [kx - Math.cos(a) * BODY.shank, ky + Math.sin(a) * BODY.shank, p] };
+}
+// legs: per leg ["foot", x, pitch wanted] or ["knee", kx]; the hips' height from a kneeling leg, else `hip`
+export function stance(hip, legs, rest) {
+  const kn = legs.map((l) => (l[0] === "knee" ? kneeOnGround(l[1]) : null)), h = kn.find(Boolean)?.hip ?? hip;
+  const L = legs.map((l, i) => kn[i]?.leg || footOnGround(h, l[1], l[2] ?? 0));
+  return { ...rest, plant: { hip: h, ankle: L.map(([x, y]) => [x, y]), foot: L.map((l) => l[2]) } };
+}
 export const POSES = {
   stand: { th: [0.03, 0.03], sh: [-0.03, -0.03], lean: 0.03, arm: [[0.12, 0.1, 0.2], [0.12, 0.1, 0.2]] },
-  ready: { th: [0.95, 0.95], sh: [-0.75, -0.75], lean: 0.55, arm: [[0.9, 0.18, 0.5], [0.9, 0.18, 0.5]] },
-  reach: { th: [1.25, 0.8], sh: [-0.55, -1.05], lean: 0.95, arm: [[1.35, 0.25, 0.15], [1.35, 0.25, 0.15]] },
-  // (the gunner: down on the knee on the car's side away from the gun – both hands on it; F1 media photos 2024–25)
-  kneel: { th: [1.4, 0.15], sh: [0.05, -1.45], lean: 0.75, arm: [[1.3, 0.12, 0.35], [1.25, 0.14, 0.4]] },
-  signal: { th: [1.4, 0.15], sh: [0.05, -1.45], lean: 0.35, arm: [[1.3, 0.12, 0.35], [2.95, 0.15, 0.1]] },
-  carry: { th: [0.3, 0.3], sh: [-0.25, -0.25], lean: 0.3, arm: [[0.6, 0.3, 0.9], [0.6, 0.3, 0.9]] },
-  jack: { th: [0.6, 0.0], sh: [-0.4, -0.3], lean: 0.7, arm: [[1.0, 0.16, 0.3], [1.0, 0.16, 0.3]] },
-  jackDown: { th: [1.25, 0.5], sh: [-0.75, -1.3], lean: 0.62, arm: [[1.3, 0.16, 0.1], [1.3, 0.16, 0.1]] },
+  // (waiting crouched, on the balls of the feet – the ankle's range lifts the heels in so deep a crouch)
+  ready: stance(0.7, [["foot", 0.1], ["foot", 0.04]], { lean: 0.55, arm: [[0.9, 0.18, 0.5], [0.9, 0.18, 0.5]] }),
+  // (a lunge towards the wheel: the near foot ahead flat, the other back on its toes)
+  reach: stance(0.7, [["foot", 0.42], ["foot", -0.3, -0.6]], { lean: 0.95, arm: [[1.35, 0.25, 0.15], [1.35, 0.25, 0.15]] }),
+  // (the gunner: down on one knee – on the ground – the other foot flat ahead, both hands on the gun; F1 media photos
+  // 2024–25)
+  kneel: stance(0, [["foot", 0.42], ["knee", 0.1]], { lean: 0.75, arm: [[1.3, 0.12, 0.35], [1.25, 0.14, 0.4]] }),
+  signal: stance(0, [["foot", 0.42], ["knee", 0.1]], { lean: 0.35, arm: [[1.3, 0.12, 0.35], [2.95, 0.15, 0.1]] }),
+  carry: stance(0.86, [["foot", 0.08], ["foot", -0.02]], { lean: 0.3, arm: [[0.6, 0.3, 0.9], [0.6, 0.3, 0.9]] }),
+  // (the jack men: braced, a foot ahead, pulling the lever down to the deep lunge as the car goes up)
+  jack: stance(0.88, [["foot", 0.3], ["foot", -0.22]], { lean: 0.7, arm: [[1.0, 0.16, 0.3], [1.0, 0.16, 0.3]] }),
+  jackDown: stance(0.66, [["foot", 0.42], ["foot", -0.42, -0.7]], { lean: 0.62, arm: [[1.3, 0.16, 0.1], [1.3, 0.16, 0.1]] }),
 };
 // A walk: the planted foot slides back under the hips at an even speed while the other swings ahead (the knee bending
 // it clear of the ground) – a step of WALK.step m each half cycle, so a figure that moves d metres is walkPhase(d)
@@ -286,18 +379,65 @@ export function walkPose(ph) {
   return { th, sh, lean: 0.08, arm: [[0.32 * sw, 0.1, 0.35], [-0.32 * sw, 0.1, 0.35]] };
 }
 POSES.walk = walkPose(0);
+// Short quick steps from a planted pose (a jack man swinging round his jack, the rear jack man swooping in behind the car):
+// the pose's feet stepping along the way he moves – (ux, uz) in his own frame (x ahead, z his right) –, d of the `total`
+// metres moved: each foot planted while the body passes over it, then lifted and put down ahead (SHUFFLE.step a step,
+// eased in and out over the first and last steps so the feet start and end where the pose has them). Estimated (M: the
+// crouched side-steps of the jack men in the stop photos and videos – formula1.com, 2024–25).
+export const SHUFFLE = { step: 0.34, side: 0.18, lift: 0.06 };
+export function shuffle(P, ux, uz, d, total) {
+  P = poseOf(P); const base = plantOf(P), st = SHUFFLE.step, ul = Math.hypot(ux, uz) || 1;
+  const e = Math.min(1, d / st, Math.max(0, total - d) / st);
+  // (mostly sideways: the leading foot steps out, then the other closes up to it – the feet never cross; each moves
+  // 2·side a cycle while the body moves side per half)
+  const lateral = Math.abs(uz) > 0.4 * ul, lead = uz > 0 ? 0 : 1, a = SHUFFLE.side;
+  const ankle = base.ankle.map(([x, y, z = 0], i) => {
+    let off, lift = 0;
+    if (lateral) {
+      const v = (((d / (2 * a)) % 1) + 1) % 1, mine = (i === lead) === (v < 0.5), w = (v % 0.5) * 2, sm = w * w * (3 - 2 * w);
+      // (relative to the hips: the moving foot from its place out by a – or in, the trailing one – the planted one back)
+      off = (i === lead ? 1 : -1) * a * (mine ? (i === lead ? sm : 1 - sm) : (i === lead ? 1 - w : w));
+      if (mine) lift = SHUFFLE.lift * Math.sin(Math.PI * w);
+    } else {
+      const v = (((d / (2 * st) + i * 0.5) % 1) + 1) % 1;
+      if (v < 0.5) off = (st / 2) * (1 - 4 * v);
+      else { const w = (v - 0.5) * 2, sm = w * w * (3 - 2 * w); off = -st / 2 + st * sm; lift = SHUFFLE.lift * Math.sin(Math.PI * w); }
+    }
+    return [x + (ux / ul) * off * e, y + lift * e, z + (uz / ul) * off * e];
+  });
+  // (the hips no higher than lets each leg reach its foot)
+  let hip = base.hip; for (const [x, y, z] of ankle) hip = Math.min(hip, y + Math.sqrt(Math.max(0, (BODY.thigh + BODY.shank - 0.012) ** 2 - x * x - z * z)));
+  return { ...P, plant: { hip, ankle, foot: base.foot } };
+}
 const poseOf = (p) => (typeof p === "string" ? POSES[p] || POSES.stand : p || POSES.stand);
 export function blendPose(a, b, k) {
   const A = poseOf(a), B = poseOf(b); k = clamp01(k);
   if (k <= 0) return A; if (k >= 1) return B;
-  const out = { th: [lerp(A.th[0], B.th[0], k), lerp(A.th[1], B.th[1], k)], sh: [lerp(A.sh[0], B.sh[0], k), lerp(A.sh[1], B.sh[1], k)], lean: lerp(A.lean, B.lean, k),
-    arm: [0, 1].map((i) => [0, 1, 2].map((j) => lerp(A.arm[i][j], B.arm[i][j], k))) };
-  if (A.seat != null && B.seat != null) { out.seat = lerp(A.seat, B.seat, k); out.footY = lerp(A.footY || 0, B.footY || 0, k); out.feet = [lerp(A.feet[0], B.feet[0], k), lerp(A.feet[1], B.feet[1], k)]; }
+  const out = { lean: lerp(A.lean, B.lean, k), arm: [0, 1].map((i) => [0, 1, 2].map((j) => lerp(A.arm[i][j], B.arm[i][j], k))) };
+  if (A.th && B.th) { out.th = [lerp(A.th[0], B.th[0], k), lerp(A.th[1], B.th[1], k)]; out.sh = [lerp(A.sh[0], B.sh[0], k), lerp(A.sh[1], B.sh[1], k)]; }
+  if (A.head != null || B.head != null) out.head = lerp(A.head ?? A.lean * 0.3, B.head ?? B.lean * 0.3, k);
+  if (A.seat != null && B.seat != null) { out.th = out.th || A.th; out.sh = out.sh || A.sh; out.seat = lerp(A.seat, B.seat, k); out.footY = lerp(A.footY || 0, B.footY || 0, k); out.feet = [lerp(A.feet[0], B.feet[0], k), lerp(A.feet[1], B.feet[1], k)]; }
+  // (a planted pose with another: both as planted – the ankles' places blended, so a foot on the ground in both stays on
+  // it, and a knee goes down to the ground in one even move)
+  else if (A.plant || B.plant) {
+    const a = plantOf(A), b = plantOf(B);
+    out.plant = { hip: lerp(a.hip, b.hip, k), ankle: [0, 1].map((i) => [lerp(a.ankle[i][0], b.ankle[i][0], k), lerp(a.ankle[i][1], b.ankle[i][1], k), lerp(a.ankle[i][2] || 0, b.ankle[i][2] || 0, k)]), foot: [0, 1].map((i) => lerp(a.foot[i], b.foot[i], k)) };
+  }
   return out;
+}
+// a pose's legs as planted (angles: where they put the ankles and feet, the lowest point on the ground)
+function plantOf(P) {
+  if (P.plant) return P.plant;
+  const kn = [], an = [], ft = []; let low = Infinity;
+  for (let i = 0; i < 2; i++) {
+    const kx = Math.sin(P.th[i]) * BODY.thigh, ky = -Math.cos(P.th[i]) * BODY.thigh, ax = kx + Math.sin(P.sh[i]) * BODY.shank, ay = ky - Math.cos(P.sh[i]) * BODY.shank;
+    const p = footPitch([kx, ky], [ax, ay], P.foot?.[i] ?? 0);
+    low = Math.min(low, soleLow(ay, p), ky - JOINT_R.knee); kn.push(ky); an.push([ax, ay]); ft.push(p);
+  }
+  return { hip: -low, ankle: an.map(([x, y]) => [x, y - low]), foot: ft };
 }
 // the limbs' lengths (constants: no pose stretches a bone)
 export const LIMB = { thigh: BODY.thigh, shin: BODY.shank, uarm: BODY.uarm, farm: BODY.farm, reach: BODY.farm + BODY.grip };
-const FOOT_ROM = [-1.05, 0.44];   // the foot's pitch from flat, relative to the shin's angle (ankle ~65°–150° to the shin)
 
 // The body's parts for a pose, in the person's frame (x forward, y up, z across), through
 //   put(part, x, y, z, yx, yy, yz, xx, xy, xz, s): the part's origin, its +y direction (a limb: from its near joint to
@@ -311,24 +451,30 @@ export function skeleton(P, put = null, hands = null) {
   const B = BODY, K = { knee: [], ankle: [], foot: [], shoulder: [], elbow: [], wrist: [], grip: [], short: [0, 0] };
   // legs: from each hip joint (at height 0 first), the knee and the ankle; the foot as flat as the ankle allows
   let low = Infinity, hip = 0;
-  const seated = P.seat != null && P.feet;
+  const seated = P.seat != null && P.feet, PL = !seated && P.plant;
   for (let i = 0; i < 2; i++) {
     const z = (i ? -1 : 1) * B.hipZ;
-    let kx, ky, ax, ay;
-    if (seated) {
+    let kx, ky, ax, ay, kz = 0, az = 0;
+    if (PL) {
+      // (relative to the hips, as the other ways: put at the plant's height below; a foot may be stepped out sideways –
+      // its third number, out from under its hip)
+      reach2([0, 0, 0], [PL.ankle[i][0], PL.ankle[i][1] - PL.hip, PL.ankle[i][2] || 0], B.thigh, B.shank, [1, 0, 0], _m, _e);
+      kx = _m[0]; ky = _m[1]; ax = _e[0]; ay = _e[1]; kz = _m[2]; az = _e[2];
+    } else if (seated) {
       reach2([0, 0, 0], [P.feet[i], (P.footY || 0) + B.ankle - P.seat, 0], B.thigh, B.shank, [1, 0.6, 0], _m, _e);
       kx = _m[0]; ky = _m[1]; ax = _e[0]; ay = _e[1];
     } else {
       kx = Math.sin(P.th[i]) * B.thigh; ky = -Math.cos(P.th[i]) * B.thigh;
       ax = kx + Math.sin(P.sh[i]) * B.shank; ay = ky - Math.cos(P.sh[i]) * B.shank;
     }
-    const shA = Math.atan2(ax - kx, -(ay - ky)), p = Math.max(shA + FOOT_ROM[0], Math.min(shA + FOOT_ROM[1], P.foot?.[i] ?? 0));
+    const p = footPitch([kx, ky], [ax, ay], PL ? PL.foot[i] : P.foot?.[i] ?? 0);
     const c = Math.cos(p), s = Math.sin(p);
     const toeY = ay + B.footFront * s - B.ankle * c, heelY = ay - B.footBack * s - B.ankle * c;
     low = Math.min(low, toeY, heelY, ky - JOINT_R.knee);
-    K.knee.push([kx, ky, z]); K.ankle.push([ax, ay, z]); K.foot.push(p);
+    K.knee.push([kx, ky, z + kz]); K.ankle.push([ax, ay, z + az]); K.foot.push(p);
   }
-  hip = seated ? P.seat : -low;
+  // (planted: at the plant's height – lifted only if a blend would push a sole or knee into the ground)
+  hip = seated ? P.seat : PL ? Math.max(PL.hip, -low) : -low;
   for (let i = 0; i < 2; i++) { K.knee[i][1] += hip; K.ankle[i][1] += hip; }
   K.hip = hip; K.ground = seated ? null : 0;
   // trunk: the pelvis tips a third of the lean, the chest the whole lean; the head stays nearer upright (eyes ahead).
@@ -355,11 +501,11 @@ export function skeleton(P, put = null, hands = null) {
   for (const part of ["head", "visor", "hair"]) Q(part, hcx, hcy, 0, hx, hy, 0, hy, -hx, 0, null);
   // legs drawn: thigh from the hip joint, shin from the knee, the knee's sphere, the shoe from the ankle
   for (let i = 0; i < 2; i++) {
-    const z = (i ? -1 : 1) * B.hipZ, [kx, ky] = K.knee[i], [ax, ay] = K.ankle[i], p = K.foot[i];
-    Q("thigh", 0, hip, z, kx / B.thigh, (ky - hip) / B.thigh, 0, null, null, null, null);
-    Q("knee", kx, ky, z, 0, 1, 0, null, null, null, JOINT_R.knee);
-    Q("shin", kx, ky, z, (ax - kx) / B.shank, (ay - ky) / B.shank, 0, null, null, null, null);
-    Q("boot", ax, ay, z, -Math.sin(p), Math.cos(p), 0, Math.cos(p), Math.sin(p), 0, null);
+    const z = (i ? -1 : 1) * B.hipZ, [kx, ky, kz] = K.knee[i], [ax, ay, az] = K.ankle[i], p = K.foot[i];
+    Q("thigh", 0, hip, z, kx / B.thigh, (ky - hip) / B.thigh, (kz - z) / B.thigh, null, null, null, null);
+    Q("knee", kx, ky, kz, 0, 1, 0, null, null, null, JOINT_R.knee);
+    Q("shin", kx, ky, kz, (ax - kx) / B.shank, (ay - ky) / B.shank, (az - kz) / B.shank, null, null, null, null);
+    Q("boot", ax, ay, az, -Math.sin(p), Math.cos(p), 0, Math.cos(p), Math.sin(p), 0, null);
   }
   // arms: the pose's angles, or a reach to what the hand holds (the elbow bent down and out)
   const out = [];
@@ -385,7 +531,8 @@ export function skeleton(P, put = null, hands = null) {
     // arm's knuckles face forward)
     let gx = h?.[4] ?? 0, gy = h?.[5] ?? 0, gz = h?.[6] ?? (fx > 0.6 ? side : 0);
     if (h?.[4] == null && !(fx > 0.6)) gx = 1;
-    Q("glove", W[0], W[1], W[2], fx, fy, fz, gx, gy, gz, null);
+    // (body3d's fist is a left hand: the right one – index 0, the +z side – is its mirror image, a part of its own)
+    Q(i ? "glove" : "gloveR", W[0], W[1], W[2], fx, fy, fz, gx, gy, gz, null);
     K.shoulder.push(S); K.elbow.push(E); K.wrist.push(W); K.grip.push(G);
     out.push(G);
   }
@@ -407,14 +554,50 @@ export const flagPose = (w, still = false) => (still ? { th: [0.03, 0.03], sh: [
 function partGeometries() {
   const ring = new THREE.CylinderGeometry(0.15, 0.15, 0.05, 16, 1, true).scale(0.72, 1, 1.02);
   return {
-    pelvis: [pelvisGeometry(), true, false, 1], chest: [chestGeometry(), true, false, 1], belt: [ring, false, true, 1],
+    pelvis: [pelvisGeometry(), true, false, 1], chest: [yokedChest(), true, false, 1], belt: [ring, false, true, 1],
     neck: [limbGeometry(0.13, 0.058, 0.054, 0, 0.5, 1, 10, 2), false, false, 1],
     head: [helmetGeometry(), true, false, 1], visor: [visorGeometry(), false, true, 1],
+    // (marshals and officials: no helmet – orange overalls, gloves, a hat; Motorsport UK 2025, F1 Singapore 2025 – a bare
+    // face and a cap in the overalls' colour)
+    face: [headGeometry(), "skin", false, 1], cap: [capGeometry(), true, false, 1], brows: [browsGeometry(), false, true, 1],
     thigh: [LIMB_GEO.thigh(), true, false, 2], shin: [LIMB_GEO.shin(), true, false, 2], uarm: [LIMB_GEO.uarm(), true, false, 2], farm: [LIMB_GEO.farm(), true, false, 2],
-    joint: [new THREE.SphereGeometry(1, 8, 6), true, true, 6], boot: [shoeGeometry(), false, true, 2],
-    gloveFine: [fistGeometry(true), false, true, 2], gloveMid: [fistGeometry(false), false, true, 2],
+    joint: [new THREE.SphereGeometry(1, 12, 8), true, true, 6], boot: [shoeGeometry(), false, true, 2],
+    gloveFine: [fistGeometry(true), false, true, 1], gloveMid: [fistGeometry(false), false, true, 1],
+    gloveFineR: [mirrorX(fistGeometry(true)), false, true, 1], gloveMidR: [mirrorX(fistGeometry(false)), false, true, 1],
     farBody: [farBodyGeometry(), true, false, 1],
   };
+}
+// The chest with the shoulders' line across its top: a rounded bar from one shoulder joint to the other (the trapezius
+// and the overalls' shoulder seams) – v0.39's narrow chest top left the shoulder spheres standing out like a doll's
+function yokedChest() {
+  const bar = new THREE.CapsuleGeometry(0.058, 2 * BODY.shoulderZ, 4, 12).rotateX(Math.PI / 2).scale(0.85, 0.9, 1).translate(-0.016, BODY.chestShoulder + 0.004, 0);
+  const trap = new THREE.CapsuleGeometry(0.05, 2 * BODY.shoulderZ - 0.12, 4, 10).rotateX(Math.PI / 2).scale(0.9, 0.8, 1).translate(-0.02, BODY.chestShoulder + 0.04, 0);
+  return mergeSimple([chestGeometry(), bar, trap]);
+}
+// Brows and eyes on a bare head (about its centre, facing +x): two dark strokes over two dark dots – enough for a face to
+// read as one at a few metres
+export function browsGeometry() {
+  const parts = [];
+  for (const sd of [1, -1]) {
+    parts.push(new THREE.CapsuleGeometry(0.0045, 0.026, 2, 6).rotateX(Math.PI / 2).rotateY(sd * 0.25).translate(0.09, 0.03, sd * 0.032));
+    parts.push(new THREE.SphereGeometry(0.0075, 8, 6).scale(0.6, 0.8, 1).translate(0.091, 0.012, sd * 0.031));
+  }
+  return mergeSimple(parts);
+}
+// A cap: the crown over the head's top and a peak ahead (about the head's centre, facing +x)
+function capGeometry() {
+  const crown = new THREE.SphereGeometry(1, 14, 6, 0, Math.PI * 2, 0, 1.15).scale(0.104, 0.1, 0.086).translate(-0.004, 0.035, 0);
+  const peak = new THREE.CylinderGeometry(0.075, 0.075, 0.008, 14, 1, false, -Math.PI / 2, Math.PI).scale(1.1, 1, 1.05).rotateZ(-0.12).translate(0.07, 0.05, 0);
+  return mergeSimple([crown, peak]);
+}
+// A geometry's mirror image across x (a right hand from a left one): the positions and normals mirrored, each
+// triangle's winding turned back (an instance matrix with a negative determinant would leave three.js culling the
+// wrong faces – it decides that per mesh, not per instance)
+export function mirrorX(g) {
+  const p = g.attributes.position.array, n = g.attributes.normal.array;
+  for (let i = 0; i < p.length; i += 3) { p[i] = -p[i]; n[i] = -n[i]; }
+  for (let i = 0; i < p.length; i += 9) for (const a of [p, n]) for (let k = 0; k < 3; k++) { const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t; }
+  g.computeBoundingSphere(); return g;
 }
 // A whole figure standing, in one coarse geometry (~300 triangles): what stands for a person far away (CREW_LOD.body)
 function farBodyGeometry() {
@@ -512,19 +695,24 @@ function partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s) {
 export function crewMeshes(max = 120) {
   const S = shared(), group = new THREE.Group(); group.name = "crews";
   const mk = (geo, mat, n, coloured) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.visible = false; m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; if (coloured) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3); group.add(m); return m; };
-  const body = {}; for (const [k, [g, team, small, per]] of Object.entries(S.parts)) body[k] = { mesh: mk(g, team ? S.teamMat : k === "visor" ? S.visorMat : S.darkMat, max * per, team), team, small, cap: max * per };
+  const body = {}; for (const [k, [g, team, small, per]] of Object.entries(S.parts)) body[k] = { mesh: mk(g, team ? S.teamMat : k === "visor" ? S.visorMat : S.darkMat, max * per, !!team), team, small, cap: max * per };
+  for (const [k, b] of Object.entries(body)) b.mesh.name = k;
   const kit = { gun: mk(S.kit.gun, S.kitMat, max, false), jackBase: mk(S.kit.base, S.kitMat, 32, false), jackBar: mk(S.kit.bar, S.kitMat, 32, false) };
   const kitCap = { gun: max, jackBase: 32, jackBar: 32 };
   let wheel = null;   // { key, front, rear, frontBand, rearBand }
   const m4 = new THREE.Matrix4(), mp = new THREE.Matrix4(), mk4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
   const counts = {}, alias = { knee: "joint", elbow: "joint", shoulder: "joint" };
-  let lod = "mid", colour = col;
-  // a part at its place in the person's frame, into the world through the person's matrix (mp)
+  let lod = "mid", colour = col, bare = false;
+  const skin = new THREE.Color();
+  // a part at its place in the person's frame, into the world through the person's matrix (mp); a marshal's (bare) head
+  // a face and a cap, no helmet or visor
   const put = (part, x, y, z, yx, yy, yz, xx, xy, xz, s) => {
-    const k = part === "glove" ? (lod === "near" ? "gloveFine" : "gloveMid") : alias[part] || part, b = body[k];
+    if (bare && part === "visor") return;
+    const k = part === "glove" ? (lod === "near" ? "gloveFine" : "gloveMid") : part === "gloveR" ? (lod === "near" ? "gloveFineR" : "gloveMidR") : bare && part === "head" ? "face" : bare && part === "hair" ? "cap" : alias[part] || part, b = body[k];
     if (!b || (lod === "far" && b.small) || counts[k] >= b.cap) return;
     partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
-    const i = counts[k]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, colour);
+    const i = counts[k]++; b.mesh.setMatrixAt(i, m4); if (b.team) b.mesh.setColorAt(i, b.team === "skin" ? skin : colour);
+    if (k === "face" && lod !== "far" && counts.brows < body.brows.cap) body.brows.mesh.setMatrixAt(counts.brows++, m4);   // (the same head's brows and eyes)
   };
   // a jack: its base where m4 says, the lever tilted up by tilt about its pivot
   const putJack = (tilt) => {
@@ -549,7 +737,7 @@ export function crewMeshes(max = 120) {
         if (people++ >= max) { people--; break; }
         const d = cam ? Math.hypot(f.x - cam.x, f.y - cam.y, f.z - cam.z) : CREW_LOD.near + 1;
         lod = d < CREW_LOD.near ? "near" : d > CREW_LOD.far ? "far" : "mid";
-        colour = col.set(f.colour || "#9aa0a6");
+        colour = col.set(f.colour || "#9aa0a6"); bare = f.role === "marshal"; if (bare) skin.set(SKIN[((f.seed ?? people) * 7) % SKIN.length]);
         q.setFromAxisAngle(up, f.yaw); p.set(f.x, f.y, f.z); mp.compose(p, q, one);
         if (d > CREW_LOD.body) { put("farBody", 0, 0, 0, 0, 1, 0, 1, 0, 0, null); continue; }
         // kit carried by the figure itself (walking out or standing ready, no stop played): held in front, the hands on it
@@ -634,6 +822,7 @@ export function kitAt(where, kits, bands = {}) {
 // soles on the footrest 0.31 m up, 0.16 m ahead; M)
 POSES.sit = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.12, arm: [[0.95, 0.12, 0.65], [0.9, 0.14, 0.7]], seat: 0.86, feet: [0.14, 0.11], footY: 0.312 };
 POSES.sitLean = { th: [1.45, 1.4], sh: [0.02, -0.06], lean: 0.3, arm: [[1.15, 0.1, 0.45], [1.1, 0.12, 0.5]], seat: 0.86, feet: [0.15, 0.1], footY: 0.312 };
+const SKIN = ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"];
 let PEOPLE = null;
 function peopleShared() {
   if (PEOPLE) return PEOPLE;
@@ -646,10 +835,10 @@ function peopleShared() {
   PEOPLE = {
     // part → [geometry, colour role: "shirt" | "legs" | "skin" | "hair" | "dark" | "kit", per person]
     parts: { thigh: [S.parts.thigh[0], "legs", 2], shin: [S.parts.shin[0], "legs", 2], boot: [S.parts.boot[0], "dark", 2],
-      pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], visor: [set, "kit", 1],
-      uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveMid[0], "skin", 2],   // (mittens: fingers on 67 seated people behind the consoles were ~240k triangles drawn from anywhere – v0.39 perf)
+      pelvis: [S.parts.pelvis[0], "legs", 1], chest: [S.parts.chest[0], "shirt", 1], neck: [S.parts.neck[0], "skin", 1], head: [headGeometry(), "skin", 1], hair: [hairGeometry(), "hair", 1], brows: [S.parts.brows[0], "dark", 1], visor: [set, "kit", 1],
+      uarm: [S.parts.uarm[0], "shirt", 2], farm: [S.parts.farm[0], "skin", 2], glove: [S.parts.gloveMid[0], "skin", 1], gloveR: [S.parts.gloveMidR[0], "skin", 1],   // (mittens: fingers on 67 seated people behind the consoles were ~240k triangles drawn from anywhere – v0.39 perf)
       shoulder: [S.parts.joint[0], "shirt", 2], elbow: [S.parts.joint[0], "skin", 2], knee: [S.parts.joint[0], "legs", 2] },
-    skin: ["#e9c3a3", "#d8a77f", "#b98260", "#8d5a3c", "#f1d2b6"], hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
+    skin: SKIN, hair: ["#2a2420", "#4a3626", "#151313", "#8a6b4a", "#6b6b6b"],
     mat: new THREE.MeshStandardMaterial({ roughness: 0.75 }), kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.3 }),
   };
   for (const [g] of Object.values(PEOPLE.parts)) g.userData.shared = true;
@@ -678,6 +867,7 @@ export function peopleMeshes(people) {
       const e = meshes[part]; if (!e) return;
       partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s);
       const i = counts[part]++; e.m.setMatrixAt(i, m4);
+      if (part === "head") { meshes.brows.m.setMatrixAt(counts.brows++, m4); meshes.brows.m.setColorAt(counts.brows - 1, cDark); }
       if (e.role !== "kit") e.m.setColorAt(i, e.role === "shirt" ? cShirt : e.role === "legs" ? cLegs : e.role === "skin" ? cSkin : e.role === "hair" ? cHair : cDark);
     }, f.hands || null);
   }
@@ -691,7 +881,7 @@ export function peopleMeshes(people) {
   // moves – hands and joints walked in from 120 m kept no shadow until then). Now the shadow pass and the view see the
   // same counts, and a change asks the caller to redraw the shadow map.
   const small = [];
-  for (const k of ["glove", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) { const m = meshes[k]?.m; if (m) small.push({ m, full: m.count }); }
+  for (const k of ["glove", "gloveR", "brows", "elbow", "shoulder", "knee", "hair", "visor", "neck", "boot"]) { const m = meshes[k]?.m; if (m) small.push({ m, full: m.count }); }
   const bs = group.children[0]?.boundingSphere;
   let near = true;
   group.userData.lod = (camPos) => {

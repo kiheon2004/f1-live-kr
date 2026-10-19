@@ -19,7 +19,7 @@ import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./mars
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
-import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
+import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights } from "./car3d.js";
@@ -440,6 +440,7 @@ function updateCrews(frame) {
       else if (ph.phase === "back" && me.lastBox?.t0 != null) { t0 = me.lastBox.t0; plan = pitPlanFor(ph.num, src, policy, { t0, t1: me.lastBox.t1, input: me.input }); }
       else if (ph.phase === "ready" && policy !== "observed") { t0 = policy === "record" ? nextStandPos(trk, A.t) : null; plan = t0 != null ? pitPlanFor(ph.num, src, policy, { t0, input: me.input }) : policy === "typical" ? { kind: "tyres", from: "typical", D: null, wait: 0, compound: null } : null; }
     }
+    if (plan && t0 != null) plan.seed = stopSeed(ph.num, t0);   // (the stop's own wheel-to-wheel differences: crew.js wheelTimes)
     if (plan?.kind === "tyres") {
       const car = cars.get(ph.num), dims = wheelParts(A.sessionYear?.() || null, team);
       world.crews.wheels(dims);
@@ -1826,7 +1827,7 @@ function updateMarshals(src, t) {
         const waving = sig && (m === 0 || sig === "double");
         const w = Math.sin(tsec * 2 * Math.PI * 1.4 + k + m * 0.7);
         const pose = waving ? flagPose(w) : flagPose(0, true);
-        const fig = { x, y, z, yaw, colour: "#ff6a13", pose }; figures.push(fig);
+        const fig = { x, y, z, yaw, colour: "#ff6a13", pose, role: "marshal", seed: k * 3 + m }; figures.push(fig);
         if (waving && dist < MARSHAL.flagFar) {
           const fk = k + ":" + m; used.add(fk);
           let f = MS.flags.get(fk); if (!f) { f = makeFlag("yellow"); MS.flags.set(fk, f); MS.group.add(f.group); }
@@ -2019,7 +2020,7 @@ function updateSupport(src, t) {
     // (walking off: the feet in step with the 2.5 m walked – walkPhase)
     const flagging = plan.official.phase === "flag", pose = flagging ? flagPose(wave) : walkPose(walkPhase(2.5 * plan.official.f));
     const { at: h, axis: ax } = flagHold(pose), c = Math.cos(yaw), sn2 = Math.sin(yaw);
-    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose, hands: flagging ? [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]] : null }], [], camera.position);
+    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose, role: "marshal", seed: 1, hands: flagging ? [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]] : null }], [], camera.position);
     const hx = x + h[0] * c + h[2] * sn2, hz = z - h[0] * sn2 + h[2] * c;
     SP.flag.group.visible = flagging;
     if (flagging) SP.flag.pose({ x: hx, y: y + h[1], z: hz }, { x: side.x, z: side.z }, tsec, 1, 0.3, { x: ax[0] * c + ax[2] * sn2, y: ax[1], z: -ax[0] * sn2 + ax[2] * c });
@@ -3818,6 +3819,12 @@ window.Map3D = {
   // development: the harbour's yachts as laid out (per zone: count, lengths)
   // development: the camera on a marshal post (its id) or a light panel ("P" + number) from the track a little before it –
   // returns the look() arguments used (to frame the same view in another build)
+  // development: face to face with post k's marshals (dist m in front of them, h up)
+  viewPost(k = 0, dist = 4, h = 1.6, fov = 40) {
+    const p = world?.marshals?.posts?.[k]; if (!p) return "no post";
+    const y = groundY(p.x, p.z), a = [p.x + p.face.x * dist, y + h, p.z + p.face.z * dist, p.x, y + 1.2, p.z, fov];
+    window.Map3D.look(...a); return p.id + " " + JSON.stringify(a.map((v) => +v.toFixed(2)));
+  },
   viewMarshal(id, back = 24, h = 4, fov = 45) {
     const M = world?.marshals; if (!M) return "no marshals";
     const p = /^P\d+$/.test(id) ? M.panels.find((q) => "P" + q.n === id) : M.posts.find((q) => q.id === id); if (!p) return "not drawn";
