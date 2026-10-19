@@ -3465,7 +3465,7 @@ window.Map3D = {
         }
         // (the distance behind the angle, frame by frame, against the telemetry's speed × the frame's session time –
         // no aliasing: above ~40 km/h a wheel turns more than half a turn a frame and the angle alone can't tell)
-        const deg = (x) => +(x * 180 / Math.PI).toFixed(1), seams = [], row = (j) => { const dt = (r[j][0] - r[j - 1][0]) / 1000, dd = r[j][6] != null && r[j - 1][6] != null ? r[j][6] - r[j - 1][6] : null, vd = r[j][7] != null && r[j - 1][7] != null ? ((r[j][7] + r[j - 1][7]) / 2 / 3.6) * dt : null; return [Math.round(r[j][0] - r[0][0]), deg(r[j][1]), dd == null ? null : +dd.toFixed(3), vd == null ? null : +vd.toFixed(3), r[j][3], r[j][5]]; };
+        const deg = (x) => +(x * 180 / Math.PI).toFixed(1), seams = [], row = (j) => { const dt = (r[j][0] - r[j - 1][0]) / 1000, dd = r[j][6] != null && r[j - 1][6] != null ? r[j][6] - r[j - 1][6] : null, vd = r[j][7] != null && r[j - 1][7] != null ? ((r[j][7] + r[j - 1][7]) / 2 / 3.6) * dt : null; return [Math.round(r[j][0] - r[0][0]), deg(r[j][1]), dd == null ? null : +dd.toFixed(3), vd == null ? null : +vd.toFixed(3), r[j][3], r[j][5], +(((r[j][2] + r[j - 1][2]) / 2) * dt).toFixed(3)]; };
         let distWorst = 0, distAt = null;
         for (let i = 1; i < r.length; i++) {
           const x = row(i); if (x[2] != null && x[3] != null && Math.abs(x[2] - x[3]) > distWorst) { distWorst = Math.abs(x[2] - x[3]); distAt = x; }
