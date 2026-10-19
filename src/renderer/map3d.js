@@ -1411,6 +1411,7 @@ function rollWheels(c, st, est, F, t, v) {
   const tw = !src?.isLive ? t : trk?.n ? Math.min(t - LIVE_LAG, Math.max(trk.t[trk.n - 1], t - LIVE_LAG - 4000)) : t - LIVE_LAG;
   const odo = tel || trk ? odometerAt(tel, tw, trk) : null;
   let fa, ra;
+  c.spinSrc = odo != null ? "odo" : "path"; c.spinD = odo;   // (development: recordSpin)
   if (odo != null) { fa = W.f.a = wrapAngle(odo / P.FR); ra = W.r.a = wrapAngle(odo / P.RR); W.f.t = W.r.t = t; }
   else { fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }); ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved }); }
   W.pos.copy(v); W.has = true; W.t = t;
@@ -3446,12 +3447,14 @@ window.Map3D = {
   // residual from a ±0.25 s fit, RMS, and the largest frame-to-frame jump), and the frame times.
   // development: the focused car's front wheel angle each frame for `secs` s of playing – the biggest turn in one frame
   // against what its speed allows (the angle must never jump where its path changes: track ↔ pit lane ↔ estimated)
-  recordSpin(secs = 10) {
+  // (v0.41: num – a car other than the focused one; the frames around each change of path or of the angle's source
+  // (seams: [ms from the first frame, angle °, turn this frame °, what its speed allows °, path, source]))
+  recordSpin(secs = 10, num = null) {
     return new Promise((done) => {
       const r = [], t0 = performance.now();
       devRec = () => {
-        const c = cars.get(app().focus || leader()); if (!c || !c.spinW) return;
-        r.push([app().t, c.spinW[0], c.speed, c.onTrack ? "track" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.est ? "est" : "other", c.model.userData.profile.FR]);
+        const c = cars.get(num || app().focus || leader()); if (!c || !c.spinW) return;
+        r.push([app().t, c.spinW[0], c.speed, c.onTrack ? "track" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.est ? "est" : "other", c.model.userData.profile.FR, c.spinSrc, c.spinD, app().src.carAt?.(c.num, app().t)?.speed ?? null]);
         if (performance.now() - t0 < secs * 1000) return;
         devRec = null;
         let worst = 0, at = null; const states = new Set();
@@ -3460,10 +3463,20 @@ window.Map3D = {
           const turn = Math.abs(Math.atan2(Math.sin(r[i][1] - r[i - 1][1]), Math.cos(r[i][1] - r[i - 1][1]))), allow = 1.3 * Math.max(r[i][2], r[i - 1][2]) * dts / r[i][4] + 0.02;   // (c.speed m/s; the telemetry may read a touch above the positions)
           if (turn - allow > worst) { worst = turn - allow; at = [r[i - 1], r[i]]; }
         }
-        done(JSON.stringify({ frames: r.length, states: [...states], t: [r[0]?.[0], r[r.length - 1]?.[0]], excessRad: +worst.toFixed(4), at }));
+        // (the distance behind the angle, frame by frame, against the telemetry's speed × the frame's session time –
+        // no aliasing: above ~40 km/h a wheel turns more than half a turn a frame and the angle alone can't tell)
+        const deg = (x) => +(x * 180 / Math.PI).toFixed(1), seams = [], row = (j) => { const dt = (r[j][0] - r[j - 1][0]) / 1000, dd = r[j][6] != null && r[j - 1][6] != null ? r[j][6] - r[j - 1][6] : null, vd = r[j][7] != null && r[j - 1][7] != null ? ((r[j][7] + r[j - 1][7]) / 2 / 3.6) * dt : null; return [Math.round(r[j][0] - r[0][0]), deg(r[j][1]), dd == null ? null : +dd.toFixed(3), vd == null ? null : +vd.toFixed(3), r[j][3], r[j][5]]; };
+        let distWorst = 0, distAt = null;
+        for (let i = 1; i < r.length; i++) {
+          const x = row(i); if (x[2] != null && x[3] != null && Math.abs(x[2] - x[3]) > distWorst) { distWorst = Math.abs(x[2] - x[3]); distAt = x; }
+          if (r[i][3] !== r[i - 1][3] || r[i][5] !== r[i - 1][5]) { const s = []; for (let j = Math.max(1, i - 4); j < Math.min(r.length, i + 5); j++) s.push(row(j)); seams.push(s); }
+        }
+        done(JSON.stringify({ frames: r.length, states: [...states], t: [r[0]?.[0], r[r.length - 1]?.[0]], excessRad: +worst.toFixed(4), at, distWorstM: +distWorst.toFixed(3), distAt, seams }));
       };
     });
   },
+  // development: a car's wheel angles now – [session ms, front °, rear °, distance m (null: the path rules), source]
+  spinOf(num) { const c = cars.get(num || app().focus || leader()); return c?.spinW ? JSON.stringify([app().t, +(c.spinW[0] * 180 / Math.PI).toFixed(3), +(c.spinW[1] * 180 / Math.PI).toFixed(3), c.spinD == null ? null : +c.spinD.toFixed(3), c.spinSrc]) : null; },
   recordLive(secs = 8) {
     return new Promise((done) => {
       const r = { t: [], dt: [], yaw: [], pitch: [], roll: [], y: [], side: [], steer: [], wheel: [], st: [] }, e = new THREE.Euler(), t0 = performance.now();
