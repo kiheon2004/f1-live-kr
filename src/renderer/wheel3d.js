@@ -1,5 +1,5 @@
 // The steering wheel up close (v0.40; v0.42 real layouts): built from a wheel spec – the team's where a source shows its
-// wheel (TEAM_WHEELS below, carshapes.js `wheel`, docs/research/wheels40.md, wheels42.md), else the era's neutral one – as
+// wheel (TEAM_WHEELS below, carshapes.js `wheel`; research ~/projects/f1kr-work/v040/research/wheels40.md and the v0.42 wheel report, reports/wheel.md), else the era's neutral one – as
 // the parts a first-person camera half a metre away sees: a thin carbon face plate (its top bar joined to the grips,
 // the centre body below the display, open hand holes between the two), rubber grips with finger grooves, the display
 // in its raised black pod with the shift lights and the FIA flag lights in it, buttons with coloured caps on dark

@@ -1272,7 +1272,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // (v0.42: the wheel's own carbon – its weave at the wheel's 3 mm tows (wheel3d.js UVs), a touch darker than the car's
   // and lacquered glossier: a moulded face plate with a sheen along its rounded edges (W16 photos, AMR26 replica), where
   // v0.41's car carbon read as a big grey weave on a matte slab)
-  const wheelCarbon = mat("wheelCarbon", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xbdbdbd, map: cm.colour, roughness: 0.32, metalness: 0 }), 0.45));
+  const wheelCarbon = mat("wheelCarbon", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xa0a0a0, map: cm.colour, roughness: 0.3, metalness: 0 }), 0.45));
   const bandMat = sidewallMaterial(0xf2c230, prof.era);
   const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
   const helmetMat = skyLit(new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 }));
