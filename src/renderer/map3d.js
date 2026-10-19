@@ -22,7 +22,7 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
@@ -1382,6 +1382,9 @@ function gridCar(c, num, v, ctx) {
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
+// development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
+let devSteer = null;
+const devSteerNow = () => -((typeof devSteer === "number" ? devSteer : devSteer.amp * Math.sin((2 * Math.PI * (performance.now() - devSteer.t0)) / (devSteer.period * 1000))) * Math.PI) / 180 / STEER_RATIO;
 // a car's shift lights now (shiftlights.js carLeds; its wheel's row in the viewer's chosen look); off without telemetry
 function lightLeds(c, num, t, src) {
   const u = c.model.userData, look = geoSettings().shiftLights === "fill" ? "fill" : "team";
@@ -1598,6 +1601,7 @@ function updateCars(dt) {
     const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;
     // (the wheels' and steering wheel's angle eased: the turning rate from 4 Hz positions twitched them frame to frame)
     c.steer = c.steer == null ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
+    if (devSteer != null && num === focusNum) c.steer = devSteerNow();
     setWheels(c.model, c.spinW, c.steer);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
@@ -4177,6 +4181,9 @@ window.Map3D = {
   },
   resetHitches() { perf.spikes = 0; perf.worst = 0; perf.frames = 0; },
   occlusionTest,
+  // development: hold the focused car's steering wheel at `deg` (+ = its left grip up – a right turn), or sweep it
+  // (period s, amplitude deg) – the arms' poses at any lock with the car standing still; null lets go
+  steerWheel(deg, period = 0) { devSteer = deg == null ? null : period ? { amp: deg, period, t0: performance.now() } : deg; return "ok"; },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {
     const c = cars.get(app().focus || leader()); if (!c) return "no car";
