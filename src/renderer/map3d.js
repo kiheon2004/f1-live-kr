@@ -26,7 +26,7 @@ import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEn
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
-import { WheelScreens, screenModel } from "./wheelscreen.js";
+import { WheelScreens, screenModel, screenUrgent } from "./wheelscreen.js";
 import { boardsFor, boardPlaces } from "./boards.js";
 import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nightlights.js";
 import { tunnelLight } from "./tunnel.js";
@@ -1386,7 +1386,8 @@ let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, 
 function lightLeds(c, num, t, src) {
   const u = c.model.userData, look = geoSettings().shiftLights === "fill" ? "fill" : "team";
   if (u.ledLook !== look) { u.ledProfile = profileForWheel(u.wheelSpec?.leds, look); u.ledLook = look; }
-  const tel = src?.car?.[num], st = tel && u.ledProfile ? carLeds(tel, t, u.ledProfile, u.profile.era) : null;
+  // (the gear and revs: src.carAt – the same reading the wheel's screen and the bottom bar show at this t)
+  const tel = src?.car?.[num], st = tel && u.ledProfile ? carLeds(tel, t, u.ledProfile, u.profile.era, src.carAt?.(num, t) || null) : null;
   setLeds(c.model, st ? st.colours : null);
   c.leds = st;
   // (the flag lights: race control's track state – yellow for a yellow / SC / VSC, red for a red flag; else off)
@@ -2099,7 +2100,8 @@ function updateWheelScreens(src, t) {
   for (const { num, tex } of have) { const c = cars.get(num); if (c) setWheelScreen(c.model, tex); }
   const lines = src?.state?.TimingData?.Lines || {}, laps = src?.state?.LapCount || null, season = app()?.sessionYear?.() || null;
   const status = src?.state?.TrackStatus?.Status ?? null;
-  wheelScreens.update((num) => screenModel({ car: src?.carAt?.(num, t) || null, line: lines[num] || null, laps, season, status }));
+  // (the gear and data loss at once, the rest ≤ 8 a second; the gear from src.carAt as the shift lights have it)
+  wheelScreens.update((num) => screenModel({ car: src?.carAt?.(num, t) || null, line: lines[num] || null, laps, season, status }), performance.now(), (num) => screenUrgent(src?.carAt?.(num, t) || null));
   // the teams' own pit wall panels: their two drivers, by team – the session's public data at the moment shown (each
   // repainted on change, at most twice a second: ~11 small canvases)
   if (pitTeams.group) {

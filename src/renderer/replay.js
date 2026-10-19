@@ -353,15 +353,34 @@
   }
   // Values at time t (speed and rpm interpolated); null when there's nothing within 3 s. drs: the DRS code, or null when
 // the feed doesn't send it (2026: no DRS – and no active-aero, overtake or energy channel in its place).
+  // Gear and revs: the ONE reading the wheel's shift lights (shiftlights.js carLeds), its screen (wheelscreen.js), the
+  // 3D view's bottom bar and the telemetry panel all take (v0.41). Before, the lights had their own sampler (revsAt:
+  // the next gear from half-way) and this held the earlier sample's gear with the revs blended – between 3rd/12,000 rpm
+  // (0 ms) and 4th/10,000 (250 ms), at 150 ms the lights showed 4th at 10,000 and the screen 3rd at 10,800 (a pair no
+  // sample has). The feed sends ~4 samples a second: WHEN the gear changed between two of them is not known (somewhere in
+  // those ~250 ms; a real shift takes tens of ms). Policy – the nearer sample: where two samples' gears differ (up, down,
+  // to or from neutral, to or from an invalid code), gear AND revs come together from the nearer of the two, switching
+  // half-way; the revs are blended only between samples in the same gear (a blend over a shift drained the lights over a
+  // quarter of a second, as no gearbox does); over a gap of more than GEAR_GAP ms nothing is blended or switched early –
+  // the earlier sample is held (until the 3 s below: then no data). Half-way keeps the error within half a sample
+  // interval either way (holding to the next sample: always late, by up to a whole one); it is a way of drawing the
+  // samples, not a measured shift time. Live, the next sample hasn't come yet: the last one is held.
+  const GEAR_GAP = 1000;
+  // (gear: 0 neutral … 8; anything else null – the 2026 feed counts the channel up 7 → 10 → … → 128 on a car that has
+  // stopped for good (Monza 2026: Leclerc, Bottas, standing at 0 km/h), which the wheel and the panels had shown as gear "128")
+  const gearOf = (g) => (g >= 0 && g <= 8 ? g : null);
   function carAt(c, t) {
     if (!c) return null;
     const i = sampleAt(c, t);
     if (i < 0 || t - c.t[i] > 3000) return null;
     const j = Math.min(i + 1, c.t.length - 1), f = c.t[j] > c.t[i] ? Math.min(1, (t - c.t[i]) / (c.t[j] - c.t[i])) : 0;
-    // (gear: 0 neutral … 8; anything else null – the 2026 feed counts the channel up 7 → 10 → … → 128 on a car that has
-    // stopped for good (Monza 2026: Leclerc, Bottas, standing at 0 km/h), which the wheel and the panels had shown as gear "128")
-    const g = c.gear[i];
-    return { speed: c.v[i] + (c.v[j] - c.v[i]) * f, rpm: c.rpm[i] + (c.rpm[j] - c.rpm[i]) * f, gear: g >= 0 && g <= 8 ? g : null, thr: c.thr[i], brk: c.brk[i], drs: c.drs[i] === 255 ? null : c.drs[i] };
+    let gear = gearOf(c.gear[i]), rpm = c.rpm[i];
+    if (j > i && c.t[j] - c.t[i] <= GEAR_GAP) {
+      const g1 = gearOf(c.gear[j]);
+      if (g1 === gear) rpm += (c.rpm[j] - rpm) * f;
+      else if (f >= 0.5) { gear = g1; rpm = c.rpm[j]; }
+    }
+    return { speed: c.v[i] + (c.v[j] - c.v[i]) * f, rpm, gear, thr: c.thr[i], brk: c.brk[i], drs: c.drs[i] === 255 ? null : c.drs[i] };
   }
   // Samples between t0 and t1 with distance (m) from t0, integrated from speed.
   function carTrace(c, t0, t1) {
@@ -954,6 +973,6 @@
   }
 
   const API = { Replay, LiveSource, CarTracks, SUPPORT_NUMS, isSupportNum, LapTracker, PitLog, StatusLog, TyreLog, merge, newMessages, applyMessages, resetMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
-    pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, carTrace, timeAtDistance, sampleAt };
+    pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, GEAR_GAP, carTrace, timeAtDistance, sampleAt };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -15,9 +15,12 @@
 // lit SF-25 launch photo and McLaren's 2017 description show)
 // (wheel profiles in car3d.js / carshapes.js: leds { count, colours, pattern, flash, src }).
 //
-// Timing: the feed's telemetry comes ~4 times a second. Between two samples the revs are interpolated, except over an
-// upshift (the next sample in a higher gear): the revs hold until half-way and then drop – a linear blend there had the
-// lights draining over a quarter of a second, as no real gearbox does (a shift takes tens of milliseconds).
+// Timing: the feed's telemetry comes ~4 times a second. The lights read the gear and revs at t from replay.js carAt –
+// the same reading the wheel's screen, the 3D view's bottom bar and the telemetry panel show (v0.41: until then the lights
+// had their own sampler here, revsAt, which took the next gear from half-way while the screen held the earlier one – the
+// two disagreed for up to a quarter of a second at every shift). Its policy (carAt's comment): over a gear change both
+// gear and revs from the nearer sample, switching half-way; revs blended only within a gear; no blend over a gap. When a
+// shift really happened between two samples is not known – the half-way switch is a drawing, not a measured time.
 export const SHIFT = {
   // the revs below the shift point where the first light comes on – no team's calibration is public (research
   // wheels40.md: no 2025–26 source describes a sequence); a design choice: the row filling over the last ~1,000 rpm
@@ -72,21 +75,6 @@ export function shiftPoint(car, gear, t, era = "2026") {
 }
 function median(a) { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
 
-// The revs and gear at t, as the lights see them: linear between samples, except over an upshift (held, then the drop
-// half-way) – null when there's no sample within 3 s (replay.js carAt's rule)
-export function revsAt(car, t) {
-  if (!car?.t?.length) return null;
-  const T = car.t; let lo = 0, hi = T.length - 1;
-  if (T[0] > t) return null;
-  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (T[m] <= t) lo = m; else hi = m - 1; }
-  if (t - T[lo] > 3000) return null;
-  const j = Math.min(lo + 1, T.length - 1), span = T[j] - T[lo];
-  if (j === lo || !(span > 0)) return { rpm: car.rpm[lo], gear: car.gear[lo] };
-  const f = Math.min(1, (t - T[lo]) / span);
-  if (car.gear[j] > car.gear[lo] && car.gear[lo] >= 1 && car.gear[j] <= 8) return f < 0.5 ? { rpm: car.rpm[lo], gear: car.gear[lo] } : { rpm: car.rpm[j], gear: car.gear[j] };
-  return { rpm: car.rpm[lo] + (car.rpm[j] - car.rpm[lo]) * f, gear: f < 0.5 ? car.gear[lo] : car.gear[j] };
-}
-
 // Light profiles: how a row lights up. count – lights in the row; colours – each light's colour when lit (left to
 // right); pattern – "left-right" (filling from the left), "ends-in" (from both ends to the middle); flash – the whole row
 // flashing at the shift point (true only where a source shows it; null: not known – not flashed); top – the colour the
@@ -120,10 +108,11 @@ export function ledState(profile, rpm, shiftRpm, t = 0, span = SHIFT.span) {
 // both ends towards the middle: 0, n−1, 1, n−2, …
 function endsIn(n) { const o = []; for (let a = 0, b = n - 1; a <= b; a++, b--) { o.push(a); if (b !== a) o.push(b); } return o; }
 
-// One car's lights now: car – its telemetry (replay.js src.car[num]); null when no data (all off – never the last
-// values as if current)
-export function carLeds(car, t, profile, era = "2026") {
-  const r = revsAt(car, t);
+// One car's lights now: car – its telemetry (replay.js src.car[num]: the upshifts the thresholds come from); now – its
+// reading at t (replay.js carAt(car, t): { gear, rpm } – the one the screen shows), null when no data (all off – never
+// the last values as if current)
+export function carLeds(car, t, profile, era = "2026", now = null) {
+  const r = car ? now : null;
   if (!r || !(r.gear >= 1 && r.gear <= 8)) return { ...ledState(profile, 0, 1), rpm: r?.rpm ?? null, gear: r?.gear ?? null, shift: null };
   const sp = shiftPoint(car, r.gear, t, era);
   return { ...ledState(profile, r.rpm, sp.rpm, t), rpm: r.rpm, gear: r.gear, shift: sp };

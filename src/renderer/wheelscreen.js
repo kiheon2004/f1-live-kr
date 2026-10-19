@@ -80,10 +80,18 @@ export function paintScreen(g, m, W = SCREEN.w, H = SCREEN.h) {
   g.setTransform?.(1, 0, 0, 1, 0, 0);
 }
 
+// What can't wait for the screen's next allowed repaint (pure; a number, no allocation – checked every frame): its gear,
+// or the data gone (−2) / an invalid gear (−1). v0.40 repainted every screen at most every 125 ms whatever changed: a
+// gear change reached the screen up to 125 ms after the shift lights (lit every frame) – one more 4 Hz sample's worth
+// of disagreement on top of the two samplers'. The revs, speed and the rest stay on the ~8-a-second limit.
+export function screenUrgent(car) { if (!car) return -2; const g = car.gear; return g == null || !Number.isFinite(g) || g < 0 || g > 8 ? -1 : g; }
+
 const NEUTRAL = screenModel({ car: null });
 // A pool of `size` screens for the cars drawn close up. assign(list): list of { num, model } nearest first; each keeps
-// its screen while it stays on the list. update(get): get(num) → model data (screenModel); repainted when changed, at
-// most every `every` ms. Its textures are its own (marked shared: a car's disposal never frees them); clear() frees.
+// its screen while it stays on the list. update(get, now, quick): get(num) → model data (screenModel); repainted when
+// changed, at most every `every` ms – except when quick(num) (screenUrgent: the gear, data lost) differs from what the
+// screen shows: then at once (a whole repaint of one small canvas, only on such a change – not every frame). A new owner
+// is painted at once too (assign). Its textures are its own (marked shared: a car's disposal never frees them); clear() frees.
 export class WheelScreens {
   constructor({ size = 4, every = 125, canvas = () => document.createElement("canvas") } = {}) {
     this.size = size; this.every = every; this.slots = []; this.mk = canvas;
@@ -92,7 +100,7 @@ export class WheelScreens {
   slot() {
     const cv = this.mk(); cv.width = SCREEN.w; cv.height = SCREEN.h;
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4; tex.userData.shared = true;
-    const s = { cv, tex, num: null, key: null, at: -Infinity, painted: null }; this.slots.push(s); return s;
+    const s = { cv, tex, num: null, key: null, q: null, at: -Infinity, painted: null }; this.slots.push(s); return s;
   }
   // which cars have a screen: the first `size` of the list; returns [{ num, tex }] for the caller to put on the wheels,
   // and the numbers that lost theirs
@@ -109,17 +117,19 @@ export class WheelScreens {
     }
     return { have: [...this.byNum].map(([num, s]) => ({ num, tex: s.tex })), lost };
   }
-  update(get, now = performance.now()) {
+  update(get, now = performance.now(), quick = null) {
     let painted = 0;
     for (const [num, s] of this.byNum) {
-      if (now - s.at < this.every) continue;
-      const m = get(num); if (!m || m.key === s.key) continue;
+      const q = quick ? quick(num) : null;
+      if (q === s.q && now - s.at < this.every) continue;
+      const m = get(num); if (!m) continue;
+      s.q = q; if (m.key === s.key) continue;
       paintScreen(s.cv.getContext("2d"), m, s.cv.width, s.cv.height); s.tex.needsUpdate = true; s.key = m.key; s.at = now; s.painted = num; painted++;
     }
     return painted;
   }
   // the neutral face on a screen, its rate limit cleared (the next update paints its owner straight away)
-  clean(s) { paintScreen(s.cv.getContext("2d"), NEUTRAL, s.cv.width, s.cv.height); s.tex.needsUpdate = true; s.key = null; s.at = -Infinity; s.painted = null; }
+  clean(s) { paintScreen(s.cv.getContext("2d"), NEUTRAL, s.cv.width, s.cv.height); s.tex.needsUpdate = true; s.key = null; s.q = null; s.at = -Infinity; s.painted = null; }
   // forget every assignment (a new session: no screen keeps another driver's face)
   reset() { for (const s of this.slots) { s.num = null; this.clean(s); } this.byNum.clear(); }
   clear() { for (const s of this.slots) s.tex.dispose(); this.slots = []; this.byNum.clear(); }
