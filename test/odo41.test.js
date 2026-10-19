@@ -161,3 +161,30 @@ test("standing with noisy positions (±0.2 m) and a jittering speed figure (0–
   assert.strictEqual(odometerAt(car, 19500, P.trk) - odometerAt(car, 2000, P.trk), 0);
   assert.strictEqual(trackDist(P.trk, 19500) - trackDist(P.trk, 2000), 0);
 });
+
+test("live reconnect: a 10 s outage then a fresh snapshot of the same session – the wheels go on from where the car is, no jump in or out", async () => {
+  const { odometerAt } = await W();
+  const L = new RK.LiveSource(), iso = (t) => new Date(Date.UTC(2026, 0, 1) + t).toISOString();
+  L.apply({ at: 0, snap: { SessionInfo: { Key: 9 } } });
+  const feed = (t) => {   // 40 m/s on a straight; one sample per message
+    L.applyOne(t, "CarData", { Entries: [{ Utc: iso(t), Cars: { 1: { Channels: { 2: 144 } } } }] });
+    L.applyOne(t + 30, "Position", { Position: [{ Timestamp: iso(t + 30), Entries: { 1: { X: (t + 30) * 0.4, Y: 1, Z: 0 } } }] });
+  };
+  // the wheels' distance against where the car is drawn (CarTracks.at, as the view does): the offset between the two
+  // must stay put through the outage and the reconnect – the wheels neither stop while the car moves nor make up a turn
+  let off = null, n = 0;
+  const p = [0, 0, 0];
+  for (let now = 0; now <= 60000; now += 1000 / 60) {
+    const t = Math.round(now);
+    if (t % 250 === 0 && (t < 20000 || t > 30000)) feed(t);
+    if (t === 30250) L.apply({ at: t, snap: { SessionInfo: { Key: 9 } } });   // reconnect: same session, its history kept
+    // drawn 0.6 s back, no later than the newest position (map3d rollWheels)
+    const trk = L.tracks.cars["1"]; if (!trk || now < 2000) continue;
+    const tw = Math.min(now - 600, Math.max(trk.t[trk.n - 1], now - 4600)), d = odometerAt(L.car["1"], tw, trk);
+    if (!L.tracks.at("1", now - 600, p)) continue;   // (not drawn: more than 4 s without positions)
+    const o = d - p[0] * 0.1; if (off == null) off = o;
+    assert.ok(Math.abs(o - off) < 0.6, `t ${t}: wheels ${d.toFixed(2)} m, car at ${(p[0] * 0.1).toFixed(2)} m – off by ${(o - off).toFixed(2)}`);
+    n++;
+  }
+  assert.ok(n > 2500);
+});
