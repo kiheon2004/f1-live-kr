@@ -189,14 +189,16 @@ test("shift lights: light 0 sits on the driver's left (the row fills left to rig
   car7.t.push(70000, 70250, 70500); car7.rpm.push(10300, 11000, 11450); car7.gear.push(7, 7, 7); car7.thr.push(100, 100, 100);
   const p = S.profileForWheel({ count: 15 }, "team");
   assert.strictEqual(S.shiftPoint(car7, 7, 70000).from, "gear"); assert.strictEqual(S.shiftPoint(car7, 7, 70000).rpm, 11400);
-  const a = S.carLeds(car7, 70250, p), b = S.carLeds(car7, 70500, p);
+  const K = require("../src/renderer/replay.js"), leds = (car, t) => S.carLeds(car, t, p, "2026", K.carAt({ v: car.t.map(() => 250), brk: car.t.map(() => 0), drs: car.t.map(() => 255), ...car }, t));
+  const a = leds(car7, 70250), b = leds(car7, 70500);
   assert.ok(a.lit >= 8 && a.lit < 15 && !a.at, `11,000 rpm: ${a.lit} lit`); assert.ok(b.at && b.lit === 15);
   // no telemetry: all off; the 2026 feed's 128 "gear" on a stopped car: all off
   assert.strictEqual(S.carLeds(null, 0, p).lit, 0);
-  assert.strictEqual(S.carLeds({ t: [0], rpm: [11500], gear: [128], thr: [0] }, 100, p).lit, 0);
-  // an upshift between two samples: held until half-way, then the drop (not a quarter-second drain)
-  const up = { t: [0, 250], rpm: [11500, 10100], gear: [6, 7], thr: [100, 100] };
-  assert.strictEqual(S.revsAt(up, 100).rpm, 11500); assert.strictEqual(S.revsAt(up, 150).rpm, 10100);
+  assert.strictEqual(leds({ t: [0], v: [0], rpm: [11500], gear: [128], thr: [0], brk: [0], drs: [255] }, 100).lit, 0);
+  // an upshift between two samples: held until half-way, then the drop (not a quarter-second drain) – v0.41: replay.js
+  // carAt's reading, the one the screen shows too
+  const up = { t: [0, 250], v: [280, 282], rpm: [11500, 10100], gear: [6, 7], thr: [100, 100], brk: [0, 0], drs: [255, 255] };
+  assert.strictEqual(K.carAt(up, 100).rpm, 11500); assert.strictEqual(K.carAt(up, 150).rpm, 10100);
   // the fill look: the right end red at the shift point
   const f = S.ledState(S.profileForWheel({ count: 15 }, "fill"), 12000, 11600);
   assert.strictEqual(f.colours[14], "#ff1e12");
