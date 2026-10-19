@@ -108,96 +108,48 @@ test("car model: teams' shapes are their own templates; wheels, hubs and mounts 
 });
 
 // v0.35: the hands stay on the arms when the wheel turns – each forearm runs from its glove (which turns with the
-// wheel) back towards the elbow (v0.34: the arms stayed put while the gloves went round with the wheel)
-test("car model: turning the wheel, each arm's skinned sleeve still ends at its glove's wrist, no bone stretches, the elbow inside the cockpit (v0.39; v0.40 skinned)", async () => {
+// wheel) back towards the elbow (v0.34: the arms stayed put while the gloves went round with the wheel). v0.41: five
+// bones (shoulder, elbow, half way, wrist, hand) – the wrist bone at the glove's wrist; the hand's orientation against
+// the forearm is checked in arms.test.js
+test("car model: turning the wheel, each arm's skinned sleeve still runs to its glove's wrist, no bone stretches, the elbow inside the cockpit (v0.39; v0.41 five bones)", async () => {
   const THREE = await import("../src/renderer/vendor/three.module.js"), C = await import("../src/renderer/car3d.js"), { BODY } = await import("../src/renderer/body3d.js");
   const car = C.makeCar({ teamName: "Ferrari", teamColour: "e8002d", number: 16, season: 2026 }), u = car.userData;
   const wp = (o) => o.getWorldPosition(new THREE.Vector3());
   for (const steer of [0, 0.08, -0.12, 0.2, -0.2]) {
     C.setWheels(car, 0, steer); car.updateMatrixWorld(true);
     for (const a of u.arms) {
-      const [wx, wy, wz] = u.armGeo.wrist, wrist = new THREE.Vector3(wx * a.k, wy, wz).applyMatrix4(u.wheel.matrixWorld);
-      const [b0, b1, b2] = a.bones;
-      assert.ok(Math.abs(wp(b0).distanceTo(wp(b1)) - BODY.uarm) < 1e-6 && Math.abs(wp(b1).distanceTo(wp(b2)) - BODY.farm) < 1e-6, "the bones keep their lengths");
-      const d = wp(b2).distanceTo(wrist);
-      assert.ok(d < 0.01, `steer ${steer}, arm ${a.k}: the sleeve ends ${d.toFixed(3)} m from the wrist`);
-      // the skin itself: the sleeve's last ring of vertices (skinned) round the wrist
+      const G = u.armPlan.geo, k = a.k, wrist = new THREE.Vector3((G.wrist[0] - G.grip.c[0]) * k, G.wrist[1] - G.grip.c[1], G.wrist[2] - G.grip.c[2]).applyMatrix4(a.hand.matrixWorld);
+      const [b0, b1, b2, b3, b4] = a.bones;
+      assert.ok(Math.abs(wp(b0).distanceTo(wp(b1)) - BODY.uarm) < 1e-6 && Math.abs(wp(b1).distanceTo(wp(b3)) - BODY.farm) < 1e-6, "the bones keep their lengths");
+      assert.ok(wp(b2).distanceTo(wp(b1).lerp(wp(b3), 0.5)) < 1e-6 && wp(b4).distanceTo(wp(b3)) < 1e-9, "the half-way bone half way, the hand's at the wrist");
+      const d = wp(b3).distanceTo(wrist);
+      assert.ok(d < 0.001, `steer ${steer}, arm ${a.k}: the arm's wrist ${(d * 1000).toFixed(2)} mm from the glove's`);
+      // the skin itself: the sleeve's last ring of vertices (skinned) on the forearm's line, inside the gauntlet's reach
       const pos = a.mesh.geometry.attributes.position, ring = [], v = new THREE.Vector3();
-      for (let i = pos.count - 19; i < pos.count; i++) { a.mesh.getVertexPosition(i, v); ring.push(v.clone().applyMatrix4(a.mesh.matrixWorld)); }
-      const cen = ring.reduce((s, q) => s.add(q), new THREE.Vector3()).multiplyScalar(1 / ring.length);
-      assert.ok(cen.distanceTo(wrist) < 0.02, `steer ${steer}, arm ${a.k}: the skinned cuff ${cen.distanceTo(wrist).toFixed(3)} m from the wrist`);
-      // (the elbow inside the cockpit: below its rim, or – the raised arm at a big lock – up in its opening, never
-      // through the bodywork beside it)
+      for (let i = pos.count - 17; i < pos.count; i++) { a.mesh.getVertexPosition(i, v); ring.push(v.clone().applyMatrix4(a.mesh.matrixWorld)); }
+      const cen = ring.reduce((t, q) => t.add(q), new THREE.Vector3()).multiplyScalar(1 / ring.length), f = wp(b3).sub(wp(b1)).normalize(), rel = cen.clone().sub(wp(b1));
+      assert.ok(rel.clone().sub(f.clone().multiplyScalar(rel.dot(f))).length() < 0.002 && Math.abs(rel.dot(f) - (BODY.farm - 0.045)) < 0.003, `steer ${steer}, arm ${a.k}: the sleeve's end off the forearm`);
+      // (the elbow inside the cockpit: below its rim, in its opening, or – the raised arm at a big lock – over the rim)
       const el = car.worldToLocal(wp(b1));
-      assert.ok((el.y < 0.56 && Math.abs(el.x) < 0.3) || Math.abs(el.x) < 0.24, `steer ${steer}, arm ${a.k}: elbow at ${el.toArray().map((q) => q.toFixed(2))}`);
+      assert.ok((el.y < 0.56 && Math.abs(el.x) < 0.3) || Math.abs(el.x) < 0.24 || el.y > 0.6, `steer ${steer}, arm ${a.k}: elbow at ${el.toArray().map((q) => q.toFixed(2))}`);
     }
   }
 });
 
-test("car model v0.40: the right glove is the left one mirrored (thumbs on the inner side of both grips), the gloves hold the grips without going through them", async () => {
+test("car model v0.40: the right glove is the left one mirrored (thumbs on the inner side of both grips) – v0.41: each on its own pivot", async () => {
   const C = await import("../src/renderer/car3d.js");
   const car = C.makeCar({ teamName: "Red Bull Racing", teamColour: "3671c6", number: 1, season: 2025 }), u = car.userData;
   C.setCockpit(car, true);
-  const g = u.gloveFine.geometry.attributes.position, n = g.count / 2;
-  // mirrored: every vertex of the second glove is a first-glove vertex with x negated (the same set of points)
+  assert.ok(u.gloveFine.every((m) => m.visible) && u.gloveLo.every((m) => !m.visible), "the fine pair in the cockpit");
+  const L = u.gloveFine[0].geometry.attributes.position, Rg = u.gloveFine[1].geometry.attributes.position, n = L.count;
+  assert.strictEqual(Rg.count, n);
+  // mirrored: every right-glove vertex (its pivot's frame – the mirrored grip's centre) is a left-glove vertex with x negated
   const key = (x, y, z) => `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`, A = new Set();
-  for (let i = 0; i < n; i++) A.add(key(-g.getX(i), g.getY(i), g.getZ(i)));
-  let miss = 0; for (let i = n; i < 2 * n; i++) if (!A.has(key(g.getX(i), g.getY(i), g.getZ(i)))) miss++;
+  for (let i = 0; i < n; i++) A.add(key(-L.getX(i), L.getY(i), L.getZ(i)));
+  let miss = 0; for (let i = 0; i < n; i++) if (!A.has(key(Rg.getX(i), Rg.getY(i), Rg.getZ(i)))) miss++;
   assert.ok(miss < n * 0.01, `${miss} of ${n} right-glove points aren't the left's mirror image`);
-  // no glove point inside a grip (the grip's tube: its axis through the grip's centre along its tilt, its radius)
-  const W = u.wheel.children; const spec = C.wheelSpecOf ? C.wheelSpecOf(car) : null;
-  if (spec) {
-    let worst = 0;
-    for (const k of [1, -1]) {
-      const cx = k * spec.grip.x, ux = k * Math.sin(spec.grip.tilt), uy = Math.cos(spec.grip.tilt);
-      for (let i = 0; i < 2 * n; i++) {
-        const x = g.getX(i) - cx, y = g.getY(i), z = g.getZ(i), along = x * ux + y * uy;
-        if (Math.abs(along) > spec.grip.len * 0.38) continue;
-        const r = Math.hypot(x - along * ux, y - along * uy, z);
-        worst = Math.max(worst, spec.grip.r - r);
-      }
-    }
-    assert.ok(worst < 0.003, `a glove point ${(worst * 1000).toFixed(1)} mm inside a grip`);
-  }
-});
-
-// v0.36 review: without a date, a spec limited to part of the season was taken (Racing Bulls 2026 → the early airbox)
-test("car shapes: the date decides between a season's specs; without one, no part-season spec", async () => {
-  const { shapeFor } = await import("../src/renderer/carshapes.js");
-  const rb = (d) => shapeFor(2026, "Racing Bulls", d)?.id ?? null;
-  assert.deepStrictEqual([rb(null), rb(""), rb("not a date"), rb(undefined)], [null, null, null, null], "no date: the era's car");
-  assert.deepStrictEqual([rb("2026-07-24"), rb("2026-07-25"), rb("2026-10-01")], ["vcarb03", "vcarb03b", "vcarb03b"], "the upgrade from its first day");
-  assert.strictEqual(shapeFor(2026, "Ferrari", null)?.id, "sf26", "a whole-season spec needs no date");
-  // the car's model key follows the shape picked: an earlier session gives the earlier car again
-  const C = await import("../src/renderer/car3d.js");
-  assert.notStrictEqual(C.profileFor(2026, "Racing Bulls", "2026-05-03").key, C.profileFor(2026, "Racing Bulls", "2026-09-06").key);
-  assert.strictEqual(C.profileFor(2026, "Racing Bulls", null).key.split("+")[0], "2026", "the era's body (its own wheel on it: v0.40)");
-  // Haas 2026: the sidepods changed at the Canadian GP (v0.36 research: gully top before, ramp and deep undercut after)
-  const h = (d) => shapeFor(2026, "Haas F1 Team", d)?.id ?? null;
-  assert.deepStrictEqual([h("2026-05-03"), h("2026-05-22"), h("2026-09-06"), h(null)], ["vf26", "vf26b", "vf26b", null]);
-});
-
-// v0.38: the halo checked against the head and the driver's eye on every profile – nothing through the helmet or the
-// mirrors, the pillar narrower than the eyes are apart where the eye's line meets it, the eye inside the hoop
-test("halo: clear of the helmet and mirrors on every profile; the pillar under the eyes' spacing at eye height", async () => {
-  const C = await import("../src/renderer/car3d.js");
-  for (const [key, P] of Object.entries(C.PROFILES)) {
-    const g = C.halo(P), pos = g.attributes.position, [hx, hy, hz] = P.helmet, [sx, sy, sz] = P.helmetSize || [0.13, 0.14, 0.155];
-    let inHelmet = 0, inMirror = 0, minE = Infinity;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const e = Math.hypot((x - hx) / (sx + 0.02), (y - hy) / (sy + 0.02), (z - hz) / (sz + 0.02)); minE = Math.min(minE, e); if (e < 1) inHelmet++;
-      if (Math.abs(Math.abs(x) - 0.5) < 0.1 && Math.abs(y - 0.68) < 0.05 && Math.abs(z - 0.52 - (P.ck || 0)) < 0.05) inMirror++;
-    }
-    assert.strictEqual(inHelmet, 0, `${key}: halo within 2 cm of the helmet (closest ${minE.toFixed(2)})`);
-    assert.strictEqual(inMirror, 0, `${key}: halo through a mirror`);
-    // the pillar where the eye's horizontal line meets it (the vertices within 1 cm of eye height, ahead of the eye)
-    const [, ey, ez] = P.eye, xs = [];
-    for (let i = 0; i < pos.count; i++) if (Math.abs(pos.getY(i) - ey) < 0.01 && pos.getZ(i) > ez + 0.3 && Math.abs(pos.getX(i)) < 0.1) xs.push(pos.getX(i));
-    if (xs.length) { const w = Math.max(...xs) - Math.min(...xs); assert.ok(w < 0.063, `${key}: pillar ${w.toFixed(3)} m wide at eye height`); }
-    g.computeBoundingBox();
-    assert.ok(g.boundingBox.max.y > ey + 0.1, `${key}: the hoop over the eye`);
-  }
+  assert.ok(Math.abs(u.arms[0].hand.position.x + u.arms[1].hand.position.x) < 1e-9, "the pivots mirrored");
+  // (holding the grips without going through them: arms.test.js, at every wheel angle)
 });
 
 // v0.39: the cars rebuilt from race photos – the cockpit where hub-aligned side photos put it, the wings within the

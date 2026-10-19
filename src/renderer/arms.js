@@ -1,0 +1,272 @@
+// The driver's arms on the steering wheel (v0.41): where each elbow and shoulder go, and how the forearm turns, for the
+// hand that holds its grip at any angle of the wheel – solved for the whole arm, not just for the wrist's place.
+//
+// v0.40 put the glove on its grip with the hand square to the grip's axis, then reached the arm to the glove's wrist
+// with a fixed elbow pole (down and out). Nothing tied the forearm's direction to the hand's: with the wheel straight the
+// forearm ran up along the grip (the elbow hung low) and the hand sat ~66° off it towards the little finger – past what a
+// wrist can do (ulnar deviation ~30°) – and turning the wheel bent the rising hand ~90° more. The sleeve ended at the
+// wrist's point, so every test of "the arm reaches the glove" passed while the wrist was broken.
+//
+// Now (all in the LEFT arm's frame – the car's: +x its left, +y up, +z its nose; the right arm is its mirror image at the
+// opposite wheel angle – the cockpit is symmetric):
+//  1. the hand holds its grip as a closed power grip does – the grip across the palm obliquely (body3d GLOVE.oblique), the
+//     thumb on the wheel's face, the fingers round its back – and stays where it is on the grip as the wheel turns (hands
+//     don't slide round a race car's grips);
+//  2. its arm: shoulder → elbow → wrist with the bones' fixed lengths; the elbow's place on the circle the two bones allow
+//     (the swivel), and how far the shoulder comes forward and up (a little: protraction / elevation), chosen per wheel
+//     angle to keep the wrist's bend (flexion/extension, radial/ulnar deviation) and the forearm's turn (pronation /
+//     supination) in a comfortable range, the elbow in the cockpit – and, angle to angle, changing smoothly;
+//  3. the hand's roll round the grip (where on the grip's circumference the palm sits) chosen once per wheel for the
+//     whole range, and the grip's small turn in the closed hand (±ROLL) as it goes round;
+//  4. the forearm's turn shared out along it (a twist bone half way) – pronation happens along the forearm (the radius
+//     round the ulna) – so the wrist itself only bends, and the glove's gauntlet (skinned to the forearm and the hand)
+//     bends over the wrist instead of a cuff sitting at an angle on the sleeve's end.
+// The plan is a table over the wheel's angle (every 2°) – the best smooth path over the whole turn (planArmsPath), baked
+// offline per cockpit geometry (armplans.js) – a pure function of the wheel's angle: the same angle gives the same arms
+// whatever came before (a seek, a pause, a camera change).
+//
+// Human reference ranges (not model rules; the model aims inside the "functional" ones; sources in v0.41
+// research/wrist.md):
+//  - wrist active range (AAOS): flexion 80°, extension 70° (H), radial deviation 20°, ulnar 30° (M); range used in daily
+//    tasks (Ryu et al. 1991): 60° extension, 54° flexion, 17° radial, 40° ulnar (H); Palmer et al. 1985: 5° flexion –
+//    30° extension, 10° radial – 15° ulnar (M); the power grip's wrist leans to extension and ulnar deviation (M).
+//  - forearm: pronation 78–82°, supination 85–88° (Zwerus et al. 2017, 352 adults; H); functional 50° each way (Morrey
+//    et al. 1981; M–H). Elbow flexion 143–148° (Zwerus; H).
+//  - the shoulder joint's forward / upward travel with the shoulder blade: a few cm (L – no good figure in cm).
+// The model's own quality limits (what this code aims at and the tests check) are WRIST_COMFORT / WRIST_LIMIT /
+// PRONATION below – choices for a picture that reads as natural, inside the human ranges, not measurements of a driver.
+import { BODY } from "./body3d.js";
+
+const D = Math.PI / 180;
+// the wrist's comfortable centre and how far it may go before the cost climbs steeply (deg; flex + = towards the palm,
+// rad + = towards the thumb's side)
+// (a closed hand on a handle leans to extension and to the little finger's side – the power grip's posture; with the
+// elbows low beside the driver's body the forearms rise to the grips, so the hands lean further that way than at a desk:
+// the limits below are the functional range's (Ryu 1991: 40° ulnar) – the model allows that much, no more)
+export const WRIST_COMFORT = { flex: -15, rad: -22, flexSpan: 26, radSpan: 14 };
+export const WRIST_LIMIT = { flex: [-62, 60], rad: [-40, 17] };
+export const PRONATION = { comfort: 0, span: 45, limit: [-75, 70] };   // (deg from neutral – thumb up; + = palm turning down)
+export const SHOULDER = { forward: 0.07, back: 0.02, up: 0.03, down: 0.02 };   // how far the shoulder joint may move (m)
+export const ROLL = 25 * D;   // how far the grip may turn in the closed hand either way (rad; an estimate – the glove's palm and fingers give)
+// the elbow's room in the cockpit (the car's frame, centre of the elbow; the sleeve there ~4.5 cm thick): beside the
+// rim's padded edge (~0.255 m to its inside) at the rim's height, more room in the tub below it; never into the torso
+export const ELBOW_ROOM = { rimY: 0.5, xRim: 0.235, xLow: 0.255, xBody: 0.12, yMin: 0.22, yHigh: 0.72, overY: [0.6, 0.66], xOver: 0.3 };
+// (above the padded rim – an elbow lifted at a big lock – it may go out over it: from overY[0] to overY[1] the room
+// widens to xOver)
+export function elbowRoom(y) { const R = ELBOW_ROOM; if (y < R.rimY) return R.xLow; if (y <= R.overY[0]) return R.xRim; const t = Math.min(1, (y - R.overY[0]) / (R.overY[1] - R.overY[0])); return R.xRim + (R.xOver - R.xRim) * t * t * (3 - 2 * t); }
+
+// ---------- small vector helpers (arrays; no per-call allocation in the per-frame path) ----------
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const sub = (a, b, o) => { o[0] = a[0] - b[0]; o[1] = a[1] - b[1]; o[2] = a[2] - b[2]; return o; };
+const len = (a) => Math.hypot(a[0], a[1], a[2]);
+const nrm = (a) => { const l = len(a) || 1; a[0] /= l; a[1] /= l; a[2] /= l; return a; };
+const cross = (a, b, o) => { const x = a[1] * b[2] - a[2] * b[1], y = a[2] * b[0] - a[0] * b[2], z = a[0] * b[1] - a[1] * b[0]; o[0] = x; o[1] = y; o[2] = z; return o; };
+const madd = (a, b, s, o) => { o[0] = a[0] + b[0] * s; o[1] = a[1] + b[1] * s; o[2] = a[2] + b[2] * s; return o; };
+// rotate v about the unit axis k by angle a (Rodrigues), into o
+function rotAbout(v, k, a, o) {
+  const c = Math.cos(a), s = Math.sin(a), d = dot(k, v), x = k[1] * v[2] - k[2] * v[1], y = k[2] * v[0] - k[0] * v[2], z = k[0] * v[1] - k[1] * v[0];
+  o[0] = v[0] * c + x * s + k[0] * d * (1 - c); o[1] = v[1] * c + y * s + k[1] * d * (1 - c); o[2] = v[2] * c + z * s + k[2] * d * (1 - c); return o;
+}
+
+// The wheel's frame in the car's: its centre `at`, tilted back by `tilt` about x, turned by `a` about its own z (the
+// column). Points / directions in the wheel's frame → the car's.
+export function wheelToCar(at, tilt, a, p, o, dir = false) {
+  const ca = Math.cos(a), sa = Math.sin(a), x = p[0] * ca - p[1] * sa, y = p[0] * sa + p[1] * ca, z = p[2];
+  const ct = Math.cos(tilt), st = Math.sin(tilt);
+  o[0] = x; o[1] = y * ct - z * st; o[2] = y * st + z * ct;
+  if (!dir) { o[0] += at[0]; o[1] += at[1]; o[2] += at[2]; }
+  return o;
+}
+
+// The wrist's bend from the forearm's direction f (elbow → wrist, unit) and the hand's axes (x: towards the little
+// finger's side, y: wrist → knuckles, z: out of the palm) – all in the same frame: flexion (+ towards the palm) and
+// radial deviation (+ towards the thumb), degrees. (The hand's long axis seen from the forearm: tilted towards the palm
+// when f leans to the hand's −z, towards the thumb when f leans to +x.)
+export function wristBend(f, hx, hy, hz, out = { flex: 0, rad: 0 }) {
+  const fx = dot(f, hx), fy = dot(f, hy), fz = dot(f, hz);
+  out.flex = Math.atan2(-fz, fy) / D; out.rad = Math.atan2(fx, Math.hypot(fy, fz)) / D;
+  return out;
+}
+// The forearm's turn (deg from neutral, + = pronation) for a left arm: the hand's little-finger axis hx against the
+// elbow's hinge H (upper arm × forearm), about the forearm f. Neutral (thumb up, palm towards the body) puts hx in the
+// elbow's plane: +90° from H about f; palm down (pronated) +180°.
+const _tp = [0, 0, 0], _tq = [0, 0, 0];
+export function twistOf(H, f, hx) {
+  const p = madd(hx, f, -dot(hx, f), _tp); nrm(p);
+  const q = cross(H, p, _tq);
+  return Math.atan2(dot(q, f), dot(H, p)) / D;   // τ: H → p about f
+}
+
+// ---------- the arm for one wheel angle ----------
+// geometry: { at, tilt, shoulder: [x, y, z], wrist: [x, y, z] (the wrist joint's centre, wheel frame), hand: [hx, hy, hz]
+// (the hand's axes, wheel frame) } – the left arm's. Writes into `o` (reused): S, E, W (car frame), f, A, H (unit), the
+// hand's axes in the car's frame, flex, rad, pron, twist τ (rad, H → the hand's x about f), and the cost.
+const _n = [0, 0, 0], _u = [0, 0, 0], _v = [0, 0, 0], _c = [0, 0, 0], _t = [0, 0, 0], _bend = { flex: 0, rad: 0 };
+export function armOut() { return { S: [0, 0, 0], E: [0, 0, 0], W: [0, 0, 0], W0: [0, 0, 0], roll: 0, f: [0, 0, 0], A: [0, 0, 0], H: [0, 0, 0], hx: [0, 0, 0], hy: [0, 0, 0], hz: [0, 0, 0], flex: 0, rad: 0, pron: 0, tau: 0, cost: 0, short: 0 }; }
+const _w = [0, 0, 0], _h0 = [0, 0, 0], _h1 = [0, 0, 0], _h2 = [0, 0, 0];
+// the hand at wheel angle a, rolled `roll` round its grip's axis (the grip turning a little in the closed hand): the
+// wrist joint W and the hand's axes in the car's frame
+export function handAt(geo, a, roll, o) {
+  const { at, tilt } = geo;
+  if (roll) {
+    const g = geo.grip; sub(geo.wrist, g.c, _w); rotAbout(_w, g.up, roll, _w); _w[0] += g.c[0]; _w[1] += g.c[1]; _w[2] += g.c[2];
+    rotAbout(geo.hand[0], g.up, roll, _h0); rotAbout(geo.hand[1], g.up, roll, _h1); rotAbout(geo.hand[2], g.up, roll, _h2);
+  } else { for (let i = 0; i < 3; i++) { _w[i] = geo.wrist[i]; _h0[i] = geo.hand[0][i]; _h1[i] = geo.hand[1][i]; _h2[i] = geo.hand[2][i]; } }
+  wheelToCar(at, tilt, a, _w, o.W0);
+  wheelToCar(at, tilt, a, _h0, o.hx, true); wheelToCar(at, tilt, a, _h1, o.hy, true); wheelToCar(at, tilt, a, _h2, o.hz, true);
+  o.roll = roll;
+  return o;
+}
+// the arm to that hand: the shoulder moved fwd / up, the elbow at its swivel; the wrist's bend and the forearm's turn
+export function elbowAt(geo, swivel, fwd, up, o) {
+  o.W[0] = o.W0[0]; o.W[1] = o.W0[1]; o.W[2] = o.W0[2];
+  o.S[0] = geo.shoulder[0]; o.S[1] = geo.shoulder[1] + up; o.S[2] = geo.shoulder[2] + fwd;
+  // the elbow on its circle round the shoulder–wrist line: swivel 0 straight down from the line, 90° out to the side
+  sub(o.W, o.S, _n); const d0 = len(_n), L1 = BODY.uarm, L2 = BODY.farm, d = Math.min(L1 + L2 - 1e-6, Math.max(Math.abs(L1 - L2) + 1e-6, d0));
+  o.short = d0 - d; nrm(_n);
+  const ca = (L1 * L1 - L2 * L2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, L1 * L1 - ca * ca));
+  _u[0] = 0; _u[1] = -1; _u[2] = 0; madd(_u, _n, -dot(_u, _n), _u); nrm(_u);           // down, square to the line
+  cross(_n, _u, _v);                                                                       // out (+x for the left arm)
+  madd(o.S, _n, ca, _c); const cs = Math.cos(swivel), sn = Math.sin(swivel);
+  _t[0] = cs * _u[0] + sn * _v[0]; _t[1] = cs * _u[1] + sn * _v[1]; _t[2] = cs * _u[2] + sn * _v[2];   // the elbow's way out of the line
+  madd(_c, _t, h, o.E);
+  // (a wrist beyond the arm's reach: the arm points straight at it and stops short – `short` says by how much)
+  if (o.short > 0) { madd(o.S, _n, L1, o.E); madd(o.S, _n, L1 + L2, o.W); }
+  sub(o.E, o.S, o.A); nrm(o.A); sub(o.W, o.E, o.f); nrm(o.f);
+  // the elbow's hinge: square to the arm's plane – from the swivel (its way out × the line), not from upper arm ×
+  // forearm, which vanishes as the arm straightens and flips the hinge over (v0.41's first plan, at 90°)
+  cross(_t, _n, o.H); nrm(o.H);
+  wristBend(o.f, o.hx, o.hy, o.hz, _bend); o.flex = _bend.flex; o.rad = _bend.rad;
+  o.tau = twistOf(o.H, o.f, o.hx) * D; o.pron = wrapDeg(o.tau / D - 90);
+  return o;
+}
+export function armAt(geo, a, swivel, fwd, up, o, roll = 0) { handAt(geo, a, roll, o); return elbowAt(geo, swivel, fwd, up, o); }
+const wrapDeg = (x) => ((((x + 180) % 360) + 360) % 360) - 180;
+// how unnatural the arm is (dimensionless): the wrist's bend and the forearm's turn from their comfortable centres, steep
+// past the limits; the elbow out of the cockpit's room; the shoulder moved
+const barrier = (x, lo, hi, s) => (x < lo ? ((lo - x) / s) ** 2 : x > hi ? ((x - hi) / s) ** 2 : 0);
+export function armCost(o, fwd, up, roll = 0) {
+  const C = WRIST_COMFORT, L = WRIST_LIMIT, P = PRONATION, R = ELBOW_ROOM;
+  let c = ((o.flex - C.flex) / C.flexSpan) ** 2 + ((o.rad - C.rad) / C.radSpan) ** 2 + ((o.pron - P.comfort) / P.span) ** 2;
+  c += 30 * (barrier(o.flex, L.flex[0], L.flex[1], 8) + barrier(o.rad, L.rad[0], L.rad[1], 4) + barrier(o.pron, P.limit[0], P.limit[1], 8));
+  const [ex, ey] = o.E, xMax = elbowRoom(ey);
+  c += 40 * (barrier(ex, R.xBody, xMax, 0.012) + barrier(ey, R.yMin, 9, 0.02)) + 2 * barrier(ey, -9, R.yHigh, 0.04);
+  c += 0.4 * ((fwd / 0.04) ** 2 + (up / 0.02) ** 2) + ((roll / D) / 12) ** 2 + (o.short / 0.001) ** 2;   // (the hand out of reach: never – a millimetre costs as much as a bent wrist)
+  return c;
+}
+
+// ---------- the plan: every 2° of the wheel ----------
+export const PLAN_STEP = 2, PLAN_MAX = 90;
+// everything the plan's cost depends on besides the geometry: part of a baked plan's key (a change asks for a re-bake)
+export const PLAN_COST = JSON.stringify({ WRIST_COMFORT, WRIST_LIMIT, PRONATION, SHOULDER, ROLL, ELBOW_ROOM, PLAN_STEP, PLAN_MAX });
+const SW = { lo: -40 * D, hi: 150 * D };   // the swivel's range (the elbow from a little inwards to well up and out)
+const _o = armOut();
+const wrapRad = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
+
+// The arm at wheel angle `a` (rad, the wheel's own turn about its column; + = the left grip up), from the plan: the
+// table's neighbours blended, then the arm rebuilt from the exact wrist (so the hand is held wherever the wheel is).
+// Left arm; the right is mirrored by the caller (k = −1: angle −a, x negated). Writes into o (armOut()).
+export function armFromPlan(plan, a, o) {
+  const n = plan.n, x = Math.max(-PLAN_MAX, Math.min(PLAN_MAX, a / D)) / PLAN_STEP + n, i = Math.min(2 * n - 1, Math.floor(x)), t = x - i;
+  const A = plan.rows[i], B = plan.rows[i + 1], l = (p, q) => p + (q - p) * t;
+  armAt(plan.geo, a, l(A.sw, B.sw), l(A.fw, B.fw), l(A.up, B.up), o, l(A.rl, B.rl)); o.roll = l(A.rl, B.rl);
+  // (τ from the frame, kept on the table's branch – never a whole turn off)
+  const ref = l(A.tau, B.tau); o.tau = ref + wrapRad(o.tau - ref);
+  return o;
+}
+// rotate the hinge H about f by τ: the forearm's x at the wrist (its turn matched to the hand's), into out
+export function twistedX(o, tau, out) { return rotAbout(o.H, o.f, tau, out); }
+
+// ---------- the hand on its grip ----------
+// The left glove's frame in the wheel's for a roll ρ of the hand round its grip: the glove's x down the grip, its y (from
+// the wrist across to the grip) at ρ from pointing in towards the hub (0) to pointing at the nose (90°), its z = x × y;
+// the grip's centre at BODY.grip along y. grip: { c, up } (wheel frame). Returns { x, y, z, o } (arrays).
+export function gloveFrame(grip, rho) {
+  const up = grip.up, X = [-up[0], -up[1], -up[2]], inw = [-up[1], up[0], 0]; nrm(inw);
+  const Y = [inw[0] * Math.cos(rho), inw[1] * Math.cos(rho), Math.sin(rho)]; nrm(Y);
+  const Z = cross(X, Y, [0, 0, 0]); nrm(Z);
+  return { x: X, y: Y, z: Z, o: madd(grip.c, Y, -BODY.grip, [0, 0, 0]) };
+}
+const inFrame = (F, v, pt) => { const o = pt ? F.o.slice() : [0, 0, 0]; return madd(madd(madd(o, F.x, v[0], o), F.y, v[1], o), F.z, v[2], o); };
+// The wheel's arm geometry for the hand rolled ρ: the wrist joint and the hand's axes (glove frame: driverGlove's
+// userData) carried into the wheel's frame
+export function armGeo(base, grip, glove, rho) {
+  const F = gloveFrame(grip, rho);
+  return { ...base, rho, grip, frame: F, wrist: inFrame(F, glove.wrist, true), hand: glove.hand.map((v) => inFrame(F, v, false)) };
+}
+// ---------- the whole turn at once (offline: tools/arm-plans.js bakes it into armplans.js) ----------
+// Step by step from straight ahead (planArms) an arm can stay in a pose that is fine now but leads nowhere – v0.41's first
+// plan kept the rising arm's elbow down beside the rim with the hand bent ~60° at 30–90°, though lifting the elbow over
+// the rim from ~20° on gives a ~20° wrist. So: the best smooth path over the whole turn of the wheel (−90°…90°, every
+// 2°) through a grid of the elbow's swivel (5°) and the grip's turn in the hand (2.5°) – the shoulder's small travel the
+// best for each – the cost of each pose (armCost) plus the change from one angle to the next (dynamic programming:
+// exact on the grid); then each angle refined off the grid next to its neighbour (smooth). ~5 s – never at run time.
+export function planArmsPath(geo, { swStep = 5 * D, rlStep = 2.5 * D, wSw = 4 * D, wRl = 2 * D, smooth = 3 } = {}) {
+  const n = PLAN_MAX / PLAN_STEP, N = 2 * n + 1, sws = [], rls = [];
+  for (let x = SW.lo; x <= SW.hi + 1e-9; x += swStep) sws.push(x);
+  for (let x = -ROLL; x <= ROLL + 1e-9; x += rlStep) rls.push(x);
+  const fws = [-SHOULDER.back, 0, 0.03, SHOULDER.forward], ups = [-SHOULDER.down, 0, SHOULDER.up], S = sws.length * rls.length;
+  const cost = new Float64Array(N * S), arg = new Int8Array(N * S * 2);
+  for (let i = 0; i < N; i++) {
+    const a = (i - n) * PLAN_STEP * D;
+    for (let r = 0; r < rls.length; r++) {
+      handAt(geo, a, rls[r], _o);
+      for (let w = 0; w < sws.length; w++) {
+        let bc = Infinity, bf = 0, bu = 0;
+        for (let f = 0; f < fws.length; f++) for (let u = 0; u < ups.length; u++) { elbowAt(geo, sws[w], fws[f], ups[u], _o); const c = armCost(_o, fws[f], ups[u], rls[r]); if (c < bc) { bc = c; bf = f; bu = u; } }
+        const k = i * S + r * sws.length + w; cost[k] = bc; arg[2 * k] = bf; arg[2 * k + 1] = bu;
+      }
+    }
+  }
+  // forward pass: the cheapest way to each state, from a neighbour state at the previous angle (within 3 swivel and 2
+  // roll steps – no leaps)
+  const acc = new Float64Array(N * S), from = new Int32Array(N * S);
+  for (let k = 0; k < S; k++) acc[k] = cost[k];
+  for (let i = 1; i < N; i++) for (let r = 0; r < rls.length; r++) for (let w = 0; w < sws.length; w++) {
+    let best = Infinity, bk = -1;
+    for (let dr = -2; dr <= 2; dr++) { const r0 = r + dr; if (r0 < 0 || r0 >= rls.length) continue; for (let dw = -3; dw <= 3; dw++) { const w0 = w + dw; if (w0 < 0 || w0 >= sws.length) continue;
+      const k0 = (i - 1) * S + r0 * sws.length + w0, c = acc[k0] + ((dw * swStep) / wSw) ** 2 + ((dr * rlStep) / wRl) ** 2; if (c < best) { best = c; bk = k0; } } }
+    const k = i * S + r * sws.length + w; acc[k] = best + cost[k]; from[k] = bk;
+  }
+  let end = (N - 1) * S; for (let k = (N - 1) * S; k < N * S; k++) if (acc[k] < acc[end]) end = k;
+  const states = new Array(N); for (let i = N - 1, k = end; i >= 0; i--) { states[i] = k; k = from[k]; }
+  // off the grid: each angle refined next to its grid state and its neighbour (from straight ahead outwards)
+  const rows = new Array(N), seed = (i) => { const k = states[i], q = k - i * S, r = Math.floor(q / sws.length), w = q % sws.length; return { sw: sws[w], rl: rls[r], fw: fws[arg[2 * k]], up: ups[arg[2 * k + 1]] }; };
+  const refine = (i, prev) => {
+    const a = (i - n) * PLAN_STEP * D, g = seed(i), B = { ...g, c: Infinity };
+    const tryOne = (sw, fw, up, rl) => {
+      armAt(geo, a, sw, fw, up, _o, rl); let c = armCost(_o, fw, up, rl);
+      if (prev) c += ((sw - prev.sw) / wSw) ** 2 + ((rl - prev.rl) / wRl) ** 2 + ((fw - prev.fw) / 0.006) ** 2 + ((up - prev.up) / 0.004) ** 2;
+      if (c < B.c) Object.assign(B, { sw, fw, up, rl, c });
+    };
+    tryOne(g.sw, g.fw, g.up, g.rl);
+    for (let it = 0; it < 6; it++) {
+      const b = { ...B }, ds = swStep / (2 << it), dr = rlStep / (2 << it), df = 0.015 / (1 << it), du = 0.01 / (1 << it);
+      for (const s of [-1, 0, 1]) for (const r of [-1, 0, 1]) for (const f of [-1, 0, 1]) for (const u of [-1, 0, 1])
+        tryOne(b.sw + s * ds, Math.max(-SHOULDER.back, Math.min(SHOULDER.forward, b.fw + f * df)), Math.max(-SHOULDER.down, Math.min(SHOULDER.up, b.up + u * du)), Math.max(-ROLL, Math.min(ROLL, b.rl + r * dr)));
+    }
+    armAt(geo, a, B.sw, B.fw, B.up, _o, B.rl);
+    return { sw: B.sw, fw: B.fw, up: B.up, rl: B.rl, c: armCost(_o, B.fw, B.up, B.rl), flex: _o.flex, rad: _o.rad, pron: _o.pron, tau: _o.tau, E: _o.E.slice(), short: _o.short };
+  };
+  rows[n] = refine(n, null);
+  for (const dir of [1, -1]) { let prev = rows[n]; for (let j = 1; j <= n; j++) { const i = n + dir * j, r = refine(i, prev); rows[i] = r; prev = r; } }
+  // then smoothed along the turn (a Gaussian over ±3 rows, σ 6°: no corner in the arm's motion where the grid's path
+  // turns) and the poses rebuilt from the smoothed settings
+  return smoothPlan(geo, rows.map((r) => [r.sw, r.fw, r.up, r.rl]), smooth);
+}
+// A plan from settings per row ([swivel, shoulder forward, up, grip roll] every PLAN_STEP from −PLAN_MAX), optionally
+// smoothed along the turn; each row's pose rebuilt (the wrist's bend, the forearm's turn, the elbow, the cost) and the
+// forearm's twist unwrapped from straight ahead outwards
+export function smoothPlan(geo, set, sigma = 0) {
+  const N = set.length, n = (N - 1) / 2;
+  let S = set;
+  if (sigma > 0) { const R = Math.ceil(sigma * 2), w = []; for (let d = -R; d <= R; d++) w.push(Math.exp(-0.5 * (d / sigma) ** 2));
+    S = set.map((_, i) => [0, 1, 2, 3].map((c) => { let t = 0, q = 0; for (let d = -R; d <= R; d++) { const j = Math.max(0, Math.min(N - 1, i + d)); t += w[d + R] * set[j][c]; q += w[d + R]; } return t / q; })); }
+  const rows = S.map(([sw, fw, up, rl], i) => {
+    const a = (i - n) * PLAN_STEP * D; armAt(geo, a, sw, fw, up, _o, rl);
+    // (smoothing must never leave the hand out of reach: the shoulder then comes forward just enough)
+    if (_o.short > 0) { let lo = fw, hi = SHOULDER.forward; for (let k = 0; k < 24; k++) { const m = (lo + hi) / 2; armAt(geo, a, sw, m, up, _o, rl); if (_o.short > 0) lo = m; else hi = m; } fw = hi; armAt(geo, a, sw, fw, up, _o, rl); }
+    return { sw, fw, up, rl, c: armCost(_o, fw, up, rl), flex: _o.flex, rad: _o.rad, pron: _o.pron, tau: _o.tau, E: _o.E.slice(), short: _o.short }; });
+  for (const dir of [1, -1]) for (let j = 1; j <= n; j++) { const i = n + dir * j, p = rows[i - dir]; rows[i].tau = p.tau + wrapRad(rows[i].tau - p.tau); }
+  return { geo, rows, n, cost: rows.reduce((t, r) => t + r.c, 0) / rows.length, worst: rows.reduce((m, r) => Math.max(m, r.c), 0) };
+}

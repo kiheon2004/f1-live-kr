@@ -190,6 +190,14 @@ function acrossOf(v, px, py, pz, out) {
 //   For the other hand, mirror it (mirrorGlove) – never turn it round.
 //   armSkin(): one sleeve per arm (shoulder → wrist, the elbow's crease blended over ±5 cm) skinned to three bones –
 //   no ball at the elbow, no rigid parts turning against each other.
+// v0.41: the grip lies across the palm obliquely, as in any closed power grip – from the heel of the hand at the little
+// finger's side to the index finger's base (Napier 1956; the handle ~70–80° to the forearm with the wrist straight –
+// GLOVE.oblique): the palm, the thumb's base and the wrist are turned that much about the palm's normal round the
+// knuckles, the fingers still wrap square round the grip. The gauntlet cuff is no longer part of the hand: it is skinned
+// to the arm (gauntletSkin) – to the forearm and to the hand – so it bends over the wrist instead of standing at an angle
+// on the sleeve's end; the hand's own axes and its wrist joint's centre are in the glove's userData (hand, wrist).
+// The sleeve: five bones (shoulder, elbow, half way down the forearm, wrist, hand) – the forearm's turn shared out along
+// it, the elbow a hinge.
 export const GLOVE = {
   // phalanx lengths (m, gloved, proximal → distal) and radii, index → little; their places along the grip (x)
   fingers: [
@@ -200,6 +208,11 @@ export const GLOVE = {
   ],
   knuckle: 0.62,   // where the knuckles sit round the grip (rad from straight behind it, towards +y)
   pad: 0.32,       // the darker grip print's shade
+  // the grip across the palm: the hand's long axis turned this far (20°) from square to the grip, its heel towards the
+  // little finger's end (the power grip's handle lies obliquely across the palm, hypothenar → index – Napier 1956 (H for
+  // the grip, no angle given); pistol-grip handle angles 80° (Fraser 1980) – 100° (Mital & Kilbom) to the forearm, i.e.
+  // 10–20° off square (secondary text; M) – v0.41 research/wrist.md)
+  oblique: 0.35,
 };
 export function driverGlove(handleR = 0.0235, fine = 1) {
   const G = BODY.grip, parts = [], seg = fine ? 12 : 6;
@@ -240,27 +253,33 @@ export function driverGlove(handleR = 0.0235, fine = 1) {
   // the grip print; the back of the hand rounded; the thenar (thumb's base) bulging at the index side by the wrist
   const kn = GLOVE.fingers.map((f) => { const d = handleR + f.r + 0.006; return new THREE.Vector3(f.x, G + d * Math.sin(GLOVE.knuckle), -d * Math.cos(GLOVE.knuckle)); });
   const palmTop = (kn[0].y + kn[3].y) / 2, palmZ = -(handleR + 0.0205);
+  // (the hand's heel turned towards the little finger's end of the grip by GLOVE.oblique about the palm's normal, round
+  // the knuckles' line: what's built below along +y from the wrist is turned with it)
+  const ob = GLOVE.oblique, co = Math.cos(ob), so = Math.sin(ob), turn = (v) => { const x = v.x, y = v.y - palmTop; v.x = x * co - y * so; v.y = palmTop + x * so + y * co; return v; };
+  const turnGeo = (g) => { const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const v = turn(new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i))); p.setXYZ(i, v.x, v.y, v.z); } g.computeVertexNormals(); return g; };
   const palm = new THREE.SphereGeometry(1, seg + 4, fine ? seg : 8); palm.scale(0.043, (palmTop + 0.004) / 2, 0.019);
   { const p = palm.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i), t = Math.max(0, Math.min(1, y / ((palmTop + 0.004) / 2) * 0.5 + 0.5)); p.setX(i, p.getX(i) * (0.74 + 0.26 * t)); } }
-  palm.translate(0.001, (palmTop + 0.004) / 2 - 0.002, palmZ); palm.computeVertexNormals(); parts.push(shade(palm, 1));
+  palm.translate(0.001, (palmTop + 0.004) / 2 - 0.002, palmZ); turnGeo(palm); parts.push(shade(palm, 1));
   const print = new THREE.SphereGeometry(1, seg, 6, 0, Math.PI * 2, 0, Math.PI / 2); print.rotateX(Math.PI / 2); print.scale(0.036, (palmTop - 0.01) / 2, 0.012);
-  print.translate(0.002, (palmTop - 0.01) / 2 + 0.006, palmZ + 0.008); parts.push(shade(print, GLOVE.pad));
+  print.translate(0.002, (palmTop - 0.01) / 2 + 0.006, palmZ + 0.008); turnGeo(print); parts.push(shade(print, GLOVE.pad));
   // knuckle ridge (the glove's padding over the knuckles)
   parts.push(capsule(kn[0].clone().add(new THREE.Vector3(-0.004, 0, -0.004)), kn[3].clone().add(new THREE.Vector3(0.004, 0, -0.004)), 0.0105));
-  const thenar = new THREE.SphereGeometry(1, seg, 8); thenar.scale(0.02, 0.03, 0.017); thenar.translate(-0.025, 0.032, palmZ + 0.009); parts.push(shade(thenar, 1));
+  const thenar = new THREE.SphereGeometry(1, seg, 8); thenar.scale(0.02, 0.03, 0.017); thenar.translate(-0.025, 0.032, palmZ + 0.009); turnGeo(thenar); parts.push(shade(thenar, 1));
   // the thumb: from its base at the palm's index edge round the grip's wrist side (−y: the wheel's face, towards the
   // driver) to its inner side, over the index finger's tip – a closed hand's thumb on a wheel's grip (onboard footage:
   // the thumbs on the wheel's face by the grips' tops). Its joints on a circle round the grip (the grip's radius + the
   // thumb's): no part of it inside the grip
   const ct = handleR + 0.0128, at = (x, th) => new THREE.Vector3(x, G + ct * Math.sin(th), -ct * Math.cos(th));
-  const t0 = new THREE.Vector3(-0.03, 0.034, palmZ + 0.006), t1 = at(-0.036, -1.75), t2 = at(-0.031, -2.55), t3 = at(-0.022, -3.05);
+  const t0 = turn(new THREE.Vector3(-0.03, 0.034, palmZ + 0.006)), t1 = at(-0.036, -1.75), t2 = at(-0.031, -2.55), t3 = at(-0.022, -3.05);
   parts.push(capsule(t0, t1, 0.0125), capsule(t1, t2, 0.0112), capsule(t2, t3, 0.0102));
   if (fine) parts.push(capsule(t1.clone().lerp(t2, 0.1).add(new THREE.Vector3(0, 0, -0.004)), t2.clone().lerp(t3, 0.9).add(new THREE.Vector3(0, 0, -0.004)), 0.0075, GLOVE.pad));
-  // the gauntlet cuff over the sleeve's end (the arm ends inside it) and its strap
-  const cuff = limbGeometry(0.085, 0.031, 0.039, 0.002, 0.5, 0.82, fine ? 16 : 10, 4); cuff.rotateZ(Math.PI); cuff.translate(0, 0.012, palmZ * 0.45); parts.push(shade(cuff, 0.92));
-  const strap = limbGeometry(0.024, 0.0365, 0.037, 0, 0.5, 0.84, fine ? 16 : 10, 2); strap.rotateZ(Math.PI); strap.translate(0, -0.022, palmZ * 0.45); parts.push(shade(strap, 0.45));
+  // (the gauntlet cuff and its strap: on the arm since v0.41 – gauntletSkin – bending over the wrist with it)
   const out = mergeColoured(parts);
   out.userData.tips = tips.map((v) => v.toArray());
+  // the hand's axes (x towards the little finger, y wrist → knuckles, z out of the palm – towards the grip) and its
+  // wrist joint's centre: in the hand's middle between palm and back, a centimetre before the heel of the palm
+  out.userData.hand = [[co, so, 0], [-so, co, 0], [0, 0, 1]];
+  out.userData.wrist = turn(new THREE.Vector3(0, -0.01, palmZ + 0.004)).toArray();
   return out;
 }
 // the other hand: the glove mirrored across its own x (the grip's axis) – a right hand from the left one, the winding
@@ -285,29 +304,78 @@ function mergeColoured(gs) {
   m.computeBoundingSphere(); return m;
 }
 // One sleeve from the shoulder (origin) along +y to the wrist (uarm + farm), the upper arm's and the forearm's swell,
-// skinned to three bones (0 shoulder, 1 elbow at +uarm, 2 wrist): the elbow's crease blended over ±ARM_BLEND – a bent
-// elbow folds the sleeve, no ball and no gap. The race suit's sleeve: a seam down its inside and a cuff ring at the wrist
-// (vertex colours as driverGlove). Its bind pose is the straight arm (bones along +y).
+// skinned to the arm's bones (ARM_BONES: 0 shoulder, 1 elbow at +uarm, 2 half way down the forearm, 3 wrist, 4 the hand
+// – all at their joints along +y in the bind pose, the straight arm): the elbow's crease blended over ±ARM_BLEND – a bent
+// elbow folds the sleeve, no ball and no gap – and the forearm shared out between the elbow, the half-way and the wrist
+// bones, so its turn (pronation, set on bones 2 and 3) twists the sleeve evenly along it, never all at the wrist. The race
+// suit's sleeve: a seam down its inside and a knitted cuff ring at the wrist (vertex colours as driverGlove); it stops
+// 4.5 cm short of the wrist, inside the glove's gauntlet (which reaches 8.5 cm up the forearm).
 export const ARM_BLEND = 0.05;
+export const ARM_BONES = 5;
 export function armSkin(fine = 1) {
-  const L1 = BODY.uarm, L2 = BODY.farm, len = L1 + L2, rings = fine ? 24 : 16, seg = fine ? 16 : 10;
+  const L1 = BODY.uarm, L2 = BODY.farm, len = L1 + L2 - 0.045, rings = fine ? 24 : 16, seg = fine ? 16 : 10;
+  // (the forearm narrowing to the wrist's ~17 cm round – a radius of ~27 mm with the suit – over its last 6 cm, so its
+  // end fits inside the gauntlet's cuff)
   const radius = (y) => {
     if (y < L1) { const t = y / L1; return 0.054 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.45) / 0.25) ** 2)); }
-    const t = (y - L1) / L2; return 0.043 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.25) / 0.25) ** 2));
+    const t = (y - L1) / L2, r = 0.043 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.25) / 0.25) ** 2)), e = Math.max(0, Math.min(1, (y - (L1 + L2 - 0.105)) / 0.06));
+    return r + (0.0255 - r) * e * e * (3 - 2 * e);
   };
   const pos = [], idx = [], skI = [], skW = [], col = [];
   for (let i = 0; i <= rings; i++) {
     // (rings closer together round the elbow, where it bends)
-    const u = i / rings, y = u < 0.5 ? L1 * Math.pow(u * 2, 0.8) : L1 + L2 * (1 - Math.pow(1 - (u - 0.5) * 2, 0.8));
+    const u = i / rings, y = u < 0.5 ? L1 * Math.pow(u * 2, 0.8) : L1 + (len - L1) * (1 - Math.pow(1 - (u - 0.5) * 2, 0.8));
     const r = radius(y), w1 = y <= L1 - ARM_BLEND ? 0 : y >= L1 + ARM_BLEND ? 1 : (() => { const t = (y - (L1 - ARM_BLEND)) / (2 * ARM_BLEND); return t * t * (3 - 2 * t); })();
+    // (along the forearm: elbow → half way → wrist, linearly – each pair of bones at most half the turn apart)
+    const tf = Math.max(0, Math.min(1, (y - L1) / L2)), e1 = tf < 0.5 ? 1 - 2 * tf : 0, e2 = tf < 0.5 ? 2 * tf : 2 - 2 * tf, e3 = tf < 0.5 ? 0 : 2 * tf - 1;
     for (let k = 0; k <= seg; k++) {
       const a = (k / seg) * Math.PI * 2, x = Math.cos(a) * r, z = Math.sin(a) * r * 0.9;
-      pos.push(x, y, z); skI.push(0, 1, 2, 0); skW.push(1 - w1, w1, 0, 0);
-      const seam = Math.abs(Math.sin(a) + 1) < 0.02 ? 0.6 : 1, cuff = y > len - 0.03 ? 0.8 : 1;
+      pos.push(x, y, z); skI.push(0, 1, 2, 3); skW.push(1 - w1, w1 * e1, w1 * e2, w1 * e3);
+      const seam = Math.abs(Math.sin(a) - 1) < 0.02 ? 0.6 : 1, cuff = y > len - 0.025 ? 0.8 : 1;
       col.push(seam * cuff, seam * cuff, seam * cuff);
     }
   }
   for (let i = 0; i < rings; i++) for (let k = 0; k < seg; k++) { const a = i * (seg + 1) + k, b = a + seg + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skI, 4)); g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skW, 4));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+// The glove's gauntlet: from 7.5 cm up the forearm (over the sleeve's end) across the wrist to the heel of the hand,
+// skinned to the wrist bone (3: the forearm's end, turned with it) and the hand (4) and blended between them over ±2 cm
+// round the wrist joint – the cuff bends with the wrist and its end meets the palm and the back of the hand. Its section
+// an oval wider across (the wrist's ~6 × 4 cm plus the glove), flared at its open end to go over the sleeve; the strap a
+// darker band, the open end's hem a lighter one. In the bind pose along +y with the wrist joint at uarm + farm; x across
+// the hand (the little finger's side), z towards the palm; symmetric in x (the right arm uses it mirrored by its bones).
+// FIA 8856-2018 (rev. 2024-06-11): the glove's cuff at least 80 mm long, tight at the wrist, the wrist always under two
+// layers (H); the gauntlet goes over the suit's knitted cuff (2025 driver photos; M); most current gloves strapless, an
+// elastic band at the wrist (M) – drawn as the darker band.
+export function gauntletSkin(fine = 1) {
+  const W = BODY.uarm + BODY.farm, y0 = W - 0.085, y1 = W + 0.03, rings = fine ? 9 : 6, seg = fine ? 12 : 10, B = 0.02;
+  // half width (x) and half depth (z) along it: flared open end → the wrist's narrowest → the heel of the hand
+  const prof = (y) => {
+    const t = (y - y0) / (y1 - y0);
+    const hw = 0.0385 - 0.0075 * Math.min(1, t / 0.62) + 0.003 * Math.max(0, (t - 0.72) / 0.28);
+    const hd = 0.034 - 0.0125 * Math.min(1, t / 0.62) - 0.003 * Math.max(0, (t - 0.72) / 0.28);
+    return [hw, hd];
+  };
+  const pos = [], idx = [], skI = [], skW = [], col = [];
+  // (rings evenly along it, plus a pair at each edge of the hem and the band – their shade changes there, sharp, not
+  // smeared over a whole ring's length into a saw-tooth)
+  const ys = Array.from({ length: rings + 1 }, (_, i) => y0 + ((y1 - y0) * i) / rings);
+  for (const e of [y0 + 0.008, W - 0.048, W - 0.026]) ys.push(e - 0.0004, e + 0.0004);
+  ys.sort((a, b) => a - b);
+  for (let i = 0; i < ys.length; i++) {
+    const y = ys[i], [hw, hd] = prof(y);
+    const w4 = y <= W - B ? 0 : y >= W + B ? 1 : (() => { const t = (y - (W - B)) / (2 * B); return t * t * (3 - 2 * t); })();
+    const shade = y < y0 + 0.008 ? 0.78 : y > W - 0.048 && y < W - 0.026 ? 0.45 : 0.92;   // (hem, strap, the gauntlet)
+    for (let k = 0; k <= seg; k++) {
+      const a = (k / seg) * Math.PI * 2;
+      pos.push(Math.cos(a) * hw, y, Math.sin(a) * hd); skI.push(3, 4, 0, 0); skW.push(1 - w4, w4, 0, 0); col.push(shade, shade, shade);
+    }
+  }
+  for (let i = 0; i < ys.length - 1; i++) for (let k = 0; k < seg; k++) { const a = i * (seg + 1) + k, b = a + seg + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skI, 4)); g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skW, 4));
