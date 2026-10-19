@@ -1410,6 +1410,10 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const capsMat = mat("wheelCaps", () => new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.38, metalness: 0.05 }));
   const metalMat = mat("wheelMetal", () => new THREE.MeshStandardMaterial({ color: 0x8e949b, roughness: 0.3, metalness: 0.9 }));
   const ledMat = mat("wheelLed", () => new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
+  // (v0.42: the wheel's own carbon – its weave at the wheel's 3 mm tows (wheel3d.js UVs), a touch darker than the car's
+  // and lacquered glossier: a moulded face plate with a sheen along its rounded edges (W16 photos, AMR26 replica), where
+  // v0.41's car carbon read as a big grey weave on a matte slab)
+  const wheelCarbon = mat("wheelCarbon", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xa0a0a0, map: cm.colour, roughness: 0.3, metalness: 0 }), 0.45));
   const bandMat = sidewallMaterial(0xf2c230, prof.era);
   const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
   const helmetMat = skyLit(new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 }));
@@ -1433,7 +1437,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // the driver's torso and thighs in the suit (the open tub shows them – close up only, as the arms)
   add(t.torso, suitMat, near, "torso");
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
-  add(t.wheel.body, carbon, wheel); add(t.wheel.paddles, carbon, wheel); add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
+  add(t.wheel.body, wheelCarbon, wheel); add(t.wheel.paddles, wheelCarbon, wheel); add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
   const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen");
   // (the gloves: the fine pair only for the car a cockpit camera rides in – setCockpit; ~16k triangles – else a light pair;
   // each hand on a pivot at its grip's centre: the grip turns a little in the hand with the wheel's angle – placeArms)

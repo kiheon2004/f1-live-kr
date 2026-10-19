@@ -4255,6 +4255,14 @@ window.Map3D = {
   // development: hold the focused car's steering wheel at `deg` (+ = its left grip up – a right turn), or sweep it
   // (period s, amplitude deg) – the arms' poses at any lock with the car standing still; null lets go
   steerWheel(deg, period = 0) { devSteer = deg == null ? null : period ? { amp: deg, period, t0: performance.now() } : deg; return "ok"; },
+  // development (v0.42): the focused car's steering wheel alone (its body, arms – and with hands false its gloves – hidden)
+  // for close looks at the wheel; false shows them again
+  wheelSolo(on = true, hands = true) {
+    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const st = c.model.getObjectByName("steering"), keep = (o) => { for (let p = o; p; p = p.parent) if (p === st) return hands || !/glove/i.test(o.name); return false; };
+    c.model.traverse((o) => { if (o.isMesh) { if (on && !keep(o)) { o.userData.soloHid = o.visible; o.visible = false; } else if (!on && o.userData.soloHid != null) { o.visible = o.userData.soloHid; delete o.userData.soloHid; } } });
+    return "ok";
+  },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development: look at the focused car from a given offset (metres, car frame)
