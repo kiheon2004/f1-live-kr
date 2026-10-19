@@ -24,7 +24,7 @@ import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
-import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
+import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
 import { WheelScreens, screenModel, screenUrgent } from "./wheelscreen.js";
 import { boardsFor, boardPlaces } from "./boards.js";
@@ -1423,6 +1423,7 @@ function lightLeds(c, num, t, src) {
   setFlagLights(c.model, ts === "5" ? "#ff2414" : ts === "2" || ts === "4" || ts === "6" || ts === "7" ? "#ffb21a" : null);
 }
 // the wheels' angles (front, rear) and how much their markings smear this frame (car3d.js setSmear)
+const LIVE_LAG = 600;   // (ms: a live car is drawn this far behind the newest data – replay.js LiveSource.positionsInto)
 function rollWheels(c, st, est, F, t, v) {
   const P = c.model.userData.profile, W = c.wheelSt || (c.wheelSt = { f: { a: null, t: null }, r: { a: null, t: null }, t: null, pos: new THREE.Vector3(), has: false });
   const pitU = est?.pit ? est.u : c.pit?.u;
@@ -1431,11 +1432,15 @@ function rollWheels(c, st, est, F, t, v) {
   const fwd = Math.sin(c.yaw) * (v.x - W.pos.x) + Math.cos(c.yaw) * (v.z - W.pos.z) >= 0 ? 1 : -1;
   const speed = st ? st.vs : (est?.pit ? est.vs : c.speed * (moved ? fwd : 1));
   const dts = W.t == null ? 0 : (t - W.t) / 1000;
-  // (the telemetry's odometer where the car has speed data – one measure on every path; else from the path)
-  const src = app().src, tel = src?.car?.[c.num];
-  const trk = src?.tracks?.cars?.[c.num]; if (W.stillTrk !== trk) { W.stillTrk = trk; W.still = stillFromTrack(trk); }
-  const odo = tel ? odometerAt(tel, t, W.still) : null;
+  // (the telemetry's odometer where the car has speed data, on by its positions over holes in it – one measure on
+  // every path; else from the path. Asked at the moment the car is drawn: live 0.6 s back – replay.js / smooth.js
+  // LiveSource positions – and no later than its newest position, where the drawn car holds (CarTracks.at) – so the
+  // wheels neither run ahead of the car nor wait on a speed batch not in yet)
+  const src = app().src, tel = src?.car?.[c.num], trk = src?.tracks?.cars?.[c.num] || null;
+  const tw = !src?.isLive ? t : trk?.n ? Math.min(t - LIVE_LAG, Math.max(trk.t[trk.n - 1], t - LIVE_LAG - 4000)) : t - LIVE_LAG;
+  const odo = tel || trk ? odometerAt(tel, tw, trk) : null;
   let fa, ra;
+  c.spinSrc = odo != null ? "odo" : "path"; c.spinD = odo;   // (development: recordSpin)
   if (odo != null) { fa = W.f.a = wrapAngle(odo / P.FR); ra = W.r.a = wrapAngle(odo / P.RR); W.f.t = W.r.t = t; }
   else { fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }); ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved }); }
   W.pos.copy(v); W.has = true; W.t = t;
@@ -3490,12 +3495,14 @@ window.Map3D = {
   // residual from a ±0.25 s fit, RMS, and the largest frame-to-frame jump), and the frame times.
   // development: the focused car's front wheel angle each frame for `secs` s of playing – the biggest turn in one frame
   // against what its speed allows (the angle must never jump where its path changes: track ↔ pit lane ↔ estimated)
-  recordSpin(secs = 10) {
+  // (v0.41: num – a car other than the focused one; the frames around each change of path or of the angle's source
+  // (seams: [ms from the first frame, angle °, turn this frame °, what its speed allows °, path, source]))
+  recordSpin(secs = 10, num = null) {
     return new Promise((done) => {
       const r = [], t0 = performance.now();
       devRec = () => {
-        const c = cars.get(app().focus || leader()); if (!c || !c.spinW) return;
-        r.push([app().t, c.spinW[0], c.speed, c.onTrack ? "track" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.est ? "est" : "other", c.model.userData.profile.FR]);
+        const c = cars.get(num || app().focus || leader()); if (!c || !c.spinW) return;
+        r.push([app().t, c.spinW[0], c.speed, c.onTrack ? "track" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.est ? "est" : "other", c.model.userData.profile.FR, c.spinSrc, c.spinD, app().src.carAt?.(c.num, app().t)?.speed ?? null]);
         if (performance.now() - t0 < secs * 1000) return;
         devRec = null;
         let worst = 0, at = null; const states = new Set();
@@ -3504,10 +3511,20 @@ window.Map3D = {
           const turn = Math.abs(Math.atan2(Math.sin(r[i][1] - r[i - 1][1]), Math.cos(r[i][1] - r[i - 1][1]))), allow = 1.3 * Math.max(r[i][2], r[i - 1][2]) * dts / r[i][4] + 0.02;   // (c.speed m/s; the telemetry may read a touch above the positions)
           if (turn - allow > worst) { worst = turn - allow; at = [r[i - 1], r[i]]; }
         }
-        done(JSON.stringify({ frames: r.length, states: [...states], t: [r[0]?.[0], r[r.length - 1]?.[0]], excessRad: +worst.toFixed(4), at }));
+        // (the distance behind the angle, frame by frame, against the telemetry's speed × the frame's session time –
+        // no aliasing: above ~40 km/h a wheel turns more than half a turn a frame and the angle alone can't tell)
+        const deg = (x) => +(x * 180 / Math.PI).toFixed(1), seams = [], row = (j) => { const dt = (r[j][0] - r[j - 1][0]) / 1000, dd = r[j][6] != null && r[j - 1][6] != null ? r[j][6] - r[j - 1][6] : null, vd = r[j][7] != null && r[j - 1][7] != null ? ((r[j][7] + r[j - 1][7]) / 2 / 3.6) * dt : null; return [Math.round(r[j][0] - r[0][0]), deg(r[j][1]), dd == null ? null : +dd.toFixed(3), vd == null ? null : +vd.toFixed(3), r[j][3], r[j][5], +(((r[j][2] + r[j - 1][2]) / 2) * dt).toFixed(3)]; };
+        let distWorst = 0, distAt = null;
+        for (let i = 1; i < r.length; i++) {
+          const x = row(i); if (x[2] != null && x[3] != null && Math.abs(x[2] - x[3]) > distWorst) { distWorst = Math.abs(x[2] - x[3]); distAt = x; }
+          if (r[i][3] !== r[i - 1][3] || r[i][5] !== r[i - 1][5] || (r[i][7] == null) !== (r[i - 1][7] == null)) { const s = []; for (let j = Math.max(1, i - 4); j < Math.min(r.length, i + 5); j++) s.push(row(j)); seams.push(s); }
+        }
+        done(JSON.stringify({ frames: r.length, states: [...states], t: [r[0]?.[0], r[r.length - 1]?.[0]], excessRad: +worst.toFixed(4), at, distWorstM: +distWorst.toFixed(3), distAt, seams }));
       };
     });
   },
+  // development: a car's wheel angles now – [session ms, front °, rear °, distance m (null: the path rules), source]
+  spinOf(num) { const c = cars.get(num || app().focus || leader()); return c?.spinW ? JSON.stringify([app().t, +(c.spinW[0] * 180 / Math.PI).toFixed(3), +(c.spinW[1] * 180 / Math.PI).toFixed(3), c.spinD == null ? null : +c.spinD.toFixed(3), c.spinSrc]) : null; },
   recordLive(secs = 8) {
     return new Promise((done) => {
       const r = { t: [], dt: [], yaw: [], pitch: [], roll: [], y: [], side: [], steer: [], wheel: [], st: [] }, e = new THREE.Euler(), t0 = performance.now();

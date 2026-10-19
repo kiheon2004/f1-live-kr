@@ -617,7 +617,7 @@
       for (const c of Object.values(this.cars)) {
         if (!c.grow) continue;
         let k = 0; while (k < c.n && c.t[k] < cutoff) k++;
-        if (k > 50) { for (const a of [c.t, c.x, c.y, c.z]) a.splice(0, k); c.n = c.t.length; }
+        if (k > 50) { c.odo?.cut?.(k); for (const a of [c.t, c.x, c.y, c.z]) a.splice(0, k); c.n = c.t.length; }   // (odo: the wheels' – wheelspin.js trackOdo)
       }
     }
     // Writes the position (and, if `vel` is given, the velocity in dm/ms) of car `num` at time t.
@@ -885,8 +885,8 @@
             const ch = car.Channels || {}, c = this.car[n] || (this.car[n] = { t: [], v: [], rpm: [], gear: [], thr: [], brk: [], drs: [] });
             if (c.t.length && t <= c.t[c.t.length - 1]) continue;
             c.t.push(t); c.v.push(ch[2] || 0); c.rpm.push(ch[0] || 0); c.gear.push(ch[3] || 0); c.thr.push(ch[4] || 0); c.brk.push(ch[5] ? 1 : 0); c.drs.push(ch[45] == null ? 255 : ch[45]);   // (255: the channel isn't sent – 2026)
-            // (the wheels' odometer – wheelspin.js – cut with the samples, its values kept; not built that far: afresh)
-            if (c.t.length > 1400) { for (const k of CAR_CH) c[k].splice(0, 200); if (c.odo) { if (c.odo.n > 200 && Array.isArray(c.odo.d)) { c.odo.d.splice(0, 200); c.odo.n -= 200; } else c.odo = null; } }
+            // (the wheels' odometer – wheelspin.js – cut with the samples: built over them first, its values kept)
+            if (c.t.length > 1400) { c.odo?.cut?.(200); for (const k of CAR_CH) c[k].splice(0, 200); }
           }
         }
         return;
