@@ -3438,6 +3438,26 @@ window.Map3D = {
   // development: what the viewer sees move during real playback, frame by frame for `secs` – the camera's turn and
   // height, the focused car's steer and steering wheel – each split into its slow part and the rest (jitter: the
   // residual from a ±0.25 s fit, RMS, and the largest frame-to-frame jump), and the frame times.
+  // development: the focused car's front wheel angle each frame for `secs` s of playing – the biggest turn in one frame
+  // against what its speed allows (the angle must never jump where its path changes: track ↔ pit lane ↔ estimated)
+  recordSpin(secs = 10) {
+    return new Promise((done) => {
+      const r = [], t0 = performance.now();
+      devRec = () => {
+        const c = cars.get(app().focus || leader()); if (!c || !c.spinW) return;
+        r.push([app().t, c.spinW[0], c.speed, c.onTrack ? "track" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.est ? "est" : "other", c.model.userData.profile.FR]);
+        if (performance.now() - t0 < secs * 1000) return;
+        devRec = null;
+        let worst = 0, at = null; const states = new Set();
+        for (let i = 1; i < r.length; i++) {
+          states.add(r[i][3]); const dts = (r[i][0] - r[i - 1][0]) / 1000; if (!(dts > 0)) continue;
+          const turn = Math.abs(Math.atan2(Math.sin(r[i][1] - r[i - 1][1]), Math.cos(r[i][1] - r[i - 1][1]))), allow = 1.3 * Math.max(r[i][2], r[i - 1][2]) * dts / r[i][4] + 0.02;   // (c.speed m/s; the telemetry may read a touch above the positions)
+          if (turn - allow > worst) { worst = turn - allow; at = [r[i - 1], r[i]]; }
+        }
+        done(JSON.stringify({ frames: r.length, states: [...states], t: [r[0]?.[0], r[r.length - 1]?.[0]], excessRad: +worst.toFixed(4), at }));
+      };
+    });
+  },
   recordLive(secs = 8) {
     return new Promise((done) => {
       const r = { t: [], dt: [], yaw: [], pitch: [], roll: [], y: [], side: [], steer: [], wheel: [], st: [] }, e = new THREE.Euler(), t0 = performance.now();
