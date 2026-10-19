@@ -1383,6 +1383,31 @@ const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
+const KA = [0, 0, 0], KB = [0, 0, 0], KC = [0, 0, 0];   // (the steering's curvature: three points of the path)
+// development: the focused driver's arm axes drawn over the car (Map3D.armDiag) – shoulder → elbow → wrist (white),
+// the hand's axes at the wrist (x to the little finger red, y to the knuckles green, z out of the palm blue), the
+// forearm's twisted x at the wrist (magenta), each grip's axis (yellow); never in the app's own views
+let devArmDiag = null;
+function drawArmDiag(model) {
+  const u = model.userData; if (!u.arms) return;
+  if (!devArmDiag.lines) {
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(2 * 3 * 2 * 9), 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(2 * 3 * 2 * 9), 3));
+    devArmDiag.lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, toneMapped: false })); devArmDiag.lines.renderOrder = 999; devArmDiag.lines.frustumCulled = false;
+  }
+  const L = devArmDiag.lines; if (L.parent !== u.near) u.near.add(L);
+  const P = L.geometry.attributes.position, Cc = L.geometry.attributes.color, w = new THREE.Vector3(), q = new THREE.Quaternion(), e = new THREE.Vector3();
+  let n = 0; const seg = (a, b, c) => { P.setXYZ(n, a.x, a.y, a.z); Cc.setXYZ(n++, ...c); P.setXYZ(n, b.x, b.y, b.z); Cc.setXYZ(n++, ...c); };
+  for (const a of u.arms) {
+    const [b0, b1, , b3, b4] = a.bones, S = b0.position, E = b1.position, W = b3.position;
+    seg(S, E, [1, 1, 1]); seg(E, W, [1, 1, 1]);
+    for (const [ax, col] of [[[1, 0, 0], [1, 0.2, 0.2]], [[0, 1, 0], [0.2, 1, 0.2]], [[0, 0, 1], [0.3, 0.5, 1]]]) seg(W, w.set(...ax).applyQuaternion(b4.quaternion).multiplyScalar(0.07).add(W), col);
+    seg(W, w.set(1, 0, 0).applyQuaternion(b3.quaternion).multiplyScalar(0.06).add(W), [1, 0.2, 1]);
+    // the grip's axis: the hand's pivot (in the wheel) along the grip's up
+    const G = u.armPlan.geo.grip; a.hand.getWorldPosition(w); u.near.worldToLocal(w); e.set(G.up[0] * a.k, G.up[1], G.up[2]).applyQuaternion(u.wheel.getWorldQuaternion(q)).applyQuaternion(model.getWorldQuaternion(new THREE.Quaternion()).invert()).multiplyScalar(0.08);
+    seg(w.clone().sub(e), w.clone().add(e), [1, 0.85, 0.1]);
+  }
+  L.geometry.setDrawRange(0, n); P.needsUpdate = true; Cc.needsUpdate = true;
+}
 let devSteer = null;
 const devSteerNow = () => -((typeof devSteer === "number" ? devSteer : devSteer.amp * Math.sin((2 * Math.PI * (performance.now() - devSteer.t0)) / (devSteer.period * 1000))) * Math.PI) / 180 / STEER_RATIO;
 // a car's shift lights now (shiftlights.js carLeds; its wheel's row in the viewer's chosen look); off without telemetry
@@ -1598,11 +1623,28 @@ function updateCars(dt) {
     rollWheels(c, st, est, F, A.t, v);
     // (the front tyres' slip angle on top, growing with the cornering force: an estimate, ~0.6° per g (0.01 rad); and a
     // touch of opposite lock when the rear steps out)
-    const steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;
-    // (the wheels' and steering wheel's angle eased: the turning rate from 4 Hz positions twitched them frame to frame)
-    c.steer = c.steer == null ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
+    // v0.41: on the track, from the path's curvature where the car is (its heading's change over ±4–12 m of the lap
+    // line, the car's offset across it) – a function of the moment shown, so a seek, a pause or another speed shows the
+    // same steering wheel and arms at the same moment (it was eased from frame-to-frame turning rates: after a seek the
+    // wheel took ~0.5 s to come round, and what it showed depended on what had been shown before). Off the track (pit
+    // lane, an estimated path) from the turning rate as before, eased – snapped after a jump of the session's time.
+    let steer;
+    if (st && c.speed > 3) {
+      const fwd = st.vs >= 0 ? 1 : -1, h = Math.max(4, Math.min(12, Math.abs(st.vs) * 0.15));
+      F.at(st.s - fwd * h, st.d, KA); F.at(st.s, st.d, KB); F.at(st.s + fwd * h, st.d, KC);
+      const kappa = wrap(Math.atan2(KC[0] - KB[0], KC[2] - KB[2]) - Math.atan2(KB[0] - KA[0], KB[2] - KA[2])) / h;
+      steer = Math.max(-0.4, Math.min(0.4, Math.atan(3.4 * kappa) + (0.01 * c.speed * c.speed * kappa) / 9.81));
+      c.steer = steer;
+    } else {
+      steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;
+      // (eased: the turning rate from 4 Hz positions twitched it frame to frame)
+      const jumped = c.steerT == null || A.t < c.steerT - 50 || A.t - c.steerT > 2000;
+      c.steer = c.steer == null || jumped ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
+    }
+    c.steerT = A.t;
     if (devSteer != null && num === focusNum) c.steer = devSteerNow();
     setWheels(c.model, c.spinW, c.steer);
+    if (devArmDiag && num === focusNum) drawArmDiag(c.model);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
     // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
@@ -4184,6 +4226,8 @@ window.Map3D = {
   // development: hold the focused car's steering wheel at `deg` (+ = its left grip up – a right turn), or sweep it
   // (period s, amplitude deg) – the arms' poses at any lock with the car standing still; null lets go
   steerWheel(deg, period = 0) { devSteer = deg == null ? null : period ? { amp: deg, period, t0: performance.now() } : deg; return "ok"; },
+  // development: the focused driver's arm axes on/off (drawArmDiag)
+  armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {
     const c = cars.get(app().focus || leader()); if (!c) return "no car";
