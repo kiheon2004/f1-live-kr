@@ -103,6 +103,15 @@ export function followTarget({ L, order = [], pos, inLane = () => false }, tau) 
   }
   return null;
 }
+// The grid box the medical car and the rear-of-grid official line up behind: the last painted box, not the last
+// starter's – a pit-lane starter's or a non-starter's box stays empty (v0.40: at Monza 2026, two pit-lane starters,
+// and Singapore 2025 the medical car stood inside the empty last box, like a car on the grid). lastG: the last starter's
+// box; slots: the grid's Map(box → place) (grid.js) → the box number (lastG when there's no grid model)
+export function gridRearSlot(lastG, slots) {
+  if (!slots?.size) return lastG;
+  let n = 0; for (const k of slots.keys()) if (+k > n) n = +k;
+  return lastG == null || !Number.isFinite(+lastG) ? n || null : Math.max(+lastG, n);
+}
 // When the medical car reaches the pit entry after lap 1: the first moment τ (from 40 s after the start, every ½ s) at
 // which the car it follows was, lag earlier, within 30 m of the pit entry. dataEnd: the latest moment the positions are
 // in for (live: grows; a replay: Infinity) – a τ whose followed moment is past it isn't decided yet.

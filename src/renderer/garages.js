@@ -854,6 +854,11 @@ export function boardStatus({ G, hasPositions, drivers, nums, teams, evidence = 
   });
 }
 
+// Whether a hit of the diagnostic's ray doesn't hide a board: a see-through surface (the street circuits' catch fence,
+// 28 % opaque – map3d.js streetWalls) or one not drawn. (v0.40: at Monaco boardsDiag said "occluded: behind
+// syntheticWalls" for boards plainly readable through the fence.)
+export const seeThrough = (material) => !!material && [].concat(material).every((m) => m.visible === false || m.colorWrite === false || (m.transparent && m.opacity < 0.5));
+
 // A key for an allocation (to rebuild only when it changes)
 // (garage indices only – a place moving within its garage doesn't rebuild anything)
 // (every value teamLayer draws from: the team, its colour and garages, where its box is drawn and how far out, each

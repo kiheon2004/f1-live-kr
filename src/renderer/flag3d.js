@@ -29,7 +29,9 @@ export function makeFlag(colour = "yellow") {
   const cloth = new THREE.Mesh(geo, S.mats[colour] || S.mats.yellow);
   pole.add(cloth); cloth.position.set(0, POLE - GRIP - 0.02, 0);
   group.add(pole);
-  pole.castShadow = cloth.castShadow = true;
+  // (no shadow in the sun's map: it is drawn again only when the area it covers moves – map3d.js updateSun –, so a waved
+  // or raised flag would leave a frozen pole and cloth on the ground (v0.40); a 1 m flag's shadow isn't missed)
+  pole.castShadow = cloth.castShadow = false;
   let shown = null;
   return {
     group,

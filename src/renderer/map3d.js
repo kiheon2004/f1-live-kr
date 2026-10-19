@@ -11,7 +11,7 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
-import { supportPlan, supportModels, followTarget, medicalLap1, SUPPORT } from "./support.js";
+import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
@@ -21,7 +21,7 @@ import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
-import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, paintPitScreens, updateTeamScreens } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
@@ -524,7 +524,7 @@ function boardsDiag() {
     if ((cam.x - p.x) * b.n[0] + (cam.y - p.y) * b.n[1] + (cam.z - p.z) * b.n[2] <= 0) { r.status = "hidden"; r.reason = "faces away from the camera (seen from inside or behind the building)"; continue; }
     v.copy(p).project(camera); if (Math.abs(v.x) > 1 || Math.abs(v.y) > 1 || v.z > 1) { r.status = "off-screen"; r.reason = "outside the view"; continue; }
     rc.set(cam.clone(), p.clone().sub(cam).normalize()); rc.far = d - 0.05;
-    const hit = rc.intersectObjects(targets, true).find((h) => h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh && h.object.name !== "teamLabels");
+    const hit = rc.intersectObjects(targets, true).find((h) => h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh && h.object.name !== "teamLabels" && !seeThrough(h.object.material));
     if (hit) { let o = hit.object, n = []; while (o && n.length < 2) { if (o.name) n.push(o.name); o = o.parent; } r.status = "occluded"; r.reason = "behind " + (n.join("<") || hit.object.type); r.hit = +hit.distance.toFixed(1); continue; }
     if (r.px < 6) { r.status = "tiny"; r.reason = `${r.px} px high at ${r.dist} m`; continue; }
     r.status = "visible";
@@ -1977,8 +1977,9 @@ function updateSupport(src, t) {
   // the medical car
   let med = null;
   const slotBack = () => {
-    // (behind the last row: the last starter's grid slot as measured (grid.js) – or, without it, that car's own place)
-    const g = st?.last ? world.gridModel?.slots.get(+carKindG(src, start, st.last)) : null;
+    // (behind the last row: the last painted grid box as measured (grid.js) – support.js gridRearSlot –, or, without it, the
+    // last starter's own place)
+    const g = st?.last ? world.gridModel?.slots.get(gridRearSlot(+carKindG(src, start, st.last), world.gridModel?.slots)) : null;
     if (g) return { x: g.x, z: g.z, f: { x: g.tx, z: g.tz } };
     const trk = st?.last ? src.tracks?.cars?.[st.last] : null, a = [0, 0, 0], b = [0, 0, 0];
     if (trk && src.tracks.at(st.last, start.t - 3000, a) && src.tracks.at(st.last, start.t + 2500, b)) { const p = toScene(a, c0), q = toScene(b, c0), d = Math.hypot(q.x - p.x, q.z - p.z) || 1; return { x: p.x, z: p.z, f: { x: (q.x - p.x) / d, z: (q.z - p.z) / d } }; }
@@ -3744,6 +3745,17 @@ window.Map3D = {
     devGroundOld = !on; rebuild(); const t0 = performance.now();
     return new Promise((res) => { const t = setInterval(() => { if (world?.real?.info || performance.now() - t0 > 150e3) { clearInterval(t); res(world?.real ? `rebuilt (${on ? "fix" : "old"}) ${Math.round(performance.now() - t0)} ms` : "timeout"); } }, 400); });
   },
+  // development: the drawn terrain's height (terrainAt) where the yards must never change it – along the pit lane, out
+  // from the track's edges over its run-off (2–29 m), along the map's raceway lines (escape roads, service tracks) –
+  // [{ k, x, z, y }]; compared before / after groundFix(false) it shows what the yards (footing.js padPlan) moved there
+  padProbe() {
+    const R = world?.real; if (!R?.terrainAt) return "no map";
+    const out = [], add = (k, x, z) => out.push([k, +x.toFixed(1), +z.toFixed(1), +R.terrainAt(x, z).toFixed(3), +(R.padAt?.(x, z) ?? 0).toFixed(3), R.padKeepOut ? R.padKeepOut(x, z) : null]);
+    for (const p of world.pitLane?.pts || []) add("lane", p.x, p.z);
+    const S = world.samples; for (let i = 0; i < S.length; i += 6) { const s = S[i]; for (const sg of [1, -1]) { const e = sg > 0 ? (s.L ?? 7) : -(s.R ?? -7); for (const o of [2, 10, 20, 29]) add("runoff" + o, s.p.x + s.nor.x * (e + o) * sg, s.p.z + s.nor.z * (e + o) * sg); } }
+    for (const l of R.scene?.lines || []) if (l.k === "raceway") for (const q of l.pts) { const [x, z] = R.geo.xz(q); add("raceway", x, z); }
+    return out;
+  },
   // development: groundDiag's counts over the whole map (no list)
   groundDiagAll() { const R = world?.real; if (!R?.scene) return "no map"; const [la, lo] = R.scene.center || R.geo.toLL(0, 0), d = JSON.parse(this.groundDiag(la, lo, 1e5, 0)); delete d.list; return JSON.stringify(d); },
   // development: pick the n buildings nearest the track (within maxD m) most buried by the drawn ground – the cameras
@@ -3847,7 +3859,7 @@ window.Map3D = {
   hitAt(x = 0, y = 0) {
     const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x, y), camera); rc.camera = camera;
     const name = (o) => { const out = []; let q = o; while (q && out.length < 3) { if (q.name) out.push(q.name); q = q.parent; } return out.join("<") || o.type; };
-    return JSON.stringify(rc.intersectObject(scene, true).filter((h) => !h.object.isSprite).slice(0, 5).map((h) => [name(h.object), +h.distance.toFixed(2), h.object.visible]));
+    return JSON.stringify(rc.intersectObject(scene, true).filter((h) => !h.object.isSprite).slice(0, 5).map((h) => [name(h.object), +h.distance.toFixed(2), h.object.visible, h.object.receiveShadow ? "rx" : "-", h.object.castShadow ? "cast" : "-", h.object.material?.type]));
   },
   // development: the pit lane across, along the garages (every `every`-th garage): its floor height, the ground's and
   // the track model's height out from the front (0, 4, 8, 12 m), how far the track's tarmac edge is, where the pit wall
@@ -4157,6 +4169,8 @@ window.Map3D = {
     if ("sky" in o) scene.background = o.sky ? (nightNow ? nightSky : daySky) : new THREE.Color(0x8fb3d6);
     if ("all" in o) world.group.visible = o.all;
     if ("labels" in o) for (const c of cars.values()) c.label.sp.visible = o.labels;
+    if ("shadowBias" in o) { sun.shadow.bias = o.shadowBias; refreshShadows(); }
+    if ("normalBias" in o) { sun.shadow.normalBias = o.normalBias; refreshShadows(); }
     if (o.shadowSize) { sun.shadow.mapSize.set(o.shadowSize, o.shadowSize); sun.shadow.map?.dispose(); sun.shadow.map = null; refreshShadows(); }
     if (o.shadowType) { renderer.shadowMap.type = THREE[o.shadowType]; scene.traverse((x) => { if (x.material) [].concat(x.material).forEach((m) => { m.needsUpdate = true; }); }); refreshShadows(); }
     return "ok";
@@ -4276,6 +4290,10 @@ window.Map3D = {
     camera.position.set(x, y + h, z); camera.up.set(0, 0, -1); camera.near = 1; camera.far = Math.max(camera.far, h * 4); camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(x, y, z); camera.up.set(0, 1, 0);
     return "ok";
   },
+  // development: the helicopter camera let go of the car (as after a pan) at p looking at t – the user's free view, whose
+  // shadow area stays put (updateSun), unlike look()'s inspect camera
+  shadowInfo() { const sc = sun.shadow.camera; return JSON.stringify({ cast: sun.castShadow, enabled: renderer.shadowMap.enabled, key: shadowKey, map: sun.shadow.map ? [sun.shadow.map.width, sun.shadow.map.height] : null, cam: [sc.left, sc.right, sc.near, sc.far], sun: sun.position.toArray().map(Math.round), target: sun.target.position.toArray().map(Math.round), int: sun.shadow.intensity, bias: [sun.shadow.bias, sun.shadow.normalBias] }); },
+  heliAt(px, py, pz, tx, ty, tz) { if (camMode !== "heli") setCam("heli"); heli.follow = false; controls.target.set(tx, ty, tz); camera.position.set(px, py, pz); controls.update(); return "ok"; },
   look(px, py, pz, tx, ty, tz, fov = 50) {
     setCam("heli"); controls.enabled = false; camMode = "inspect";
     camera.position.set(px, py, pz); camera.near = 0.3; camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(tx, ty, tz);

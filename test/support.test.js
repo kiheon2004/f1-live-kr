@@ -127,7 +127,7 @@ test("support car models (v0.39): each its own outline, the wheels in arches at 
     const W = wheelPlaces(s);
     assert.ok(Math.abs(W.zf - W.zr - s.WB) < 1e-9, id + " wheelbase");
     // the body's box: the spec's length and width (±4 cm: bevels, mirrors not drawn), height ≤ spec + light bar
-    const box = new THREE.Box3(); car.children.filter((o) => o.isMesh).forEach((m) => box.expandByObject(m));
+    const box = new THREE.Box3(); car.children.filter((o) => o.isMesh && !o.userData.contactShadow).forEach((m) => box.expandByObject(m));
     assert.ok(Math.abs(box.max.z - box.min.z - s.L) < 0.12, id + " length " + (box.max.z - box.min.z));
     assert.ok(box.max.x - box.min.x <= s.W + 0.06 && box.max.x - box.min.x > s.W * 0.9, id + " width " + (box.max.x - box.min.x));
     assert.ok(box.max.y < s.H + 0.16, id + " height " + box.max.y);
@@ -139,4 +139,49 @@ test("support car models (v0.39): each its own outline, the wheels in arches at 
   }
   // models differ: the SUV is tall, the 4-door long, the coupés short and low
   assert.ok(SUPPORT_CARS.dbx707.H > 1.6 && SUPPORT_CARS.amgGt63s.L > 5 && SUPPORT_CARS.amgGtBlack.H < 1.3);
+});
+
+test("moving things stay out of the static shadow map (v0.40): support cars and flags cast none; a support car's contact shadow lies under it, facing up, darkest in the middle", async () => {
+  // (map3d.js updateSun draws the sun's shadow map only when its area moves: a caster that moves under a still camera leaves
+  // its shadow where the map was last drawn – the Monza 2026 safety car left a car-shaped shadow at the pit exit)
+  const { makeSupportCar, SUPPORT_CARS } = await import("../src/renderer/support3d.js");
+  const { makeFlag } = await import("../src/renderer/flag3d.js");
+  const { disposeGroup } = await import("../src/renderer/dispose.js");
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  for (const id of Object.keys(SUPPORT_CARS)) {
+    const car = makeSupportCar(id), s = SUPPORT_CARS[id], casters = [];
+    car.traverse((o) => { if (o.castShadow) casters.push(o.name || o.type); });
+    assert.deepStrictEqual(casters, [], id + " casts into the shadow map");
+    const sh = car.children.filter((o) => o.userData.contactShadow);
+    assert.strictEqual(sh.length, 1, id + " one contact shadow");
+    const g = sh[0].geometry, p = g.attributes.position, c = g.attributes.color, ix = g.index.array;
+    assert.strictEqual(c.itemSize, 4, "alpha per vertex");
+    const box = new THREE.Box3().setFromBufferAttribute(p);
+    assert.ok(box.max.y < 0.05 && box.min.y > 0, id + " on the ground");
+    assert.ok(box.max.z - box.min.z > s.L && box.max.z - box.min.z < s.L + 1, id + " a little longer than the car");
+    assert.ok(box.max.x - box.min.x > s.W && box.max.x - box.min.x < s.W + 1, id + " a little wider than the car");
+    // every face up (seen from above), the inner vertices darker than the outer
+    const v = (i) => new THREE.Vector3().fromBufferAttribute(p, i);
+    for (let k = 0; k < ix.length; k += 3) { const a = v(ix[k]), b = v(ix[k + 1]), d = v(ix[k + 2]); assert.ok(b.sub(a).cross(d.sub(a)).y > 0, id + " face " + k / 3 + " up"); }
+    for (let i = 0; i < 4; i++) assert.ok(c.getW(i) > 0.3 && c.getW(4 + i) === 0);
+    assert.ok(sh[0].material.transparent && !sh[0].material.depthWrite);
+    // (its own geometry and material: freed with the car – dispose.js)
+    let freed = 0; sh[0].geometry.addEventListener("dispose", () => freed++); sh[0].material.addEventListener("dispose", () => freed++);
+    disposeGroup(car); assert.strictEqual(freed, 2, id + " contact shadow freed with the car");
+  }
+  const f = makeFlag("yellow"), casters = []; f.group.traverse((o) => { if (o.castShadow) casters.push(o.type); });
+  assert.deepStrictEqual(casters, [], "a flag casts into the shadow map");
+});
+
+test("the medical car lines up behind the last painted grid box, not inside an empty one (v0.40)", async () => {
+  // (Monza 2026: 22 boxes, the last two cars started from the pit lane – the last starter is in box 20, and 13 m behind
+  // it is box 22's paint; Singapore 2025 likewise with box 20 of 20 empty)
+  const { gridRearSlot } = await import("../src/renderer/support.js");
+  const boxes = (n) => new Map(Array.from({ length: n }, (_, i) => [i + 1, { x: 0, z: -8 * i }]));
+  assert.strictEqual(gridRearSlot(20, boxes(22)), 22, "pit-lane starters' boxes stay empty: behind box 22");
+  assert.strictEqual(gridRearSlot(19, boxes(20)), 20);
+  assert.strictEqual(gridRearSlot(20, boxes(20)), 20, "a full grid: behind the last starter's box, as before");
+  assert.strictEqual(gridRearSlot(20, new Map()), 20, "no grid model: the last starter's");
+  assert.strictEqual(gridRearSlot(20, null), 20);
+  assert.strictEqual(gridRearSlot(null, boxes(22)), 22, "the last starter's box unknown: the last box");
 });
