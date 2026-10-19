@@ -2318,7 +2318,7 @@ function updateCamera(dt) {
     c.model.getWorldQuaternion(qTmp);
     // (the T-cam as the car's profile has it – fitted to the team's onboard footage where there is one; the eyes ahead,
     // a touch down)
-    shakeE.set(eye ? -0.06 : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI + (eye ? 0 : ((u.profile.tcamYaw || 0) * Math.PI) / 180), 0, "YXZ");
+    shakeE.set(eye ? EYE_PITCH : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI + (eye ? 0 : ((u.profile.tcamYaw || 0) * Math.PI) / 180), 0, "YXZ");
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
@@ -2381,11 +2381,16 @@ function setNear(n) { if (camera.near !== n) { camera.near = n; camera.updatePro
 // Double-click returns to the straight-ahead view. The angles are kept relative to the car, so the view
 // turns with it through the corners.
 // (fov 0: the cockpit cameras' own – the T-cam's lens as the car's profile has it (2026 footage: ~72° wide), the eyes'
-// ~95°, as tall
+// EYE_HFOV, as tall
 // as the window's shape makes it; zooming sets a vertical angle of its own)
 const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 0, dragged: false, down: null };
 function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 0; }
-const cockpitFov = (eye, tcamHfov = 72) => look.fov || Math.max(35, Math.min(100, (2 * Math.atan(Math.tan(((eye ? 95 : tcamHfov) * Math.PI) / 360) / (camera.aspect || 1.6)) * 180) / Math.PI));
+// v0.42: the eyes' lens 80° wide (it was 95°: the steering wheel ~30 % of the picture's width against ~45 % in the
+// helmet camera's frames – research/cockpit.md: that camera ~75–85° wide, L) and looking down 8° (it was 3.4°) – the
+// horizon a third of the way down, the wheel's top a little under it, as in those frames (the eyes 2 cm lower too, the
+// profiles' eye: ~3.5 cm over the wheel's top, Z 0.70–0.76 m in the research – L)
+const EYE_HFOV = 80, EYE_PITCH = -0.14;
+const cockpitFov = (eye, tcamHfov = 72) => look.fov || Math.max(35, Math.min(100, (2 * Math.atan(Math.tan(((eye ? EYE_HFOV : tcamHfov) * Math.PI) / 360) / (camera.aspect || 1.6)) * 180) / Math.PI));
 function initLook() {
   const active = () => camMode === "chase" || camMode === "onboard" || camMode === "eye";
   canvas.addEventListener("pointerdown", (e) => {

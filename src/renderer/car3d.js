@@ -25,7 +25,7 @@
 // car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
 import { shapeFor } from "./carshapes.js";
-import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin } from "./body3d.js";
+import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, chestGeometry, pelvisGeometry, LIMB_GEO } from "./body3d.js";
 import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST } from "./arms.js";
 import { ARM_PLANS } from "./armplans.js";
 import { wheelSpec, wheelParts as steeringParts, ledGeometry, teamWheel } from "./wheel3d.js";
@@ -57,7 +57,7 @@ export const PROFILES = {
     // the footage marks above (run/tt_cars/tcamfit.py: tyres' tops, horizon, helmet's top; halo and mirror kept where the
     // v0.22 fit had them): 1.12 m up, looking down 17.5°, 77.5° wide – the marks within 0.02 of the footage (the horizon
     // 0.15 for 0.17), the helmet now ~32 % of the frame's width (footage ~30 %; it was 39 %)
-    ck: 0.30, tcam: [0.08, 1.12, -0.16], tcamPitch: 17.5, tcamYaw: -2, tcamHfov: 77.5, eye: [0, 0.75, 0.30], helmet: [0, 0.755, 0.25], helmetSize: [0.14, 0.145, 0.16],
+    ck: 0.30, tcam: [0.08, 1.12, -0.16], tcamPitch: 17.5, tcamYaw: -2, tcamHfov: 77.5, eye: [0, 0.73, 0.30], helmet: [0, 0.755, 0.25], helmetSize: [0.14, 0.145, 0.16],
     src: "2026 F1 technical regulations: 3.4 m wheelbase max, 1.9 m width; tyre diameters from Pirelli's 2026 announcements (front ~705 mm, rear ~710 mm; the tread 25 / 30 mm narrower than 2025's 305 / 405 mm – motorsport.com), overall widths estimated (above) – the rest estimated",
   },
   2022: {
@@ -68,7 +68,7 @@ export const PROFILES = {
     // (v0.39: the cockpit 0.33 m further forward, ck – the helmet's middle 1.47–1.62 m behind the front axle in side photos
     // of the 2025 SF-25, MCL39 (Japanese GP 2025-04-05) and W16 (Italian GP 2025) lined up on their hubs; the model had it
     // 1.88 m back. The T-cam moved with it, with the 2026 lens and angle)
-    ck: 0.33, tcam: [0, 1.07, -0.19], tcamPitch: 17.5, tcamHfov: 77.5, eye: [0, 0.745, 0.30], helmet: [0, 0.735, 0.25],
+    ck: 0.33, tcam: [0, 1.07, -0.19], tcamPitch: 17.5, tcamHfov: 77.5, eye: [0, 0.725, 0.30], helmet: [0, 0.735, 0.25],
     src: "2022–2025 F1 technical regulations: 3.6 m wheelbase max, 2.0 m width, 0.95 m height; 18-inch wheels, ~720 mm tyres (FIA: ≤ 725 mm; 345–375 / 440–470 mm wide overall) – the rest from photos",
   },
 };
@@ -146,6 +146,89 @@ function loft(sections, ring = 24, uRange = [-2.9, 2.9], capEnds = true) {
   g.computeVertexNormals();
   return g;
 }
+// The chassis with its cockpit open (v0.42): loft's surface, except that over the cockpit each section's top – the arc
+// between the opening's edges, |x| ≤ open.w(z) – folds down into the tub: over the rim's lip, down the inner side wall,
+// across the floor, up the other wall – and back to the edge. Where the opening starts and ends (open.depth(z) rising
+// from 0 to 1) the fold deepens: at the front the bulkhead under the steering wheel, at the back the seat's back. The
+// surface stays one closed skin (no hole cut, no torn edge); the folded part comes back as its own geometry (`inner`:
+// the tub's dark carbon and padding, its own normals – a crisp edge at the rim), the rest as `outer` (paint).
+// v0.41 and before: the chassis loft was closed over the cockpit (its top at ~0.6 m, the steering wheel's middle at
+// 0.61 m) – a padded rim drawn on the paint, the dark tub under it: the wheel's lower half and the hands sank into the
+// paint when it turned. open: { zR, zF (the opening's rear and front, car z), w(z) (half width of the opening at its
+// edge), depth(z) (0…1), floor(z) (the tub's floor height) }.
+const OPEN_TOP = 22, OPEN_DZ = 0.015;
+function openLoft(sections, ring, open, uRange = [-2.9, 2.9]) {
+  // (sections over the cockpit closer together: the bulkhead and seat back are formed between them)
+  const S = [];
+  for (let i = 0; i < sections.length; i++) {
+    const a = sections[i], b = sections[i + 1]; S.push(a);
+    if (!b) break;
+    // (only where the fold deepens – the bulkhead's and the seat back's stretches; over the open middle it's the same
+    // fold section to section)
+    const n = Math.ceil((b[0] - a[0]) / OPEN_DZ);
+    for (let k = 1; k < n; k++) { const t = k / n, z = a[0] + (b[0] - a[0]) * t; if (open.ramps.some(([z0, z1]) => z > z0 - 0.01 && z < z1 + 0.01)) S.push(a.map((v, j) => (v === undefined ? b[j] : b[j] === undefined ? v : v + (b[j] - v) * t))); }
+  }
+  // a section's point at ring angle a (as loft: from the bottom, a = −π/2, round the left (+x) to the top and the right)
+  const at = (s, a) => { const [, cy, hw, hh, cx = 0, pw = 2.6, tp = 0] = s, c = Math.cos(a), sn = Math.sin(a); return [cx + hw * (1 + (tp || 0) * sn) * Math.sign(c) * Math.pow(Math.abs(c), 2 / pw), cy + hh * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / pw)]; };
+  // the top arc's half angle β: where the section's top reaches the opening's edge (|x| = w); outside the cockpit the
+  // edge's angle at the nearest end – only where the ring's points fall, the surface is the same
+  const wOf = (z) => open.w(Math.max(open.zR, Math.min(open.zF, z)));
+  const beta = (s) => { const w = Math.min(wOf(s[0]), s[2] * 0.97); let lo = 0, hi = Math.PI / 2; for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (at(s, Math.PI / 2 - m)[0] > w) hi = m; else lo = m; } return lo; };
+  const N = OPEN_TOP, M = ring - N, rows = S.length, pos = [], uv = [], isIn = [], edge = [];
+  for (const s of S) {
+    const z = s[0], b = beta(s), d = z > open.zR && z < open.zF ? open.depth(z) : 0;
+    // the outer part: from the top arc's right end round the bottom to its left end (M + 1 points), then the top arc
+    // (N − 1 points between its ends)
+    const pts = [];
+    for (let k = 0; k <= M; k++) pts.push(at(s, Math.PI / 2 + b + ((2 * Math.PI - 2 * b) * k) / M));
+    const L = at(s, Math.PI / 2 - b), R = at(s, Math.PI / 2 + b), fl = open.floor(z);
+    if (z >= open.zR - 1e-9 && z <= open.zF + 1e-9) edge.push([L[0], L[1], z]);
+    // the fold: lip, wall, the floor's corners and middle – then each top-arc point slid towards its place on it
+    const fold = [L, [L[0] - 0.006, L[1] - 0.014], [L[0] - 0.014, L[1] - 0.045], [L[0] - 0.026, fl + 0.07], [L[0] - 0.055, fl + 0.012], [0, fl], [R[0] + 0.055, fl + 0.012], [R[0] + 0.026, fl + 0.07], [R[0] + 0.014, R[1] - 0.045], [R[0] + 0.006, R[1] - 0.014], R];
+    const segN = [1, 2, 4, 2, 2, 2, 2, 4, 2, 1], along = [];   // (points per stretch: more on the walls and round the lip)
+    fold.slice(0, -1).forEach((A, i) => { const B = fold[i + 1]; for (let k = 0; k < segN[i]; k++) along.push([A[0] + ((B[0] - A[0]) * k) / segN[i], A[1] + ((B[1] - A[1]) * k) / segN[i]]); });
+    for (let k = 1; k < N; k++) {
+      const P0 = at(s, Math.PI / 2 - b + (2 * b * k) / N), PT = along[k];   // (along has N points: k = 0 is the edge)
+      pts.push([P0[0] + (PT[0] - P0[0]) * d, P0[1] + (PT[1] - P0[1]) * d]);
+    }
+    pts.forEach(([x, y], k) => { pos.push(x, y, z); uv.push((z - uRange[0]) / (uRange[1] - uRange[0]), 1 - k / ring); isIn.push(d > 0 && k > M ? 1 : 0); });
+  }
+  // rings of `ring` points (closed: the last top-arc point joins the first outer one)
+  const outer = [], inner = [];
+  for (let i = 0; i < rows - 1; i++) for (let k = 0; k < ring; k++) {
+    const a = i * ring + k, b = a + ring, a1 = i * ring + ((k + 1) % ring), b1 = a1 + ring;
+    const tri = isIn[a] || isIn[b] || isIn[a1] || isIn[b1] ? inner : outer;
+    tri.push(a, a1, b, a1, b1, b);   // (rear → front, round bottom → left → top: this winding faces out, as loft's)
+  }
+  // the ends closed (the crash structure's rear, the nose's tip)
+  for (const [i, flip] of [[0, false], [rows - 1, true]]) {
+    const base = pos.length / 3, s = S[i]; pos.push(s[4] || 0, s[1], s[0]); uv.push(uv[i * ring * 2], uv[i * ring * 2 + 1]); isIn.push(0);
+    for (let k = 0; k < ring; k++) { const a = i * ring + k, a1 = i * ring + ((k + 1) % ring); outer.push(...(flip ? [base, a1, a] : [base, a, a1])); }
+  }
+  // each part with its own copy of the points it uses: smooth normals within it, a crease where the two meet
+  const build = (idx) => {
+    const map = new Map(), P = [], U = [], I = idx.map((v) => { if (!map.has(v)) { map.set(v, P.length / 3); P.push(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]); U.push(uv[2 * v], uv[2 * v + 1]); } return map.get(v); });
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(U, 2)); g.setIndex(I); g.computeVertexNormals();
+    return g;
+  };
+  return { outer: build(outer), inner: build(inner), sections: S, edge, room: roomTable(S, open) };
+}
+// The cockpit's room as a table (v0.42) – for the driver's arms (arms.js roomPenetration) and the tests: every centimetre
+// along the car over the opening, the opening's edge (x, y), how deep the tub is there, and the chassis' top surface's
+// height every centimetre across (−9 where the chassis isn't): read off the very sections openLoft folds.
+export function roomTable(S, open) {
+  const z0 = open.zR - 0.04, z1 = open.zF + 0.2, dz = 0.01, nz = Math.round((z1 - z0) / dz) + 1, dx = 0.01, nx = 76;
+  const secAt = (z) => { let i = 0; while (i < S.length - 2 && S[i + 1][0] < z) i++; const a = S[i], b = S[i + 1], t = Math.max(0, Math.min(1, (z - a[0]) / (b[0] - a[0]))); return a.map((v, j) => (v === undefined ? b[j] : b[j] === undefined ? v : v + (b[j] - v) * t)); };
+  const at = (s, a) => { const [, cy, hw, hh, cx = 0, pw = 2.6, tp = 0] = s, c = Math.cos(a), sn = Math.sin(a); return [cx + hw * (1 + (tp || 0) * sn) * Math.sign(c) * Math.pow(Math.abs(c), 2 / pw), cy + hh * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / pw)]; };
+  const topAt = (s, x) => { if (x > at(s, 0)[0] && x > at(s, 0.3)[0]) return -9; let lo = 0, hi = Math.PI / 2; for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (at(s, m)[0] > x) lo = m; else hi = m; } return at(s, (lo + hi) / 2)[1]; };
+  const edgeX = [], edgeY = [], bottom = [], top = new Float32Array(nz * nx);
+  for (let i = 0; i < nz; i++) {
+    const z = z0 + i * dz, sc = secAt(z), inside = z > open.zR && z < open.zF, w = open.w(Math.max(open.zR, Math.min(open.zF, z))), d = inside ? open.depth(z) : 0;
+    const yE = topAt(sc, w); edgeX.push(inside ? w : 0); edgeY.push(yE); bottom.push(yE - d * (yE - open.floor(z)));
+    for (let j = 0; j < nx; j++) top[i * nx + j] = topAt(sc, j * dx);
+  }
+  return { z0, dz, nz, dx, nx, edgeX, edgeY, bottom, top, zR: open.zR, zF: open.zF, rim: 0.03 };
+}
 // Sections given nose first, smoothed: each pair of neighbours gets `k` sections between them on a Catmull-Rom
 // curve through all four numbers (no kinks between the hand-set sections).
 function smoothSections(list, k = 2) {
@@ -188,8 +271,8 @@ function wingElement(span, chord, thick, y, z, aoa = 0.12, dip = 0, segs = 16, r
 }
 const boxAt = (w, h, l, x, y, z, rx = 0, ry = 0, rz = 0) => { const g = new THREE.BoxGeometry(w, h, l); g.rotateX(rx); g.rotateY(ry); g.rotateZ(rz); g.translate(x, y, z); return g; };
 // a rounded box (soft edges catch the light: cockpit pads, mirror housings, camera pods)
-function softBox(w, h, l, x, y, z, r = 0.25) {
-  const g = new THREE.BoxGeometry(w, h, l, 8, 8, 8), p = g.attributes.position, v = new THREE.Vector3(), hx = w / 2, hy = h / 2, hz = l / 2, rr = Math.min(hx, hy, hz) * r * 4;
+function softBox(w, h, l, x, y, z, r = 0.25, seg = 8) {
+  const g = new THREE.BoxGeometry(w, h, l, seg, seg, seg), p = g.attributes.position, v = new THREE.Vector3(), hx = w / 2, hy = h / 2, hz = l / 2, rr = Math.min(hx, hy, hz) * r * 4;
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i);
     const c = new THREE.Vector3(Math.max(-hx + rr, Math.min(hx - rr, v.x)), Math.max(-hy + rr, Math.min(hy - rr, v.y)), Math.max(-hz + rr, Math.min(hz - rr, v.z)));
@@ -438,11 +521,16 @@ export function setWheelScreen(car, tex) {
 }
 
 // ---------- the template per profile (shared by every car of that profile) ----------
-const TEMPLATES = new Map();
+const TEMPLATES = new Map(), ROOMS = new Map();
+// a profile's cockpit room (roomTable) without building the whole car template when it isn't made yet
+function roomOf(p) { if (!ROOMS.has(p.key)) ROOMS.set(p.key, (p.era === "2026" ? body2026(p) : body2022(p)).room); return ROOMS.get(p.key); }
 function template(prof) {
   if (TEMPLATES.has(prof.key)) return TEMPLATES.get(prof.key);
   const T = prof.era === "2026" ? body2026(prof) : body2022(prof);
+  ROOMS.set(prof.key, T.room);
   Object.assign(T, cockpit(prof), wheels(prof));
+  // (v0.42: the padded rim along the opening's own edge – the chassis' fold – round its front; it was a hand-set line)
+  if (T.openEdge) { T.rim.dispose(); T.rim = rimAlong(T.openEdge); }
   // parts fixed to the car that share a material, merged: fewer objects to draw per car; the painted parts' livery
   // mapped by projection (paintUV: side, plan and underside views)
   const extra = T.paintExtra || [];
@@ -698,6 +786,26 @@ function mirrorParts(at, size, root) {
 // the glass in each mirror (dark, a little in from the housing's back)
 const mirrorGlass = (at, size) => [1, -1].map((k) => { const g = new THREE.PlaneGeometry(size[0] * 0.86, size[1] * 0.72); g.rotateY(Math.PI); g.translate(at[0] * k, at[1], at[2] - size[2] / 2 - 0.002); return g; });
 
+// the padded rim on the opening's edge: a soft tube (3 × 2.2 cm) a little out over the edge, up one side, round the front
+// in front of the steering wheel (its middle at the opening's front) and down the other
+function rimAlong(edge) {
+  const E = edge.filter((_, i) => i % 2 === 0 || i === edge.length - 1), last = edge[edge.length - 1];
+  const side = (k) => E.map(([x, y, z]) => [(x + 0.006) * k, y + 0.012, z]);
+  const front = [[last[0] * 0.55, last[1] + 0.014, last[2] + 0.025], [0, last[1] + 0.016, last[2] + 0.035], [-last[0] * 0.55, last[1] + 0.014, last[2] + 0.025]];
+  return sweep([...side(1), ...front, ...side(-1).reverse()], 0.03, 0.022, 40, 8);
+}
+// The cockpit's opening (v0.42), the car's z with the cockpit's own shift (ck): its edge's half width along it – the
+// rim's line of v0.41, a U closing in front of the steering wheel (FIA cockpit opening template, research/cockpit.md;
+// the side edge ~0.27 m out, the front ~0.14 m ahead of the wheel's middle – photos, M) –, how deep the tub is under it
+// (the bulkhead rising under and ahead of the wheel over its front 0.1 m, the seat's back over the rear 0.06 m) and the
+// tub's floor. One definition for the chassis' fold (openLoft), the padded rim, the arms' room (arms.js) and the tests.
+const OPEN_W = [[-0.36, 0.25], [-0.3, 0.262], [-0.05, 0.272], [0.25, 0.262], [0.36, 0.24], [0.44, 0.19], [0.5, 0.11]];
+export function cockpitOpening(p) {
+  const ck = p.ck || 0, zR = OPEN_W[0][0] + ck, zF = OPEN_W[OPEN_W.length - 1][0] + ck;
+  const w = (z) => { const u = z - ck; if (u <= OPEN_W[0][0]) return OPEN_W[0][1]; for (let i = 0; i < OPEN_W.length - 1; i++) { const [u0, w0] = OPEN_W[i], [u1, w1] = OPEN_W[i + 1]; if (u <= u1) { const t = (u - u0) / (u1 - u0); return w0 + (w1 - w0) * t * t * (3 - 2 * t); } } return OPEN_W[OPEN_W.length - 1][1]; };
+  const depth = (z) => { const u = z - ck; return sstep(-0.36, -0.3, u) * (1 - sstep(0.4, 0.5, u)); };
+  return { zR, zF, w, depth, floor: () => 0.16, ramps: [[zR, -0.3 + ck], [0.4 + ck, zF]] };
+}
 function body2022(p) {
   const S = p.shape;
   // chassis, nose first (sec's format): the nose tip over the front wing's main plane, its top rising to the chassis
@@ -711,7 +819,7 @@ function body2022(p) {
     [-1.6, 0.13, 0.62, 0.155, 0, 2.5, -0.35], [-2.0, 0.18, 0.48, 0.105, 0, 2.5, -0.25], [-2.3, 0.22, 0.41, 0.07, 0, 2.4, -0.15], [-2.45, 0.245, 0.37, 0.05], [-2.655, 0.255, 0.335, 0.035],
   ];
   const zb = bodyShift(p), zp = podShift(p), ck = p.ck || 0;
-  const body = loft(smoothSections(sec(zMap(shapeBody(C, S, 1.7), zb)), 2).reverse(), 32);
+  const OB = openLoft(smoothSections(sec(zMap(shapeBody(C, S, 1.7), zb)), 2).reverse(), 44, cockpitOpening(p)), body = OB.outer;
   // sidepods (left; the right a mirror): the inlet mouth under the mirror, the undercut beneath (the floor visible under
   // it), the top falling towards the floor's edge, the coke-bottle narrowing to the gearbox
   const P = sec(zMap(shapePods([
@@ -758,7 +866,7 @@ function body2022(p) {
   const fin = plate([[-0.8, 0.935], [-1.0, 0.93], [-1.65, 0.68], [-1.65, 0.6], [-0.8, 0.9]].map(([z, y]) => [zb(z), y]), 0, 0.008);
   const exhaust = new THREE.CylinderGeometry(0.045, 0.05, 0.14, 14, 1, true); exhaust.rotateX(Math.PI / 2); exhaust.translate(0, 0.43, -2.46);
   return {
-    body, pods: both(merge([podL, inl.lip])),
+    body, tubIn: OB.inner, openEdge: OB.edge, room: OB.room, pods: both(merge([podL, inl.lip])),
     // (2022–25 halos are painted in the team's colours on most cars: with the body, the livery's zones decide)
     paintExtra: [paintUV(halo(p), true), rwPlates, ...M.heads],
     carbon: metricUV(merge([...floor, fw0, fwPlates, rwPylon, beam, ...susp, ...corners(p), ...M.stays, fin, tcamPod, inlets, airbox, exhaust, ...mirrorGlass([0.5, 0.68, 0.52 + ck], [0.16, 0.065, 0.06]), ...shapeParts(S, p, fwSpan, 2.68, 0.35, zb)]), 0.04),
@@ -782,7 +890,7 @@ function body2026(p) {
     [-1.6, 0.13, 0.86, 0.17, 0, 2.6, -0.35], [-1.85, 0.16, 0.66, 0.125, 0, 2.5, -0.3], [-2.05, 0.19, 0.5, 0.095, 0, 2.5, -0.25], [-2.28, 0.22, 0.44, 0.065, 0, 2.4, -0.15], [-2.42, 0.245, 0.36, 0.045], [-2.52, 0.255, 0.33, 0.032],
   ];
   const zb = bodyShift(p), zp = podShift(p), ck = p.ck || 0;
-  const body = loft(smoothSections(sec(zMap(shapeBody(C, S, 1.6), zb)), 2).reverse(), 32);
+  const OB = openLoft(smoothSections(sec(zMap(shapeBody(C, S, 1.6), zb)), 2).reverse(), 44, cockpitOpening(p)), body = OB.outer;
   const P = sec(zMap(shapePods([
     [0.55, 0.4, 0.62, 0.11, 0.52, 3.2, 0.12], [0.4, 0.34, 0.645, 0.14, 0.51, 3, 0.28], [0.05, 0.28, 0.645, 0.155, 0.49, 2.8, 0.38], [-0.35, 0.23, 0.6, 0.15, 0.46, 2.7, 0.38],
     [-0.75, 0.19, 0.52, 0.125, 0.41, 2.6, 0.32], [-1.15, 0.165, 0.43, 0.1, 0.34, 2.6, 0.28], [-1.5, 0.15, 0.33, 0.07, 0.27, 2.5, 0.2], [-1.78, 0.15, 0.26, 0.04, 0.2],
@@ -833,7 +941,7 @@ function body2026(p) {
   const fin = plate([[-0.78, 0.99], [-0.98, 0.99], [-1.55, 0.93], [-1.75, 0.8], [-1.75, 0.72], [-0.78, 0.95]].map(([z, y]) => [zb(z), y]), 0, 0.008);
   const exhaust = new THREE.CylinderGeometry(0.045, 0.05, 0.14, 14, 1, true); exhaust.rotateX(Math.PI / 2); exhaust.translate(0, 0.42, -2.4);
   return {
-    body, pods: both(merge([podL, inl.lip])), paintExtra: [rwPlates, ...M.heads],
+    body, tubIn: OB.inner, openEdge: OB.edge, room: OB.room, pods: both(merge([podL, inl.lip])), paintExtra: [rwPlates, ...M.heads],
     // (2026 halos are black carbon on every car in the footage and photos – not painted)
     carbon: metricUV(merge([...floor, fw0, pylons, fwPlates, boards, rwPylon, ...susp, ...corners(p), ...M.stays, tcamPod, fin, inlets, airbox, exhaust, halo(p), ...mirrorGlass([0.56, 0.74, 0.48 + ck], [0.22, 0.085, 0.07]), ...shapeParts(S, p, fwSpan, 2.5, 0.37, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge(fwF), rwFlaps,
@@ -852,21 +960,22 @@ function cockpit(p) {
   const [hx, hy, hz] = p.helmet;
   // the opening's rim (padded edge round it) and the headrest round the helmet's back and sides
   const rim = sweep([[0.26, 0.565, -0.32], [0.285, 0.575, -0.05], [0.27, 0.58, 0.25], [0.18, 0.585, 0.45], [0, 0.59, 0.5], [-0.18, 0.585, 0.45], [-0.27, 0.58, 0.25], [-0.285, 0.575, -0.05], [-0.26, 0.565, -0.32]], 0.03, 0.022, 48, 10);
-  const headrest = merge([softBox(0.09, 0.15, 0.36, 0.2, 0.62, -0.12, 0.25), softBox(0.09, 0.15, 0.36, -0.2, 0.62, -0.12, 0.25), softBox(0.42, 0.2, 0.1, 0, 0.64, -0.33, 0.25)]);
-  // the tub inside (dark), visible through the opening round the driver: seat back and shoulders
-  const tub = merge([loft([[0.45, 0.53, 0.25, 0.02], [-0.3, 0.53, 0.26, 0.02]], 16), softBox(0.38, 0.12, 0.22, 0, 0.6, -0.2, 0.3)]);
+  const headrest = merge([softBox(0.09, 0.15, 0.36, 0.2, 0.62, -0.12, 0.25, 5), softBox(0.09, 0.15, 0.36, -0.2, 0.62, -0.12, 0.25, 5), softBox(0.42, 0.2, 0.1, 0, 0.64, -0.33, 0.25, 5)]);
+  // behind the helmet, the seat's top and the HANS' collar (dark); the tub itself is the chassis' fold (openLoft – v0.41's
+  // flat dark slab lay under the closed paint)
+  const tub = softBox(0.38, 0.12, 0.22, 0, 0.6, -0.2, 0.3, 5);
   // (v0.39: the cockpit ck further forward than these numbers – the helmet and mounts are the profile's own)
   const ck = p.ck || 0; for (const g of [rim, headrest, tub]) g.translate(0, 0, ck);
   // helmet: an egg a little longer than wide, its chin bar lower in front; the visor a band over its eyes
   const [sx, sy, sz] = p.helmetSize || [0.13, 0.14, 0.155];
-  const helmet = new THREE.SphereGeometry(1, 32, 24); helmet.scale(sx, sy, sz);
+  const helmet = new THREE.SphereGeometry(1, 30, 20); helmet.scale(sx, sy, sz);
   { const q = helmet.attributes.position; for (let i = 0; i < q.count; i++) { const y = q.getY(i), z = q.getZ(i); if (y < -0.04 && z > 0) q.setY(i, y - 0.02 * (z / 0.155)); } helmet.computeVertexNormals(); }
   helmet.translate(hx, hy, hz);
-  const visor = new THREE.SphereGeometry(1.01, 32, 8, Math.PI / 2 - 0.95, 1.9, 1.2, 0.42); visor.scale(sx, sy, sz); visor.translate(hx, hy, hz);
+  const visor = new THREE.SphereGeometry(1.01, 28, 8, Math.PI / 2 - 0.95, 1.9, 1.2, 0.42); visor.scale(sx, sy, sz); visor.translate(hx, hy, hz);
   // the steering wheel (wheel3d.js): the team's where a source shows it (carshapes.js wheel), else the era's neutral
   // one – carbon body, rubber grips, display in its bezel, buttons, rotaries, paddles, hub, and its shift lights' places;
   // its face (−z, towards the driver) tilted up to the driver's eyes
-  const wz = 0.36 + ck, wy = 0.61, tilt = 0.42;
+  const wz = WHEEL_MOUNT.z + ck, wy = WHEEL_MOUNT.y, tilt = WHEEL_MOUNT.tilt;
   const W = wheelSpec(p.wheel || null), SW = steeringParts(W, merge, metricUV);
   const column = rod([0, -0.02, 0.06], [0, -0.02, 0.24], 0.018, 10);
   // the gloves round the grips (body3d.js driverGlove: a left hand closed round the grip, phalanges tangent to it, the
@@ -887,11 +996,38 @@ function cockpit(p) {
   const mirrorTips = (g, from) => { g.userData.tips = from.userData.tips.map(([x, y, z]) => [-x, y, z]); return g; };
   const right = mirrorTips(mirrorGlove(left), left), rightLo = mirrorTips(mirrorGlove(leftLo), leftLo);
   return {
-    rim, headrest: merge([headrest, tub]), helmet, visor,
+    rim, headrest: merge([headrest, tub]), helmet, visor, torso: torsoGeometry(driverTorso(shoulder)),
     // (the arms: placed per car each frame from the plan, setWheels)
     wheel: { body: SW.body, rubber: SW.rubber, bezel: SW.bezel, caps: SW.caps, metal: merge([SW.metal, column]), paddles: SW.paddles, screen: SW.screen, leds: SW.leds, led: ledGeometry(SW.led.r), ledWhere: W.leds?.where || null, spec: W,
       flags: SW.flags, gloves: [left, right], glovesLo: [leftLo, rightLo], grip, arm: armSkin(), gauntlet: gauntletSkin(), at: [0, wy, wz], tilt, plan, shoulder },
   };
+}
+// The steering wheel's mount in the cockpit (the car's frame, before the cockpit's shift ck): its middle and its face's
+// tilt back from upright. v0.42: 0.3 rad (17°) – research/cockpit.md: 10–20° in photos (L); it was 0.42 (24°), which
+// laid the grips back along the rising forearms (the wrists bent ~40° to the little finger with the wheel straight).
+export const WHEEL_MOUNT = { y: 0.61, z: 0.36, tilt: 0.3 };
+// The driver's torso and thighs (v0.42 – the open cockpit shows them; v0.41's closed paint hid that there were none):
+// the chest and pelvis (body3d's) along the back reclined from the shoulders – their middle at the arms' shoulder joints'
+// height – down to the hips on the seat, the thighs forward and a little up into the footwell under the bulkhead. The
+// recline (the shoulders over the hips by 0.29 m in 0.48 m: ~37° from flat) and the knees' place are estimates from
+// side photos of drivers in their cars (M–L). Returns the parts' placement (for the mesh) and the capsules the arms keep
+// clear of (arms.js torsoPenetration).
+export function driverTorso(shoulder) {
+  const sm = new THREE.Vector3(0, shoulder[1], shoulder[2]), hip = new THREE.Vector3(0, 0.25, shoulder[2] + 0.385);
+  const up = sm.clone().sub(hip).normalize(), front = new THREE.Vector3(0, -up.z, up.y);   // (up the back; out of the chest)
+  const L0 = sm.clone().addScaledVector(up, -BODY.chestShoulder), hips = L0.clone().addScaledVector(up, -BODY.lumbar);
+  const thighDir = new THREE.Vector3(0, Math.sin(0.25), Math.cos(0.25)), hipX = BODY.hipZ;
+  const thighs = [1, -1].map((k) => { const a = hips.clone().setX(hipX * k), b = a.clone().addScaledVector(thighDir, BODY.thigh); return [a, b]; });
+  // (the capsules: the ribcage – 0.14 m half across, 0.1 m front to back – not the suit's outline: the arms lie against
+  // the sides of the chest, they don't stand off it)
+  return { L0, up, front, hips, thighs, capsule: { L0: L0.toArray(), up: up.toArray(), front: front.toArray(), lo: -0.2, hi: 0.42, hw: 0.14, hd: 0.1, thighs: thighs.map(([a, b]) => [a.toArray(), b.toArray(), 0.075]) } };
+}
+function torsoGeometry(t) {
+  // (the lathes' frame: +y up the spine, +x out of the chest, z across – into the car's: y → up, x → front, z → −x)
+  const M = new THREE.Matrix4().makeBasis(t.front, t.up, new THREE.Vector3().crossVectors(t.front, t.up)).setPosition(t.L0);
+  const parts = [chestGeometry().applyMatrix4(M), pelvisGeometry().applyMatrix4(M)];
+  for (const [a, b] of t.thighs) { const g = LIMB_GEO.thigh(); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize())); g.translate(a.x, a.y, a.z); parts.push(g); }
+  return merge(parts);
 }
 // The driver's arm geometry for a car (season, team): the wheel's place and tilt, the shoulders, the left grip, the
 // glove's wrist and axes – and its key (with the arms' cost settings) for the baked plans (armplans.js)
@@ -902,10 +1038,14 @@ function armGeometryOf(p, W) {
   // centre less its depth. v0.40 had them 0.13 m behind the eyes, under the middle of the helmet – the arm then had
   // ~0.44 m to reach a 0.59 m arm into, folding the elbow down beside the rim and bending the rising hand ~60°.)
   const hz = (p.helmet?.[2] ?? p.eye[2] - 0.05) - (p.helmetSize?.[2] ?? 0.155);
-  const base = { at: [0, 0.61, 0.36 + (p.ck || 0)], tilt: 0.42, shoulder: [0.19, p.eye[1] - 0.21, hz] };
+  const base = { at: [0, WHEEL_MOUNT.y, WHEEL_MOUNT.z + (p.ck || 0)], tilt: WHEEL_MOUNT.tilt, shoulder: [0.19, p.eye[1] - 0.21, hz] };
+  base.torso = driverTorso(base.shoulder).capsule;
   const grip = { c: [W.grip.x, 0, 0], up: [Math.sin(W.grip.tilt), Math.cos(W.grip.tilt), 0] }, glove = driverGlove(W.grip.r, 0).userData;
+  // (v0.42: the cockpit's room – the arms kept out of the tub's walls, the rim and the chassis – in the plan and its key)
+  base.room = roomOf(p);
   const r = (v) => (Array.isArray(v) ? v.map(r) : typeof v === "number" ? +v.toFixed(5) : v);
-  return { base, grip, glove, key: JSON.stringify(r([base.at, base.tilt, base.shoulder, grip.c, grip.up, glove.wrist, glove.hand, PLAN_COST])) };
+  let h = 0; for (const v of [...base.room.top, ...base.room.edgeX, ...base.room.edgeY, ...base.room.bottom]) h = (h * 31 + Math.round(v * 1e4)) | 0;
+  return { base, grip, glove, key: JSON.stringify(r([base.at, base.tilt, base.shoulder, grip.c, grip.up, glove.wrist, glove.hand, PLAN_COST, base.room.z0, h, base.torso])) };
 }
 // the plan for that geometry: the baked one (tools/arm-plans.js) – else made now on a coarse grid (~1–2 s; a warning:
 // re-bake), once per geometry
@@ -1259,6 +1399,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const coverMat = mat("cover", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.2 }), 0.6));
   const lipMat = mat("lip", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.32, metalness: 0.85 })));
   const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));
+  const tubMat = mat("tub", () => new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.7, metalness: 0.05 }));
   const visorMat = mat("visor", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.06, metalness: 0.7 })));
   const screenMat = mat("screen", () => new THREE.MeshBasicMaterial({ map: wheelScreen(), toneMapped: false }));
   // the wheel's own materials (shared): grips' rubber, the matte black of the display's bezel and the light strip, the
@@ -1277,7 +1418,10 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const suitMat = new THREE.MeshStandardMaterial({ color: l.suit || l.base, vertexColors: true, roughness: 0.86, metalness: 0 });
   const g = new THREE.Group();
   const add = (geo, m, parent = g, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; parent.add(mesh); return mesh; };
-  add(t.painted, paint); add(t.carbon, carbon); add(t.wing, wingPaint); add(t.rim, pad);
+  add(t.painted, paint, g, "painted"); add(t.carbon, carbon, g, "carbon"); add(t.wing, wingPaint, g, "wing"); add(t.rim, pad, g, "rim");
+  // the tub inside the cockpit's opening (the chassis' fold: walls, floor, bulkhead, seat back) – dark carbon, every LOD
+  // (it shows from the helicopter too)
+  if (t.tubIn) add(t.tubIn, tubMat, g, "tub");
   // active aero / DRS: the flaps pivot about their leading edges (closed = corner mode, open = straight mode / DRS)
   const pivot = ([y, z], geo, m0) => { const pv = new THREE.Group(); pv.position.set(0, y, z); const m = new THREE.Mesh(geo, m0); m.position.set(0, -y, -z); pv.add(m); g.add(pv); return pv; };
   const fwPivot = pivot(t.fwPivot, t.fwFlaps, fwPaint), rwPivot = pivot(t.rwPivot, t.rwFlaps, wingPaint);
@@ -1285,7 +1429,9 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // driver: helmet and visor always (a T-cam sees them); the rest close up only
   const helmet = add(t.helmet, helmetMat, g, "helmet"); const visor = add(t.visor, visorMat, helmet);
   const near = new THREE.Group(); near.name = "near"; g.add(near);
-  add(t.headrest, pad, near);
+  add(t.headrest, pad, near, "headrest");
+  // the driver's torso and thighs in the suit (the open tub shows them – close up only, as the arms)
+  add(t.torso, suitMat, near, "torso");
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
   add(t.wheel.body, carbon, wheel); add(t.wheel.paddles, carbon, wheel); add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
   const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen");

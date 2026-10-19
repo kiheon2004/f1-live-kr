@@ -46,14 +46,67 @@ const D = Math.PI / 180;
 export const WRIST_COMFORT = { flex: -15, rad: -22, flexSpan: 26, radSpan: 14 };
 export const WRIST_LIMIT = { flex: [-62, 60], rad: [-40, 17] };
 export const PRONATION = { comfort: 0, span: 45, limit: [-75, 70] };   // (deg from neutral – thumb up; + = palm turning down)
-export const SHOULDER = { forward: 0.07, back: 0.02, up: 0.03, down: 0.02 };   // how far the shoulder joint may move (m)
-export const ROLL = 25 * D;   // how far the grip may turn in the closed hand either way (rad; an estimate – the glove's palm and fingers give)
-// the elbow's room in the cockpit (the car's frame, centre of the elbow; the sleeve there ~4.5 cm thick): beside the
-// rim's padded edge (~0.255 m to its inside) at the rim's height, more room in the tub below it; never into the torso
-export const ELBOW_ROOM = { rimY: 0.5, xRim: 0.235, xLow: 0.255, xBody: 0.12, yMin: 0.22, yHigh: 0.72, overY: [0.6, 0.66], xOver: 0.3 };
-// (above the padded rim – an elbow lifted at a big lock – it may go out over it: from overY[0] to overY[1] the room
-// widens to xOver)
-export function elbowRoom(y) { const R = ELBOW_ROOM; if (y < R.rimY) return R.xLow; if (y <= R.overY[0]) return R.xRim; const t = Math.min(1, (y - R.overY[0]) / (R.overY[1] - R.overY[0])); return R.xRim + (R.xOver - R.xRim) * t * t * (3 - 2 * t); }
+export const SHOULDER = { forward: 0.12, back: 0.02, up: 0.08, down: 0.03 };   // how far the shoulder joint may move (m)
+export const ROLL = 40 * D;   // how far the grip may turn in the closed hand either way (rad; an estimate – the glove and a loosened hand let a round 47 mm grip slide round; v0.42: 25° left the lower arm at a big lock no way across the chest)
+// the elbow beside the driver's torso (never into it: x ≥ xBody), not down in the seat (y ≥ yMin), and only a little
+// over the shoulders (yHigh) – the car's own body is the room's (roomPenetration)
+export const ELBOW_ROOM = { xBody: 0.12, yMin: 0.22, yHigh: 0.72 };
+
+// ---------- the cockpit's room (v0.42) ----------
+// How deep a ball of radius r at (x, y, z) (the car's frame) sits in the car's body – 0 when it is clear: inside the
+// tub (within its walls, over its floor or the bulkhead / seat back where the opening starts and ends), over the
+// opening, or above the chassis' top outside it. From the room table car3d.js builds off the chassis' own sections
+// (roomTable): the opening's edge, the tub's bottom, the top surface every cm. The padded rim: a 3 cm tube on the edge.
+export function roomPenetration(R, x, y, z, r) {
+  if (!R) return 0;
+  const ax = Math.abs(x), fi = (z - R.z0) / R.dz;
+  if (fi < 0 || fi > R.nz - 1) return 0;   // (ahead of or behind the table: nothing of the arm goes there)
+  const i = Math.min(R.nz - 2, Math.floor(fi)), t = fi - i, lerp = (A) => A[i] + (A[i + 1] - A[i]) * t;
+  const ex = lerp(R.edgeX), ey = lerp(R.edgeY), bot = lerp(R.bottom);
+  const topAt = (xx) => { const fj = Math.min(R.nx - 1.001, xx / R.dx), j = Math.floor(fj), u = fj - j, a = R.top[i * R.nx + j] * (1 - u) + R.top[i * R.nx + j + 1] * u, b = R.top[(i + 1) * R.nx + j] * (1 - u) + R.top[(i + 1) * R.nx + j + 1] * u; return a + (b - a) * t; };
+  // over the opening (between its edges, inside the rim): the tub's walls and floor, and the rim's tube at the edge
+  if (ex > 0 && ax < ex) {
+    let pen = Math.max(0, bot - (y - r));                                   // floor, bulkhead, seat back
+    if (y < ey + 0.01) pen = Math.max(pen, ax + r - (ex - 0.02));           // the walls (the fold's 1.4–2.6 cm in)
+    const dr = Math.hypot(ax - ex, y - (ey + 0.012)) - R.rim; if (dr < r) pen = Math.max(pen, r - dr);   // the rim
+    return pen;
+  }
+  // elsewhere: above the chassis' top (the rim's tube on the edge too)
+  const top = Math.max(topAt(Math.max(0, ax - r * 0.7)), topAt(ax), topAt(ax + r * 0.7));
+  let pen = top > -1 ? Math.max(0, top - (y - r)) : 0;
+  if (ex > 0) { const dr = Math.hypot(ax - ex, y - (ey + 0.012)) - R.rim; if (dr < r) pen = Math.max(pen, r - dr); }
+  return pen;
+}
+// How deep a ball of radius r at (x, y, z) sits in the driver's own torso or thighs (car3d driverTorso's capsules: the
+// trunk an elliptic section – hw across, hd front to back – along its back from lo to hi about L0; the thighs round)
+export function torsoPenetration(T, x, y, z, r) {
+  if (!T) return 0;
+  const rx = x - T.L0[0], ry = y - T.L0[1], rz = z - T.L0[2], along = rx * T.up[0] + ry * T.up[1] + rz * T.up[2];
+  let pen = 0;
+  if (along > T.lo - r && along < T.hi + r) {
+    const lat = rx, fr = rx * T.front[0] + ry * T.front[1] + rz * T.front[2], d = Math.hypot(lat / T.hw, fr / T.hd);
+    if (d < 1 + r / T.hd) pen = Math.max(pen, r + T.hd * (1 - d));
+  }
+  for (const [a, b, rr] of T.thighs) {
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L2 = ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2, t = Math.max(0, Math.min(1, ((x - a[0]) * ab[0] + (y - a[1]) * ab[1] + (z - a[2]) * ab[2]) / L2));
+    const dd = Math.hypot(x - a[0] - ab[0] * t, y - a[1] - ab[1] * t, z - a[2] - ab[2] * t); if (dd < rr + r) pen = Math.max(pen, rr + r - dd);
+  }
+  return pen;
+}
+// the sleeve's radius along the arm (body3d armSkin: upper arm ~5 cm, forearm narrowing to ~2.6 cm at the wrist)
+const ARM_R = (u) => (u < 0.5 ? 0.052 - 0.014 * u * 2 : 0.042 - 0.016 * (u - 0.5) * 2);
+// the deepest the arm (shoulder → elbow → wrist, 12 balls along it) goes into the car's body, and into the driver's
+// torso and thighs (the balls more than 0.14 m from the shoulder joint: nearer, the arm grows out of the torso)
+export function armPenetration(R, o, T = null) {
+  let worst = 0;
+  for (let k = 1; k <= 12; k++) {
+    const u = k / 12, A = u <= 0.5 ? o.S : o.E, B = u <= 0.5 ? o.E : o.W, f = u <= 0.5 ? u * 2 : (u - 0.5) * 2;
+    const x = A[0] + (B[0] - A[0]) * f, y = A[1] + (B[1] - A[1]) * f, z = A[2] + (B[2] - A[2]) * f, r = ARM_R(u);
+    worst = Math.max(worst, roomPenetration(R, x, y, z, r));
+    if (T && Math.hypot(x - o.S[0], y - o.S[1], z - o.S[2]) > 0.14) worst = Math.max(worst, torsoPenetration(T, x, y, z, r));
+  }
+  return worst;
+}
 
 // ---------- small vector helpers (arrays; no per-call allocation in the per-frame path) ----------
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -140,7 +193,7 @@ export function elbowAt(geo, swivel, fwd, up, o) {
   o.tau = twistOf(o.H, o.f, o.hx) * D; o.pron = wrapDeg(o.tau / D - 90);
   return o;
 }
-export function armAt(geo, a, swivel, fwd, up, o, roll = 0) { handAt(geo, a, roll, o); return elbowAt(geo, swivel, fwd, up, o); }
+export function armAt(geo, a, swivel, fwd, up, o, roll = 0) { handAt(geo, a, roll, o); o.room = geo.room || null; o.torso = geo.torso || null; return elbowAt(geo, swivel, fwd, up, o); }
 const wrapDeg = (x) => ((((x + 180) % 360) + 360) % 360) - 180;
 // how unnatural the arm is (dimensionless): the wrist's bend and the forearm's turn from their comfortable centres, steep
 // past the limits; the elbow out of the cockpit's room; the shoulder moved
@@ -149,17 +202,20 @@ export function armCost(o, fwd, up, roll = 0) {
   const C = WRIST_COMFORT, L = WRIST_LIMIT, P = PRONATION, R = ELBOW_ROOM;
   let c = ((o.flex - C.flex) / C.flexSpan) ** 2 + ((o.rad - C.rad) / C.radSpan) ** 2 + ((o.pron - P.comfort) / P.span) ** 2;
   c += 30 * (barrier(o.flex, L.flex[0], L.flex[1], 8) + barrier(o.rad, L.rad[0], L.rad[1], 4) + barrier(o.pron, P.limit[0], P.limit[1], 8));
-  const [ex, ey] = o.E, xMax = elbowRoom(ey);
-  c += 40 * (barrier(ex, R.xBody, xMax, 0.012) + barrier(ey, R.yMin, 9, 0.02)) + 2 * barrier(ey, -9, R.yHigh, 0.04);
-  c += 0.4 * ((fwd / 0.04) ** 2 + (up / 0.02) ** 2) + ((roll / D) / 12) ** 2 + (o.short / 0.001) ** 2;   // (the hand out of reach: never – a millimetre costs as much as a bent wrist)
+  const [ex, ey] = o.E;
+  // the arm in the car's body (the tub's walls and floor, the rim, the chassis' top – the room's table, roomPenetration)
+  // or into the driver's own body (beside the torso: x ≥ xBody); a raised elbow high over the shoulders costs a little
+  const pen = o.room || o.torso ? armPenetration(o.room, o, o.torso) : 0; o.pen = pen;
+  c += (pen / 0.004) ** 2 + (o.torso ? 0 : 40 * barrier(ex, R.xBody, 9, 0.012)) + 40 * barrier(ey, R.yMin, 9, 0.02) + 2 * barrier(ey, -9, R.yHigh, 0.04);
+  c += 0.4 * ((fwd / 0.04) ** 2 + (up / 0.02) ** 2) + ((roll / D) / 18) ** 2 + (o.short / 0.001) ** 2;   // (the hand out of reach: never – a millimetre costs as much as a bent wrist)
   return c;
 }
 
 // ---------- the plan: every 2° of the wheel ----------
 export const PLAN_STEP = 2, PLAN_MAX = 90;
 // everything the plan's cost depends on besides the geometry: part of a baked plan's key (a change asks for a re-bake)
-export const PLAN_COST = JSON.stringify({ WRIST_COMFORT, WRIST_LIMIT, PRONATION, SHOULDER, ROLL, ELBOW_ROOM, PLAN_STEP, PLAN_MAX });
-const SW = { lo: -40 * D, hi: 150 * D };   // the swivel's range (the elbow from a little inwards to well up and out)
+export const PLAN_COST = JSON.stringify({ WRIST_COMFORT, WRIST_LIMIT, PRONATION, SHOULDER, ROLL, ELBOW_ROOM, PLAN_STEP, PLAN_MAX, W: "1+12exp(-(a/35)^2)", SW: [-120, 150], BESIDE: [35, 0.16] });
+const SW = { lo: -120 * D, hi: 150 * D };   // the swivel's range (the elbow from across the chest – a big lock's lower arm – to well up and out)
 const _o = armOut();
 const wrapRad = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
 
@@ -194,6 +250,12 @@ export function armGeo(base, grip, glove, rho) {
   const F = gloveFrame(grip, rho);
   return { ...base, rho, grip, frame: F, wrist: inFrame(F, glove.wrist, true), hand: glove.hand.map((v) => inFrame(F, v, false)) };
 }
+// how much a wheel angle's pose counts in the whole-turn plan: the wheel spends most of a lap within ±30° (straight
+// ahead most of all) – a pose there weighs up to 5× one at the lock, so the plan never buys a better hairpin with a
+// worse straight (v0.42's first whole-turn plan with the torso kept the lower arm crossed over the chest from the lock
+// right through straight ahead: the wrist bent 57° there)
+export const BESIDE = { a: 35 * D, x: 0.16 };
+export const angleWeight = (a) => 1 + 12 * Math.exp(-(((a / D) / 35) ** 2));
 // ---------- the whole turn at once (offline: tools/arm-plans.js bakes it into armplans.js) ----------
 // Step by step from straight ahead (planArms) an arm can stay in a pose that is fine now but leads nowhere – v0.41's first
 // plan kept the rising arm's elbow down beside the rim with the hand bent ~60° at 30–90°, though lifting the elbow over
@@ -205,7 +267,8 @@ export function planArmsPath(geo, { swStep = 5 * D, rlStep = 2.5 * D, wSw = 4 * 
   const n = PLAN_MAX / PLAN_STEP, N = 2 * n + 1, sws = [], rls = [];
   for (let x = SW.lo; x <= SW.hi + 1e-9; x += swStep) sws.push(x);
   for (let x = -ROLL; x <= ROLL + 1e-9; x += rlStep) rls.push(x);
-  const fws = [-SHOULDER.back, 0, 0.03, SHOULDER.forward], ups = [-SHOULDER.down, 0, SHOULDER.up], S = sws.length * rls.length;
+  const fws = [-SHOULDER.back, 0, 0.03, 0.07, SHOULDER.forward], ups = [-SHOULDER.down, 0, 0.03, SHOULDER.up], S = sws.length * rls.length;
+  _o.room = geo.room || null; _o.torso = geo.torso || null;
   const cost = new Float64Array(N * S), arg = new Int8Array(N * S * 2);
   for (let i = 0; i < N; i++) {
     const a = (i - n) * PLAN_STEP * D;
@@ -214,7 +277,10 @@ export function planArmsPath(geo, { swStep = 5 * D, rlStep = 2.5 * D, wSw = 4 * 
       for (let w = 0; w < sws.length; w++) {
         let bc = Infinity, bf = 0, bu = 0;
         for (let f = 0; f < fws.length; f++) for (let u = 0; u < ups.length; u++) { elbowAt(geo, sws[w], fws[f], ups[u], _o); const c = armCost(_o, fws[f], ups[u], rls[r]); if (c < bc) { bc = c; bf = f; bu = u; } }
-        const k = i * S + r * sws.length + w; cost[k] = bc; arg[2 * k] = bf; arg[2 * k + 1] = bu;
+        // (within ±BESIDE of straight ahead the elbow stays out beside the body – the arm crosses over the chest only
+        // towards the lock, never for a small turn)
+        if (Math.abs(a) < BESIDE.a) { armAt(geo, a, sws[w], fws[bf], ups[bu], _o, rls[r]); if (_o.E[0] < BESIDE.x) bc += 1e4 * (BESIDE.x - _o.E[0]); }
+        const k = i * S + r * sws.length + w; cost[k] = bc * angleWeight(a); arg[2 * k] = bf; arg[2 * k + 1] = bu;
       }
     }
   }
