@@ -140,7 +140,9 @@ test("crew meshes: a figure's parts drawn per LOD – fingers near, mittens mid,
   at(CREW_LOD.far - 10); const mid = meshes.filter((m) => m.visible).length;
   at(CREW_LOD.far + 20); const far = meshes.filter((m) => m.visible).length;
   const r = at(CREW_LOD.body + 50), body = meshes.filter((m) => m.visible).length;
-  assert.ok(near === mid && far < mid && body === 1 && r.people === 1, `parts shown near ${near}, mid ${mid}, far ${far}, beyond ${body}`);
+  // (v0.40: plus each figure's contact shadow, at every distance)
+  assert.ok(near === mid && far < mid && body === 2 && r.people === 1, `parts shown near ${near}, mid ${mid}, far ${far}, beyond ${body}`);
+  assert.ok(meshes.find((m) => m.name === "contactShadows").visible && meshes.every((m) => !m.castShadow), "contact shadows, no casting into the static shadow map");
   assert.ok(meshes.every((m) => m.isInstancedMesh));
   void names;
 });

@@ -665,7 +665,14 @@ function shared() {
   SHARED = { parts, kit: kitParts(), teamMat: new THREE.MeshStandardMaterial({ roughness: 0.72 }), darkMat: new THREE.MeshStandardMaterial({ color: "#17191c", roughness: 0.6 }),
     visorMat: new THREE.MeshStandardMaterial({ color: "#0b0d12", roughness: 0.08, metalness: 0.6 }),
     kitMat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.4 }), bandMat: sidewallMaterial(0xffffff), bandMat26: sidewallMaterial(0xffffff, "2026") };
-  for (const x of [SHARED.teamMat, SHARED.darkMat, SHARED.visorMat, SHARED.kitMat, SHARED.bandMat, SHARED.bandMat26]) x.userData.shared = true;
+  // a person's contact shadow: a soft ellipse on the ground (dark in the middle, clear at its edge – vertex alpha), a
+  // little longer along the figure's facing (x) than across
+  { const pos = [0, 0.012, 0], col = [0, 0, 0, 0.42], idx = [], N = 16;
+    for (let i = 0; i < N; i++) { const a = (i / N) * Math.PI * 2; pos.push(Math.cos(a) * 0.42, 0.012, Math.sin(a) * 0.3); col.push(0, 0, 0, 0); idx.push(0, 1 + ((i + 1) % N), 1 + i); }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 4)); g.setIndex(idx); g.computeVertexNormals();
+    SHARED.blob = g; g.userData.shared = true;
+    SHARED.blobMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }); }
+  for (const x of [SHARED.blobMat, SHARED.teamMat, SHARED.darkMat, SHARED.visorMat, SHARED.kitMat, SHARED.bandMat, SHARED.bandMat26]) x.userData.shared = true;
   for (const [g] of Object.values(parts)) g.userData.shared = true;
   for (const g of Object.values(SHARED.kit)) g.userData.shared = true;
   return SHARED;
@@ -694,11 +701,15 @@ function partMatrix(m4, mp, x, y, z, yx, yy, yz, xx, xy, xz, s) {
 //   joints) are left out.
 export function crewMeshes(max = 120) {
   const S = shared(), group = new THREE.Group(); group.name = "crews";
-  const mk = (geo, mat, n, coloured) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.visible = false; m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; if (coloured) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3); group.add(m); return m; };
+  // (the crews move: they cast no shadow into the sun's shadow map, which is drawn again only when its area moves – their
+  // shadows would stay where it was drawn (the safety car's did, v0.40 regression check); a soft contact shadow under each
+  // figure instead, as the cars and support cars have)
+  const mk = (geo, mat, n, coloured) => { const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.visible = false; m.frustumCulled = false; m.castShadow = false; m.receiveShadow = true; if (coloured) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3); group.add(m); return m; };
   const body = {}; for (const [k, [g, team, small, per]] of Object.entries(S.parts)) body[k] = { mesh: mk(g, team ? S.teamMat : k === "visor" ? S.visorMat : S.darkMat, max * per, !!team), team, small, cap: max * per };
   for (const [k, b] of Object.entries(body)) b.mesh.name = k;
   const kit = { gun: mk(S.kit.gun, S.kitMat, max, false), jackBase: mk(S.kit.base, S.kitMat, 32, false), jackBar: mk(S.kit.bar, S.kitMat, 32, false) };
   const kitCap = { gun: max, jackBase: 32, jackBar: 32 };
+  const blob = mk(S.blob, S.blobMat, max, false); blob.receiveShadow = false; blob.name = "contactShadows";
   let wheel = null;   // { key, front, rear, frontBand, rearBand }
   const m4 = new THREE.Matrix4(), mp = new THREE.Matrix4(), mk4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
   const counts = {}, alias = { knee: "joint", elbow: "joint", shoulder: "joint" };
@@ -739,6 +750,7 @@ export function crewMeshes(max = 120) {
         lod = d < CREW_LOD.near ? "near" : d > CREW_LOD.far ? "far" : "mid";
         colour = col.set(f.colour || "#9aa0a6"); bare = f.role === "marshal"; if (bare) skin.set(SKIN[((f.seed ?? people) * 7) % SKIN.length]);
         q.setFromAxisAngle(up, f.yaw); p.set(f.x, f.y, f.z); mp.compose(p, q, one);
+        m4.copy(mp); blob.setMatrixAt(people - 1, m4);   // (the contact shadow under the figure's feet)
         if (d > CREW_LOD.body) { put("farBody", 0, 0, 0, 0, 1, 0, 1, 0, 0, null); continue; }
         // kit carried by the figure itself (walking out or standing ready, no stop played): held in front, the hands on it
         let hands = f.hands || null;
@@ -763,6 +775,7 @@ export function crewMeshes(max = 120) {
         }
       }
       for (const [k, b] of Object.entries(body)) { b.mesh.count = counts[k]; b.mesh.visible = counts[k] > 0; b.mesh.instanceMatrix.needsUpdate = true; if (b.mesh.instanceColor) b.mesh.instanceColor.needsUpdate = true; }
+      blob.count = people; blob.visible = people > 0; blob.instanceMatrix.needsUpdate = true;
       const kn = { gun: n.gun, jackBase: counts.jack, jackBar: counts.jack };
       for (const [k, mesh] of Object.entries(kit)) { mesh.count = kn[k]; mesh.visible = kn[k] > 0; mesh.instanceMatrix.needsUpdate = true; }
       if (wheel) for (const k of ["front", "rear"]) for (const mesh of [wheel[k], wheel[k + "Band"]]) { mesh.count = n[k]; mesh.visible = n[k] > 0; mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; }
