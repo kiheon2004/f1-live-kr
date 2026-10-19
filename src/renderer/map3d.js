@@ -3469,7 +3469,7 @@ window.Map3D = {
         let distWorst = 0, distAt = null;
         for (let i = 1; i < r.length; i++) {
           const x = row(i); if (x[2] != null && x[3] != null && Math.abs(x[2] - x[3]) > distWorst) { distWorst = Math.abs(x[2] - x[3]); distAt = x; }
-          if (r[i][3] !== r[i - 1][3] || r[i][5] !== r[i - 1][5]) { const s = []; for (let j = Math.max(1, i - 4); j < Math.min(r.length, i + 5); j++) s.push(row(j)); seams.push(s); }
+          if (r[i][3] !== r[i - 1][3] || r[i][5] !== r[i - 1][5] || (r[i][7] == null) !== (r[i - 1][7] == null)) { const s = []; for (let j = Math.max(1, i - 4); j < Math.min(r.length, i + 5); j++) s.push(row(j)); seams.push(s); }
         }
         done(JSON.stringify({ frames: r.length, states: [...states], t: [r[0]?.[0], r[r.length - 1]?.[0]], excessRad: +worst.toFixed(4), at, distWorstM: +distWorst.toFixed(3), distAt, seams }));
       };

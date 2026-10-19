@@ -207,9 +207,11 @@ export function odometerAt(car, t, trk = null) {
   }
   const span = T[lo + 1] - T[lo];
   if (span > ODO.gap) {
-    // a hole: the positions' share of what was added over it (it ends exactly on the next sample)
+    // a hole: the positions' share of what was added over it (it ends exactly on the next sample); their distance
+    // taken over ±0.5 s (the raw 4 Hz positions' own spacing and timing make a wheel's speed jump from 11 to 160 km/h
+    // between samples – a pit entry at 80 km/h, Monza 2025 – and the average of a rising function still rises)
     if (!has) return dt > ODO.gap ? null : d[lo];
-    const a = trackDist(trk, T[lo]), b = trackDist(trk, T[lo + 1]), x = trackDist(trk, t);
+    const a = holeDist(trk, T[lo]), b = holeDist(trk, T[lo + 1]), x = holeDist(trk, t);
     return b > a ? d[lo] + (d[lo + 1] - d[lo]) * Math.min(1, Math.max(0, (x - a) / (b - a))) : d[lo];
   }
   if (!(span > 0) || d[lo + 1] === d[lo]) return d[lo];
@@ -219,6 +221,7 @@ export function odometerAt(car, t, trk = null) {
   return d[lo] + (full > 0 ? (d[lo + 1] - d[lo]) * (part / full) : 0);
 }
 
+const holeDist = (trk, t) => (trackDist(trk, t - 500) + trackDist(trk, t - 250) + trackDist(trk, t) + trackDist(trk, t + 250) + trackDist(trk, t + 500)) / 5;
 // still(t) for odometer() from a car's position track (the v0.40 form; odometer(car, trk) uses the track itself)
 export function stillFromTrack(trk) { return trk ? (t) => standing(trk, t) : null; }
 
