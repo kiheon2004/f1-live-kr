@@ -237,7 +237,25 @@ export function lastStand(car, t, lag = 0, within = 25, min = 1.2, still = 3) {
 // one position to the next (positions come ~4 a second, good to centimetres in the pit lane).
 const DMm = 0.1;
 function idxAt(c, t) { let lo = 0, hi = c.n - 1; if (!c.n || c.t[0] > t) return -1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c.t[m] <= t) lo = m; else hi = m; } return c.t[hi] <= t ? hi : lo; }
-const stepStill = (c, j, still) => { const dt = (c.t[j] - c.t[j - 1]) / 1000; return dt > 0 && dt < 3 && Math.hypot(c.x[j] - c.x[j - 1], c.y[j] - c.y[j - 1]) * DMm / dt < still; };
+const rawStill = (c, j, still) => { const dt = (c.t[j] - c.t[j - 1]) / 1000; return dt > 0 && dt < 3 && Math.hypot(c.x[j] - c.x[j - 1], c.y[j] - c.y[j - 1]) * DMm / dt < still; };
+// v0.41: a blip inside a standstill – one or two steps that moved (0.1–0.45 m at 1–1.7 m/s), still before them and for
+// at least BLIP.after steps after – is part of the standstill. Monaco 2025: 14 of 141 stops in 5 races were split that
+// way (Bortoleto lap 35: 1.6 s still, 0.3 m in 0.2 s, 0.8 s still; the record says one 2.4 s stop) – the stop's clock
+// started again from 0 (jacks, wheels off a second time) and the crew flicked to walking back and out again for a frame
+// or two. A car that drives off never stands again within BLIP.after steps, so a departure isn't bridged; live, the
+// steps after don't exist yet – nothing is bridged until they do.
+export const BLIP = { m: 0.5, steps: 2, after: 2 };
+function stepStill(c, j, still) {
+  if (rawStill(c, j, still)) return true;
+  const n = c.n ?? c.t.length;
+  let a = j, b = j;
+  while (a > 1 && !rawStill(c, a - 1, still)) { a--; if (j - a + 1 > BLIP.steps) return false; }
+  while (b + 1 < n && !rawStill(c, b + 1, still)) { b++; if (b - a + 1 > BLIP.steps) return false; }
+  if (b - a + 1 > BLIP.steps || a < 2 || !rawStill(c, a - 1, still)) return false;
+  for (let k = 1; k <= BLIP.after; k++) if (b + k >= n || !rawStill(c, b + k, still)) return false;
+  for (let k = a; k <= b; k++) { const dt = c.t[k] - c.t[k - 1]; if (!(dt > 0 && dt < 3000)) return false; }
+  return Math.hypot(c.x[b] - c.x[a - 1], c.y[b] - c.y[a - 1]) * DMm <= BLIP.m;
+}
 export function posSpeed(c, t, span = 600) {
   const i = idxAt(c, t); if (i < 1) return 0;
   // (as drawn – standingForPos: the step covering t, when the next sample is there; else the last span's)

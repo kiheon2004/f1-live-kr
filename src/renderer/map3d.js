@@ -78,8 +78,13 @@ function init() {
   // Shadows: a 4096² map over a box that follows what the camera looks at (see updateSun).
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
-  sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.6;
+  // (three.js adds the bias to the map's 0…1 depth over near…far: −0.0004 was 0.0004 × 5990 m ≈ 2.4 m, which wiped the
+  // shadow of anything under ~2 m – barriers, the pit wall, chimneys – and lit a strip up the shaded side of walls at a
+  // low sun. v0.41: 0.12 m. No acne seen at Monza 2025 (spans 256–1218 m) or Abu Dhabi 2025 at a 6° sun; the maps are
+  // drawn from back faces and nothing that moves casts into them (cars, crews, support cars, flags: contact shadows) –
+  // shots/reg_sh_*; normalBias unchanged.)
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 6000;
+  sun.shadow.bias = -0.12 / (sun.shadow.camera.far - sun.shadow.camera.near); sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
 
   camera = new THREE.PerspectiveCamera(50, 1, 0.3, 20000);
