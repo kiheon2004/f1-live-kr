@@ -121,21 +121,22 @@ test("wheels by the telemetry's odometer: continuous where the path changes, the
 });
 
 test("wheels' odometer: nothing added while the car stands by its positions (the jacks up), or across a gap in the telemetry", async () => {
-  const { odometer, odometerAt, stillFromTrack, ODO } = await W();
+  const { odometer, odometerAt, ODO } = await W();
   // the wheel-speed figure jumping to 40 km/h while the car stands (positions unchanged) at t 10–13 s
   const car = telemetry(0, 20000, (t) => (t >= 10000 && t <= 13000 ? 40 : 0));
   const trk = { t: [], x: [], y: [], n: 0 }; for (let t = 0; t <= 20000; t += 250) { trk.t.push(t); trk.x.push(1000); trk.y.push(500); trk.n++; }
-  odometer(car, stillFromTrack(trk));
-  assert.strictEqual(odometerAt(car, 20000), 0, "standing: the wheels don't turn");
+  odometer(car, trk);
+  assert.strictEqual(odometerAt(car, 20000, trk), 0, "standing: the wheels don't turn");
   // without positions near (a gap in them): the telemetry is trusted
   const car2 = telemetry(0, 20000, (t) => (t >= 10000 && t <= 13000 ? 40 : 0));
-  odometer(car2, stillFromTrack({ t: [0], x: [0], y: [0], n: 1 }));
-  assert.ok(odometerAt(car2, 20000) > 30, "no positions: rolled by the speed");
+  const far = { t: [0], x: [0], y: [0], n: 1 };
+  odometer(car2, far);
+  assert.ok(odometerAt(car2, 20000, far) > 30, "no positions: rolled by the speed");
   // a 10 s hole in the telemetry: nothing integrated over it, no angle inside it (the path rules apply)
   const c3 = { t: [0, 250, 500, 10500, 10750], v: [100, 100, 100, 100, 100] };
   const d = odometerAt(c3, 10750);
   assert.ok(Math.abs(d - (100 / 3.6) * 0.75) < 1e-9, `only the covered 0.75 s counted (${d})`);
-  assert.strictEqual(odometerAt(c3, 500 + ODO.gap + 1), null);
+  assert.strictEqual(odometerAt(c3, 500 + ODO.gap + 1), null, "and no positions to go on by: the path rules");
 });
 
 test("wheels' odometer on a live feed: extended as samples arrive and cut with them – the values already given never change", async () => {
@@ -144,8 +145,8 @@ test("wheels' odometer on a live feed: extended as samples arrive and cut with t
   for (let t = 0; t < 400000; t += 250) {
     car.t.push(t); car.v.push(200);
     if (t % 5000 === 0) seen.push([t, odometerAt(car, t)]);
-    // (replay.js live: over 1400 samples, the first 200 cut from every channel and the odometer)
-    if (car.t.length > 1400) { car.t.splice(0, 200); car.v.splice(0, 200); if (car.odo) { if (car.odo.n > 200 && Array.isArray(car.odo.d)) { car.odo.d.splice(0, 200); car.odo.n -= 200; } else car.odo = null; } }
+    // (replay.js live: over 1400 samples, the odometer cut – built over them first – then the first 200 of every channel)
+    if (car.t.length > 1400) { car.odo?.cut?.(200); car.t.splice(0, 200); car.v.splice(0, 200); }
   }
   for (const [t, d] of seen.slice(-20)) assert.ok(Math.abs(odometerAt(car, t) - d) < 1e-6, `t ${t}: ${odometerAt(car, t)} vs ${d}`);
   assert.ok(Math.abs(odometerAt(car, 399750) - (200 / 3.6) * 399.75) < 1e-6);

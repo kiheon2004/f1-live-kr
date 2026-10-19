@@ -24,7 +24,7 @@ import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
-import { stepWheel, smearOf, odometerAt, stillFromTrack, wrapAngle } from "./wheelspin.js";
+import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
 import { WheelScreens, screenModel } from "./wheelscreen.js";
 import { boardsFor, boardPlaces } from "./boards.js";
@@ -1394,6 +1394,7 @@ function lightLeds(c, num, t, src) {
   setFlagLights(c.model, ts === "5" ? "#ff2414" : ts === "2" || ts === "4" || ts === "6" || ts === "7" ? "#ffb21a" : null);
 }
 // the wheels' angles (front, rear) and how much their markings smear this frame (car3d.js setSmear)
+const LIVE_LAG = 600;   // (ms: a live car is drawn this far behind the newest data – replay.js LiveSource.positionsInto)
 function rollWheels(c, st, est, F, t, v) {
   const P = c.model.userData.profile, W = c.wheelSt || (c.wheelSt = { f: { a: null, t: null }, r: { a: null, t: null }, t: null, pos: new THREE.Vector3(), has: false });
   const pitU = est?.pit ? est.u : c.pit?.u;
@@ -1402,10 +1403,13 @@ function rollWheels(c, st, est, F, t, v) {
   const fwd = Math.sin(c.yaw) * (v.x - W.pos.x) + Math.cos(c.yaw) * (v.z - W.pos.z) >= 0 ? 1 : -1;
   const speed = st ? st.vs : (est?.pit ? est.vs : c.speed * (moved ? fwd : 1));
   const dts = W.t == null ? 0 : (t - W.t) / 1000;
-  // (the telemetry's odometer where the car has speed data – one measure on every path; else from the path)
-  const src = app().src, tel = src?.car?.[c.num];
-  const trk = src?.tracks?.cars?.[c.num]; if (W.stillTrk !== trk) { W.stillTrk = trk; W.still = stillFromTrack(trk); }
-  const odo = tel ? odometerAt(tel, t, W.still) : null;
+  // (the telemetry's odometer where the car has speed data, on by its positions over holes in it – one measure on
+  // every path; else from the path. Asked at the moment the car is drawn: live 0.6 s back – replay.js / smooth.js
+  // LiveSource positions – and no later than its newest position, where the drawn car holds (CarTracks.at) – so the
+  // wheels neither run ahead of the car nor wait on a speed batch not in yet)
+  const src = app().src, tel = src?.car?.[c.num], trk = src?.tracks?.cars?.[c.num] || null;
+  const tw = !src?.isLive ? t : trk?.n ? Math.min(t - LIVE_LAG, Math.max(trk.t[trk.n - 1], t - LIVE_LAG - 4000)) : t - LIVE_LAG;
+  const odo = tel || trk ? odometerAt(tel, tw, trk) : null;
   let fa, ra;
   if (odo != null) { fa = W.f.a = wrapAngle(odo / P.FR); ra = W.r.a = wrapAngle(odo / P.RR); W.f.t = W.r.t = t; }
   else { fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }); ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved }); }
