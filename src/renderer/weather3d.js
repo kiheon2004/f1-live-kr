@@ -154,7 +154,7 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   scene.add(dome, rain);
   const ru = rain.material.uniforms;
   const S = { log: null, logFor: null, liveKey: null, liveSeen: "", clouds: null, cloudsKey: null, cloudsAsk: 0, coverFor: null, raster: null, coverTex: null,
-    clock: 0, camPrev: new THREE.Vector3(), camVel: new THREE.Vector3(), hasPrev: false, north: [0, -1], east: [1, 0], wind: [0, 0], tyresAt: 0, tyres: null,
+    camPrev: new THREE.Vector3(), camVel: new THREE.Vector3(), hasPrev: false, north: [0, -1], east: [1, 0], wind: [0, 0], tyresAt: 0, tyres: null,
     forced: null, roadFor: null, roadMats: [], roadWet: -1, roadEnv: null, skyMode: "auto", useClouds: true, enabled: true };
   const sc = { sun: scaler(), hemi: scaler(), near: scaler(), far: scaler(), exp: scaler() };
   const ti = { hemi: tinter(), fog: tinter(), sun: tinter() };
@@ -179,16 +179,25 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     return S.log;
   }
   // the hourly cloud cover for this place and session (asked once per session; none until it comes)
-  function clouds(A, world, src, utc) {
-    if (!S.useClouds || !world?.geoCenter || !window.api?.geo?.clouds || !Number.isFinite(utc)) return null;
-    const key = `${A.sourceKey?.()?.replace(/:\d+$/, "")}|${world.geoCenter[0].toFixed(2)},${world.geoCenter[1].toFixed(2)}`;
+  // (asked again only when the session or the place changes – a live one every 15 min; the cover at t worked out once a
+  // second, or at once after a jump: nothing of this per frame)
+  function clouds(A, world, src, t) {
+    if (!S.useClouds || !world?.geoCenter || !window.api?.geo?.clouds || !Number.isFinite(t)) return null;
     const now = performance.now();
-    if (key !== S.cloudsKey || (src.isLive && now - S.cloudsAsk > 15 * 60e3)) {
-      S.cloudsKey = key; S.cloudsAsk = now; if (!src.isLive) S.clouds = null;
-      const k = key;
-      window.api.geo.clouds(world.geoCenter[0], world.geoCenter[1], utc, !!src.isLive).then((r) => { if (S.cloudsKey === k) S.clouds = r?.ok ? r : null; }).catch(() => {});
+    if (src !== S.cloudSrc || world !== S.cloudWorld || S.cloudsKey == null || (src.isLive && now - S.cloudsAsk > 15 * 60e3)) {
+      const key = `${A.sourceKey?.()?.replace(/:\d+$/, "")}|${world.geoCenter[0].toFixed(2)},${world.geoCenter[1].toFixed(2)}`;
+      S.cloudSrc = src; S.cloudWorld = world;
+      if (key !== S.cloudsKey || src.isLive) {
+        const utc = src.utcAt?.(t);
+        if (Number.isFinite(utc)) {
+          S.cloudsKey = key; S.cloudsAsk = now; if (!src.isLive) S.clouds = null; S.coverAt = -Infinity;
+          window.api.geo.clouds(world.geoCenter[0], world.geoCenter[1], utc, !!src.isLive).then((r) => { if (S.cloudsKey === key) { S.clouds = r?.ok ? r : null; S.coverAt = -Infinity; } }).catch(() => {});
+        }
+      }
     }
-    return S.clouds ? coverAt(S.clouds.hours, utc) : null;
+    if (!S.clouds) return null;
+    if (now - S.coverAt > 1000 || Math.abs(t - S.coverT) > 5000) { S.coverAt = now; S.coverT = t; S.cover = coverAt(S.clouds.hours, src.utcAt?.(t)); }
+    return S.cover;
   }
   // the roofs over this world's real surroundings (rebuilt with them)
   function covers(world) {
@@ -226,10 +235,11 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   // sky – roughness no lower than 0.3 (a film of water on open tarmac, not a mirror); no puddles (nothing says where)
   function road(world, wet, night) {
     if (!world?.road) return;
-    if (S.roadFor !== world) {
-      S.roadFor = world; S.roadMats = []; S.roadWet = -1;
+    // (the kerbs are rebuilt when the real map comes – a tunnel keeps them out of it: their materials taken again)
+    if (S.roadFor !== world || S.roadKerb !== world.kerb) {
+      S.roadFor = world; S.roadKerb = world.kerb; S.roadMats = []; S.roadWet = -1; S.roadEnv = undefined;
       const seen = new Set();
-      for (const part of [world.road, world.lines, world.kerb]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); S.roadMats.push({ m, color: m.color.clone(), rough: m.roughness, road: o === world.road }); } });
+      for (const part of [world.road, world.lines, world.kerb]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); const b = m.userData.wxBase || (m.userData.wxBase = { color: m.color.clone(), rough: m.roughness }); S.roadMats.push({ m, color: b.color, rough: b.rough, road: o === world.road }); } });
     }
     const q = Math.round(wet * 50) / 50;
     const envNow = !night && q > 0.03 ? S.envSky || null : null;
@@ -248,10 +258,10 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     get info() { return S.info || null; },
     get raster() { return S.raster; },
     // settings: { sky: "auto" | "neutral" | "fair" | "overcast", clouds: true/false }
-    configure(o = {}) { if (o.sky) S.skyMode = o.sky; if ("clouds" in o) { S.useClouds = o.clouds !== false; if (!S.useClouds) S.clouds = null; S.cloudsKey = null; } },
+    configure(o = {}) { if (o.sky) S.skyMode = o.sky; if ("clouds" in o) { S.useClouds = o.clouds !== false; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; } },
     // development: a state forced for testing the look (the covers, the wet road) – { rain: 0–1, wet: 0–1, cloud: 0–1 } or null
     force(o) { S.forced = o || null; },
-    reset() { S.log = null; S.logFor = null; S.liveKey = null; S.clouds = null; S.cloudsKey = null; S.hasPrev = false; },
+    reset() { S.log = null; S.logFor = null; S.liveKey = null; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.hasPrev = false; },
     // once a frame, before drawing. A: window.F1KR; world: map3d's world; night: the night look is on.
     update({ A, world, camera, dt, night, hemi, sun, fog }) {
       const src = A?.src || null, log = logFor(src), t = A?.t;
@@ -259,8 +269,7 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       // supporting evidence: the tyres at t (re-read every 2 s; a seek re-reads at once)
       const now = performance.now();
       if (src && (now - S.tyresAt > 2000 || Math.abs((t ?? 0) - (S.tyresT ?? 0)) > 5000)) { S.tyresAt = now; S.tyresT = t; S.tyres = wetTyreEvidence(src.state?.TimingAppData?.Lines); }
-      const utc = src && Number.isFinite(t) ? src.utcAt?.(t) : null;
-      const cover = src ? clouds(A, world, src, utc) : null;
+      const cover = src ? clouds(A, world, src, t) : null;
       environmentAt(log, Number.isFinite(t) ? t : -Infinity, { tyres: src ? S.tyres : null, cover, sky: S.skyMode }, env);
       env.cloudData = cover != null ? S.clouds?.source || null : null;
       if (S.forced) { const f = S.forced; env.forced = true; if (f.rain != null) { env.rainAmt = f.rain; env.raining = f.rain > 0 ? 1 : 0; } if (f.wet != null) env.wet = f.wet; if (f.cloud != null) env.cloud = f.cloud; }
@@ -288,13 +297,13 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       const rate = A?.rate ?? 1, step = dt * Math.min(1, Math.max(0, rate));
       rain.visible = env.rainAmt > 0.002 && !!camera;
       if (!rain.visible) { S.hasPrev = false; return; }
-      S.clock += step;
       windVector(env.windDir, env.windSpeed, S.north, S.east, S.wind);
       fall.set(S.wind[0], -6.5, S.wind[1]);          // (≈ the terminal speed of a 2 mm drop, m/s)
       ru.uOff.value.addScaledVector(fall, -step);
       ru.uOff.value.set(((ru.uOff.value.x % BOX[0]) + BOX[0]) % BOX[0], ((ru.uOff.value.y % BOX[1]) + BOX[1]) % BOX[1], ((ru.uOff.value.z % BOX[2]) + BOX[2]) % BOX[2]);
       // the camera's own motion (smoothed): the streak is the drop's path relative to it over EXPOSE
-      if (S.hasPrev && dt > 0) { streak.copy(camera.position).sub(S.camPrev).multiplyScalar(1 / dt); S.camVel.lerp(streak, 0.3); } else S.camVel.set(0, 0, 0);
+      // (a jump of more than 20 m in a frame is a cut – another camera, a seek –, not motion: no streaks smeared across it)
+      if (S.hasPrev && dt > 0 && camera.position.distanceToSquared(S.camPrev) < 400) { streak.copy(camera.position).sub(S.camPrev).multiplyScalar(1 / dt); S.camVel.lerp(streak, 0.3); } else S.camVel.set(0, 0, 0);
       S.camPrev.copy(camera.position); S.hasPrev = true;
       streak.copy(fall).sub(S.camVel).multiplyScalar(EXPOSE);
       if (rate === 0) streak.copy(fall).multiplyScalar(EXPOSE);

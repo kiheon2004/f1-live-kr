@@ -221,3 +221,35 @@ test("weather: Spa 2025's recorded rain (WeatherData, minute records) – wet at
   assert.ok(w > 0.2 && w < 0.4, `at the switch to slicks ${w}`);
   assert.ok(log.wetAt(222 * MIN) < 0.1);
 });
+
+test("weather3d: the live path – records taken as they're shown, a new session's key starts clean; the lights scaled without compounding or fighting map3d.js", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const { createWeather } = await import("../src/renderer/weather3d.js");
+  const scene = new THREE.Scene(), renderer = { toneMappingExposure: 1.05 };
+  const hemi = new THREE.HemisphereLight(0xe3efff, 0x4a5a3a, 1.15), sun = new THREE.DirectionalLight(0xfff3e0, 2.4), fog = new THREE.Fog(0xc9d9e8, 800, 5000);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 20000);
+  const W = createWeather({ scene, renderer, daySky: null, fairEnv: () => null });
+  let now = 1000;
+  const src = { isLive: true, state: { SessionInfo: { Key: 1 }, WeatherData: { Rainfall: "0", WindSpeed: "1", WindDirection: "90" } }, now: () => now, utcAt: (t) => t };
+  const A = { src, get t() { return now; }, rate: 1, sourceKey: () => "live:1:0" };
+  const step = () => W.update({ A, world: null, camera, dt: 0.016, night: true, hemi, sun, fog });
+  step();
+  assert.strictEqual(W.env.raining, 0);
+  now = 61000; src.state.WeatherData = { ...src.state.WeatherData, Rainfall: "1" }; step();
+  assert.strictEqual(W.env.raining, 1);
+  for (let i = 0; i < 50; i++) { now += 1000; step(); }
+  assert.ok(W.env.rainAmt > 0 && W.env.wet > 0);
+  // the lights: the same every frame (no compounding), and a value map3d.js sets is taken as the new base
+  const s1 = sun.intensity; for (let i = 0; i < 20; i++) step();
+  assert.strictEqual(sun.intensity, s1);
+  sun.intensity = 0.16; step();                       // (applyLighting's night value)
+  assert.ok(Math.abs(sun.intensity - 0.16 * (1 - 0.5 * Math.min(1, W.env.rainAmt / 0.6))) < 1e-9);
+  // a new live session: nothing of the last one's rain or wet road
+  src.state = { SessionInfo: { Key: 2 }, WeatherData: { Rainfall: "0" } }; now += 1000; step();
+  assert.strictEqual(W.env.raining, 0); assert.strictEqual(W.env.wet, 0); assert.strictEqual(W.env.rainAmt, 0);
+  // no session at all: unknown, nothing drawn
+  const B = { src: null, t: null, rate: 1 };
+  W.update({ A: B, world: null, camera, dt: 0.016, night: true, hemi, sun, fog });
+  assert.strictEqual(W.env.known, false); assert.strictEqual(W.env.rainAmt, 0);
+  W.dispose();
+});
