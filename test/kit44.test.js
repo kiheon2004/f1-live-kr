@@ -28,9 +28,13 @@ test("kit v0.44: no glove takes the car's body colour whole – Mercedes' near-b
 
 test("kit v0.44: one material per kit style – the team's cars share it, other teams have their own; freeing a car leaves it to the others", async () => {
   const { C, D } = await load();
-  const a = C.makeCar({ teamName: "Mercedes", teamColour: "27F4D2", number: 63, season: 2026 }), b = C.makeCar({ teamName: "Mercedes", teamColour: "27F4D2", number: 12, season: 2026 });
-  const f = C.makeCar({ teamName: "Ferrari", teamColour: "E80020", number: 16, season: 2026 });
-  assert.strictEqual(a.userData.kitMat, b.userData.kitMat, "two Mercedes, two kit materials");
+  const a = C.makeCar({ teamName: "Mercedes", teamColour: "27F4D2", number: 63, season: 2026 }), b = C.makeCar({ teamName: "Mercedes", teamColour: "27F4D2", number: 63, season: 2026 });
+  const f = C.makeCar({ teamName: "Ferrari", teamColour: "E80020", number: 16, season: 2026 }), f2 = C.makeCar({ teamName: "Ferrari", teamColour: "E80020", number: 44, season: 2026 });
+  assert.strictEqual(a.userData.kitMat, b.userData.kitMat, "two cars in one kit, two kit materials");
+  assert.strictEqual(f.userData.kitMat, f2.userData.kitMat, "Ferrari's two drivers (one team design), two kit materials");
+  // a driver's own design (research/gloves.md: Mercedes 2025–26 teal / white by driver) – its own material
+  const ant = C.makeCar({ teamName: "Mercedes", teamColour: "27F4D2", number: 12, season: 2026 });
+  assert.notStrictEqual(a.userData.kitMat, ant.userData.kitMat, "Antonelli's white gloves on Russell's teal material");
   assert.notStrictEqual(a.userData.kitMat, f.userData.kitMat, "Mercedes and Ferrari share a kit material");
   assert.notStrictEqual(a.userData.kitMat.map, f.userData.kitMat.map, "and their palettes");
   // the gloves, gauntlets, sleeves and the torso (with the harness) all on the kit's material

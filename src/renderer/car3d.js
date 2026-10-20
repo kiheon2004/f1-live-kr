@@ -1604,7 +1604,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const helmetMat = skyLit(new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 }));
   // the driver's kit – gloves, the suit's sleeves and torso, the harness – in the team's kit colours per zone (kit.js: one
   // material per kit style, shared by the team's cars; v0.43 drew the gloves in the car's base colour all over)
-  const kitMat = kitMaterial(kitStyle(l, kitEntry(teamName, prof.season, date))), gloveMat = kitMat, suitMat = kitMat;
+  const kitMat = kitMaterial(kitStyle(l, kitEntry(teamName, prof.season, date, number))), gloveMat = kitMat, suitMat = kitMat;
   const g = new THREE.Group();
   const add = (geo, m, parent = g, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; parent.add(mesh); return mesh; };
   add(t.painted, paint, g, "painted"); add(t.carbon, carbon, g, "carbon"); add(t.wing, wingPaint, g, "wing"); add(t.rim, pad, g, "rim");

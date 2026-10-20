@@ -29,8 +29,49 @@ const KIT_BLACK = "#2a2c30", PALM_GREY = "#4a4c50", BUCKLE = "#2e3034", LEVER = 
 // knitted cuff under the gauntlet), webbing (harness straps), webEdge (their edges), buckle, buckleCap, adjuster;
 // src: where it comes from and how sure (H/M/L or "visual": a choice for legibility, not a photo of the real kit).
 // Matched on the feed's team name, the season and (where a kit changed mid-season) the event's date, as liveryFor.
-// Missing fields fall back to the base rules in kitStyle().
-export const KITS = [];
+// Missing fields fall back to the base rules in kitStyle(). drivers: a driver's own design over the team's (by car number).
+// Colours are read off the photos in research/gloves.md (approximations, not measurements); sponsor and maker logos left
+// out; where a stripe sits on a fingertip the knuckle or the seam rings carry it (the glove has no fingertip zone). A
+// season whose gloves weren't found carries the season before ("assumed", L) or – none at all – the base rules.
+const PALM = KIT_BLACK, PAPAYA = "#ff8000", MERC_TEAL = "#00a19b";
+const KIT_RBR = { fabric: "#1b2340", palm: PALM, band: "#202226", gauntlet: "#1b2340", hem: "#161c33", suit: "#1b2340", suitCuff: "#161c33" };
+const KIT_FER25 = { fabric: "#a3121c", palm: PALM, band: "#8a0f18", gauntlet: "#a3121c", suit: "#a3121c", suitSeam: "#f2f2f2", suitCuff: "#f2f2f2" };
+const KIT_VCARB = { fabric: "#eef0f3", back: "#1f3fa0", knuckle: "#eef0f3", palm: PALM, band: "#eef0f3", gauntlet: "#eef0f3", hem: "#1a1b1e", suit: "#eef0f3", suitSeam: "#1f3fa0", suitCuff: "#eef0f3" };
+const KIT_MCL = { fabric: KIT_BLACK, back: KIT_BLACK, knuckle: PAPAYA, palm: "#3a3c40", band: KIT_BLACK, suit: PAPAYA, suitSeam: KIT_BLACK, suitCuff: KIT_BLACK };
+const KIT_AMR = { fabric: KIT_BLACK, back: KIT_BLACK, knuckle: "#cedc00", seam: "#cedc00", palm: PALM, band: KIT_BLACK, gauntlet: KIT_BLACK, suit: "#00483d", suitCuff: "#00483d" };
+const KIT_WIL = { fabric: "#e9ebee", back: "#e9ebee", knuckle: "#e9ebee", palm: PALM, band: "#e9ebee", gauntlet: "#e9ebee", hem: "#d5d8dc", suit: "#eef0f3", suitSeam: "#0b1f4f", suitCuff: "#eef0f3" };
+const KIT_HAAS = { fabric: KIT_BLACK, back: "#da291c", knuckle: KIT_BLACK, palm: PALM, band: KIT_BLACK, gauntlet: KIT_BLACK, suit: KIT_BLACK, suitCuff: "#da291c" };
+const MERC_RUSSELL = { fabric: MERC_TEAL, back: MERC_TEAL, knuckle: MERC_TEAL, palm: PALM, band: "#7a7d80", gauntlet: MERC_TEAL, hem: "#7a7d80" };
+export const KITS = [
+  [/red bull racing/i, { ...KIT_RBR, src: "Sparco (Castore) navy, black palm – race-used, Graham Budd lot 78 (2024); Getty Baku 2025 (H Verstappen / M)" }, { until: 2025 }],
+  [/red bull racing/i, { ...KIT_RBR, suitCuff: "#e8b923", src: "navy, black palm; sleeve's yellow/red band near the cuff – Getty 2026 (M)" }, { from: 2026 }],
+  [/^rb$|racing bulls|\bvcarb|alphatauri|rb f1/i, { ...KIT_VCARB, src: "Alpinestars white mesh, royal-blue back panel, black binding – Getty Spain/Brazil 2024 (H Tsunoda / M)" }, { until: 2024 }],
+  [/^rb$|racing bulls|\bvcarb|alphatauri|rb f1/i, { ...KIT_VCARB, suitSeam: "#2a4fb0", src: "gloves assumed as 2024 (L); sleeve white/blue – Getty Bahrain 2025 (M)" }, { from: 2025, until: 2025 }],
+  [/^rb$|racing bulls|\bvcarb|alphatauri|rb f1/i, { ...KIT_VCARB, fabric: "#d9dce0", back: "#5a6f8c", knuckle: "#d9dce0", band: "#d9dce0", gauntlet: "#d9dce0", hem: "#1a2340", suit: "#f1ede4", suitSeam: "#e0502a", suitCuff: "#1a2340", src: "light grey, blue-grey back print, navy binding – Getty Singapore 2026 (M)" }, { from: 2026 }],
+  [/ferrari/i, { ...KIT_FER25, fabric: "#d6001c", gauntlet: "#d6001c", band: "#b80018", seam: "#f2c200", suit: "#d6001c", suitSeam: "#f2c200", src: "Puma red, yellow/white finger stripes (on the seam rings) – Getty Bahrain test 2024 (M); palm inferred (L)" }, { until: 2024 }],
+  [/ferrari/i, { ...KIT_FER25, src: "Puma deep red, black palm (white thumb not drawn) – Collector Studio race-used 2025 (H)" }, { from: 2025, until: 2025 }],
+  [/ferrari/i, { ...KIT_FER25, fabric: "#d81e1e", gauntlet: "#d81e1e", band: "#c01a1a", hem: "#f2f2f2", suit: "#d81e1e", src: "Puma bright red, tricolour cuff hem (its white drawn) – Collector Studio Canada 2026 (H Hamilton / M Leclerc)" }, { from: 2026 }],
+  [/mercedes/i, { ...MERC_RUSSELL, suit: KIT_BLACK, src: "Puma: Russell teal, black palm (M, dated by label); Hamilton his own fluo yellow (H)",
+    drivers: { 44: { fabric: "#d8e81c", back: "#d8e81c", knuckle: "#d8e81c", band: "#d8e81c", gauntlet: "#d8e81c", hem: "#b9c816" } } }, { until: 2024 }],
+  [/mercedes/i, { ...MERC_RUSSELL, hem: "#16171a", src: "Adidas/OMP: teal (Russell) / white (Antonelli) – team giveaway photo, driver split by signature only (L)",
+    drivers: { 12: { fabric: "#eceef1", back: "#eceef1", knuckle: "#eceef1", band: "#eceef1", gauntlet: "#eceef1", hem: "#24234a" } } }, { from: 2025, until: 2025 }],
+  [/mercedes/i, { ...MERC_RUSSELL, hem: "#16171a", suit: "#3a3d42", suitSeam: MERC_TEAL, suitCuff: KIT_BLACK, src: "gloves assumed as 2025 (L); sleeve charcoal forearm, teal at the elbow – replica suit (M)",
+    drivers: { 12: { fabric: "#eceef1", back: "#eceef1", knuckle: "#eceef1", band: "#eceef1", gauntlet: "#eceef1", hem: "#24234a" } } }, { from: 2026 }],
+  [/mclaren/i, { ...KIT_MCL, src: "Alpinestars black, papaya fingertip (on the knuckles) – Piastri race-used 2024 (H), Joopiter 2025 (M); sleeve Commons 2024-08-25 (H)" }, { until: 2025 }],
+  [/mclaren/i, { ...KIT_MCL, src: "assumed as 2025 (L): 2026 gloves not found" }, { from: 2026 }],
+  [/aston martin/i, { ...KIT_AMR, src: "OMP black, lime fingertip stripes (on knuckles and seams) – race-spec / race-used pairs 2024 (H)" }, { until: 2024 }],
+  [/aston martin/i, { ...KIT_AMR, suit: "#00594c", suitCuff: "#00594c", src: "gloves assumed as 2024 (L, maker now Puma); sleeve green, green knit cuff – used suits (H)" }, { from: 2025 }],
+  [/alpine/i, { fabric: KIT_BLACK, back: "#ff87bc", knuckle: "#2f6fd6", seam: "#2f6fd6", palm: PALM, band: "#e0409a", gauntlet: KIT_BLACK, src: "Alpinestars black, pink back panel, blue piping, stripe band – Gasly GP-used 2024 (H; Ocon L)" }, { until: 2024 }],
+  [/alpine/i, { fabric: "#1a2448", back: "#ff87bc", knuckle: "#20b8e0", seam: "#20b8e0", palm: PALM, band: "#1a2448", gauntlet: "#1a2448", suit: "#ff87bc", suitSeam: "#1a2448", suitCuff: KIT_BLACK, src: "Alpinestars navy, pink panel, cyan piping – Alamy Jeddah / Spielberg 2025 (H); palm inferred" }, { from: 2025, until: 2025 }],
+  [/alpine/i, { fabric: "#1a2448", back: "#ff87bc", knuckle: "#20b8e0", seam: "#20b8e0", palm: PALM, band: "#1a2448", gauntlet: "#1a2448", suit: "#ff87bc", suitSeam: "#1a2448", suitCuff: KIT_BLACK, src: "assumed as 2025 (L): 2026 gloves not found" }, { from: 2026 }],
+  [/williams/i, { ...KIT_WIL, src: "Puma white knit, black palm, long white gauntlet – RM Sotheby's / gp-collection race-used 2024 (H); 2025 signature gloves (M)" }, { until: 2025 }],
+  [/williams/i, { ...KIT_WIL, src: "assumed as 2025 (L, maker now Sparco): 2026 gloves not found; white suit (L)" }, { from: 2026 }],
+  [/haas/i, { ...KIT_HAAS, seam: "#da291c", src: "Alpinestars black, red star (back panel), red finger stripes – signed replica (M-/L); sleeve photos (H)" }, { until: 2024 }],
+  [/haas/i, { ...KIT_HAAS, seam: "#f2f2f2", src: "Alpinestars black, red star, white piping – signature gloves 2025 (M); 2026 assumed (L)" }, { from: 2025 }],
+  [/kick sauber|sauber|stake/i, { suit: KIT_BLACK, band: "#52e252", src: "gloves not found – base rules; sleeve black/green (text report, L)" }, { until: 2025 }],
+  [/audi/i, { suit: "#33363b", suitSeam: "#b5b8bc", suitCuff: KIT_BLACK, src: "gloves not found – base rules; sleeve charcoal, grey stripes – F1.com launch 2026-01-20 (H)" }, { from: 2026 }],
+  [/cadillac/i, { suit: KIT_BLACK, suitSeam: "#e8e8e8", src: "gloves not found – base rules; suit black, white accents (L-M)" }, { from: 2026 }],
+];
 // the base rules for a team without its own entry: the glove's fabric in the suit's colour, the back panel and the band
 // in the team's accent, the knuckles in the fabric, a grey palm print; black webbing with a polished buckle
 export function kitStyle(livery, own = null) {
@@ -46,8 +87,8 @@ export function kitStyle(livery, own = null) {
     src: o.src || "base rules from the livery (no photo of this kit)",
   };
 }
-// the team's own kit entry for a season / date (as liveryFor's windows)
-export function kitEntry(teamName, season = null, date = null) {
+// the team's own kit entry for a season / date (as liveryFor's windows), a driver's own design over it
+export function kitEntry(teamName, season = null, date = null, number = null) {
   const y = +season || null, d = typeof date === "string" ? date.slice(0, 10) : null;
   const ok = (w) => { if (!w) return true;
     const lo = w.from, hi = w.until;
@@ -55,7 +96,10 @@ export function kitEntry(teamName, season = null, date = null) {
     if (typeof lo === "string") { if (!d) return y ? y > +lo.slice(0, 4) : true; if (d < lo) return false; }
     if (typeof hi === "string") { if (!d) return y ? y <= +hi.slice(0, 4) : true; if (d >= hi) return false; }
     return true; };
-  for (const [re, k, w] of KITS) if (re.test(teamName || "") && ok(w)) return k;
+  for (const [re, k, w] of KITS) if (re.test(teamName || "") && ok(w)) {
+    const own = k.drivers?.[+number];
+    return own ? { ...k, ...own } : k;
+  }
   return null;
 }
 // a dark colour raised to the fabric's albedo floor; others as they are
