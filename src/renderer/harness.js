@@ -1,34 +1,38 @@
 // The driver's safety harness (v0.44): a six-point racing harness laid on the driver's torso as drawn (car3d.js
 // driverTorso / torsoGeometry) and over the HANS collar – not a road car's diagonal belt.
 //
-// What it is (research/harness.md): F1 cars carry an FIA 8853-2016 six-point harness – two shoulder straps over the
-// shoulders (over the FHR/HANS device's tails) down to a single central rotary quick-release buckle on the lower belly,
-// two lap straps from anchorages at the sides of the seat across the pelvis to the buckle, and two crotch (leg) straps
-// up from the seat between the thighs to it (2022–25 Technical Regulations Art. 14.4 / 2026 Section C C14.4: the
-// harness as the FIA list of homologated belts, "two shoulder straps, one abdominal strap and two straps between the
-// legs" at least – H; 8853-2016: shoulder straps 75 mm, or 50 mm where used with an FHR device; lap straps 75 mm;
-// crotch straps 50 mm – H). Colours vary by team (the webbing is often black or grey, some team-coloured – kit.js).
+// What it is (research/harness.md, 2026-10-20): the Technical Regulations make the harness mandatory and point at FIA
+// Standard 8853-2016 (2022 Art. 12.5.6: "two shoulder straps, one abdominal strap and two straps between the legs";
+// 2024 / 2025 Art. 14.5 and 2026 Section C C14.5 (Iss 17, 2026-04-28): homologated to 8853-2016, Technical List n°57 – H).
+// 8853-2016 (text of 11.12.2024): two shoulder, two pelvic and two crotch straps on one single buckle (4.1, 4.2); the
+// crotch straps at least 20 mm apart, no V (4.1); shoulder straps ≥ 70 mm, or ≥ 44 mm (2") "for FHR use only" (6.4.1 –
+// every F1 driver wears an FHR: 2" straps); pelvic ≥ 44 mm, crotch ≥ 44 mm (6.1.1, 6.2.1); the turn buckle's lever
+// points down when closed (4.4); the buckle's contact area 20–40 cm² (6.5.1: Ø ~55–70 mm round); adjusters never on the
+// buckle (4.5) – all H. The F1 harnesses on List n°57 (Sabelt F1 2020: shoulder 48–50 mm, pelvic 75 mm, crotch 48 mm,
+// black webbing, a black anodised round buckle with a polished lever, satin metal ladder adjusters; Schroth Formula 2x2
+// F1: black) – H from the FIA homologation forms' photos. The straps run over the HANS yokes, then back and a little
+// down to anchorages on the chassis behind the seat (FHR user guide, M); the seat has slots, the belts are anchored to the
+// car (2026 C12.8). Colours per team: not found for 2024–26 (dark webbing, satin metal: both F1 forms' photos) – kit.js.
 //
 // How: each strap is a guide line drawn round the torso (points a little off the body), densified, and every point
 // ray-cast onto the torso's own triangles and the HANS collar – the strap lies on the surface the arms are planned
 // against (arms.js torsoField), never floating over it or buried in it: a ribbon 2 mm off the surface, ~2 mm thick, its
-// edges each cast on their own (it bends over the chest's curve), its ends closed. The buckle: an anodised disc
-// Ø 86 mm, 13 mm thick with a raised rotary cap (photos of Sabelt / Schroth F1 buckles; M), on the belly at the
-// straps' meeting point, over them. Where the straps go behind the
+// edges each cast on their own (it bends over the chest's curve), its ends closed. The buckle: a dark anodised disc
+// Ø 64 mm, 16 mm thick (EST within the standard's area), its polished lever across its face pointing down, over the
+// straps on the belly. A ladder adjuster on each shoulder strap at the collar-bone. Where the straps go behind the
 // shoulders and into the seat (to their anchorages on the chassis behind the seat back and at its sides) they end
-// inside the seat's back / the tub – unseen from any camera, so not drawn further. Not drawn: the strap adjusters (their
-// shape and place differ by maker and team; a plate of a guessed shape read worse than none).
-// Every triangle carries its kit zone (body3d KIT_ZONE: webbing, its edges, buckle, cap): it is merged into the
-// torso's mesh and drawn with the kit's material – no extra draw call.
+// inside the seat's back / the tub – unseen from any camera, so not drawn further.
+// Every triangle carries its kit zone (body3d KIT_ZONE: webbing, its edges, buckle, lever, adjusters): it is merged into
+// the torso's mesh and drawn with the kit's material – no extra draw call.
 import * as THREE from "./vendor/three.module.js";
 import { KIT_ZONE, kitU } from "./body3d.js";
 
 export const HARNESS = {
-  shoulderW: 0.05,   // with an FHR device (8853-2016: 50 mm allowed with FHR; F1 cars use FHR – H)
-  lapW: 0.075, crotchW: 0.05,
+  shoulderW: 0.05,   // 2" "for FHR use only" (8853-2016 6.4.1; Sabelt F1 2020 48–50 mm – H)
+  lapW: 0.075, crotchW: 0.048,   // (Sabelt F1 2020: pelvic 75 mm, crotch 48 mm – H; Schroth's are all 2")
   thick: 0.0022,     // webbing ~1.5–2 mm plus the stitched layers (M)
   gap: 0.0018,       // off the surface: the suit's give under it
-  buckleR: 0.043, buckleT: 0.013, capR: 0.027, capT: 0.005,
+  buckleR: 0.032, buckleT: 0.016, leverL: 0.05, leverW: 0.012, leverT: 0.005,
   // the buckle's place on the torso's front: below the low back's bending point (L0) – the lower belly (M: photos)
   buckleH: -0.075,
 };
@@ -52,7 +56,7 @@ export function harnessGeometry(torso, solids) {
   // (layer: the straps lie on each other at the buckle – crotch straps under the lap straps under the shoulder straps, as
   // they're threaded into it – each a strap's thickness further out, so no two share a surface; v0.44 first try had
   // them all at one height: they flickered through each other there)
-  const strap = (guide, width, mode, n0, layer = 0, z = KIT_ZONE.webbing) => {
+  const strap = (guide, width, mode, n0, layer = 0, adj = null, z = KIT_ZONE.webbing) => {
     const curve = new THREE.CatmullRomCurve3(guide, false, "centripetal"), pts = curve.getSpacedPoints(n0), C = [];
     for (const g of pts) {
       const rel = g.clone().sub(L0), h = Math.max(-0.21, Math.min(0.43, rel.dot(U)));
@@ -77,6 +81,12 @@ export function harnessGeometry(torso, solids) {
         P.push(on ? hit.p : e); N.push(on ? hit.n.clone().lerp(C[i].n, 0.5).normalize() : C[i].n);
       }
     }
+    // (a ladder adjuster at the fraction adj along it: a satin-metal plate a little wider than the strap, 28 mm along it)
+    if (adj != null && C.length > 2) {
+      const i = Math.round(adj * (C.length - 1)), a = C[Math.max(0, i - 1)].p, b = C[Math.min(C.length - 1, i + 1)].p, T = b.clone().sub(a).normalize(), n = C[i].n;
+      const c = L[i].clone().add(R[i]).multiplyScalar(0.5).addScaledVector(n, H.gap + (layer + 1) * H.thick);
+      parts.push(plate(c, n, T, width + 0.008, 0.028, 0.004, KIT_ZONE.adjuster));
+    }
     return ribbon(L, R, NL, NR, z, KIT_ZONE.webEdge, layer);
   };
   const parts = [];
@@ -85,16 +95,20 @@ export function harnessGeometry(torso, solids) {
   // shoulder straps (k: each side): up the chest from beside the buckle, over the shoulder by the neck and over the HANS'
   // tail, back down behind the shoulder into the seat's back
   for (const k of [1, -1]) {
-    parts.push(strap([at(H.buckleH + 0.02, k * 0.026, 0.3), at(0.05, k * 0.052, 0.3), at(0.2, k * 0.078, 0.3), at(0.33, k * 0.092, 0.25), at(0.42, k * 0.1, 0.12), at(0.5, k * 0.1, -0.04), at(0.44, k * 0.1, -0.16)], H.shoulderW, "plane", 24, 2));
+    parts.push(strap([at(H.buckleH + 0.02, k * 0.026, 0.3), at(0.05, k * 0.052, 0.3), at(0.2, k * 0.078, 0.3), at(0.33, k * 0.092, 0.25), at(0.42, k * 0.1, 0.12), at(0.5, k * 0.1, -0.04), at(0.44, k * 0.1, -0.16)], H.shoulderW, "plane", 24, 2, 0.5));
     // lap straps: from beside the buckle across the pelvis and round the hip to the seat's side
     parts.push(strap([at(H.buckleH - 0.012, k * 0.03, 0.3), at(-0.11, k * 0.09, 0.3), at(-0.135, k * 0.17, 0.12), at(-0.145, k * 0.22, -0.05)], H.lapW, "radial", 14, 1));
     // crotch straps: from under the buckle down the lower belly to the crotch, where they go into the seat's base between
     // the thighs (the torso is reclined: "down" its front is forward and down in the car – they end at the pelvis' foot,
     // not along the thighs)
-    parts.push(strap([at(H.buckleH - 0.03, k * 0.014, 0.3), at(-0.15, k * 0.016, 0.3), at(-0.2, k * 0.018, 0.2)], H.crotchW, "plane", 7, 0));
+    // (8853-2016 4.1: at least 20 mm between them, edge to edge – their middles 0.072 m apart; not a V)
+    parts.push(strap([at(H.buckleH - 0.03, k * 0.036, 0.3), at(-0.15, k * 0.036, 0.3), at(-0.2, k * 0.036, 0.2)], H.crotchW, "plane", 7, 0));
   }
   // the buckle and its rotary cap
-  parts.push(disc(bp, bn, H.buckleR, H.buckleT, KIT_ZONE.buckle, 24), disc(bp.clone().addScaledVector(bn, H.buckleT), bn, H.capR, H.capT, KIT_ZONE.buckleCap, 16));
+  // the buckle and its lever across its face, pointing down the torso when closed (8853-2016 4.4) – "down" the reclined
+  // torso's front: −up, flattened onto the buckle's face
+  const down = U.clone().negate().addScaledVector(bn, U.dot(bn)).normalize(), lc = bp.clone().addScaledVector(bn, H.buckleT).addScaledVector(down, H.leverL * 0.3);
+  parts.push(disc(bp, bn, H.buckleR, H.buckleT, KIT_ZONE.buckle, 24), plate(lc, bn, down, H.leverW, H.leverL, H.leverT, KIT_ZONE.buckleCap), disc(bp.clone().addScaledVector(bn, H.buckleT), bn, 0.009, H.leverT + 0.002, KIT_ZONE.buckleCap, 12));
   mats.dispose();
   const g = mergeParts(parts); g.userData.buckle = bp.toArray(); return g;
 }
@@ -119,6 +133,15 @@ function ribbon(L, R, NL, NR, z, ze, layer = 0) {
 function disc(c, n, r, t, zone, seg = 24, scale = [1, 1]) {
   const g = new THREE.CylinderGeometry(r, r, t, seg, 1, false); g.scale(scale[0], 1, scale[1]);
   g.translate(0, t / 2, 0); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n.clone().normalize())); g.translate(c.x, c.y, c.z);
+  const out = g.toNonIndexed(); g.dispose();
+  const k = out.attributes.position.count; out.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(k * 2).map((_, i) => (i & 1 ? 0.5 : kitU(zone))), 2));
+  return out;
+}
+// a plate on a surface: centre c (its underside), normal n, along t; w across, l along, h thick
+function plate(c, n, t, w, l, h, zone) {
+  const g = new THREE.BoxGeometry(w, h, l); g.translate(0, h / 2, 0);
+  const N = n.clone().normalize(), T = t.clone().addScaledVector(N, -t.dot(N)).normalize(), B = new THREE.Vector3().crossVectors(N, T);
+  g.applyMatrix4(new THREE.Matrix4().makeBasis(B, N, T).setPosition(c));
   const out = g.toNonIndexed(); g.dispose();
   const k = out.attributes.position.count; out.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(k * 2).map((_, i) => (i & 1 ? 0.5 : kitU(zone))), 2));
   return out;

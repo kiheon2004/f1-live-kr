@@ -20,7 +20,10 @@ import * as THREE from "./vendor/three.module.js";
 import { KIT_ZONE, KIT_TEXELS } from "./body3d.js";
 
 // fabric albedo floor for "black" kit (sRGB): see the header
-const KIT_BLACK = "#2a2c30", KIT_ANTHRACITE = "#3a3d42", PALM_GREY = "#4a4c50", BUCKLE = "#b9bec4", WEB_BLACK = "#26272a";
+// (the harness: black webbing, a black anodised buckle, a polished lever and satin ladder adjusters – both F1 harnesses'
+// FIA homologation photos (Sabelt F1 2020, Schroth Formula 2x2 F1; research/harness.md – H); no team's own colours found
+// for 2024–26, so every team gets these)
+const KIT_BLACK = "#2a2c30", PALM_GREY = "#4a4c50", BUCKLE = "#2e3034", LEVER = "#c9ced4", ADJUSTER = "#9aa0a7", WEB_BLACK = "#26272a";
 // The styles. Fields: fabric (the glove's body), back (back-of-hand panel), knuckle, seam (stitching rings), palm (the
 // silicone print), band (the wrist band), gauntlet (the cuff), hem (the cuff's open end), suit, suitSeam, suitCuff (the
 // knitted cuff under the gauntlet), webbing (harness straps), webEdge (their edges), buckle, buckleCap, adjuster;
@@ -39,7 +42,7 @@ export function kitStyle(livery, own = null) {
     fabric, back: o.back || fabric, knuckle: o.knuckle || fabric, seam: o.seam || shade(fabric, 0.8), palm: o.palm || PALM_GREY,
     band: o.band || accent, gauntlet: o.gauntlet || fabric, hem: o.hem || shade(fabric, 0.85),
     suit, suitSeam: o.suitSeam || shade(suit, 0.75), suitCuff: o.suitCuff || shade(suit, 0.7),
-    webbing: o.webbing || WEB_BLACK, webEdge: o.webEdge || shade(o.webbing || WEB_BLACK, 0.7), buckle: o.buckle || BUCKLE, buckleCap: o.buckleCap || o.buckle || BUCKLE, adjuster: o.adjuster || "#8d9298",
+    webbing: o.webbing || WEB_BLACK, webEdge: o.webEdge || shade(o.webbing || WEB_BLACK, 0.7), buckle: o.buckle || BUCKLE, buckleCap: o.buckleCap || LEVER, adjuster: o.adjuster || ADJUSTER,
     src: o.src || "base rules from the livery (no photo of this kit)",
   };
 }
@@ -63,10 +66,10 @@ function floorBlack(c) {
 const shade = (c, k) => "#" + new THREE.Color(c).multiplyScalar(k).getHexString();
 
 // the zones' finish: roughness (G) and metalness (B), linear – fabric knit, the palm's silicone print (smoother), the
-// harness' polyester webbing (a little sheen), the buckle's machined aluminium and anodised cap (H: photos of Sabelt /
-// Schroth F1 buckles – brushed alloy)
+// harness' polyester webbing (a little sheen), the buckle's black anodised aluminium body, its polished lever and the
+// satin adjusters (the FIA forms' photos of the Sabelt / Schroth F1 harnesses – H)
 const FINISH = { fabric: [0.86, 0], back: [0.8, 0], knuckle: [0.84, 0], seam: [0.9, 0], palm: [0.55, 0], band: [0.7, 0], gauntlet: [0.84, 0], hem: [0.88, 0],
-  suitSeam: [0.9, 0], suit: [0.86, 0], suitCuff: [0.93, 0], webbing: [0.66, 0], webEdge: [0.7, 0], buckle: [0.32, 0.9], buckleCap: [0.4, 0.75], adjuster: [0.38, 0.85] };
+  suitSeam: [0.9, 0], suit: [0.86, 0], suitCuff: [0.93, 0], webbing: [0.66, 0], webEdge: [0.7, 0], buckle: [0.4, 0.6], buckleCap: [0.22, 0.95], adjuster: [0.42, 0.85] };
 let finishTex = null;
 function finishTexture() {
   if (finishTex) return finishTex;
