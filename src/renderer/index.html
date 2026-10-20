@@ -173,6 +173,7 @@
             <label>밤 경기 <select id="geoNight"><option value="auto">자동</option><option value="on">밤</option><option value="off">낮</option></select></label>
             <label title="F1 날씨 데이터에는 구름 정보가 없어요(비가 오는지만 있어요). 비가 오면 항상 흐린 하늘이에요. 비가 오지 않을 때: 자동은 Open-Meteo 과거 기상 자료(재분석 모델값, 세션 시각·서킷 위치)의 구름 양을 쓰고, 자료가 없으면 중립 하늘이에요. 비가 안 온다고 맑은 날이라는 뜻은 아니에요.">하늘 <select id="geoSky"><option value="auto">자동(구름 자료, 없으면 중립)</option><option value="neutral">중립(옅은 구름)</option><option value="fair">맑게(연출)</option><option value="overcast">흐리게(연출)</option></select></label>
             <label title="구름 양을 Open-Meteo(open-meteo.com, CC BY 4.0)에서 받아요. 서킷 좌표와 날짜만 보내요(개인 정보 없음). 끄면 중립 하늘이에요."><input type="checkbox" id="geoCloudData"> 구름 자료 받기</label>
+            <label title="젖은 노면에서 빠르게 달리는 가까운 차 뒤에 물보라를 그려요. 데이터에 물보라 정보는 없어서, 추정한 노면 젖음과 차 속도로 크기를 정한 연출이에요."><input type="checkbox" id="geoSpray"> 물보라(추정)</label>
           </fieldset>
           <p id="geoQualityNow" class="muted tiny" aria-live="polite"></p>
           <p class="muted tiny">지도 출처: <span id="geo3dCredits">© OpenStreetMap 기여자 · Sentinel-2 cloudless – EOX (Copernicus 2023) · 지형 Mapzen/AWS</span> · 구름: Open-Meteo (CC BY 4.0)</p>

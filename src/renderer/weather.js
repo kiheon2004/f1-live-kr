@@ -178,7 +178,6 @@ export function environmentAt(log, t, opts = {}, out = newEnvironment()) {
 // highest roof over each cell (−1e9: open sky), over the covers' own extent only. A drop below the roof over it is hidden;
 // one beside the roof isn't – a camera under a roof still sees the rain outside.
 export const OPEN = -1e9;
-function inPoly(x, z, pts) { let r = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, zi] = pts[i], [xj, zj] = pts[j]; if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) r = !r; } return r; }
 export function coverRaster(covers, { cell = 1, max = 1024, pad = 2 } = {}) {
   const list = (covers || []).filter((c) => c?.pts?.length >= 3 && Number.isFinite(c.y));
   if (!list.length) return null;
@@ -191,13 +190,20 @@ export function coverRaster(covers, { cell = 1, max = 1024, pad = 2 } = {}) {
   for (const c of list) {
     let a = Infinity, b = Infinity, A = -Infinity, B = -Infinity;
     for (const [x, z] of c.pts) { a = Math.min(a, x); A = Math.max(A, x); b = Math.min(b, z); B = Math.max(B, z); }
-    const i0 = Math.max(0, Math.floor((a - x0) / size)), i1 = Math.min(w - 1, Math.floor((A - x0) / size));
-    const j0 = Math.max(0, Math.floor((b - z0) / size)), j1 = Math.min(h - 1, Math.floor((B - z0) / size));
-    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-      // (a cell is covered when any of its centre or corners is: thin roofs – a tunnel's edge – aren't lost between cells)
-      const cx = x0 + (i + 0.5) * size, cz = z0 + (j + 0.5) * size, q = size * 0.45;
-      if (inPoly(cx, cz, c.pts) || inPoly(cx - q, cz - q, c.pts) || inPoly(cx + q, cz - q, c.pts) || inPoly(cx - q, cz + q, c.pts) || inPoly(cx + q, cz + q, c.pts)) {
-        const o = j * w + i; if (c.y > data[o]) data[o] = c.y;
+    // a scanline fill: per row, the outline's crossings at the row's top, middle and bottom (thin roofs – a tunnel's
+    // edge – aren't lost between rows), each span widened by half a cell (v0.44: the per-cell point-in-polygon test took
+    // 14 s for a pit building's outline at 1 m cells)
+    const j0 = Math.max(0, Math.floor((b - z0) / size)), j1 = Math.min(h - 1, Math.floor((B - z0) / size)), P = c.pts, n = P.length, xs = [];
+    for (let j = j0; j <= j1; j++) {
+      for (const f of [0.02, 0.5, 0.98]) {
+        const z = z0 + (j + f) * size;
+        xs.length = 0;
+        for (let i = 0, k = n - 1; i < n; k = i++) { const [xi, zi] = P[i], [xk, zk] = P[k]; if ((zi > z) !== (zk > z)) xs.push(xi + ((z - zi) * (xk - xi)) / (zk - zi)); }
+        xs.sort((p, q) => p - q);
+        for (let m = 0; m + 1 < xs.length; m += 2) {
+          const i0 = Math.max(0, Math.floor((xs[m] - x0) / size - 0.5)), i1 = Math.min(w - 1, Math.floor((xs[m + 1] - x0) / size + 0.5));
+          for (let i = i0; i <= i1; i++) { const o = j * w + i; if (c.y > data[o]) data[o] = c.y; }
+        }
       }
     }
   }

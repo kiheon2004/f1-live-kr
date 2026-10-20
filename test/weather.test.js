@@ -253,3 +253,15 @@ test("weather3d: the live path – records taken as they're shown, a new session
   assert.strictEqual(W.env.known, false); assert.strictEqual(W.env.rainAmt, 0);
   W.dispose();
 });
+
+test("weather: the roof raster of a rotated 400 × 30 m pit building and 300 pit wall canopies (scanline fill: 35 ms idle where a per-cell point-in-polygon test took 14 s; not timed here – the shared machine's load makes a time bound flaky)", async () => {
+  const { coverRaster, rainBlocked } = await W();
+  const a = 0.6, R = (u, v) => [u * Math.cos(a) - v * Math.sin(a), u * Math.sin(a) + v * Math.cos(a)];
+  const foot = []; for (let i = 0; i <= 100; i++) foot.push(R(i * 4, 0)); for (let i = 100; i >= 0; i--) foot.push(R(i * 4, 30));
+  const list = [{ pts: foot, y: 15 }]; for (let k = 0; k < 300; k++) { const x = k * 3 - 400, z = 500; list.push({ pts: [[x, z], [x + 2.5, z], [x + 2.5, z + 2], [x, z + 2]], y: 3 }); }
+  const r = coverRaster(list);
+  const [cx, cz] = R(200, 15);
+  assert.ok(rainBlocked(r, cx, 5, cz) && !rainBlocked(r, cx, 16, cz));
+  assert.ok(rainBlocked(r, -399, 1, 501) && !rainBlocked(r, -399, 4, 501), "under a pit wall canopy, not above it");
+  const [ox, oz] = R(200, 45); assert.ok(!rainBlocked(r, ox, 1, oz), "beside the building");
+});

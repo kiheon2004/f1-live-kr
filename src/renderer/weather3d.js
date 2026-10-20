@@ -10,7 +10,7 @@
 // rain one draw of line segments, its drops moved on the GPU (no buffer is written per frame); the wet road its own
 // material's uniforms. Nothing is allocated per frame.
 import * as THREE from "./vendor/three.module.js";
-import { WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, INTENSITY } from "./weather.js";
+import { WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, roofAt, INTENSITY } from "./weather.js";
 
 // ---------- the overcast sky (equirectangular, as the fair one in map3d.js) ----------
 // A grey deck of stratus / stratocumulus: brighter towards the zenith's diffuse light, darker lumps underneath, a pale
@@ -130,6 +130,31 @@ function rainMesh() {
   return mesh;
 }
 
+
+// ---------- spray (a visual approximation, labelled) ----------
+// Behind fast cars near the camera on a wet road: a plume of soft grey puffs rising and widening behind the rear wheels.
+// Nothing in the feed measures spray; its size here only follows the estimated wetness and the car's speed (no spray
+// under ~90 km/h, full by ~200 km/h; a plume of ~20 m and ~3 m high as wet-race TV pictures show – an estimate, L). Up to
+// SPRAY_CARS nearest cars within SPRAY_NEAR m; one draw; the puffs' buffers written in place (no allocation).
+const SPRAY_CARS = 8, SPRAY_P = 48, SPRAY_NEAR = 140;
+const SPRAY_VS = `attribute float aAlpha; attribute float aSize; uniform float uScale; varying float vA;
+void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = aSize * uScale / max(1.0, -mv.z); vA = aAlpha; }`;
+const SPRAY_FS = `uniform vec3 uColor; varying float vA;
+void main() { vec2 d = gl_PointCoord - 0.5; float r = dot(d, d) * 4.0; if (r > 1.0 || vA < 0.005) discard; gl_FragColor = vec4(uColor, vA * (1.0 - r) * (1.0 - r)); }`;
+function sprayMesh() {
+  const n = SPRAY_CARS * SPRAY_P, g = new THREE.BufferGeometry();
+  const pos = new THREE.BufferAttribute(new Float32Array(n * 3), 3), al = new THREE.BufferAttribute(new Float32Array(n), 1), sz = new THREE.BufferAttribute(new Float32Array(n), 1);
+  for (const a of [pos, al, sz]) a.setUsage(THREE.DynamicDrawUsage);
+  g.setAttribute("position", pos); g.setAttribute("aAlpha", al); g.setAttribute("aSize", sz);
+  const m = new THREE.ShaderMaterial({ vertexShader: SPRAY_VS, fragmentShader: SPRAY_FS, transparent: true, depthWrite: false, fog: false,
+    uniforms: { uScale: { value: 500 }, uColor: { value: new THREE.Color(0.8, 0.82, 0.85) } } });
+  const pts = new THREE.Points(g, m); pts.name = "spray"; pts.frustumCulled = false; pts.visible = false; pts.renderOrder = 9; pts.raycast = () => {};
+  // per-puff fixed jitter (seeded)
+  let a = 4711; const r = () => ((a = (a * 16807) % 2147483647) / 2147483647);
+  pts.userData.jit = Float32Array.from({ length: n * 3 }, () => r() * 2 - 1);
+  return pts;
+}
+
 // ---------- scaling what map3d.js sets ----------
 // The lights, the haze and the exposure are set by map3d.js (applyLighting, updateSun – by the sun and the night). The
 // weather scales them: each value's base is what was last set there by someone else (a value that isn't the one written
@@ -150,12 +175,12 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   dome.name = "sky"; dome.frustumCulled = false; dome.renderOrder = -1e9; dome.raycast = () => {}; dome.visible = false;
   // (follows whichever camera draws the scene – the view's, a mirror's)
   dome.onBeforeRender = (_r, _s, cam) => { dome.position.copy(cam.position); dome.scale.setScalar(cam.far * 0.5); dome.updateMatrixWorld(); };
-  const rain = rainMesh();
-  scene.add(dome, rain);
+  const rain = rainMesh(), spray = sprayMesh();
+  scene.add(dome, rain, spray);
   const ru = rain.material.uniforms;
   const S = { log: null, logFor: null, liveKey: null, liveSeen: "", clouds: null, cloudsKey: null, cloudsAsk: 0, coverFor: null, raster: null, coverTex: null,
     camPrev: new THREE.Vector3(), camVel: new THREE.Vector3(), hasPrev: false, north: [0, -1], east: [1, 0], wind: [0, 0], tyresAt: 0, tyres: null,
-    forced: null, roadFor: null, roadMats: [], roadWet: -1, roadEnv: null, skyMode: "auto", useClouds: true, enabled: true };
+    forced: null, sprayOn: true, roadFor: null, roadMats: [], roadWet: -1, roadEnv: null, skyMode: "auto", useClouds: true, enabled: true };
   const sc = { sun: scaler(), hemi: scaler(), near: scaler(), far: scaler(), exp: scaler() };
   const ti = { hemi: tinter(), fog: tinter(), sun: tinter() };
   const GREY = new THREE.Color(0xdfe3e8), FOGGREY = new THREE.Color(0xa9afb6), SUNGREY = new THREE.Color(0xe8ecf2);
@@ -200,11 +225,13 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     return S.cover;
   }
   // the roofs over this world's real surroundings (rebuilt with them)
-  function covers(world) {
+  // (and the team layer's pit wall canopies – garages.js, rebuilt as the teams' places are inferred)
+  function covers(world, teams) {
     const real = world?.real || null;
-    if (S.coverFor === real) return;
-    S.coverFor = real;
+    if (S.coverFor === real && S.coverTeams === teams) return;
+    S.coverFor = real; S.coverTeams = teams;
     const list = [];
+    for (const c of (real && teams?.userData?.covers) || []) list.push(c);
     if (real) {
       for (const c of tunnelCovers(real.tunnel?.stations)) list.push(c);
       for (const r of real.stands?.roofs || []) list.push(r);
@@ -229,17 +256,23 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       S.coverTex = t;
       ru.uCover.value = t; ru.uCoverExt.value.set(S.raster.x0, S.raster.z0, 1 / (S.raster.w * S.raster.cell), 1 / (S.raster.h * S.raster.cell)); ru.uHasCover.value = 1;
     } else { ru.uCover.value = rain.material.userData.none; ru.uHasCover.value = 0; }
-    S.info = { covers: list.length, tunnel: list.filter((c) => c.kind === "tunnel").length, stands: list.filter((c) => c.kind === "stand roof").length, facilities: list.filter((c) => c.kind === "facility").length, raster: S.raster ? [S.raster.w, S.raster.h, +S.raster.cell.toFixed(2)] : null };
+    S.info = { covers: list.length, tunnel: list.filter((c) => c.kind === "tunnel").length, stands: list.filter((c) => c.kind === "stand roof").length, facilities: list.filter((c) => c.kind === "facility").length, pitWall: list.filter((c) => c.kind === "pit wall canopy").length, raster: S.raster ? [S.raster.w, S.raster.h, +S.raster.cell.toFixed(2)] : null };
   }
   // the wet look on the track's own surfaces (the road, its lines, the kerbs): darker, smoother, a faint reflection of the
   // sky – roughness no lower than 0.3 (a film of water on open tarmac, not a mirror); no puddles (nothing says where)
-  function road(world, wet, night) {
+  // Also the pit lane's tarmac and its lines (map3d.js pitLaneMeshes, added with the teams' layer) and the venue's other
+  // tarmac from the map (auxroads: escape roads, rejoin routes – scenery.js "auxTarmac"): the same rain falls on them, so
+  // the same wetness (an estimate; a pit lane under no roof dries as the track does – nothing measures either).
+  function road(world, wet, night, pitFac) {
     if (!world?.road) return;
+    const real = world.real || null, now = performance.now();
+    // (the pit lane surface is looked for every 2 s until it's there – a lookup by name walks the facility)
+    if (pitFac !== S.roadPitFac || (!S.roadPit && pitFac && now - S.roadPitAt > 2000)) { S.roadPitFac = pitFac; S.roadPitAt = now; S.roadPit = pitFac?.getObjectByName("pitLaneSurface") || null; }
     // (the kerbs are rebuilt when the real map comes – a tunnel keeps them out of it: their materials taken again)
-    if (S.roadFor !== world || S.roadKerb !== world.kerb) {
-      S.roadFor = world; S.roadKerb = world.kerb; S.roadMats = []; S.roadWet = -1; S.roadEnv = undefined;
-      const seen = new Set();
-      for (const part of [world.road, world.lines, world.kerb]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); const b = m.userData.wxBase || (m.userData.wxBase = { color: m.color.clone(), rough: m.roughness }); S.roadMats.push({ m, color: b.color, rough: b.rough, road: o === world.road }); } });
+    if (S.roadFor !== world || S.roadKerb !== world.kerb || S.roadReal !== real || S.roadPitSeen !== S.roadPit) {
+      S.roadFor = world; S.roadKerb = world.kerb; S.roadReal = real; S.roadPitSeen = S.roadPit; S.roadMats = []; S.roadWet = -1; S.roadEnv = undefined;
+      const seen = new Set(), aux = real?.group.getObjectByName("auxTarmac") || null;
+      for (const part of [world.road, world.lines, world.kerb, S.roadPit, aux]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); const b = m.userData.wxBase || (m.userData.wxBase = { color: m.color.clone(), rough: m.roughness }); S.roadMats.push({ m, color: b.color, rough: b.rough, road: o === world.road || o === aux || o.name === "pitLaneTarmac" }); } });
     }
     const q = Math.round(wet * 50) / 50;
     const envNow = !night && q > 0.03 ? S.envSky || null : null;
@@ -253,6 +286,45 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     }
   }
 
+  // the spray behind the nearest fast cars (see sprayMesh); `cars`: map3d's car records ({ pos, yaw, speed m/s, obj })
+  const near = new Array(SPRAY_CARS).fill(null), nearD = new Float64Array(SPRAY_CARS);
+  let sprayPhase = 0;
+  function updateSpray(cars, camera, wet, step, night, hostH) {
+    const k0 = Math.max(0, Math.min(1, (wet - 0.3) / 0.4));
+    if (!cars || !camera || k0 <= 0) { spray.visible = false; return; }
+    near.fill(null); nearD.fill(Infinity);
+    const cp = camera.position;
+    for (const c of cars.values()) {
+      if (!c?.pos || !c.obj?.visible || !(c.speed > 25)) continue;
+      const d = c.pos.distanceToSquared(cp); if (d > SPRAY_NEAR * SPRAY_NEAR) continue;
+      if (S.raster && roofAt(S.raster, c.pos.x, c.pos.z) > c.pos.y) continue;   // (under a roof: a dry road there)
+      let k = SPRAY_CARS - 1; if (d >= nearD[k]) continue;
+      while (k > 0 && nearD[k - 1] > d) { near[k] = near[k - 1]; nearD[k] = nearD[k - 1]; k--; }
+      near[k] = c; nearD[k] = d;
+    }
+    sprayPhase = (sprayPhase + step * 1.6) % 1;
+    const P = spray.geometry.attributes.position.array, AL = spray.geometry.attributes.aAlpha.array, SZ = spray.geometry.attributes.aSize.array, J = spray.userData.jit;
+    let any = false;
+    for (let ci = 0; ci < SPRAY_CARS; ci++) {
+      const c = near[ci], base = ci * SPRAY_P;
+      if (!c) { for (let k = 0; k < SPRAY_P; k++) AL[base + k] = 0; continue; }
+      any = true;
+      const v = Math.min(1, (c.speed - 25) / 30), fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), rx = fz, rz = -fx, len = 6 + 16 * v;
+      for (let k = 0; k < SPRAY_P; k++) {
+        const i = base + k, f = (k / SPRAY_P + sprayPhase) % 1, side = k % 2 ? 1 : -1, j = i * 3;
+        const back = 1.6 + f * len, lat = side * (0.75 + f * 1.4) + J[j] * 0.4 * f, up = 0.25 + f * (1.2 + 1.8 * v) + J[j + 1] * 0.3 * f;
+        P[j] = c.pos.x - fx * back + rx * lat; P[j + 1] = c.pos.y + up; P[j + 2] = c.pos.z - fz * back + rz * lat;
+        AL[i] = k0 * v * 0.22 * (1 - f) * Math.min(1, f * 8);
+        SZ[i] = 1.0 + f * 3.5;
+      }
+    }
+    spray.visible = any;
+    if (!any) return;
+    spray.geometry.attributes.position.needsUpdate = true; spray.geometry.attributes.aAlpha.needsUpdate = true; spray.geometry.attributes.aSize.needsUpdate = true;
+    spray.material.uniforms.uScale.value = (hostH || 800) / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    spray.material.uniforms.uColor.value.setRGB(night ? 0.45 : 0.82, night ? 0.47 : 0.84, night ? 0.52 : 0.87);
+  }
+
   const W = {
     env,
     get info() { return S.info || null; },
@@ -261,11 +333,14 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     configure(o = {}) { if (o.sky) S.skyMode = o.sky; if ("clouds" in o) { S.useClouds = o.clouds !== false; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; } },
     // development: a state forced for testing the look (the covers, the wet road) – { rain: 0–1, wet: 0–1, cloud: 0–1 } or null
     force(o) { S.forced = o || null; },
+    // spray on / off (settings: 차량 물보라)
+    spray(on) { S.sprayOn = on !== false; },
     reset() { S.log = null; S.logFor = null; S.liveKey = null; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.hasPrev = false; },
     // once a frame, before drawing. A: window.F1KR; world: map3d's world; night: the night look is on.
-    update({ A, world, camera, dt, night, hemi, sun, fog }) {
+    // pitFac / teams: map3d's pit building in use and its teams' layer (for the pit lane's tarmac and the pit wall canopies)
+    update({ A, world, camera, dt, night, hemi, sun, fog, pitFac = null, teams = null, cars = null, viewH = 0 }) {
       const src = A?.src || null, log = logFor(src), t = A?.t;
-      covers(world);
+      covers(world, teams);
       // supporting evidence: the tyres at t (re-read every 2 s; a seek re-reads at once)
       const now = performance.now();
       if (src && (now - S.tyresAt > 2000 || Math.abs((t ?? 0) - (S.tyresT ?? 0)) > 5000)) { S.tyresAt = now; S.tyresT = t; S.tyres = wetTyreEvidence(src.state?.TimingAppData?.Lines); }
@@ -292,9 +367,10 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       sc.near(fog, "near", 1 - 0.6 * rp);
       ti.fog(fog.color, day ? FOGGREY : fog.color, day ? Math.max(0.6 * m, rp) : 0);
       sc.exp(renderer, "toneMappingExposure", day ? 1 + 0.12 * m : 1);
-      road(world, env.wet || 0, night);
+      road(world, env.wet || 0, night, pitFac);
       // rain: the clock runs with the replay (paused: the drops stand still; fast: they still fall at their own speed)
       const rate = A?.rate ?? 1, step = dt * Math.min(1, Math.max(0, rate));
+      updateSpray(S.sprayOn ? cars : null, camera, env.wet || 0, step, night, viewH);
       rain.visible = env.rainAmt > 0.002 && !!camera;
       if (!rain.visible) { S.hasPrev = false; return; }
       windVector(env.windDir, env.windSpeed, S.north, S.east, S.wind);
@@ -315,8 +391,8 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       ru.uAlpha.value = night ? 0.42 : 0.5;
     },
     dispose() {
-      scene.remove(dome, rain);
-      dome.geometry.dispose(); dome.material.dispose(); rain.geometry.dispose(); rain.material.dispose(); rain.material.userData.none.dispose();
+      scene.remove(dome, rain, spray);
+      dome.geometry.dispose(); dome.material.dispose(); rain.geometry.dispose(); rain.material.dispose(); rain.material.userData.none.dispose(); spray.geometry.dispose(); spray.material.dispose();
       S.coverTex?.dispose(); S.coverTex = null;
     },
   };

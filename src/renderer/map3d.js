@@ -90,6 +90,7 @@ function init() {
   scene.add(sun, sun.target);
   wx = createWeather({ scene, renderer, daySky, fairEnv: () => carEnvironment(false) });
   wx.configure({ sky: geoSettings().sky || "auto", clouds: geoSettings().cloudData !== false });
+  wx.spray(geoSettings().spray !== false);
 
   camera = new THREE.PerspectiveCamera(50, 1, 0.3, 20000);
   camera.position.set(0, 1500, 1500);
@@ -132,6 +133,7 @@ function initGeoSettings() {
     document.getElementById("geoNight").value = o.night || "auto";
     document.getElementById("geoSky").value = ["auto", "neutral", "fair", "overcast"].includes(o.sky) ? o.sky : "auto";
     document.getElementById("geoCloudData").checked = o.cloudData !== false;
+    document.getElementById("geoSpray").checked = o.spray !== false;
     document.getElementById("geoPitWork").value = ["record", "observed", "typical"].includes(o.pitWork) ? o.pitWork : "record";
     document.getElementById("geoAero").value = o.aero === "off" ? "off" : "estimate";
     document.getElementById("geoCorners").value = ["near", "all", "off"].includes(o.corners) ? o.corners : "near";
@@ -163,6 +165,7 @@ function initGeoSettings() {
   document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); applyQuality(); paintQualityNow(); });
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
   document.getElementById("geoSky").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), sky: e.target.value }); wx?.configure({ sky: e.target.value }); });
+  document.getElementById("geoSpray").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), spray: e.target.checked }); wx?.spray(e.target.checked); });
   document.getElementById("geoCloudData").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), cloudData: e.target.checked }); wx?.configure({ clouds: e.target.checked }); });
   document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
   document.getElementById("geoAero").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), aero: e.target.value }));
@@ -3281,7 +3284,7 @@ function frame(now) {
   // redraws the static shadow map)
   if (peopleLod(camera.position)) refreshShadows();
   updateSun(now);
-  wx?.update({ A, world, camera, dt, night: !!nightNow, hemi, sun, fog: scene.fog });
+  wx?.update({ A, world, camera, dt, night: !!nightNow, hemi, sun, fog: scene.fog, pitFac: pitTeams.facility, teams: pitTeams.group, cars, viewH: renderer.getDrawingBufferSize(tmpV2).y });
   thinFarTrees();
   world?.real?.stands?.update(camera.position, camMode === "heli" || camMode === "inspect" ? 520 : 300);
   realPart("buildings")?.userData.update?.(camera.position);
