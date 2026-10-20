@@ -34,6 +34,7 @@ import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js"
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
 import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
 import { footing } from "./footing.js";
+import { boxDepth, episodeLog, summarise, classifyOverlap } from "./traffic.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -1185,6 +1186,21 @@ function carFor(num, d) {
   return c;
 }
 
+// A car's footprint from its model's bounds (metres from its origin: ahead, behind, to the side), once per model –
+// the contact shadow left out (development: Map3D.overlapScan; traffic.js boxes)
+const dimBox = new THREE.Box3(), dimM = new THREE.Matrix4();
+function carDims(c) {
+  if (c.dims?.key === c.key) return c.dims;
+  const m = c.model, inv = new THREE.Matrix4(); m.updateWorldMatrix(true, true); inv.copy(m.matrixWorld).invert();
+  let f = 0, b = 0, h = 0;
+  m.traverse((o) => {
+    if (!o.isMesh || !o.geometry || o.material?.map === shadowTex()) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    dimBox.copy(o.geometry.boundingBox).applyMatrix4(dimM.multiplyMatrices(inv, o.matrixWorld));
+    f = Math.max(f, dimBox.max.z); b = Math.max(b, -dimBox.min.z); h = Math.max(h, dimBox.max.x, -dimBox.min.x);
+  });
+  return (c.dims = { key: c.key, front: f, back: b, half: h, era: m.userData.profile?.era || "?" });
+}
 // ---------- per-frame update ----------
 function trackPointFor(c, x, z) {
   // Keep cars glued to the road surface and remember where on the lap they are.
@@ -1262,6 +1278,7 @@ function traffic(sm, F, t, dt, pos) {
     const tgt = Math.max((smp.R ?? -7) + 0.95 - ln, Math.min((smp.L ?? 7) - 0.95 - ln, w[0] + w[1]));   // on the tarmac
     // a critically damped spring (ω 3/s: a lane change takes ~1.5 s, starting and ending gently, like a car's)
     const c = cars.get(num);
+    c.trafTgt = tgt; c.trafWant = w;   // (development: Map3D.overlapScan)
     if (jump) { c.trafD = tgt; c.trafRate = 0; continue; }
     spring(c, "trafD", "trafRate", tgt, 3, dt);
   }
@@ -3631,6 +3648,69 @@ window.Map3D = {
     try { for (fakeT = t0; fakeT <= t1; fakeT += step) { updateCars(step / 1000); for (const [num, c] of cars) if (c.obj.visible && Math.abs(c.trafD || 0) > 1.2) hits.push([Math.round((fakeT - t0) / 1000), num, +c.trafD.toFixed(1)]); } }
     finally { window.F1KR = real; }
     return JSON.stringify(hits.slice(0, 60)) + " total " + hits.length;
+  },
+  // development (v0.44): cars drawn overlapping over [t0, t1] (stream ms, every `step` ms, driven like trafficScan):
+  // oriented boxes from each car's model bounds at its drawn pose (C), at its steadied place without the correction
+  // (B) and at the feed's own interpolated position (A); overlap episodes per pair, classified (traffic.js
+  // classifyOverlap), with counts, durations and depths per cause and the worst ones (time from lights out, cars, place)
+  overlapScan(t0, t1, step = 100, o = {}) {
+    const src = app().src, sm = smoothFor(src); if (!sm || !world) return "no tracks";
+    const F = sm.frame, real = window.F1KR, st0 = src.startTime?.() || 0; let fakeT = t0;
+    const log = episodeLog(step * 2.5), RAW = [0, 0, 0], B = [0, 0, 0], c0 = world.center;
+    const res = { frames: 0, carFrames: 0, levels: 0, sameLat: 0, closePairs: 0, queue: { brake: { pairs: 0, rawBelow: 0, alignedBelow: 0 }, other: { pairs: 0, rawBelow: 0, alignedBelow: 0 } }, rawGapMs: null, dims: {} };
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try {
+      for (fakeT = t0; fakeT <= t1; fakeT += step) {
+        updateCars(step / 1000); res.frames++;
+        const list = [];
+        for (const [num, c] of cars) {
+          if (!c.has || !c.obj.visible || !c.pos) continue;
+          const D = carDims(c); res.dims[D.era] = [+(D.front + D.back).toFixed(2), +(2 * D.half).toFixed(2)];
+          const onT = c.onTrack && c.st && !c.est && !c.pit;
+          if (onT) F.at(c.st.s, c.st.d, B);
+          const r = src.tracks.at(num, fakeT, RAW) ? [RAW[0] * DM - c0.x, -(RAW[1] * DM - c0.z)] : null;
+          list.push({ num, c, D, x: c.pos.x, y: c.pos.y, z: c.pos.z, yaw: c.yaw, bx: onT ? B[0] : c.feedPos.x, bz: onT ? B[2] : c.feedPos.z, s: onT ? c.st.s : null, d: onT ? c.st.d : null, raw: r,
+            pit: !!c.pit, offT: !onT && !c.pit && !c.est, est: !!c.est, grid: !!c.grid && c.grid.state !== "free" && !c.grid.estimated, off: c.trafD || 0, tgt: c.trafTgt ?? 0, want: c.trafWant || [0, 0], as: c.st?.as || 0 });
+        }
+        res.carFrames += list.length;
+        // nose to tail on the track (neighbours along the lap within 15 m): how often the feed (A) and the steadied
+        // tracks (B) have them closer than a car's length – braking (−12 m/s² or harder) and all
+        { const on = list.filter((q) => q.s != null).map((q) => [((q.s % F.L) + F.L) % F.L, q]).sort((x, y) => x[0] - y[0]);
+          for (let k = 0; k < on.length; k++) {
+            const [ua, a] = on[k], [ub, b] = on[(k + 1) % on.length]; if (a === b) continue;
+            const dsB = ((ub - ua) % F.L + F.L) % F.L; if (dsB > 15) continue;
+            const need = (a.D.front + a.D.back + b.D.front + b.D.back) / 2, pa = a.raw && F.project(a.raw[0], a.raw[1]), pb = b.raw && F.project(b.raw[0], b.raw[1]);
+            const q = Math.min(a.as, b.as) < -12 ? res.queue.brake : res.queue.other;
+            q.pairs++; if (dsB < need) q.alignedBelow++;
+            if (pa && pb) { const dsA = Math.abs(((pb.s - pa.s) % F.L + F.L * 1.5) % F.L - F.L / 2); if (dsA < need) q.rawBelow++; }
+          }
+        }
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+          const a = list[i], b = list[j];
+          if (Math.hypot(a.x - b.x, a.z - b.z) > 8) continue;
+          const dC = boxDepth(a.x, a.z, a.yaw, a.D, b.x, b.z, b.yaw, b.D);
+          // (on the track, one behind the other: the feed's spacing in a braking queue, and how often B has them on the same line)
+          if (a.s != null && b.s != null) {
+            res.closePairs++; if (Math.abs(a.d - b.d) < 0.3) res.sameLat++;
+          }
+          if (!dC) continue;
+          if (Math.abs(a.y - b.y) > 2.5) { res.levels++; continue; }   // (one over the other: a bridge, a tunnel – not an overlap)
+          const dB = boxDepth(a.bx, a.bz, a.yaw, a.D, b.bx, b.bz, b.yaw, b.D);
+          const dA = a.raw && b.raw ? boxDepth(a.raw[0], a.raw[1], a.yaw, a.D, b.raw[0], b.raw[1], b.yaw, b.D) : 0;
+          const smp = a.s != null ? F.sampleAt(a.s) : null, room = smp ? (smp.L ?? 7) - (smp.R ?? -7) - 1.9 : 99;
+          const cause = classifyOverlap({ pitA: a.pit, pitB: b.pit, offA: a.offT, offB: b.offT, est: a.est || b.est, grid: a.grid || b.grid, aligned: dB, raw: dA, room, need: a.D.half + b.D.half,
+            cancel: [a, b].some((q) => q.want[0] > 0.3 && q.want[1] < -0.3), tgtSep: a.d != null && b.d != null ? Math.abs(a.d + a.tgt - b.d - b.tgt) : 0, moved: Math.abs(a.off) + Math.abs(b.off) > 0.3 });
+          log.add(fakeT, a.num + "/" + b.num, dC, cause, { s: a.s != null ? Math.round(((a.s % F.L) + F.L) % F.L) : null, x: +a.x.toFixed(1), z: +a.z.toFixed(1), off: [+a.off.toFixed(2), +b.off.toFixed(2)], raw: +dA.toFixed(2), aligned: +dB.toFixed(2) });
+        }
+      }
+    } finally { window.F1KR = real; }
+    // the feed's sample spacing (ms) over the window: median and 95th percentile
+    { const g = []; for (const c of Object.values(src.tracks.cars)) for (let k = 1; k < c.n; k++) if (c.t[k] >= t0 && c.t[k] <= t1) g.push(c.t[k] - c.t[k - 1]); g.sort((x, y) => x - y); res.rawGapMs = g.length ? [g[g.length >> 1], g[Math.floor(g.length * 0.95)]] : null; }
+    const eps = log.finish();
+    res.episodes = eps.length; res.overlapFrames = eps.reduce((x, e) => x + e.frames, 0);
+    res.byCause = summarise(eps, step);
+    res.worst = eps.sort((x, y) => y.depth * (y.t1 - y.t0 + step) - x.depth * (x.t1 - x.t0 + step)).slice(0, o.top ?? 12).map((e) => ({ t: +((e.worstT - st0) / 1000).toFixed(1), pair: e.key, cause: e.cause, depth: +e.depth.toFixed(2), dur: +((e.t1 - e.t0 + step) / 1000).toFixed(1), ...e.at }));
+    return JSON.stringify(res);
   },
   // development: the racing line's offset (and the edges, turning) every 10 m over ±80 m of the k sharpest corners
   lineProfile(k = 3) {
