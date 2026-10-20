@@ -88,7 +88,7 @@ void main() {
 // chase camera at 300 km/h). A streak is the drop's path over a short exposure relative to the camera – long and slanted
 // when the camera moves (EXPOSE: a TV camera's ~1/20 s – longer than a real shutter, so the streaks read at a
 // glance: a look). Drops below a roof (the cover raster) and those past the shown share (uAmount) aren't drawn.
-const RAIN_N = 16000, BOX = [56, 32, 56], EXPOSE = 0.05;
+const RAIN_N = 16000, BOX = [56, 32, 56], EXPOSE = 0.05, EXPOSE_CAM = 0.0125;
 const RAIN_VS = `attribute float aEnd; attribute float aSeed;
 uniform vec3 uCam; uniform vec3 uBox; uniform vec3 uOff; uniform vec3 uStreak; uniform float uAmount;
 uniform sampler2D uCover; uniform vec4 uCoverExt; uniform float uHasCover;
@@ -381,9 +381,11 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       // (a jump of more than 20 m in a frame is a cut – another camera, a seek –, not motion: no streaks smeared across it)
       if (S.hasPrev && dt > 0 && camera.position.distanceToSquared(S.camPrev) < 400) { streak.copy(camera.position).sub(S.camPrev).multiplyScalar(1 / dt); S.camVel.lerp(streak, 0.3); } else S.camVel.set(0, 0, 0);
       S.camPrev.copy(camera.position); S.hasPrev = true;
-      streak.copy(fall).sub(S.camVel).multiplyScalar(EXPOSE);
+      // (the camera's own motion over a shorter ~1/80 s: at the full 0.05 s a chase camera at 300 km/h drew 4 m streaks
+      // right across the picture – wx_spray_a_3, v0.44)
+      streak.copy(fall).multiplyScalar(EXPOSE).addScaledVector(S.camVel, -EXPOSE_CAM);
       if (rate === 0) streak.copy(fall).multiplyScalar(EXPOSE);
-      if (streak.length() > 3) streak.setLength(3);
+      if (streak.length() > 1.6) streak.setLength(1.6);
       ru.uStreak.value.copy(streak);
       ru.uCam.value.copy(camera.position);
       ru.uAmount.value = env.rainAmt;
