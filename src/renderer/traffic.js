@@ -121,7 +121,7 @@ export function classifyOverlap(p) {
 export const TRAFFIC = {
   WINDOW: 32,      // m along the lap: pairs looked at
   GAP_L: 0.4,      // m nose to tail kept clear (on top of the cars' lengths)
-  GAP_W: 0.3,      // m side to side kept clear (on top of their widths)
+  GAP_W: 0.6,      // m side to side kept clear (on top of their widths: a car changing lanes is turned a few degrees, its corners swing out ~0.3 m)
   EDGE: 0.1,       // m a car's side may go over the edge line (onto the kerb) when parted
   LONG_MAX: 2.5,   // m a pair may be drawn further apart along the track
   S_MAX: 2.0,      // m any car may be drawn off its place along the track

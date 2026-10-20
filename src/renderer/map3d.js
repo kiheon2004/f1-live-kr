@@ -1228,7 +1228,7 @@ const smoothstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) /
 // between two others and put queues side by side; and that looked 1–3 s ahead live, where smooth.js holds the newest
 // position: the "future" was the latest data, every car standing still)
 const trafSt = {}, trafPk = {}, trafItems = new Map(), trafList = [], trafEdge = { L: 7, R: -7 }, KA2 = [0, 0, 0], KB2 = [0, 0, 0], KD1 = [0, 0], KD2 = [0, 0];
-const traf = { S: makeTraffic(), sm: null, env: null }, trafCost = { ms: 0, frames: 0 };   // (development: its share of a frame)
+const traf = { S: makeTraffic(), sm: null, env: null, lastT: null }, trafCost = { ms: 0, frames: 0 };   // (development: its share of a frame)
 function traffic(sm, F, t, dt, pos) {
   if (traf.sm !== sm) { resetTraffic(traf.S); traf.sm = sm; }   // (another session or circuit: nothing carried over)
   const env = traf.env || (traf.env = {
@@ -1242,6 +1242,8 @@ function traffic(sm, F, t, dt, pos) {
     pose(s, d, o) { traf.F.at(s - 2, d, KA2); traf.F.at(s + 2, d, KB2); o.x = (KA2[0] + KB2[0]) / 2; o.z = (KA2[2] + KB2[2]) / 2; o.yaw = Math.atan2(KB2[0] - KA2[0], KB2[2] - KA2[2]); return o; },
   });
   traf.F = F; env.L = F.L; env.live = !!app().src?.isLive;
+  if (traf.lastT == null || t < traf.lastT || t - traf.lastT > TRAFFIC.JUMP_MS) sepMemory = {};   // (a seek: separate()'s sides start over too)
+  traf.lastT = t;
   const list = trafList; list.length = 0;
   // (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already)
   const held = (c) => { const g = c.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
@@ -2174,13 +2176,17 @@ function updateWheelScreens(src, t) {
 // amount (ReplayKit.separateCars). The correction is eased in and out so nothing jumps, and a car pushed
 // sideways stays on the tarmac.
 let sepMemory = {};
+const sepSkip = (a, b) => a.track && b.track;
 function separate(dt, seen) {
   const list = [];
   for (const num of seen) {
     const c = cars.get(num);
-    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw) });   // c.pos is this frame's raw position
+    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw), track: c.onTrack && !c.est && !c.pit && !(c.grid && c.grid.state !== "free") });   // c.pos is this frame's raw position
   }
-  const off = window.ReplayKit.separateCars(list, sepMemory);
+  // (v0.44: two cars on the track are traffic.js's – traffic() above, along and across the track, checked as boxes; this
+  // pass is for the rest – the pit lane, a car off the steadied tracks, grid slots, placements without data – so no pair
+  // gets two corrections on top of each other)
+  const off = window.ReplayKit.separateCars(list, sepMemory, 16, 5, sepSkip);
   const k = Math.min(1, dt * 9);
   for (const o of list) {
     const c = cars.get(o.id);
@@ -3688,7 +3694,7 @@ window.Map3D = {
             cancel: [a, b].some((q) => q.want[0] > 0.3 && q.want[1] < -0.3), tgtSep: a.d != null && b.d != null ? Math.abs(a.d + a.tgt - b.d - b.tgt) : 0, moved: Math.abs(a.off) + Math.abs(b.off) > 0.3 });
           if (Math.max(a.c.trafRes || 0, b.c.trafRes || 0) > 0) res.acknowledged++;
           { const mk = cause + "|" + [a.c.trafMode || "-", b.c.trafMode || "-"].sort().join("+"); res.byMode[mk] = (res.byMode[mk] || 0) + 1; if (a.s != null) { const bin = Math.floor(((a.s % F.L) + F.L) % F.L / 50) * 50; res.byPlace[bin] = (res.byPlace[bin] || 0) + 1; } }   // (frames the correction itself reports as left over)
-          log.add(fakeT, a.num + "/" + b.num, dC, cause, { s: a.s != null ? Math.round(((a.s % F.L) + F.L) % F.L) : null, x: +a.x.toFixed(1), y: +a.y.toFixed(1), z: +a.z.toFixed(1), off: [+a.off.toFixed(2), +b.off.toFixed(2)], sOff: [+(a.c.trafS || 0).toFixed(2), +(b.c.trafS || 0).toFixed(2)], mode: [a.c.trafMode || "", b.c.trafMode || ""], raw: +dA.toFixed(2), aligned: +dB.toFixed(2) });
+          log.add(fakeT, a.num + "/" + b.num, dC, cause, { s: a.s != null ? Math.round(((a.s % F.L) + F.L) % F.L) : null, x: +a.x.toFixed(1), y: +a.y.toFixed(1), z: +a.z.toFixed(1), off: [+a.off.toFixed(2), +b.off.toFixed(2)], sOff: [+(a.c.trafS || 0).toFixed(2), +(b.c.trafS || 0).toFixed(2)], mode: [a.c.trafMode || "", b.c.trafMode || ""], pit: [a.c.pit?.state?.state || "", b.c.pit?.state?.state || ""], sep: [+Math.hypot(a.c.sepX || 0, a.c.sepZ || 0).toFixed(2), +Math.hypot(b.c.sepX || 0, b.c.sepZ || 0).toFixed(2)], raw: +dA.toFixed(2), aligned: +dB.toFixed(2) });
         }
       }
     } finally { window.F1KR = real; }
