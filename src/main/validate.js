@@ -20,6 +20,8 @@ function inside(dir, file) {
 }
 
 const year = (v) => { if (!isInt(v, 2018, 2100)) throw new Error("bad year"); return v; };
+// a calendar season (the home screen shows calendars from before the archive's first season, 2018, as out of its range)
+const season = (v) => { if (!isInt(v, 1950, 2100)) throw new Error("bad season"); return v; };
 // MultiViewer circuit keys are small integers
 const circuitKey = (v) => { const k = typeof v === "string" && /^\d{1,4}$/.test(v) ? +v : v; if (!isInt(k, 0, 9999)) throw new Error("bad circuit key"); return k; };
 // a short plain string (location names, session paths), else throws
@@ -50,4 +52,4 @@ function trustedSender(frame, win, pageUrl) {
 // a facility model file name (src/data/models): "silverstone-wing.glb"
 const modelFile = (v) => { if (typeof v !== "string" || !/^[a-z0-9][a-z0-9_-]{0,80}\.glb$/.test(v)) throw new Error("bad model file"); return v; };
 
-module.exports = { modelFile, tileArgs, inside, year, circuitKey, text, sessionPath, jobId, sessionPaths, externalUrl, trustedSender };
+module.exports = { modelFile, tileArgs, inside, year, season, circuitKey, text, sessionPath, jobId, sessionPaths, externalUrl, trustedSender };

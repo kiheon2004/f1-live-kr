@@ -86,7 +86,7 @@ app.whenReady().then(() => {
     return archive.loadSession(V.sessionPath(sessionPath), (p) => { if (!e.sender.isDestroyed()) e.sender.send("session:progress", id == null ? p : { ...p, job: id }); });
   });
   handle("schedule:get", async (_e, year) => (await schedules.get(V.year(year))).races);
-  handle("schedule:meta", async (_e, year) => ({ ...(await schedules.get(V.year(year))), stats: { ...schedules.stats } }));
+  handle("schedule:meta", async (_e, year) => ({ ...(await schedules.get(V.season(year))), stats: { ...schedules.stats } }));
   handle("schedule:checked", () => schedules.checked());
   handle("meta:stats", () => ({ schedule: { ...schedules.stats }, archive: { ...(archive.stats || {}) } }));
   handle("track:outline", (_e, location) => { const y = new Date().getFullYear(); return archive.findOutline(V.text(location, 80), [y, y - 1, y - 2]); });

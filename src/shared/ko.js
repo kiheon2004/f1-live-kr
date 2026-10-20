@@ -29,6 +29,10 @@
     "Dutch": "네덜란드", "Italian": "이탈리아", "Azerbaijan": "아제르바이잔", "Singapore": "싱가포르",
     "United States": "미국", "Mexico City": "멕시코시티", "São Paulo": "상파울루", "Sao Paulo": "상파울루",
     "Las Vegas": "라스베이거스", "Qatar": "카타르", "Abu Dhabi": "아부다비", "Emilia Romagna": "에밀리아로마냐",
+    // (the home screen lists every season from 2014: names those calendars use – Jolpica's raceName)
+    "Barcelona": "바르셀로나", "Brazilian": "브라질", "Mexican": "멕시코", "Russian": "러시아", "French": "프랑스", "German": "독일",
+    "Malaysian": "말레이시아", "Styrian": "슈타이어마르크", "70th Anniversary": "70주년 기념", "Tuscan": "토스카나", "Eifel": "아이펠",
+    "Portuguese": "포르투갈", "Turkish": "튀르키예", "Sakhir": "사키르", "Korean": "한국", "Indian": "인도",
   };
   const SESSIONS = {
     "Practice 1": "연습 주행 1", "Practice 2": "연습 주행 2", "Practice 3": "연습 주행 3",
