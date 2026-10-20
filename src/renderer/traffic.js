@@ -197,7 +197,10 @@ export function stepTraffic(S, list, env, t) {
       const o = pairDepth(env, P.r, P.r.s + P.r.q, P.r.p, P.f, P.f.s + P.f.q, P.f.p);
       if (o <= 0.02) continue;
       if (P.wLat > 0.5 && P.Wx < T.BOX_MAX) { P.Wx = Math.min(T.BOX_MAX, P.Wx + o * 1.2); more = true; }
-      else if (!P.pass && P.wLong > 0 && P.Lx < T.BOX_MAX) { P.Lx = Math.min(T.BOX_MAX, P.Lx + o * 1.2); more = true; }
+      else if (!P.pass && P.wLong > 0 && P.deficit + P.Lx < T.LONG_MAX) { P.Lx = Math.min(T.BOX_MAX, P.Lx + o * 1.2); more = true; }
+      // (along is used up – a hairpin's inside turns a car's length of lap line into two thirds of one – and there's
+      // tarmac beside: the one behind is drawn a little wide of the one ahead, as cars queue round a hairpin)
+      else if (!P.pass && P.wLat <= 0.5) { P.wLat = 1; P.side = sideOf(S, P.key, P.r, P.f, P.Wneed, env, t); P.r.mode = P.f.mode = "alongside"; more = true; }
     }
     if (!more) break;
     for (const c of list) { c.p = c.d; c.q = 0; }
@@ -282,6 +285,27 @@ function pairDepth(env, a, sa, da, b, sb, db) {
   return boxDepth(PA.x, PA.z, PA.yaw, a, PB.x, PB.z, PB.yaw, b);
 }
 
+// The side each car of a pair being parted across goes to (+1: r left of f), kept while the pair is close: as they
+// already are if they're apart across; else the one behind to the inside of the next corner if there's room for it,
+// or to the side with more room. (A car already being parted from another keeps the order across as it is drawn – a
+// choice by preference for each pair of three cars abreast could ask for A left of B, B left of C and C left of A.)
+function sideOf(S, key, r, f, Wneed, env, t) {
+  let mem = S.pairs.get(key);
+  if (!mem) {
+    const dd = (r.d + r.m.dOff) - (f.d + f.m.dOff);
+    let side;
+    if (Math.abs(dd) > 0.4 || (dd !== 0 && (S.busy.has(r.num) || S.busy.has(f.num)))) side = Math.sign(dd);
+    else {
+      const roomL = r.hi - r.p, roomR = r.p - r.lo;
+      side = env.turnAhead(r.s) >= 0 ? 1 : -1;
+      if ((side > 0 ? roomL : roomR) < Wneed && (side > 0 ? roomR : roomL) > (side > 0 ? roomL : roomR)) side = -side;
+    }
+    mem = { left: side > 0 ? r.num : f.num, t }; S.pairs.set(key, mem);   // (who is left: the same whichever is ahead)
+  }
+  mem.t = t; mem.lat = true; S.busy.add(r.num); S.busy.add(f.num);
+  return mem.left === r.num ? 1 : -1;
+}
+
 // One close pair: r behind f by du m along the lap line (the steadied tracks). What it needs: across (Wneed: their
 // half widths and a gap) and along (Lneed: the rear's front and the front's back and a gap), whether it's a pass, how
 // much along is missing (deficit, with the bend: on the inside of a corner the distance at an offset is shorter),
@@ -324,27 +348,9 @@ function pairOf(S, r, f, du, env, t) {
     wLat = sstep(T.LONG_MAX, T.LONG_MAX + 1.5, def2);
     if (mem && mem.lat && deficit > 0) wLat = Math.max(wLat, sstep(0, T.LONG_MAX * 0.5, deficit));
   }
-  if (wLat > 0) {
-    if (!mem) {
-      // the side: as they already are if they're apart across; else the one going by (the one behind) to the inside
-      // of the next corner if there's room for it, or to the side with more room
-      // (a car already being parted from another keeps the order across as it is drawn – a choice by preference for
-      // each pair of three cars abreast could ask for A left of B, B left of C and C left of A)
-      const dd = (r.d + r.m.dOff) - (f.d + f.m.dOff);
-      let side;
-      if (Math.abs(dd) > 0.4 || (dd !== 0 && (S.busy.has(r.num) || S.busy.has(f.num)))) side = Math.sign(dd);
-      else {
-        const roomL = r.hi - r.p, roomR = r.p - r.lo;
-        side = env.turnAhead(r.s) >= 0 ? 1 : -1;
-        if ((side > 0 ? roomL : roomR) < Wneed && (side > 0 ? roomR : roomL) > (side > 0 ? roomL : roomR)) side = -side;
-      }
-      mem = { left: side > 0 ? r.num : f.num, t }; S.pairs.set(key, mem);   // (who is left: the same whichever is ahead)
-    }
-    mem.t = t; mem.lat = true; S.busy.add(r.num); S.busy.add(f.num);
-  }
-  const side = mem ? (mem.left === r.num ? 1 : -1) : 0;
+  const side = wLat > 0 ? sideOf(S, key, r, f, Wneed, env, t) : mem ? (mem.left === r.num ? 1 : -1) : 0;
   if (pass) { r.mode = f.mode = "pass"; } else if (wLat > 0) { r.mode = f.mode = "alongside"; } else if (deficit > 0) { r.mode = r.mode || "queue"; f.mode = f.mode || "queue"; }
   const P = S.pool[S.used] || (S.pool[S.used] = {}); S.used++;
-  P.r = r; P.f = f; P.du = du; P.Wneed = Wneed; P.Lneed = Lneed; P.deficit = deficit; P.bend = bend; P.pass = pass; P.wLat = wLat; P.wLong = 0; P.side = side;
+  P.key = key; P.r = r; P.f = f; P.du = du; P.Wneed = Wneed; P.Lneed = Lneed; P.deficit = deficit; P.bend = bend; P.pass = pass; P.wLat = wLat; P.wLong = 0; P.side = side;
   return P;
 }
