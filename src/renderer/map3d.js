@@ -22,7 +22,7 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
@@ -474,12 +474,12 @@ function applyLift(c, vis, dims) {
   const [lf, lr] = vis.lift, u = c.model.userData;
   c.model.position.y = (lf + lr) / 2;
   c.model.rotation.x -= Math.atan2(lf - lr, dims.FZ - dims.RZ);
-  u.wheels.forEach((w, i) => { w.visible = !vis.off[i]; });
+  u.wheels.forEach((w, i) => setWheelOff(c.model, i, !!vis.off[i]));   // (v0.43: the wheel only – drum, upright, disc stay)
   c.lifted = true;
 }
 function restoreCar(c) {
   if (!c.lifted) return;
-  c.model.position.y = 0; c.model.userData.wheels.forEach((w) => { w.visible = true; }); c.lifted = false;
+  c.model.position.y = 0; c.model.userData.wheels.forEach((w, i) => setWheelOff(c.model, i, false)); c.lifted = false;
 }
 function pitWorkNote(text) {
   let el = document.getElementById("pitWorkNote");
@@ -3894,7 +3894,7 @@ window.Map3D = {
   crewState() {
     let h = 0, n = 0;
     for (const m of world?.crews?.group.children || []) for (let i = 0; i < m.count; i++) { const e = m.instanceMatrix.array; for (let k = 12; k < 15; k++) { h = (h * 31 + Math.round(e[i * 16 + k] * 100)) | 0; } n++; }
-    const lifted = [...cars.values()].filter((c) => c.lifted).map((c) => ({ num: c.num, y: +c.model.position.y.toFixed(3), wheels: c.model.userData.wheels.map((w) => (w.visible ? 1 : 0)).join(""), pos: c.pos.toArray().map((v) => +v.toFixed(3)), raw: c.raw?.toArray().map((v) => +v.toFixed(3)), yaw: +c.yaw.toFixed(4) }));
+    const lifted = [...cars.values()].filter((c) => c.lifted).map((c) => ({ num: c.num, y: +c.model.position.y.toFixed(3), wheels: c.model.userData.wheels.map((w, i) => (wheelIsOn(c.model, i) ? 1 : 0)).join(""), pos: c.pos.toArray().map((v) => +v.toFixed(3)), raw: c.raw?.toArray().map((v) => +v.toFixed(3)), yaw: +c.yaw.toFixed(4) }));
     return JSON.stringify({ t: app().t, instances: n, hash: h, lifted, note: document.getElementById("pitWorkNote")?.hidden === false ? document.getElementById("pitWorkNote").textContent : null });
   },
   // development: the starts as the lights use them (race control's + the field's launch by telemetry)

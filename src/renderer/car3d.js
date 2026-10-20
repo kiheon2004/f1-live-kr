@@ -5,8 +5,9 @@
 // Model contract (every profile): metres, +Y up, nose +Z, origin on the ground between the axles' midpoint; wheel
 // pivots at the axles (steer about Y, roll about X); front-wing flap pivot at its leading edge, rear-wing flap (DRS /
 // active aero) at its leading edge; mounts in car coordinates: TCAM (the broadcast camera on the airbox), EYE (the
-// driver's eyes); bounds (length, width, height); LOD: "near" (cockpit interior, hands, steering wheel, wheel
-// deflectors and other small parts), "mid" (the car), "far" (wheel covers and lights off). See PROFILES for each era's
+// driver's eyes); bounds (length, width, height); LOD: "near" (cockpit interior, hands, steering wheel and other
+// small parts), "mid" (the car), "far" (wheel covers and lights off; the corners' drums and the 2022–25 front fence and
+// arch stay at every level – their outline doesn't pop). See PROFILES for each era's
 // numbers and where they come from (rules' limits vs. published or estimated figures).
 //
 // Eras:
@@ -741,17 +742,110 @@ function floorParts(E) {
   for (const k of [1, -1]) out.push(wall(dw * k, 0), wall(dw * 0.62 * k, 0.35), wall(dw * 0.3 * k, 0.55));
   return out;
 }
-// Uprights and brake ducts inside each wheel – the drum round the brake on the car's side of the wheel, its intake
-// facing forward (the hub's carbon fairings, not the rotating wheel: they don't spin; the fronts steer a few degrees
-// in reality – drawn fixed, inside the rim, where a few degrees don't show)
-function corners(p) {
-  const out = [];
-  for (const [z, r, w, front] of [[p.FZ, p.FR, p.FW, true], [p.RZ, p.RR, p.RW, false]]) for (const k of [1, -1]) {
-    const inner = p.W / 2 - w;                  // the tyre's inner face
-    const drum = new THREE.CylinderGeometry(front ? 0.15 : 0.165, front ? 0.16 : 0.175, 0.13, 20); drum.rotateZ(Math.PI / 2); drum.translate((inner - 0.04) * k, r, z);
-    const scoop = softBox(0.07, front ? 0.1 : 0.08, 0.16, (inner - 0.085) * k, r + (front ? -0.08 : 0.06), z + 0.14, 0.35);
-    out.push(drum, scoop);
+// ---------- the corners: what sits inside each wheel (v0.43) ----------
+// The parts inside the rim that do NOT come off with the wheel (research/corners.md): the brake drum (the carbon brake-duct
+// fairing round the disc, fixed to the upright), its intake facing forward on the drum's inboard face, the upright
+// inside it, the caliper on the disc's edge, the disc and the hub. Drawn in the wheel's own frame (origin the wheel's
+// centre, axle along x, +x out of the LEFT wheel; the right wheel's is the mirror image – cornerGeo's caller mirrors it),
+// in vertex colours over the carbon weave.
+// Motion (makeCar): the fronts' corner mesh rides in the wheel's steer group (it steers, it doesn't roll); the rears'
+// is merged into the body's carbon (a rear wheel never steers in this model and the body doesn't move on its springs).
+// The disc and the hub turn with the axle on the car, but they are drawn as plain solids of revolution – their turning
+// would not show – so they go with the drum: one mesh less per corner, and they stay on the car at a stop as the real
+// ones do. Proportions: CORNER (estimates from photos and the rules' limits – see each number's note).
+export const CORNER = {
+  // the rim's inner barrel (18-inch: 457 mm bead seat, Ø ~464 mm inside the barrel's wall – estimate) and the drum
+  // inside it – ~2 cm clear of the barrel (photos of 2022–25 front corners with the wheel off: the drum fills the rim)
+  barrelR: 0.232, drumR: 0.21, drumWall: 0.006,
+  // how far the drum reaches out of the wheel past the tyre's inner sidewall, and in towards the wheel's middle (its
+  // open outboard side faces the rim's centre: with the wheel off the disc shows in it)
+  drumOut: 0.025, drumIn: 0.05,
+  // brake discs (research/corners.md): FIA 2022–25 Technical Regulations Art. 11.3.2–3 – front Ø 325–330 mm, rear Ø 275–280
+  // mm, ≤ 32 mm thick; 2026 Section C (Issue 17, 2026-04-28) C11.3 – front Ø 325–345, rear 260–280, ≤ 34 mm. Drawn at the
+  // upper limits (teams run the largest a track's cooling allows – an estimate); the hub's bell and stub
+  disc: { 2022: { front: 0.165, rear: 0.14, t: 0.032 }, 2026: { front: 0.1725, rear: 0.14, t: 0.034 } }, hubR: 0.062,
+  // the wishbones' outer ends (ball joints): inside the drum, 6 cm in from the wheel's middle plane – near the steer axis
+  // (the wheel group's pivot), so a fixed wishbone's end stays hidden in the drum through ±0.4 rad of steer (measured in
+  // test/corners43.test.js); real kingpins sit inside the rim near the middle plane (low scrub – an estimate, M)
+  ballX: 0.06,
+};
+const CC = { carbon: [1, 1, 1], mouth: [0.03, 0.03, 0.035], disc: [0.11, 0.11, 0.115], metal: [0.32, 0.33, 0.35], caliper: [0.16, 0.16, 0.17] };
+const tinted = (g, c) => { g = g.index ? g.toNonIndexed() : g; const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute("color", new THREE.BufferAttribute(a, 3)); return g; };
+// a solid of revolution about the x axis from (radius, x) points – a closed loop, counter-clockwise in (r, x): the
+// faces point out of the solid
+function latheX(pts, seg = 32) { const g = new THREE.LatheGeometry(pts.map(([r, x]) => new THREE.Vector2(r, x)), seg); g.rotateZ(-Math.PI / 2); return g; }
+// A closed annular sector about the x axis: radii r0–r1, angles a0–a1 (y = r·sin a, z = r·cos a: 0 at the front, π/2 on
+// top), from x0 to x1 – the 2022–25 front fence and arch; its faces point out (checked by the first face's normal)
+function sector(r0, r1, a0, a1, x0, x1, n = 18) {
+  const pos = [], P = (rr, a, x) => [x, rr * Math.sin(a), rr * Math.cos(a)], quad = (A, B, C, D) => pos.push(...A, ...B, ...C, ...A, ...C, ...D);
+  for (let i = 0; i < n; i++) {
+    const s0 = a0 + ((a1 - a0) * i) / n, s1 = a0 + ((a1 - a0) * (i + 1)) / n;
+    quad(P(r1, s0, x0), P(r1, s1, x0), P(r1, s1, x1), P(r1, s0, x1));   // outer face
+    quad(P(r0, s0, x0), P(r0, s0, x1), P(r0, s1, x1), P(r0, s1, x0));   // inner face
+    quad(P(r0, s0, x0), P(r0, s1, x0), P(r1, s1, x0), P(r1, s0, x0));   // the x0 side
+    quad(P(r0, s0, x1), P(r1, s0, x1), P(r1, s1, x1), P(r0, s1, x1));   // the x1 side
   }
+  quad(P(r0, a0, x0), P(r1, a0, x0), P(r1, a0, x1), P(r0, a0, x1)); quad(P(r0, a1, x0), P(r0, a1, x1), P(r1, a1, x1), P(r1, a1, x0));
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals();
+  const nn = g.attributes.normal; if (nn.getY(0) * Math.sin(a0) + nn.getZ(0) * Math.cos(a0) < 0) { const a = g.attributes.position.array; for (let i = 0; i < a.length; i += 9) for (let k = 0; k < 3; k++) [a[i + 3 + k], a[i + 6 + k]] = [a[i + 6 + k], a[i + 3 + k]]; g.computeVertexNormals(); }
+  return g;
+}
+// One corner's fixed parts (the left wheel's, its frame as above): r the tyre's radius, w its width
+function cornerGeo(p, front) {
+  const w = front ? p.FW : p.RW, r = front ? p.FR : p.RR, hw = w / 2, K = CORNER, R = K.drumR, ri = R - K.drumWall;
+  const xi = -hw - K.drumOut, xo = K.drumIn, e = 0.022, t = 0.012, parts = [];
+  // the drum: a shell – its outer skin, the rounded edge into its inboard wall, the wall's inner face, the skin's inside
+  // and the outboard rim (open towards the wheel's centre)
+  const loop = [[ri, xo], [R, xo], [R, xi + e], [R - e * 0.3, xi + e * 0.3], [R - e, xi], [K.hubR + 0.01, xi], [K.hubR + 0.01, xi + t], [ri, xi + t], [ri, xo]];
+  // (the loop counter-clockwise in (r, x): outer skin rising in x – the faces out of the shell's material)
+  parts.push(tinted(latheX(loop.slice().reverse(), 36), CC.carbon));
+  // the wall's middle closed round the upright's stub (the hub's axle runs through the upright inside)
+  const plug = new THREE.CircleGeometry(K.hubR + 0.012, 16); plug.rotateY(-Math.PI / 2); plug.translate(xi - 0.001, 0, 0); parts.push(tinted(plug, CC.carbon));
+  // the disc near the drum's open side, and the hub's bell from it out to the wheel nut (the nut is the wheel's)
+  const D = K.disc[p.era] || K.disc[2022], dR = front ? D.front : D.rear, dx = xo - 0.035;
+  parts.push(tinted(latheX([[K.hubR, dx - D.t / 2], [dR, dx - D.t / 2], [dR, dx + D.t / 2], [K.hubR, dx + D.t / 2]].reverse(), 36), CC.disc));
+  parts.push(tinted(latheX([[0.001, xi + t], [K.hubR, xi + t], [K.hubR, hw - 0.06], [0.001, hw - 0.06]].reverse(), 18), CC.metal));
+  // the caliper on the disc's rim, behind the axle and a little low (front calipers sit at the back of the disc on most
+  // cars – photos, M), and the upright: a block inside the drum from the lower ball joint to the upper one
+  parts.push(tinted(boxAt(0.075, 0.12, 0.04, dx, -0.045, -(dR - 0.02)), CC.caliper));
+  parts.push(tinted(boxAt(0.07, 0.3, 0.08, -K.ballX - 0.005, -0.015, 0), CC.carbon));
+  // the intake on the drum's inboard face, its mouth facing forward (a duct's four walls; the inside dark): low and
+  // ahead of the axle at the front, higher at the rear (photos of 2022–26 corners – M)
+  const [y0, y1] = front ? [-0.1, 0.025] : [-0.02, 0.11], z0 = 0.045, z1 = R - 0.012, xa = xi - 0.055, xb = xi + 0.004, wt = 0.007;
+  const zc = (z0 + z1) / 2, zl = z1 - z0;
+  parts.push(tinted(boxAt(xb - xa, wt, zl, (xa + xb) / 2, y1 - wt / 2, zc), CC.carbon), tinted(boxAt(xb - xa, wt, zl, (xa + xb) / 2, y0 + wt / 2, zc), CC.carbon));
+  parts.push(tinted(boxAt(wt, y1 - y0, zl, xa + wt / 2, (y0 + y1) / 2, zc), CC.carbon));
+  // (its back: a dark wall 4 cm into the mouth – what the eye takes for the opening)
+  parts.push(tinted(boxAt(xb - xa - wt, y1 - y0 - 2 * wt, 0.01, (xa + wt + xb) / 2, (y0 + y1) / 2, z1 - 0.045), CC.mouth));
+  if (front && p.era === "2022") {
+    // 2022–25: the front wheel bodywork's fence and arch (FIA 2022–25 Art. 3.13.5, a shape the rules fix; rigidly on the
+    // upright, 3.13.1 – research/corners.md): a flat carbon fence just inboard of the tyre over its upper front quarter,
+    // curling over the top into an arch a few cm over the tread's inner part. It steers with the drum; it doesn't spin.
+    // 2026 has no arch (C3.14 – press and rule text agree). Both closed thin shells (no double-sided material needed)
+    const a0 = 0.55, a1 = 1.8, xf = -hw - 0.014;
+    parts.push(tinted(sector(R - 0.01, r + 0.036, a0, a1, xf - 0.01, xf), CC.carbon));            // the fence
+    parts.push(tinted(sector(r + 0.03, r + 0.036, a0 + 0.1, a1, xf - 0.01, hw * 0.15), CC.carbon));  // the arch over the tread
+  }
+  for (const g of parts) if (g.attributes.uv) g.deleteAttribute("uv");
+  return mergeColoured(parts);
+}
+// The mirror image across x = 0 of a non-indexed geometry, every attribute kept (normals mirrored, not recomputed:
+// smooth parts stay smooth) and each triangle's winding turned back so its faces still point out
+function mirrorAll(g) {
+  const m = g.clone(); m.attributes.position.array.forEach((_, i, a) => { if (i % 3 === 0) a[i] = -a[i]; });
+  if (m.attributes.normal) m.attributes.normal.array.forEach((_, i, a) => { if (i % 3 === 0) a[i] = -a[i]; });
+  for (const at of Object.values(m.attributes)) { const a = at.array, s = at.itemSize; for (let i = 0; i < a.length; i += 3 * s) for (let k = 0; k < s; k++) [a[i + s + k], a[i + 2 * s + k]] = [a[i + 2 * s + k], a[i + s + k]]; }
+  m.computeBoundingSphere(); return m;
+}
+// merge() keeps position / normal / uv: a colour attribute merged the same way (the corner meshes' vertex colours)
+function mergeColoured(list) { const out = merge(list); const total = list.reduce((a, g) => a + g.attributes.color.count, 0), arr = new Float32Array(total * 3); let o = 0; for (const g of list) { arr.set(g.attributes.color.array, o); o += g.attributes.color.count * 3; } out.setAttribute("color", new THREE.BufferAttribute(arr, 3)); return out; }
+// The rear corners in the car's frame, for the body's carbon (they neither steer nor roll in this model)
+function corners(p) {
+  const L = cornerGeo(p, false), out = [];
+  const RX = p.W / 2 - p.RW / 2;
+  const l = L.clone(); l.translate(RX, p.RR, p.RZ); out.push(l);
+  const rr = mirrorAll(L); rr.translate(-RX, p.RR, p.RZ); out.push(rr);
+  L.dispose();
   return out;
 }
 // Wishbones and push/pull rods (faired blades), each corner from the chassis to the upright – front and rear each
@@ -759,16 +853,17 @@ function corners(p) {
 // front upper wishbone; at the rear, the toe link.
 function suspension(p, pullFront, pullRear = false) {
   const out = [];
-  for (const [z, r, wx, front] of [[p.FZ, p.FR, p.W / 2 - p.FW, true], [p.RZ, p.RR, p.W / 2 - p.RW, false]]) for (const k of [1, -1]) {
-    const ox = (wx + 0.02) * k, cx = (front ? 0.2 : 0.24) * k, top = r + 0.12, bot = r - 0.16;
+  for (const [z, r, wc, front] of [[p.FZ, p.FR, p.W / 2 - p.FW / 2, true], [p.RZ, p.RR, p.W / 2 - p.RW / 2, false]]) for (const k of [1, -1]) {
+    // (v0.43: the outer ends at the ball joints inside the drum, CORNER.ballX in from the wheel's middle – they ended at
+    // the tyre's inner face, where a steered drum would leave them behind)
+    const ox = (wc - CORNER.ballX) * k, cx = (front ? 0.2 : 0.24) * k, top = r + 0.12, bot = r - 0.16;
     out.push(strut([cx, front ? 0.47 : 0.42, z + 0.26], [ox, top, z]), strut([cx, front ? 0.47 : 0.42, z - 0.22], [ox, top, z]));
     out.push(strut([cx * 0.95, 0.2, z + 0.3], [ox, bot, z]), strut([cx * 0.95, 0.2, z - 0.24], [ox, bot, z]));
     // (pull rod: from high on the upright down to the chassis; push rod: low on the upright up to the chassis)
     const pull = front ? pullFront : pullRear;
     out.push(pull ? strut([ox * 0.97, top - 0.02, z + (front ? -0.03 : 0.03)], [cx * 0.9, 0.17, z + (front ? -0.3 : 0.3)], 0.03, 0.014) : strut([ox * 0.97, bot + 0.02, z + 0.02], [cx * 1.05, front ? 0.52 : 0.46, z + (front ? -0.12 : 0.12)], 0.03, 0.014));
     out.push(front ? strut([cx, 0.4, z + 0.1], [ox, 0.42, z + 0.09], 0.032, 0.012) : strut([cx, 0.32, z - 0.12], [ox, 0.3, z - 0.1], 0.03, 0.012));
-    // the upright (inside the rim)
-    out.push(boxAt(0.04, top - bot + 0.04, 0.09, wx * k, r - 0.02, z));
+    // (the upright: in the corner's parts – cornerGeo)
   }
   return out;
 }
@@ -1080,7 +1175,8 @@ function armPlanFor(A) {
 }
 
 // Wheels: the tyre (rounded profile, sidewall bulge), the rim's lip, the wheel cover (with the compound's coloured
-// band on the sidewall), and on 2022–25 cars the deflector arching over the front tyre (it steers, doesn't spin).
+// band on the sidewall); the fronts' corner parts (cornerGeo: drum, intake, upright, caliper, disc, hub – and on 2022–25
+// cars the deflector arching over the front tyre: they steer, they don't spin).
 function wheels(p) {
   const tyre = (r, w) => {
     const pts = [], rr = 0.07, rim = 0.247;   // (18-inch rim: ~0.247 m to its lip)
@@ -1107,17 +1203,26 @@ function wheels(p) {
   const tint = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set(c, i * 3); g.setAttribute("color", new THREE.BufferAttribute(a, 3)); return g; };
   const onFace = (g, x, rad = 0, ang = 0) => { g.translate(0, rad, 0); g.rotateX(ang); g.translate(x, 0, 0); return g; };
   const axleCyl = (r1, r2, len, seg, x, rad = 0, ang = 0) => { const g = new THREE.CylinderGeometry(r1, r2, len, seg); g.rotateZ(-Math.PI / 2); return onFace(g, x, rad, ang); };
+  // (v0.43: the rim's both flanges, the nut, valve and fasteners on its outer face only – they were mirrored onto the
+  // inner face too, a nut where the brake drum is; the hub went to the corner's parts – it stays on the car at a stop;
+  // the rim's inner barrel and its centre's inboard face added: through the inner flange the eye saw the cover's back
+  // – a black disc – and past the drum's edge through the wheel)
   const lip = (w) => {
     const g = new THREE.TorusGeometry(lipR, 0.012, 6, 40); g.rotateY(Math.PI / 2); g.translate(w / 2 - 0.012, 0, 0);
     const parts = [tint(g.toNonIndexed(), [0.54, 0.56, 0.59])];
+    parts.push(tint(g.clone().translate(-(w - 0.024), 0, 0).toNonIndexed(), [0.54, 0.56, 0.59]));   // the inner flange
     const face = w / 2 - (era26 ? 0.014 : 0.016);
     if (!era26) for (let i = 0; i < 10; i++) parts.push(tint(axleCyl(0.008, 0.008, 0.006, 8, face + 0.002, 0.219, (i / 10) * Math.PI * 2).toNonIndexed(), [0.42, 0.44, 0.47]));
     parts.push(tint(axleCyl(0.006, 0.006, 0.016, 8, face + 0.006, era26 ? 0.2 : 0.19, 0.31).toNonIndexed(), [0.75, 0.77, 0.8]));   // the valve
-    // the hub, and the nut on it: six flats, a collar in the second colour where there is one
-    parts.push(tint(axleCyl(0.066, 0.07, 0.03, 20, w / 2 - 0.07).toNonIndexed(), [0.2, 0.21, 0.23]));
+    // the nut (it stays in the wheel – a captive nut – and comes off with it): six flats, a collar in the second colour
     parts.push(tint(axleCyl(0.046, 0.0525, 0.05, 6, w / 2 - 0.035).toNonIndexed(), nut.c));
     parts.push(tint(axleCyl(0.054, 0.054, 0.012, 20, w / 2 - 0.058).toNonIndexed(), nut.ring || nut.c));
-    return both(merge(parts));
+    // the barrel (its inside: faces towards the axle) from flange to flange, and the rim's centre seen from inboard
+    const bR = CORNER.barrelR, bar = new THREE.CylinderGeometry(bR, bR, w - 0.03, 40, 1, true); bar.rotateZ(-Math.PI / 2);
+    const bi = bar.toNonIndexed(), ba = bi.attributes.position.array; for (let i = 0; i < ba.length; i += 9) for (let k = 0; k < 3; k++) [ba[i + 3 + k], ba[i + 6 + k]] = [ba[i + 6 + k], ba[i + 3 + k]];
+    bi.computeVertexNormals(); parts.push(tint(bi, [0.09, 0.095, 0.1]));
+    const web = new THREE.RingGeometry(CORNER.hubR + 0.004, bR + 0.002, 40, 1); web.rotateY(-Math.PI / 2); web.translate(w / 2 - 0.075, 0, 0); parts.push(tint(web.toNonIndexed(), [0.07, 0.072, 0.078]));
+    return merge(parts);
   };
   const cover = (r, w) => {
     const parts = [];
@@ -1132,16 +1237,19 @@ function wheels(p) {
         const b = new THREE.BoxGeometry(0.02, 0.1, 0.016); b.rotateZ(0.0); onFace(b, w / 2 - 0.04, 0.108, (i / 7) * Math.PI * 2 + o); parts.push(tint(b.toNonIndexed(), [0.2, 0.21, 0.23]));
       }
     }
-    return both(merge(parts));
+    return merge(parts);   // (v0.43: the outer face only – it was mirrored onto the inner face, where the drum is)
   };
-  const out = { front: { tyre: tyre(p.FR, p.FW), band: band(p.FR, p.FW), lip: lip(p.FW), cover: cover(p.FR, p.FW) }, rear: { tyre: tyre(p.RR, p.RW), band: band(p.RR, p.RW), lip: lip(p.RW), cover: cover(p.RR, p.RW) } };
-  if (p.era === "2022") {
-    // the deflector over the front tyre: an arc plate a few cm above the tread, from the top towards the front
-    // (cylinder angle θ: after turning its axis along x, y = r·sin θ, z = r·cos θ – from over the top to the front)
-    const arc = new THREE.CylinderGeometry(p.FR + 0.035, p.FR + 0.035, p.FW * 0.75, 24, 1, true, 0.55, 1.25);
-    arc.rotateZ(Math.PI / 2);
-    out.front.deflector = arc;
+  // the left wheel's (outer face +x); the right wheel's turned half round about the vertical (not mirrored: the wheel is
+  // the same both ways round). corner: the parts inside the wheel that steer but don't roll (fronts – cornerGeo; the
+  // rears' are in the body) – the right one the left's mirror image (its intake still faces forward)
+  const half = (g) => g.clone().rotateY(Math.PI);
+  const out = {};
+  for (const [k, r, w] of [["front", p.FR, p.FW], ["rear", p.RR, p.RW]]) {
+    const L = lip(w), C = cover(r, w);
+    out[k] = { tyre: tyre(r, w), band: band(r, w), lip: L, cover: C, lipR: half(L), coverR: half(C) };
   }
+  const cl = metricUV(cornerGeo(p, true), 0.04);
+  out.front.corner = cl; out.front.cornerR = mirrorAll(cl);
   return out;
 }
 
@@ -1411,7 +1519,6 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // the rear wing's elements and the front wing's flaps in the livery's colours (v0.38: the top colour on both)
   const wingPaint = skyLit(new THREE.MeshStandardMaterial({ color: l.wing || (l.accent === "#ffffff" || l.accent === "#f2f2f2" ? l.base : l.top), roughness: matte ? 0.55 : 0.24, metalness: 0.05 }));
   const fwPaint = skyLit(new THREE.MeshStandardMaterial({ color: l.fw || l.wing || l.base, roughness: matte ? 0.55 : 0.24, metalness: 0.05 }));
-  const carbonThin = mat("carbonThin", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.42, metalness: 0, side: THREE.DoubleSide }), 0.35));
   // (rubber: matte, a faint sheen at grazing angles; the wheel's black parts satin, its metal parts – the rim's lip, the
   // nut, the hub – metal that now has a sky to reflect: without one a metalness of 0.85 drew them near black)
   const tyreMat = mat("tyre", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.88, metalness: 0 }), 0.6));
@@ -1489,18 +1596,25 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     near.add(sk, gl);
     return { k, mesh: sk, gauntlet: gl, bones, hand: hands[k > 0 ? 0 : 1], pose: armOut() };
   });
-  const wheels = [], spins = [];
+  // each wheel: its steer group w at the axle (turns about y – the fronts) holding the spin group s (rolls about x: the
+  // parts that come off at a stop – tyre, band, rim, cover, nut) and, at the front, the corner mesh (drum, intake,
+  // upright, caliper, disc, hub, 2022–25 deflector – steers, doesn't roll, stays on the car). The rears' corner parts
+  // are in the body's carbon. One material for the corners: the carbon weave tinted by vertex colours (the intake's
+  // dark mouth, the disc, the hub's metal)
+  const cornerMat = mat("corner", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, map: cm.colour, vertexColors: true, roughness: 0.45, metalness: 0 }), 0.35));
+  const wheels = [], spins = [], corners = [];
   const FX = prof.W / 2 - prof.FW / 2, RX = prof.W / 2 - prof.RW / 2;
   for (const [x, z, kind] of [[FX, prof.FZ, "front"], [-FX, prof.FZ, "front"], [RX, prof.RZ, "rear"], [-RX, prof.RZ, "rear"]]) {
-    const w = new THREE.Group(); w.position.set(x, kind === "front" ? prof.FR : prof.RR, z);
-    const s = new THREE.Group(); w.add(s);
-    s.add(new THREE.Mesh(t[kind].tyre, tyreMat), new THREE.Mesh(t[kind].band, bandMat), new THREE.Mesh(t[kind].lip, lipMat));
-    const cv = new THREE.Mesh(t[kind].cover, coverMat); s.add(cv); fine.push(cv);
-    if (t[kind].deflector) { const d = new THREE.Mesh(t[kind].deflector, carbonThin); w.add(d); fine.push(d); }
-    g.add(w); wheels.push(w); spins.push(s);
+    const T = t[kind], left = x > 0;
+    const w = new THREE.Group(); w.name = "wheel"; w.position.set(x, kind === "front" ? prof.FR : prof.RR, z);
+    const s = new THREE.Group(); s.name = "spin"; w.add(s);
+    s.add(new THREE.Mesh(T.tyre, tyreMat), new THREE.Mesh(T.band, bandMat), new THREE.Mesh(left ? T.lip : T.lipR, lipMat));
+    const cv = new THREE.Mesh(left ? T.cover : T.coverR, coverMat); s.add(cv); fine.push(cv);
+    let cn = null; if (T.corner) { cn = new THREE.Mesh(left ? T.corner : T.cornerR, cornerMat); cn.name = "corner"; w.add(cn); }
+    g.add(w); wheels.push(w); spins.push(s); corners.push(cn);
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
-  g.userData = { profile: prof, mounts, wheels, spins, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
+  g.userData = { profile: prof, mounts, wheels, spins, corners, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
     leds, flagLights, gloveFine, gloveLo, cockpit: false, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat, gloveMat, suitMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
@@ -1529,6 +1643,12 @@ export function setWheels(car, spin, steer) {
   if (u.wheel) u.wheel.rotation.z = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, -steer * STEER_RATIO));
   if (u.arms && u.near.visible) placeArms(u);
 }
+// A wheel off the car at a pit stop (i in userData.wheels' order): only what comes off with a real wheel is hidden – its
+// spin group (tyre, band, rim, cover, nut); the drum, intake, upright, caliper, disc, hub and the 2022–25 fence and
+// arch stay (FIA 2022–25 Art. 3.13.1 / 3.13.7, 2026 C3.14 / C10.7.5 – research/corners.md). Before v0.43 the whole
+// steer group was hidden.
+export function setWheelOff(car, i, off) { const s = car.userData.spins[i]; if (s) s.visible = !off; }
+export const wheelIsOn = (car, i) => car.userData.spins[i]?.visible !== false;
 // the steering wheel's spec this car was built with (wheel3d.js)
 export const wheelSpecOf = (car) => car.userData.wheelSpec || null;
 // The car a cockpit camera rides in (on) or not: its gloves in full detail – fingers' grip print, seams
@@ -1593,8 +1713,8 @@ function placeArms(u) {
     A.hand.quaternion.copy(_q.setFromAxisAngle(_ax, k * (o.roll || 0)));
   }
 }
-// Level of detail: "near" (everything), "mid" (no cockpit interior, hands, steering wheel), "far" (also no wheel covers,
-// deflectors, lights). The same model at every level: only small parts come and go.
+// Level of detail: "near" (everything), "mid" (no cockpit interior, hands, steering wheel), "far" (also no wheel covers or
+// lights; v0.43: the 2022–25 front fence and arch are in the corner mesh, at every level). The same model at every level: only small parts come and go.
 export function setDetail(car, lod) {
   const u = car.userData;
   if (u.lod === lod) return;
@@ -1618,6 +1738,9 @@ export const DIMENSIONS = (season, teamName) => { const p = profileFor(season, t
 // The car's wheels in its userData.wheels are in this order: front left (+x), front right, rear left, rear right.
 export function wheelParts(season, teamName) {
   const p = profileFor(season, teamName), t = template(p);
-  return { key: p.key, front: t.front, rear: t.rear, FR: p.FR, RR: p.RR, FW: p.FW, RW: p.RW, FZ: p.FZ, RZ: p.RZ, FX: p.W / 2 - p.FW / 2, RX: p.W / 2 - p.RW / 2, W: p.W };
+  // (front / rear: the wheel as it comes off – tyre, band, lip (rim, nut), cover – the left wheel's, outer face +x; a
+  // carried wheel is turned, not mirrored, for the right side. The corner parts are not in it: they stay on the car)
+  const off = (o) => ({ tyre: o.tyre, band: o.band, lip: o.lip, cover: o.cover });
+  return { key: p.key, front: off(t.front), rear: off(t.rear), FR: p.FR, RR: p.RR, FW: p.FW, RW: p.RW, FZ: p.FZ, RZ: p.RZ, FX: p.W / 2 - p.FW / 2, RX: p.W / 2 - p.RW / 2, W: p.W };
 }
 export { loft, smoothSections, softBox, merge, boxAt };
