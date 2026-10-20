@@ -3,8 +3,9 @@
 // broadcast T-cam looks down on them) and fewer parts far away.
 //
 // Model contract (every profile): metres, +Y up, nose +Z, origin on the ground between the axles' midpoint; wheel
-// pivots at the axles (steer about Y, roll about X); front-wing flap pivot at its leading edge, rear-wing flap (DRS /
-// active aero) at its leading edge; mounts in car coordinates: TCAM (the broadcast camera on the airbox), EYE (the
+// pivots at the axles (steer about Y, roll about X); wing flaps on joints where the rules put their hinges (v0.44, aero.js:
+// the 2026 front flaps' halves about axes by their leading edges, the rear flap – 2026 – in its back half, DRS – 2025 – by
+// its trailing edge); mounts in car coordinates: TCAM (the broadcast camera on the airbox), EYE (the
 // driver's eyes); bounds (length, width, height); LOD: "near" (cockpit interior, hands, steering wheel and other
 // small parts), "mid" (the car), "far" (wheel covers and lights off; the corners' drums and the 2022–25 front fence and
 // arch stay at every level – their outline doesn't pop). See PROFILES for each era's
@@ -27,6 +28,7 @@
 import * as THREE from "./vendor/three.module.js";
 import { shapeFor } from "./carshapes.js";
 import { MIRROR } from "./mirrors.js";
+import { aeroSpecFor, hingeOf } from "./aero.js";
 import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R, KIT_ZONE, kitZone } from "./body3d.js";
 import { kitStyle, kitEntry, kitMaterial } from "./kit.js";
 import { harnessGeometry, HARNESS } from "./harness.js";
@@ -606,12 +608,15 @@ const sec = (list) => list.map(([z, b, t, hw, cx = 0, pw = 2.6, tp = 0]) => [z, 
 // A wing across the car: at(e) gives, at e = |x| / half span (0 middle, 1 tip), [y, z of the leading edge, chord,
 // thickness, angle (rad, leading edge up)] – elements that rise, sweep back and twist towards their tips as the real
 // ones do (one profile everywhere: wingElement's)
-function wingSpan(span, at, segs = 28) {
-  const prof = [[0, 0], [0.04, 0.55], [0.18, 0.9], [0.45, 1], [0.8, 0.55], [1, 0.08], [1, -0.02], [0.6, -0.25], [0.25, -0.35], [0.06, -0.3]];
+const WING_PROF = [[0, 0], [0.04, 0.55], [0.18, 0.9], [0.45, 1], [0.8, 0.55], [1, 0.08], [1, -0.02], [0.6, -0.25], [0.25, -0.35], [0.06, -0.3]];
+// range [x0, x1] (optional, v0.44): only that piece of the span (the same shape where it is) – a flap's moving middle
+// apart from its fixed tips (aero.js: the rules keep the outer ends still)
+function wingSpan(span, at, segs = 28, range = null) {
+  const prof = WING_PROF;
   const R = prof.length, pos = [], idx = [];
   for (let i = 0; i <= segs; i++) {
     // (stations closer together at the tips, where the elements turn)
-    const u = -1 + (2 * i) / segs, x = (span / 2) * Math.sign(u) * (1 - Math.pow(1 - Math.abs(u), 1.6)), e = Math.abs(x) / (span / 2);
+    const u = -1 + (2 * i) / segs, x = range ? range[0] + ((range[1] - range[0]) * i) / segs : (span / 2) * Math.sign(u) * (1 - Math.pow(1 - Math.abs(u), 1.6)), e = Math.abs(x) / (span / 2);
     const [y, z, c, t, a] = at(e);
     for (const [cf, tf] of prof) { const lz = -cf * c, ly = tf * t; pos.push(x, y + ly * Math.cos(a) - lz * Math.sin(a), z + lz * Math.cos(a) + ly * Math.sin(a)); }
   }
@@ -620,6 +625,14 @@ function wingSpan(span, at, segs = 28) {
   for (const i of [0, segs]) for (let k = 1; k < R - 1; k++) idx.push(...(i ? [i * R, i * R + k, i * R + k + 1] : [0, k + 1, k]));
   const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
   return g;
+}
+// (v0.44) A point on a wing element's chord, `back` m behind its leading edge, at x across the car (wingSpan's `at`) –
+// a hinge axis's point; and the element's section at x as [y, z] points (its profile, wingSpan's) – where a hinge
+// can sit inside it (aero.js hingeOf)
+function edgePoint(span, at, x, back = 0) { const [y, z, , , a] = at(Math.abs(x) / (span / 2)); return [x, y + back * Math.sin(a), z - back * Math.cos(a)]; }
+function wingSection(span, at, x) {
+  const [y, z, c, t, a] = at(Math.abs(x) / (span / 2));
+  return WING_PROF.map(([cf, tf]) => { const lz = -cf * c, ly = tf * t; return [y + ly * Math.cos(a) - lz * Math.sin(a), z + lz * Math.cos(a) + ly * Math.sin(a)]; });
 }
 const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // The sidepod's inlet as an opening (v0.40): a loft's front section `s` left open (loft capEnds "rear"), the lip – a ring
@@ -1015,7 +1028,11 @@ function body2022(p) {
   // (read from the PDF 2026-10-19): the profiles between XR +140 and +555 (the tips to +680), the endplates' volume to
   // XR +680; the model's endplates reached XR +775 and the flap's trailing edge XR +680)
   const rwMain = wingSpan(rwSpan, (e) => [0.775 + 0.035 * e * e - tip(e), -2.0 - 0.02 * e, 0.3, 0.04, 0.1]);
-  const rwFlap = wingSpan(rwSpan - 0.01, (e) => [0.855 + 0.015 * e * e - tip(e), -2.2 - 0.01 * e, 0.2, 0.026, 0.42]);   // (its trailing edge under Z 910: it stood at 1.01 m)
+  const rwFlapAt = (e) => [0.855 + 0.015 * e * e - tip(e), -2.2 - 0.01 * e, 0.2, 0.026, 0.42];   // (its trailing edge under Z 910: it stood at 1.01 m)
+  // (v0.44: the DRS flap moves inboard of Y 490 only – 2025 Art. 3.10.10 (a), Issue 03: no DRS bodywork outboard of it –
+  // its last 5 mm stay with the endplates; it turns about an axis by its trailing edge – (b): ≤ 20 mm under the top and
+  // ≤ 20 mm ahead of the rear of the profiles' volume –, its leading edge rising off the main plane (the slot gap ≤ 85 mm, (g)))
+  const rwFlap = wingSpan(rwSpan - 0.01, rwFlapAt, 28, [-0.49, 0.49]), rwTips = [wingSpan(rwSpan - 0.01, rwFlapAt, 2, [0.49, (rwSpan - 0.01) / 2]), wingSpan(rwSpan - 0.01, rwFlapAt, 2, [-(rwSpan - 0.01) / 2, -0.49])];
   // (the endplates' lower rear corner cut away, their tops rounding over into the elements – photos of SF-25, MCL39)
   const ep = [[-1.96, 0.54], [-1.95, 0.8], [-1.97, 0.88], [-2.06, 0.93], [-2.2, 0.95], [-2.4, 0.945], [-2.475, 0.9], [-2.47, 0.73], [-2.3, 0.7], [-2.1, 0.62], [-2.04, 0.54]];
   const rwPlates = merge([plate(ep, rwSpan / 2 + 0.006, 0.012), plate(ep, -rwSpan / 2 - 0.006, 0.012)]);
@@ -1035,8 +1052,9 @@ function body2022(p) {
     // (2022–25 halos are painted in the team's colours on most cars: with the body, the livery's zones decide)
     paintExtra: [paintUV(halo(p), true), rwPlates, ...M.heads],
     carbon: metricUV(merge([...floor, fw0, fwPlates, rwPylon, beam, ...susp, ...corners(p), ...M.stays, fin, tcamPod, inlets, airbox, exhaust, ...shapeParts(S, p, fwSpan, 2.68, 0.35, zb)]), 0.04),
-    wing: rwMain, fwFlaps: merge([...fwF, ...fwEnds]), rwFlaps: rwFlap,   // (2022–25 flaps never move: the endplates go with them)
-    fwPivot: [0.13, 2.68], rwPivot: [0.855, -2.2], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
+    wing: merge([rwMain, ...rwTips]), fwFlaps: merge([...fwF, ...fwEnds]), rwFlaps: rwFlap,   // (2022–25 front flaps never move: the endplates go with them)
+    // (v0.44: the front flaps fixed – fwFront null; the rear flap's section at Y 50 for its hinge (aero.js hingeOf))
+    fwFront: null, rwSection: wingSection(rwSpan - 0.01, rwFlapAt, 0.05),
     lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: null, mirrors: merge(MG.geos), mirrorSpec: MG.spec,
   };
 }
@@ -1072,8 +1090,18 @@ function body2026(p) {
   // the main plane, the two flaps that open in straight-line mode; endplates in front of the tyres' inner half
   const fwSpan = 1.35, r = (e) => sstep(0.35, 1, e);
   const fw0 = wingSpan(fwSpan, (e) => [0.075 + 0.07 * r(e), 2.93 - 0.1 * r(e), 0.32 - 0.06 * r(e), 0.032, 0.06 + 0.08 * r(e)]);
-  const fwF = [wingSpan(fwSpan - 0.02, (e) => [0.15 + 0.08 * r(e), 2.58 - 0.08 * r(e), 0.17 + 0.03 * r(e), 0.026, 0.22 + 0.1 * r(e)]),
-    wingSpan(fwSpan - 0.03, (e) => [0.2 + 0.08 * r(e), 2.45 - 0.05 * r(e), 0.12 + 0.02 * r(e), 0.022, 0.38 + 0.1 * r(e)])];
+  // (v0.44: the flaps in halves, left and right of the nose – each half turns about its own axis: C3.10.10 (a)–(g), Issue 17
+  // 28 Apr 2026: the "FW Primary Flap" (every element but the forwardmost) about the Primary Axis through Point A (inboard
+  // of Y 150) and Point B (Y 475–675), both within 25 mm of its leading edge; the "FW Secondary Flap" (the rearmost
+  // element) about the Secondary Axis (Points C, D the same on its own leading edge), carried by the primary one)
+  const fwAt = [(e) => [0.15 + 0.08 * r(e), 2.58 - 0.08 * r(e), 0.17 + 0.03 * r(e), 0.026, 0.22 + 0.1 * r(e)], (e) => [0.2 + 0.08 * r(e), 2.45 - 0.05 * r(e), 0.12 + 0.02 * r(e), 0.022, 0.38 + 0.1 * r(e)]];
+  const fwSp = [fwSpan - 0.02, fwSpan - 0.03];
+  const fwFront = [1, -1].map((k) => {
+    const half = (i) => wingSpan(fwSp[i], fwAt[i], 16, k > 0 ? [0.005, fwSp[i] / 2] : [-fwSp[i] / 2, -0.005]);
+    const pt = (i, x) => edgePoint(fwSp[i], fwAt[i], k * x, 0.012);
+    const primary = half(0), secondary = half(1);
+    return { side: k, primary, secondary, A: pt(0, 0.1), B: pt(0, 0.6), C: pt(1, 0.1), D: pt(1, 0.6) };
+  });
   const epF = [[2.95, 0.075], [2.95, 0.2], [2.88, 0.3], [2.7, 0.365], [2.4, 0.375], [2.15, 0.33], [2.05, 0.2], [2.08, 0.075]];
   const fwPlates = merge([plate(epF, 0.63, 0.012), plate(epF, -0.63, 0.012)]);
   const pylons = merge([plate([[2.75, 0.12], [2.75, 0.2], [2.45, 0.27], [2.3, 0.27], [2.4, 0.12]], 0.075, 0.012), plate([[2.75, 0.12], [2.75, 0.2], [2.45, 0.27], [2.3, 0.27], [2.4, 0.12]], -0.075, 0.012)]);
@@ -1085,7 +1113,12 @@ function body2026(p) {
   // outboard as §30.2's plane asks – Z ≥ 785 at Y 575 against 725 inboard)
   // (and under its top, Z 880 – ~0.92 m over the ground: the top flap's trailing edge was at 1.0 m)
   const rwMain = wingSpan(rwSpan, (e) => [0.765 + 0.05 * e * e, -1.88 - 0.01 * e, 0.24, 0.04, 0.12]);
-  const rwFlaps = merge([wingSpan(rwSpan - 0.02, (e) => [0.81 + 0.03 * e * e, -2.09, 0.15, 0.026, 0.38]), wingSpan(rwSpan - 0.04, (e) => [0.87 + 0.015 * e * e, -2.205, 0.1, 0.02, 0.45])]);
+  // (v0.44: the "RW Flap" – every element but the forwardmost, inboard of Y 530; the flaps' ends outboard of Y 535 stay
+  // with the endplates – C3.11.6 (a), Issue 17; the two turn together (one actuator, (e); the hangers keep them one piece,
+  // C3.11.7 (a)), about an axis along Y whose place the mechanism chooses (aero.js))
+  const rwF = [[rwSpan - 0.02, (e) => [0.81 + 0.03 * e * e, -2.09, 0.15, 0.026, 0.38]], [rwSpan - 0.04, (e) => [0.87 + 0.015 * e * e, -2.205, 0.1, 0.02, 0.45]]];
+  const rwFlaps = merge(rwF.map(([sp, at]) => wingSpan(sp, at, 28, [-0.53, 0.53])));
+  const rwTips = rwF.flatMap(([sp, at]) => [wingSpan(sp, at, 2, [0.535, sp / 2]), wingSpan(sp, at, 2, [-sp / 2, -0.535])]);
   // (v0.40: the endplate as the rules draw it – App. §31, Issue 17: in the X-plane its section runs from the lower part
   // inboard (Y 345–375, Z 250–425) up a diagonal to the upper part outboard (Y 535–575, from Z 700 to 880), one piece; its
   // leading edge from XR +375 at Z 250 forward to XR +160 at Z 700, its trailing edge from XR +625 back to XR +750 at
@@ -1109,8 +1142,8 @@ function body2026(p) {
     body, tubIn: OB.inner, openEdge: OB.edge, room: OB.room, pods: both(merge([podL, inl.lip])), paintExtra: [rwPlates, ...M.heads],
     // (2026 halos are black carbon on every car in the footage and photos – not painted)
     carbon: metricUV(merge([...floor, fw0, pylons, fwPlates, boards, rwPylon, ...susp, ...corners(p), ...M.stays, tcamPod, fin, inlets, airbox, exhaust, halo(p), ...shapeParts(S, p, fwSpan, 2.5, 0.37, zb)]), 0.04),
-    wing: rwMain, fwFlaps: merge(fwF), rwFlaps,
-    fwPivot: [0.16, 2.5], rwPivot: [0.81, -2.09], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
+    wing: merge([rwMain, ...rwTips]), fwFlaps: null, fwFront, rwFlaps,
+    rwSection: [...wingSection(rwF[0][0], rwF[0][1], 0.05), ...wingSection(rwF[1][0], rwF[1][1], 0.05)],
     // (v0.40, C14.3 Issue 17: two lights in the endplates, lenses facing back – within 5° of the X-axis –, between Z 700
     // and 870, and the middle one's rear face centred at Z 295–305 on Y = 0. They were 0.36 m strips along the endplates'
     // outer faces, lit sideways: now upright strips at the endplates' trailing edges, a reference plane ~4 cm up)
@@ -1595,6 +1628,27 @@ export const TYRE_COLOURS = { SOFT: "#e8392f", MEDIUM: "#f2c230", HARD: "#eef0f2
 // opts: { teamName, teamColour, number, season } → a THREE.Group; userData: { profile, mounts: { tcam, eye },
 // wheels (steer groups), spins (roll groups), fwPivot, rwPivot, bandMat, near (the close-up parts), fine (wheel covers,
 // lights), helmet, wheel (steering wheel group), lod, compound, aero }.
+// The 2026 front flaps' two halves as one geometry with its open pose as a morph target (v0.44): each half's primary
+// flap (both elements) about its Primary Axis A–B, the secondary (rear) element first about C–D – C3.10.10 (a)–(g).
+// Kept on the profile's template per angle pair, shared (marked) by every car with those angles.
+function frontMorph(T, prim, sec) {
+  const key = `${prim}|${sec}`, M = T.fwMorphs || (T.fwMorphs = new Map());
+  if (M.has(key)) return M.get(key);
+  const turn = (geo, P, Q, a) => {
+    const d = new THREE.Vector3(Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]); if (d.x < 0) d.negate();   // (the same sense both sides)
+    const m = new THREE.Matrix4().makeTranslation(P[0], P[1], P[2]).multiply(new THREE.Matrix4().makeRotationAxis(d.normalize(), a)).multiply(new THREE.Matrix4().makeTranslation(-P[0], -P[1], -P[2]));
+    return geo.clone().applyMatrix4(m);
+  };
+  const closed = [], open = [];
+  for (const F of T.fwFront) {
+    closed.push(F.primary, F.secondary);
+    open.push(turn(F.primary, F.A, F.B, prim), turn(turn(F.secondary, F.C, F.D, sec), F.A, F.B, prim));
+  }
+  const g = merge(closed), o = merge(open);
+  g.morphAttributes.position = [o.attributes.position]; g.morphAttributes.normal = [o.attributes.normal];
+  g.userData.shared = true; M.set(key, g);
+  return g;
+}
 export function makeCar({ teamName, teamColour, number, season = null, date = null }) {
   const prof = profileFor(season, teamName, date), t = template(prof), l = liveryFor(teamName, teamColour, prof.season, date);
   const matte = l.finish === "matte";
@@ -1650,9 +1704,32 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const glassMat = mat("mirrorGlass", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x8c939b, roughness: 0.08, metalness: 1 })));
   // (both glasses one mesh – one draw: the halves of the rear view's picture are in their UVs)
   const mirrors = add(t.mirrors, glassMat, g, "mirrors"); mirrors.userData.spec = t.mirrorSpec; mirrors.userData.glass = glassMat;
-  // active aero / DRS: the flaps pivot about their leading edges (closed = corner mode, open = straight mode / DRS)
-  const pivot = ([y, z], geo, m0) => { const pv = new THREE.Group(); pv.position.set(0, y, z); const m = new THREE.Mesh(geo, m0); m.position.set(0, -y, -z); pv.add(m); g.add(pv); return pv; };
-  const fwPivot = pivot(t.fwPivot, t.fwFlaps, fwPaint), rwPivot = pivot(t.rwPivot, t.rwFlaps, wingPaint);
+  // active aero / DRS (v0.44): only the parts that move move, each about its own hinge, as this car's mechanism has it
+  // (aero.js aeroSpecFor: the era's rules, a team's own design from the race it was first run): the rear wing's flap
+  // about an axis along Y (its place in the flap – the rules', or the team's), the 2026 front flaps' halves about their
+  // swept axes (the secondary flap carried by the primary one). Main planes, endplates and the flaps' fixed ends stay.
+  // Each joint turns about ONE axis by angle × open (setAero) – no Euler blend: it cannot flip or go round the other way.
+  const spec = aeroSpecFor(prof.season, teamName, date, undefined, number);
+  const joint = (at, axis, geo, m0, parent = g, from = null) => {
+    const pv = new THREE.Group(); pv.name = "aeroJoint"; pv.position.set(at[0] - (from ? from[0] : 0), at[1] - (from ? from[1] : 0), at[2] - (from ? from[2] : 0));
+    if (geo) { const m = new THREE.Mesh(geo, m0); m.position.set(-at[0], -at[1], -at[2]); pv.add(m); }
+    pv.userData.axis = new THREE.Vector3(...axis).normalize(); parent.add(pv); return pv;
+  };
+  const rwHinge = hingeOf(t.rwSection, spec.rw.at);
+  const rwPivot = joint([0, rwHinge[0], rwHinge[1]], [1, 0, 0], t.rwFlaps, wingPaint);
+  const joints = [{ pv: rwPivot, angle: spec.rw.angle, front: false }];
+  let fwPivot;
+  if (t.fwFront) {
+    // (v0.44: both halves in ONE mesh – the draw-call budget – whose open pose is baked: each half turned about its own
+    // swept axis by the mechanism's angles (frontMorph); setAero blends to it (a morph target). The front flaps turn a few
+    // degrees: the straight blend between the two poses stays within ~1 % of the turn's arc – no flip, one way)
+    fwPivot = new THREE.Group(); fwPivot.name = "aeroFront"; g.add(fwPivot);
+    const m = new THREE.Mesh(frontMorph(t, spec.fw.primary, spec.fw.secondary), fwPaint); fwPivot.add(m);
+    m.morphTargetInfluences = [0];
+    joints.push({ morph: m, front: true });
+  } else {
+    fwPivot = joint([0, 0, 0], [1, 0, 0], t.fwFlaps, fwPaint);   // (fixed: 2022–25 front flaps)
+  }
   const fine = [add(t.lights, lightMat)];
   // driver: helmet and visor always (a T-cam sees them); the rest close up only
   const helmet = add(t.helmet, helmetMat, g, "helmet"); const visor = add(t.visor, visorMat, helmet);
@@ -1713,7 +1790,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     g.add(w); wheels.push(w); spins.push(s); corners.push(cn);
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
-  g.userData = { profile: prof, mounts, wheels, spins, corners, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
+  g.userData = { profile: prof, mounts, wheels, spins, corners, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroFront: 0, aeroSpec: spec, aeroJoints: joints,
     leds, flagLights, gloveFine, gloveLo, cockpit: false, mirrors, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat], kitMat, bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
@@ -1724,10 +1801,15 @@ export function setCompound(car, compound) {
   car.userData.compound = compound;
   car.userData.bandMat.color.set(TYRE_COLOURS[compound] || "#9aa0a6");
 }
-// Wing flaps: 0 = closed (corner mode / DRS shut), 1 = open (straight mode / DRS open). Eased by the caller.
-export function setAero(car, open) {
-  const u = car.userData; u.aero = open;
-  u.fwPivot.rotation.x = u.aeroOpen.fw * open; u.rwPivot.rotation.x = u.aeroOpen.rw * open;
+// Wing flaps: 0 = closed (corner mode / DRS shut), 1 = open (straight mode / DRS open) – the caller's fraction of the
+// way (aero.js: a function of the session's time). Each joint: its one axis, angle × open (a quaternion from axis and
+// angle – the path is that single turn, monotonic in `open`).
+// front (optional): the front wing's own fraction – low grip opens the front alone (aero.js); else the same.
+export function setAero(car, open, front = open) {
+  const u = car.userData, c = (x) => (x > 1 ? 1 : x > 0 ? x : 0); open = c(open); front = c(front);
+  if (u.aero === open && u.aeroFront === front) return;
+  u.aero = open; u.aeroFront = front;
+  for (const j of u.aeroJoints) { if (j.morph) j.morph.morphTargetInfluences[0] = j.front ? front : open; else j.pv.quaternion.setFromAxisAngle(j.pv.userData.axis, j.angle * (j.front ? front : open)); }
 }
 // Wheels: roll angle (rad) and the front wheels' steer angle (rad, + = left); the steering wheel turns with them at
 // a fixed ratio (STEER_RATIO, an estimate: 10:1 – about 50° of the wheel through a 130 km/h corner, the ±90° stop

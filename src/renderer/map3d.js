@@ -33,7 +33,8 @@ import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nigh
 import { tunnelLight } from "./tunnel.js";
 import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
-import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
+import { venueOf, wallOpeningsFor } from "./venues.js";
+import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, estimateZones, smModeOf } from "./aero.js";
 import { footing } from "./footing.js";
 
 const DM = 0.1;               // decimetres → metres
@@ -394,12 +395,49 @@ function pitDraw(c, r, v) {
 // crew's hands are copies of the car's). Anything else: the crew round the car, nothing played.
 // 2026 active aero, estimated (the feed has nothing about it): only if the viewer leaves it on, and never where the FIA
 // locked the cars in corner mode for the weekend – Monaco 2026 (formula1.com, 4 June 2026: "effectively locked in
-// Corner Mode for the entire Monte Carlo weekend"). The real straight-mode zones are set circuit by circuit and not
-// in the data, so the flaps open on any fast straight: a look, not the car's state.
+// Corner Mode for the entire Monte Carlo weekend"). v0.44: the zones are the FIA's where the app has them (aero.js
+// ZONES), else estimated from the lap line's long straights – either way a look from the rules and the car's speed and
+// brake, not the car's state.
 function aero2026Allowed() {
   if (geoSettings().aero === "off") return false;
   const A = app(), v = venueOf({ circuitKey: A?.circuitKey?.(), location: A?.location?.() });
-  return !aeroLocked(v?.key, A?.sessionYear?.() || 0);
+  return !aeroLock(v?.key, A?.sessionYear?.() || 0, sessionDate());
+}
+// v0.44: the zones on this world's lap line (aero.js zonesFor: the event's own, placed from the corners' stations; else
+// estimated from the line's long straights), kept per world, season and venue
+function aeroZones() {
+  const A = app(), season = A?.sessionYear?.() || 0, v = venueOf({ circuitKey: A?.circuitKey?.(), location: A?.location?.() }), key = `${season}|${v?.key}|${sessionDate()}|${A?.circuit?.corners?.length || 0}`;   // (again once the circuit's corners have come)
+  if (world.aeroZones?.key === key) return world.aeroZones;
+  const S = world.samples, pts = S.map((q) => q.p), cum = new Float64Array(S.length);
+  for (let i = 1; i < S.length; i++) cum[i] = cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+  const L = cum[S.length - 1] + Math.hypot(pts[0].x - pts[S.length - 1].x, pts[0].z - pts[S.length - 1].z);
+  const circ = A.circuit, ks = (circ?.corners || []).map((k) => { const q = toWorld([k.x, k.y, 0], world.center); return { n: k.n, x: q.x, z: q.z }; });
+  const official = zonesFor(v?.key, season, sessionDate());
+  const spans = official && ks.length ? zoneSpans(official.zones, cornerStations(ks, pts, cum, L), L) : [];
+  world.aeroZones = spans.length ? { key, L, spans, official } : { key, L, spans: estimateZones(pts, cum, L), official: null };
+  return world.aeroZones;
+}
+// A car's wing pose at t: { open 0..1, measured | estimated, why }
+let devAeroHold = null;
+// what every car's pose needs from the session, worked out once a frame (the setting, the venue's zones, lights out, race
+// control's word) – not per car: the setting is read from storage and the start found in the event list
+const AERO_CTX = { src: null, t: NaN, nMsg: -1, allowed: false, Z: null, t0: null, mode: "normal", isRace: false };
+function aeroCtx(src, t) {
+  const X = AERO_CTX, nMsg = src.messages?.length || 0;
+  if (X.src !== src) { X.src = src; X.isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || ""); X.t0 = X.isRace && src.startTime ? src.startTime() || null : null; X.nMsg = -1; X.t = NaN; }
+  if (X.isRace && X.t0 == null && src.isLive && src.startTime) X.t0 = src.startTime() || null;   // (live: lights out comes later)
+  if (X.nMsg !== nMsg) { X.nMsg = nMsg; X.mode = smModeOf(src.messages); }
+  if (X.t !== t) { X.t = t; X.allowed = aero2026Allowed(); X.Z = aeroZones(); }
+  return X;
+}
+function aeroPose(c, num, st, est, t, src) {
+  const era = c.model.userData.profile.era, out = c.aeroOut || (c.aeroOut = {});
+  if (era === "2022") { if (drsAt(src.car?.[num], t, 160, out)) return out; out.open = 0; out.front = 0; out.measured = false; out.estimated = false; out.why = "no DRS data"; return out; }
+  if (!world?.samples?.length) { out.open = 0; out.front = 0; out.estimated = true; out.why = "no lap line"; return out; }
+  const X = aeroCtx(src, t), I = c.aeroIn || (c.aeroIn = {});
+  I.allowed = X.allowed; I.spans = X.Z.spans; I.L = X.Z.L; I.s = st ? st.s : null; I.speed = c.speed * 3.6; I.tel = src.car?.[num] || null; I.t = t;
+  I.onTrack = !!st && !est && !c.pit; I.racing = X.t0 == null || t >= X.t0; I.startGate = X.t0; I.mode = X.mode;
+  return activeAeroAt(I, out);
 }
 function pitWorkPolicy() {
   const v = geoSettings().pitWork || "record", live = !!app()?.src?.isLive;
@@ -1662,13 +1700,13 @@ function updateCars(dt) {
     if (devArmDiag && num === focusNum) drawArmDiag(c.model);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
-    // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
-    // (straight mode at speed on straights, corner mode otherwise: the feed has no channel for it)
-    let wantOpen;
-    if (c.model.userData.profile.era === "2022") { const cd = src.carAt?.(num, A.t); wantOpen = cd && cd.drs != null ? (cd.drs >= 10 ? 1 : 0) : 0; }
-    else wantOpen = aero2026Allowed() && c.speed > 68 && Math.abs(yawRate) < 0.04 ? 1 : 0;
-    c.aero += (wantOpen - c.aero) * (1 - Math.exp(-dt * 6));
-    setAero(c.model, c.aero);
+    // the wings' flaps (aero.js – a function of the moment shown: a seek or a pause shows the pose at once): 2022–25
+    // cars – DRS as the car's telemetry says; 2026 cars – active aero, ESTIMATED (the feed has no channel for it): in the
+    // event's Straight Mode zones, at speed, until the brake (v0.44; it was speed > 68 m/s and a low turning rate, eased
+    // frame to frame – stale after a seek)
+    c.aeroState = aeroPose(c, num, st, est, A.t, src);
+    if (devAeroHold != null && num === focusNum) { c.aeroState.open = c.aeroState.front = devAeroHold; c.aeroState.why = "development hold"; }
+    c.aero = c.aeroState.open; setAero(c.model, c.aero, c.aeroState.front ?? c.aero);
     // (the compound on the sidewalls: the stint now; a replay shown from its record has the new set on the car from the
     // stop it went on at – the new stint is sent ~15 s after the car left; a car at work in its box: updateCrews)
     if (!liftedCars.has(num) && (!c.compoundAt || performance.now() - c.compoundAt > 1500)) {
@@ -4376,6 +4414,14 @@ window.Map3D = {
   partVis(name, on) { const c = cars.get(app().focus || leader()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
+  // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones
+  // development: hold the focused car's wings at a fraction (0 shut … 1 open; null: back to the estimate / data)
+  aeroHold(v = null) { devAeroHold = v; return "ok"; },
+  aeroState(num = null) {
+    const c = cars.get(num || app().focus || leader()); if (!c) return "no car";
+    const Z = world?.aeroZones, u = c.model.userData;
+    return JSON.stringify({ num: c.num, ...c.aeroState, open: +(c.aero ?? 0).toFixed(3), spec: u.aeroSpec?.id, conf: u.aeroSpec?.conf, zones: Z ? { official: !!Z.official, src: Z.official?.src || "estimated (long straights)", spans: Z.spans.map((q) => [Math.round(q.a), Math.round(q.b)]), L: Math.round(Z.L) } : null, s: c.st ? Math.round(((c.st.s % (Z?.L || 1)) + (Z?.L || 1)) % (Z?.L || 1)) : null });
+  },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {
     const c = cars.get(app().focus || leader()); if (!c) return "no car";
