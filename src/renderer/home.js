@@ -436,6 +436,7 @@ window.HomeDev = {
   globe: () => JSON.stringify(globe?.info() || null),
   failGlobe: () => { globe?.dispose(); globe = makeGlobe(true); placeMarkers(); return globeFailed; },
   disposeGlobe: () => { globe?.dispose(); globe = null; return "ok"; },
+  spin: () => { if (globe) { globe.autoRotate = true; globe.dirty = true; } return String(!!globe); },
 };
 
 // ---------- start ----------

@@ -109,18 +109,23 @@ export class Globe {
     this.raf = requestAnimationFrame((t) => this.frame(t));
     this.stats.ticks++;
     if (document.hidden) return;
-    const dt = Math.min(0.1, (now - this.last) / 1000 || 0); this.last = now;
     if (this.fly) {
       const f = this.fly, k = Math.min(1, (now - f.t0) / f.ms), e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
       this.camera.position.copy(f.from).lerp(f.to, e).setLength(f.dist);
       if (k >= 1) this.fly = null;
       this.dirty = true;
-    } else if (this.autoRotate) {
-      // ~1° a second around the polar axis (a turn takes six minutes)
-      this.camera.position.applyAxisAngle(THREE.Object3D.DEFAULT_UP, 0.0175 * dt); this.dirty = true;
     }
+    let idle = false;
     if (this.controls.update()) this.dirty = true;
+    else if (!this.dirty && this.autoRotate && !this.fly) {
+      // ~1° a second around the polar axis (a turn takes six minutes), drawn 30 times a second – nothing else moves
+      if (now - (this.lastDraw || 0) < 32) return;
+      this.camera.position.applyAxisAngle(THREE.Object3D.DEFAULT_UP, 0.0175 * Math.min(0.1, (now - (this.lastDraw || now)) / 1000));
+      this.controls.update();   // (taken in now, so the next frame doesn't count it as a move to draw again)
+      this.dirty = idle = true;
+    }
     if (!this.dirty) return;
+    this.lastDraw = now; this.stats.idleFrames = (this.stats.idleFrames || 0) + (idle ? 1 : 0);
     this.dirty = false;
     this.renderer.render(this.scene, this.camera);
     this.stats.frames++;

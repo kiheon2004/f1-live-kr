@@ -118,8 +118,10 @@ test("archive meta (synthetic files): the text contract stays; fresh/cache/stale
     global.fetch = async () => { calls++; throw new TypeError("fetch failed", { cause: { code: "ENOTFOUND" } }); };
     const off = await a.listSessionsMeta(2026);
     assert.deepStrictEqual([off.source, off.offline, off.sessions.length], ["stale-cache", true, 0]);
+    // asked again within two minutes: the same answer, no new request
+    const n0 = calls; assert.strictEqual((await a.listSessionsMeta(2026)).source, "stale-cache"); assert.strictEqual(calls, n0);
     global.fetch = async () => { calls++; return { ok: false, status: 401, headers: new Map() }; };
-    const ref = await a.listSessionsMeta(2026);
+    const ref = await new Archive(dir).listSessionsMeta(2026);
     assert.deepStrictEqual([ref.source, ref.offline, ref.status], ["stale-cache", false, 401]);
     // nothing cached, offline: an error marked offline
     global.fetch = async () => { throw new TypeError("fetch failed"); };

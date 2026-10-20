@@ -261,9 +261,21 @@ class Archive {
 
   // The season's sessions with where the list came from (getTextMeta): { year, sessions, source, fetchedAt, offline,
   // status }. cacheOnly: only a copy already on this computer (nothing fetched).
+  // (asks for one season at a time are shared, and an answer from an old copy – F1 refused or no connection – is reused
+  // for two minutes: going back and forth between seasons doesn't ask a refusing server again each time)
   async listSessionsMeta(year, { cacheOnly = false } = {}) {
-    const m = await this.getTextMeta(`${year}/Index.json`, { maxAgeMs: 3600e3, cacheOnly });
-    return { year, sessions: parseIndex(m.text), source: m.source, fetchedAt: m.fetchedAt, offline: !!m.offline, status: m.status ?? null };
+    const memo = this.listMemo || (this.listMemo = new Map()), key = `${year}:${cacheOnly}`, had = memo.get(key);
+    if (had && (had.pending || Date.now() - had.at < 120e3)) { (this.stats || (this.stats = { network: 0, cache: 0, stale: 0 })).shared = (this.stats.shared || 0) + 1; return had.promise; }
+    const promise = this.getTextMeta(`${year}/Index.json`, { maxAgeMs: 3600e3, cacheOnly })
+      .then((m) => ({ year, sessions: parseIndex(m.text), source: m.source, fetchedAt: m.fetchedAt, offline: !!m.offline, status: m.status ?? null }));
+    const entry = { pending: true, at: 0, promise };
+    memo.set(key, entry);
+    try {
+      const r = await promise;
+      // (a fresh answer needs no memo: the file itself is fresh for an hour)
+      if (r.source === "stale-cache") Object.assign(entry, { pending: false, at: Date.now() }); else memo.delete(key);
+      return r;
+    } catch (e) { memo.delete(key); throw e; }
   }
 
   // Which of these sessions have their recording on this computer: path → { core: the topics a replay needs are all
