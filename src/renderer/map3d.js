@@ -36,6 +36,7 @@ import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./lo
 import { venueOf, wallOpeningsFor } from "./venues.js";
 import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, estimateZones, smModeOf } from "./aero.js";
 import { footing } from "./footing.js";
+import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, TRAFFIC } from "./traffic.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -1226,6 +1227,21 @@ function carFor(num, d) {
   return c;
 }
 
+// A car's footprint from its model's bounds (metres from its origin: ahead, behind, to the side), once per model –
+// the contact shadow left out (development: Map3D.overlapScan; traffic.js boxes)
+const dimBox = new THREE.Box3(), dimM = new THREE.Matrix4();
+function carDims(c) {
+  if (c.dims?.key === c.key) return c.dims;
+  const m = c.model, inv = new THREE.Matrix4(); m.updateWorldMatrix(true, true); inv.copy(m.matrixWorld).invert();
+  let f = 0, b = 0, h = 0;
+  m.traverse((o) => {
+    if (!o.isMesh || !o.geometry || o.material?.map === shadowTex()) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    dimBox.copy(o.geometry.boundingBox).applyMatrix4(dimM.multiplyMatrices(inv, o.matrixWorld));
+    f = Math.max(f, dimBox.max.z); b = Math.max(b, -dimBox.min.z); h = Math.max(h, dimBox.max.x, -dimBox.min.x);
+  });
+  return (c.dims = { key: c.key, front: f, back: b, half: h, era: m.userData.profile?.era || "?" });
+}
 // ---------- per-frame update ----------
 function trackPointFor(c, x, z) {
   // Keep cars glued to the road surface and remember where on the lap they are.
@@ -1244,70 +1260,56 @@ function spring(o, key, rateKey, target, w, dt) {
 }
 const smoothstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 
-// Traffic. Every car is drawn on the racing line (the position data has them all on one line), so when one
-// catches and passes another, or two run side by side, someone has to make room: the car going past (seen in
-// the timing: it's behind now and ahead within 3 s, or the other way round in the last 3 s) pulls out by a car's
-// width to the side with room – the inside of the next corner if it can, as a real pass is set up – and the car
-// being passed gives a little room the other way. Two cars overlapping without a pass: the one behind goes to
-// the side. Offsets are eased (≈0.4 s), so cars swing out and back in like cars, not jump.
-const trafSide = new Map(), trafSt = {}, trafA = {}, trafB = {};
-let trafT = null;
+// Traffic (traffic.js): every car is drawn on the racing line (the position data has them all on one line), so cars
+// side by side or nose to tail in the data would be drawn through each other. traffic.js parts them – across the
+// track for passes and cars alongside, along it (within a few metres, never past each other) in queues – as offsets
+// on top of the steadied tracks (c.trafD across, c.trafS along, eased in the session's time), and records what it
+// can't solve (c.trafRes). Only where the cars are drawn: the order, laps and timing are the data's.
+// (v0.44: this replaced a pairwise push – each car the largest push each way, summed – that cancelled for a car
+// between two others and put queues side by side; and that looked 1–3 s ahead live, where smooth.js holds the newest
+// position: the "future" was the latest data, every car standing still)
+const trafSt = {}, trafPk = {}, trafItems = new Map(), trafList = [], trafEdge = { L: 7, R: -7 }, KA2 = [0, 0, 0], KB2 = [0, 0, 0], KD1 = [0, 0], KD2 = [0, 0];
+const traf = { S: makeTraffic(), sm: null, env: null, lastT: null }, trafCost = { ms: 0, frames: 0 };   // (development: its share of a frame)
 function traffic(sm, F, t, dt, pos) {
-  const L = F.L, list = [];
-  const wrapL = (x) => ((x % L) + L * 1.5) % L - L / 2;
+  if (traf.sm !== sm) { resetTraffic(traf.S); traf.sm = sm; }   // (another session or circuit: nothing carried over)
+  const env = traf.env || (traf.env = {
+    L: 0, live: false,
+    edges(s) { const q = traf.F.sampleAt(s); trafEdge.L = q.L ?? 7; trafEdge.R = q.R ?? -7; return trafEdge; },
+    // (the next 200 m's turning: > 0 the next corner goes left)
+    turnAhead(s) { const i = traf.F.sampleAt(s).i; let x = 0; for (let k = 0; k < 100; k++) x += world.samples[(i + k) % world.n].turn; return x; },
+    kappa(s) { traf.F.at(s - 4, 0, KA2, KD1); traf.F.at(s + 4, 0, KB2, KD2); return Math.atan2(KD1[0] * KD2[1] - KD1[1] * KD2[0], KD1[0] * KD2[0] + KD1[1] * KD2[1]) / 8; },
+    peek(num, tt) { const q = traf.sm.state(num, tt, trafPk); return q ? q.s : null; },
+    // (where a car at (s, d) is and faces: the path at that offset over ±2 m – the boxes check)
+    pose(s, d, o) { traf.F.at(s - 2, d, KA2); traf.F.at(s + 2, d, KB2); o.x = (KA2[0] + KB2[0]) / 2; o.z = (KA2[2] + KB2[2]) / 2; o.yaw = Math.atan2(KB2[0] - KA2[0], KB2[2] - KA2[2]); return o; },
+  });
+  traf.F = F; env.L = F.L; env.live = !!app().src?.isLive;
+  if (traf.lastT == null || t < traf.lastT || t - traf.lastT > TRAFFIC.JUMP_MS) sepMemory = {};   // (a seek: separate()'s sides start over too)
+  traf.lastT = t;
+  const list = trafList; list.length = 0;
+  // (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already)
+  const held = (c) => { const g = c.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
   for (const num of Object.keys(pos)) {
-    const st = sm.state(num, t, trafSt[num] || (trafSt[num] = {}));
-    if (st && cars.get(num)) list.push({ num, u: ((st.s % L) + L) % L, st });
+    const c = cars.get(num), st = c && sm.state(num, t, trafSt[num] || (trafSt[num] = {}));
+    if (!st) continue;
+    const D = carDims(c), it = trafItems.get(num) || {}; trafItems.set(num, it);
+    it.num = num; it.s = st.s; it.d = st.d; it.vs = st.vs; it.y = F.sampleAt(st.s).p.y; it.held = held(c); it.front = D.front; it.back = D.back; it.half = D.half;
+    list.push(it);
   }
-  // per car the biggest push each way (several cars at once don't add up beyond a car's width)
-  const want = new Map();
-  const add = (num, x) => { const w = want.get(num) || [0, 0]; if (x > 0) w[0] = Math.max(w[0], x); else w[1] = Math.min(w[1], x); want.set(num, w); };
-  // (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already:
-  // no room-making between them, which pushed one into the other column)
-  const held = (num) => { const g = cars.get(num)?.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
-  for (const A of list) for (const B of list) {
-    if (A === B || held(A.num) || held(B.num)) continue;
-    const du = wrapL(B.u - A.u);
-    if (du <= 0 || du > 25) continue;   // B ahead of A, within 25 m
-    let passer = null;
-    for (const tau of [-3000, -2000, -1000, 1000, 2000, 3000]) {
-      const sa = sm.state(A.num, t + tau, trafA), sb = sm.state(B.num, t + tau, trafB);
-      if (!sa || !sb) continue;
-      if (wrapL(sb.s - sa.s) < -1) { passer = tau > 0 ? A : B; break; }
+  const t0 = performance.now(), out = stepTraffic(traf.S, list, env, t); trafCost.ms += performance.now() - t0; trafCost.frames++;
+  for (const [num, c] of cars) {
+    const m = out.get(num);
+    c.trafD = m ? m.dOff : 0; c.trafRate = m ? m.dRate : 0; c.trafS = m ? m.sOff : 0; c.trafSRate = m ? m.sRate : 0;
+    c.trafTgt = m ? m.tD : 0; c.trafRes = m ? m.res : 0; c.trafMode = m ? m.mode : "";
+    // (development: a red ring under a car the correction couldn't keep clear – one shared ring, never in the app's views)
+    if (devTrafMark || c.trafRing) {
+      if (!c.trafRing) { c.trafRing = new THREE.Mesh(trafRingGeo(), trafRingMat()); c.trafRing.rotation.x = -Math.PI / 2; c.trafRing.position.y = 0.06; c.obj.add(c.trafRing); }
+      c.trafRing.visible = devTrafMark && c.trafRes > 0.05;
     }
-    const overlap = du < 6;
-    if (!passer && !overlap) continue;
-    const mover = passer || A, other = mover === A ? B : A;
-    const w = passer ? smoothstep(25, 9, du) : smoothstep(6.5, 3.5, du);
-    const key = mover.num + ">" + other.num;
-    const smp = F.sampleAt(mover.st.s), ln = F.lineAt(mover.st.s);
-    const roomL = (smp.L ?? 7) - 0.95 - ln, roomR = ln - ((smp.R ?? -7) + 0.95);
-    let side = trafSide.get(key)?.side;
-    if (!side) {
-      // the inside of the next corner (the turning over the next 200 m), if there's a car's width of room there
-      let turn = 0; for (let k = 0; k < 100; k++) turn += world.samples[(smp.i + k) % world.n].turn;
-      side = turn >= 0 ? 1 : -1;
-      if ((side > 0 ? roomL : roomR) < 1.8 && (side > 0 ? roomR : roomL) > (side > 0 ? roomL : roomR)) side = -side;
-    }
-    trafSide.set(key, { side, t });
-    add(mover.num, side * Math.max(0, Math.min(2.5, side > 0 ? roomL : roomR)) * w);
-    const os = F.sampleAt(other.st.s), oln = F.lineAt(other.st.s);
-    const oRoom = side > 0 ? oln - ((os.R ?? -7) + 0.95) : (os.L ?? 7) - 0.95 - oln;
-    add(other.num, -side * Math.max(0, Math.min(0.8, oRoom)) * w);
   }
-  for (const [key, v] of trafSide) if (Math.abs(t - v.t) > 8000) trafSide.delete(key);
-  const jump = trafT == null || Math.abs(t - trafT) > 2000;
-  trafT = t;
-  for (const { num, st } of list) {
-    const w = want.get(num) || [0, 0], smp = F.sampleAt(st.s), ln = F.lineAt(st.s);
-    const tgt = Math.max((smp.R ?? -7) + 0.95 - ln, Math.min((smp.L ?? 7) - 0.95 - ln, w[0] + w[1]));   // on the tarmac
-    // a critically damped spring (ω 3/s: a lane change takes ~1.5 s, starting and ending gently, like a car's)
-    const c = cars.get(num);
-    if (jump) { c.trafD = tgt; c.trafRate = 0; continue; }
-    spring(c, "trafD", "trafRate", tgt, 3, dt);
-  }
-  for (const [num, c] of cars) if (!list.some((x) => x.num === num)) { c.trafD = 0; c.trafRate = 0; }
 }
+let trafRingG = null, trafRingM = null;
+const trafRingGeo = () => trafRingG || (trafRingG = Object.assign(new THREE.RingGeometry(2.6, 3.0, 32), { userData: { shared: true } }));
+const trafRingMat = () => trafRingM || (trafRingM = Object.assign(new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.85, depthWrite: false }), { userData: { shared: true } }));
 // Steadied car tracks per source and world, built a moment after the world (a replay takes a few hundred ms).
 let smooth = { src: null, world: null, tr: null, pending: false };
 function smoothFor(src) {
@@ -1428,6 +1430,7 @@ function gridCar(c, num, v, ctx) {
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devSpin = null;   // (development, v0.43: the focused car's wheels rolled at this many turns a second – Map3D.spinWheels)
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
+let devTrafMark = false;   // (development: red rings under cars with an overlap left – Map3D.trafficState(at, true))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
 const KA = [0, 0, 0], KB = [0, 0, 0], KC = [0, 0, 0];   // (the steering's curvature: three points of the path)
@@ -1540,17 +1543,19 @@ function updateCars(dt) {
       // moves: the path's heading and turning rate, the body a touch more into the corner than the path (slip),
       // the nose dipping under braking, the car leaning a little and squatting on its downforce at speed.
       const off = est ? 0 : c.trafD || 0, offRate = est ? 0 : c.trafRate || 0;
+      // (and along it: a queue's spacing, traffic.js – a few metres at most, never past the car ahead)
+      const sD = st.s + (est ? 0 : c.trafS || 0), sRate = st.vs + (est ? 0 : c.trafSRate || 0);
       const dTot = st.d + off, dRate = st.vd + offRate;
-      F.at(st.s, dTot, P0, DIR);
-      speed = Math.hypot(st.vs, dRate);
+      F.at(sD, dTot, P0, DIR);
+      speed = Math.hypot(sRate, dRate);
       v.set(P0[0], P0[1], P0[2]);
-      c.sample = F.sampleAt(st.s);
+      c.sample = F.sampleAt(sD);
       // heading: the direction of the path over a few metres either side (3–10 m, with the speed): the lap line has
       // fine wiggles from the reference line it's made of, which its tangent shows and a chord averages out
       let pathYaw;
       if (Math.abs(st.vs) > 1.5) {
         const ds = Math.max(3, Math.min(10, Math.abs(st.vs) * 0.1)), h = ds / Math.abs(st.vs);
-        F.at(st.s - st.vs * h, dTot - dRate * h, PA); F.at(st.s + st.vs * h, dTot + dRate * h, PB);
+        F.at(sD - st.vs * h, dTot - dRate * h, PA); F.at(sD + st.vs * h, dTot + dRate * h, PB);
         pathYaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
       } else pathYaw = Math.atan2(DIR[0], DIR[1]);
       if (devMotion) c.dbg = [Math.atan2(DIR[0], DIR[1]), Math.atan2(dRate, st.vs || 1), st.s, dTot, st.vs, st.d, off, P0[0], P0[2]];
@@ -1568,7 +1573,7 @@ function updateCars(dt) {
       if (!c.has || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * (1 - Math.exp(-dt * 30));
       c.pathYaw = pathYaw; c.yawRate = yawRate; c.slide = exitSlide;
       // the road's slope over ±4 m
-      F.at(st.s + 4, 0, PA); F.at(st.s - 4, 0, PB);
+      F.at(sD + 4, 0, PA); F.at(sD - 4, 0, PB);
       const fwd = st.vs >= 0 ? 1 : -1, slope = -Math.atan2((PA[1] - PB[1]) * fwd, 8);
       const pitchT = slope + Math.max(-0.006, Math.min(0.02, -aLong * 0.00032));     // −5 g: nose down ~0.9°
       const rollT = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));               // 5 g: ~0.55° out of the corner
@@ -2212,13 +2217,17 @@ function updateWheelScreens(src, t) {
 // amount (ReplayKit.separateCars). The correction is eased in and out so nothing jumps, and a car pushed
 // sideways stays on the tarmac.
 let sepMemory = {};
+const sepSkip = (a, b) => a.track && b.track;
 function separate(dt, seen) {
   const list = [];
   for (const num of seen) {
     const c = cars.get(num);
-    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw) });   // c.pos is this frame's raw position
+    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw), track: c.onTrack && !c.est && !c.pit && !(c.grid && c.grid.state !== "free") });   // c.pos is this frame's raw position
   }
-  const off = window.ReplayKit.separateCars(list, sepMemory);
+  // (v0.44: two cars on the track are traffic.js's – traffic() above, along and across the track, checked as boxes; this
+  // pass is for the rest – the pit lane, a car off the steadied tracks, grid slots, placements without data – so no pair
+  // gets two corrections on top of each other)
+  const off = window.ReplayKit.separateCars(list, sepMemory, 16, 5, sepSkip);
   const k = Math.min(1, dt * 9);
   for (const o of list) {
     const c = cars.get(o.id);
@@ -3692,6 +3701,83 @@ window.Map3D = {
     try { for (fakeT = t0; fakeT <= t1; fakeT += step) { updateCars(step / 1000); for (const [num, c] of cars) if (c.obj.visible && Math.abs(c.trafD || 0) > 1.2) hits.push([Math.round((fakeT - t0) / 1000), num, +c.trafD.toFixed(1)]); } }
     finally { window.F1KR = real; }
     return JSON.stringify(hits.slice(0, 60)) + " total " + hits.length;
+  },
+  // development (v0.44): cars drawn overlapping over [t0, t1] (stream ms, every `step` ms, driven like trafficScan):
+  // oriented boxes from each car's model bounds at its drawn pose (C), at its steadied place without the correction
+  // (B) and at the feed's own interpolated position (A); overlap episodes per pair, classified (traffic.js
+  // classifyOverlap), with counts, durations and depths per cause and the worst ones (time from lights out, cars, place)
+  overlapScan(t0, t1, step = 100, o = {}) {
+    const src = app().src, sm = smoothFor(src); if (!sm || !world) return "no tracks";
+    const F = sm.frame, real = window.F1KR, st0 = src.startTime?.() || 0; let fakeT = t0;
+    const log = episodeLog(step * 2.5), RAW = [0, 0, 0], B = [0, 0, 0], c0 = world.center;
+    const res = { frames: 0, carFrames: 0, acknowledged: 0, byMode: {}, byPlace: {}, levels: 0, sameLat: 0, closePairs: 0, queue: { brake: { pairs: 0, rawBelow: 0, alignedBelow: 0 }, other: { pairs: 0, rawBelow: 0, alignedBelow: 0 } }, rawGapMs: null, dims: {} };
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try {
+      for (fakeT = t0; fakeT <= t1; fakeT += step) {
+        updateCars(step / 1000); res.frames++;
+        const list = [];
+        for (const [num, c] of cars) {
+          if (!c.has || !c.obj.visible || !c.pos) continue;
+          const D = carDims(c); res.dims[D.era] = [+(D.front + D.back).toFixed(2), +(2 * D.half).toFixed(2)];
+          const onT = c.onTrack && c.st && !c.est && !c.pit;
+          if (onT) F.at(c.st.s, c.st.d, B);
+          const r = src.tracks.at(num, fakeT, RAW) ? [RAW[0] * DM - c0.x, -(RAW[1] * DM - c0.z)] : null;
+          list.push({ num, c, D, x: c.pos.x, y: c.pos.y, z: c.pos.z, yaw: c.yaw, bx: onT ? B[0] : c.feedPos.x, bz: onT ? B[2] : c.feedPos.z, s: onT ? c.st.s : null, d: onT ? c.st.d : null, raw: r,
+            pit: !!c.pit, offT: !onT && !c.pit && !c.est, est: !!c.est, grid: !!c.grid && c.grid.state !== "free" && !c.grid.estimated, off: c.trafD || 0, tgt: c.trafTgt ?? 0, want: c.trafWant || [0, 0], as: c.st?.as || 0 });
+        }
+        res.carFrames += list.length;
+        // nose to tail on the track (neighbours along the lap within 15 m): how often the feed (A) and the steadied
+        // tracks (B) have them closer than a car's length – braking (−12 m/s² or harder) and all
+        { const on = list.filter((q) => q.s != null).map((q) => [((q.s % F.L) + F.L) % F.L, q]).sort((x, y) => x[0] - y[0]);
+          for (let k = 0; k < on.length; k++) {
+            const [ua, a] = on[k], [ub, b] = on[(k + 1) % on.length]; if (a === b) continue;
+            const dsB = ((ub - ua) % F.L + F.L) % F.L; if (dsB > 15) continue;
+            const need = (a.D.front + a.D.back + b.D.front + b.D.back) / 2, pa = a.raw && F.project(a.raw[0], a.raw[1]), pb = b.raw && F.project(b.raw[0], b.raw[1]);
+            const q = Math.min(a.as, b.as) < -12 ? res.queue.brake : res.queue.other;
+            q.pairs++; if (dsB < need) q.alignedBelow++;
+            if (pa && pb) { const dsA = Math.abs(((pb.s - pa.s) % F.L + F.L * 1.5) % F.L - F.L / 2); if (dsA < need) q.rawBelow++; }
+          }
+        }
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+          const a = list[i], b = list[j];
+          if (Math.hypot(a.x - b.x, a.z - b.z) > 8) continue;
+          const dC = boxDepth(a.x, a.z, a.yaw, a.D, b.x, b.z, b.yaw, b.D);
+          // (on the track, one behind the other: the feed's spacing in a braking queue, and how often B has them on the same line)
+          if (a.s != null && b.s != null) {
+            res.closePairs++; if (Math.abs(a.d - b.d) < 0.3) res.sameLat++;
+          }
+          if (!dC) continue;
+          if (Math.abs(a.y - b.y) > 2.5) { res.levels++; continue; }   // (one over the other: a bridge, a tunnel – not an overlap)
+          const dB = boxDepth(a.bx, a.bz, a.yaw, a.D, b.bx, b.bz, b.yaw, b.D);
+          const dA = a.raw && b.raw ? boxDepth(a.raw[0], a.raw[1], a.yaw, a.D, b.raw[0], b.raw[1], b.yaw, b.D) : 0;
+          const smp = a.s != null ? F.sampleAt(a.s) : null, room = smp ? (smp.L ?? 7) - (smp.R ?? -7) - 1.9 : 99;
+          const cause = classifyOverlap({ pitA: a.pit, pitB: b.pit, offA: a.offT, offB: b.offT, est: a.est || b.est, grid: a.grid || b.grid, aligned: dB, raw: dA, room, need: a.D.half + b.D.half,
+            cancel: [a, b].some((q) => q.want[0] > 0.3 && q.want[1] < -0.3), tgtSep: a.d != null && b.d != null ? Math.abs(a.d + a.tgt - b.d - b.tgt) : 0, moved: Math.abs(a.off) + Math.abs(b.off) > 0.3 });
+          if (Math.max(a.c.trafRes || 0, b.c.trafRes || 0) > 0) res.acknowledged++;
+          { const mk = cause + "|" + [a.c.trafMode || "-", b.c.trafMode || "-"].sort().join("+"); res.byMode[mk] = (res.byMode[mk] || 0) + 1; if (a.s != null) { const bin = Math.floor(((a.s % F.L) + F.L) % F.L / 50) * 50; res.byPlace[bin] = (res.byPlace[bin] || 0) + 1; } }   // (frames the correction itself reports as left over)
+          log.add(fakeT, a.num + "/" + b.num, dC, cause, { s: a.s != null ? Math.round(((a.s % F.L) + F.L) % F.L) : null, x: +a.x.toFixed(1), y: +a.y.toFixed(1), z: +a.z.toFixed(1), off: [+a.off.toFixed(2), +b.off.toFixed(2)], sOff: [+(a.c.trafS || 0).toFixed(2), +(b.c.trafS || 0).toFixed(2)], mode: [a.c.trafMode || "", b.c.trafMode || ""], pit: [a.c.pit?.state?.state || "", b.c.pit?.state?.state || ""], sep: [+Math.hypot(a.c.sepX || 0, a.c.sepZ || 0).toFixed(2), +Math.hypot(b.c.sepX || 0, b.c.sepZ || 0).toFixed(2)], raw: +dA.toFixed(2), aligned: +dB.toFixed(2) });
+        }
+      }
+    } finally { window.F1KR = real; }
+    // the feed's sample spacing (ms) over the window: median and 95th percentile
+    { const g = []; for (const c of Object.values(src.tracks.cars)) for (let k = 1; k < c.n; k++) if (c.t[k] >= t0 && c.t[k] <= t1) g.push(c.t[k] - c.t[k - 1]); g.sort((x, y) => x - y); res.rawGapMs = g.length ? [g[g.length >> 1], g[Math.floor(g.length * 0.95)]] : null; }
+    const eps = log.finish();
+    res.episodes = eps.length; res.overlapFrames = eps.reduce((x, e) => x + e.frames, 0);
+    res.byCause = summarise(eps, step);
+    res.worst = eps.sort((x, y) => y.depth * (y.t1 - y.t0 + step) - x.depth * (x.t1 - x.t0 + step)).slice(0, o.top ?? 12).map((e) => ({ t: +((e.worstT - st0) / 1000).toFixed(1), pair: e.key, cause: e.cause, depth: +e.depth.toFixed(2), dur: +((e.t1 - e.t0 + step) / 1000).toFixed(1), ...e.at }));
+    return JSON.stringify(res);
+  },
+  // development (v0.44): the traffic correction now (D) – per car its place (s, d: the steadied tracks), the offsets
+  // across and along (drawn and target), the overlap left (res, m) and why (mode); the close pairs and what each
+  // needs. `at` (stream ms): driven there first, from 8 s before (like trafficScan). `mark`: a red ring under every
+  // car with an overlap left (development only)
+  trafficState(at = null, mark = null) {
+    if (at != null) { const real = window.F1KR; let fakeT = at - 8000; window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) }); try { for (; fakeT <= at; fakeT += 50) updateCars(0.05); } finally { window.F1KR = real; } }
+    if (mark != null) devTrafMark = !!mark;
+    const S = traf.S, r2 = (x) => +x.toFixed(2);
+    return JSON.stringify({ t: S.lastT, live: !!traf.env?.live, stats: S.stats, costMs: +(trafCost.ms / Math.max(1, trafCost.frames)).toFixed(4), limits: TRAFFIC,
+      cars: S.cand.length || S.cars.size ? [...trafItems.values()].filter((c) => S.cars.has(c.num)).map((c) => { const m = S.cars.get(c.num); return { num: c.num, s: r2(c.s % traf.F.L), d: r2(c.d), lo: r2(c.lo), hi: r2(c.hi), dOff: r2(m.dOff), tD: r2(m.tD), sOff: r2(m.sOff), tS: r2(m.tS), res: r2(m.res), mode: m.mode }; }) : [],
+      pairs: S.cand.slice(0, S.cand.length).map((P) => ({ r: P.r.num, f: P.f.num, du: r2(P.du), Lneed: r2(P.Lneed), deficit: r2(P.deficit), wLat: r2(P.wLat), wLong: r2(P.wLong), pass: P.pass, side: P.side })) });
   },
   // development: the racing line's offset (and the edges, turning) every 10 m over ±80 m of the k sharpest corners
   lineProfile(k = 3) {
