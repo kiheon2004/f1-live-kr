@@ -797,14 +797,14 @@ function cornerGeo(p, front) {
   // the drum: a shell – its outer skin, the rounded edge into its inboard wall, the wall's inner face, the skin's inside
   // and the outboard rim (open towards the wheel's centre)
   const loop = [[ri, xo], [R, xo], [R, xi + e], [R - e * 0.3, xi + e * 0.3], [R - e, xi], [K.hubR + 0.01, xi], [K.hubR + 0.01, xi + t], [ri, xi + t], [ri, xo]];
-  // (the loop counter-clockwise in (r, x): outer skin rising in x – the faces out of the shell's material)
+  // (written clockwise from the open rim; reversed: counter-clockwise, the faces out of the shell's material)
   parts.push(tinted(latheX(loop.slice().reverse(), 36), CC.carbon));
   // the wall's middle closed round the upright's stub (the hub's axle runs through the upright inside)
   const plug = new THREE.CircleGeometry(K.hubR + 0.012, 16); plug.rotateY(-Math.PI / 2); plug.translate(xi - 0.001, 0, 0); parts.push(tinted(plug, CC.carbon));
   // the disc near the drum's open side, and the hub's bell from it out to the wheel nut (the nut is the wheel's)
   const D = K.disc[p.era] || K.disc[2022], dR = front ? D.front : D.rear, dx = xo - 0.035;
-  parts.push(tinted(latheX([[K.hubR, dx - D.t / 2], [dR, dx - D.t / 2], [dR, dx + D.t / 2], [K.hubR, dx + D.t / 2]].reverse(), 36), CC.disc));
-  parts.push(tinted(latheX([[0.001, xi + t], [K.hubR, xi + t], [K.hubR, hw - 0.06], [0.001, hw - 0.06]].reverse(), 18), CC.metal));
+  parts.push(tinted(latheX([[K.hubR, dx - D.t / 2], [dR, dx - D.t / 2], [dR, dx + D.t / 2], [K.hubR, dx + D.t / 2]], 36), CC.disc));
+  parts.push(tinted(latheX([[0.001, xi + t], [K.hubR, xi + t], [K.hubR, hw - 0.06], [0.001, hw - 0.06]], 18), CC.metal));
   // the caliper on the disc's rim, behind the axle and a little low (front calipers sit at the back of the disc on most
   // cars – photos, M), and the upright: a block inside the drum from the lower ball joint to the upper one
   parts.push(tinted(boxAt(0.075, 0.12, 0.04, dx, -0.045, -(dR - 0.02)), CC.caliper));
@@ -822,9 +822,24 @@ function cornerGeo(p, front) {
     // upright, 3.13.1 – research/corners.md): a flat carbon fence just inboard of the tyre over its upper front quarter,
     // curling over the top into an arch a few cm over the tread's inner part. It steers with the drum; it doesn't spin.
     // 2026 has no arch (C3.14 – press and rule text agree). Both closed thin shells (no double-sided material needed)
-    const a0 = 0.55, a1 = 1.8, xf = -hw - 0.014;
-    parts.push(tinted(sector(R - 0.01, r + 0.036, a0, a1, xf - 0.01, xf), CC.carbon));            // the fence
-    parts.push(tinted(sector(r + 0.03, r + 0.036, a0 + 0.1, a1, xf - 0.01, hw * 0.15), CC.carbon));  // the arch over the tread
+    // (v0.43 first try: the arch over 0.6 of the tread – as the v0.39 deflector spanned 0.75 – read as a mudguard in the
+    // app; photos show a strip over the tyre's inner shoulder only, ~7 cm in – an estimate, M. The fence a narrow tall
+    // strip a little ahead of the top, from the drum's height up past the tread: Haas VF-22 front corner, wheel off,
+    // motorsport.com 2022 (refs/corners/vf22_brake_drum.jpg); RB18 drawing, Piola 2022 – M)
+    const a0 = 1.3, a1 = 1.68, xf = -hw - 0.014;
+    parts.push(tinted(sector(R - 0.01, r + 0.036, a0, a1, xf - 0.01, xf), CC.carbon));             // the fence
+    parts.push(tinted(sector(r + 0.03, r + 0.036, a0 + 0.04, a1 + 0.08, xf - 0.01, -hw + 0.07), CC.carbon));  // the arch over the shoulder
+  }
+  if (front && p.era === "2026") {
+    // 2026: no arch over the tyre (C3.14 – nothing of the wheel bodywork may reach over it); the Front Drum Rear Deflector
+    // instead (FIA 2026 Section C Issue 17, 2026-04-28, C3.14.7: its leading edge must hide the box FWH-TOP – XW 150–335 mm
+    // behind the axle, ZW −160…−110 mm under it – seen from inboard; ≤ 15 mm thick there – research/corners.md): a board
+    // just inboard of the tyre from the drum's lower back down and back past the tyre's rear edge. Its outline here is
+    // an estimate (L) – the rules' reference surface itself was not read
+    const xb = -hw - 0.022, P2 = [[-0.1, -0.06], [-0.2, -0.085], [-0.345, -0.1], [-0.345, -0.17], [-0.12, -0.175]];
+    const sh = new THREE.Shape(); P2.forEach(([z, y], i) => (i ? sh.lineTo(z, y) : sh.moveTo(z, y)));
+    const b = new THREE.ExtrudeGeometry(sh, { depth: 0.012, bevelEnabled: false }); b.rotateY(-Math.PI / 2); b.translate(xb + 0.006, 0, 0);
+    parts.push(tinted(b, CC.carbon));
   }
   for (const g of parts) if (g.attributes.uv) g.deleteAttribute("uv");
   return mergeColoured(parts);

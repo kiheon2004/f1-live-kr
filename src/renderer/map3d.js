@@ -2206,7 +2206,7 @@ function leader() {
 // settings' "차량 크게" – a readability option, off by default: the names over them say who is where).
 // Level of detail by the car's size on screen (pixels along its length), with a margin each way so it doesn't flick:
 // close up (over ~260 px, or the car the cockpit cameras are in) the cockpit interior, hands and steering wheel;
-// under ~26 px no wheel covers, deflectors or lights either.
+// under ~26 px no wheel covers or lights either (the corners' drums and the 2022–25 front fences stay – v0.43).
 function scaleForView() {
   const H = hostH || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H, big = geoSettings().bigCars === true, focusNum = app().focus || leader();
   for (const c of cars.values()) {

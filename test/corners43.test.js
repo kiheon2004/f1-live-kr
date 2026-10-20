@@ -58,9 +58,10 @@ test("corners v0.43: the drum, disc, caliper and upright inside the rim's barrel
     // the rim's barrel (in the lip) at barrelR, inside the tyre's bead (0.247) and outside the drum
     const lip = u.spins[0].children[2].geometry, lr = []; for (const t of tris(lip)) lr.push(...t.pts.map(radial));
     assert.ok(lr.some((v) => Math.abs(v - K.barrelR) < 1e-4) && K.barrelR < 0.247 && K.barrelR - K.drumR >= 0.015);
-    // the 2022–25 fence and arch: points past the tyre's inner face or over its tread – none in 2026 (no arch)
-    let above = 0; for (const t of tris(g)) for (const q of t.pts) if (radial(q) > r + 0.02) above++;
-    if (P.era === "2022") assert.ok(above > 50, `${season}: fence and arch over the tyre`); else assert.strictEqual(above, 0, `${season}: no arch on 2026 cars`);
+    // the 2022–25 arch: points over the tread (within the tyre's width, beyond its radius) – none in 2026 (no arch:
+    // C3.14); 2026's Front Drum Rear Deflector instead: inboard of the tyre, behind and under the axle (C3.14.7)
+    let above = 0, board = 0; for (const t of tris(g)) for (const q of t.pts) { if (radial(q) > r + 0.02 && q[0] > -hw) above++; if (q[0] < -hw - 0.005 && q[2] < -0.3 && q[1] < -0.09) board++; }
+    if (P.era === "2022") assert.ok(above > 50 && board === 0, `${season}: arch over the tyre, no 2026 board`); else assert.ok(above === 0 && board > 4, `${season}: no arch on 2026 cars (${above}), the rear deflector board (${board})`);
   }
 });
 
@@ -85,6 +86,19 @@ test("corners v0.43: the right corner is the left's mirror image, faces out on b
       assert.ok(skin > 30 && bad === 0, `${season} side ${side}: ${bad} of ${skin} skin faces turned in`);
       // the intake's dark back wall: ahead of the axle, inboard of the tyre
       assert.ok(mouthZ.length && mouthZ.every((z) => z > 0.1) && mouthX.every((x) => x < -hw), "intake ahead and inboard");
+      // the disc and the hub face out too (v0.43 review: both were wound inside out – the wheel-off view saw through them):
+      // the disc's rim faces away from the axle, its two flat faces away from its middle plane
+      const D = C.CORNER.disc[season >= 2026 ? 2026 : 2022].front; let rimF = 0, rimBad = 0, flat = 0, flatBad = 0, xs = [];
+      for (const t of tris(g)) if (t.colour && Math.abs(t.colour[0] - 0.11) < 1e-3) xs.push(t.c[0]);
+      const xm = xs.reduce((a, v) => a + v, 0) / xs.length;
+      for (const t of tris(g)) if (t.colour && Math.abs(t.colour[0] - 0.11) < 1e-3) {
+        const rr = radial(t.c);
+        if (Math.abs(rr - D) < 0.003 && Math.abs(t.n[0]) < 0.3) { rimF++; if ((t.n[1] * t.c[1] + t.n[2] * t.c[2]) / rr < 0.9) rimBad++; }
+        else if (Math.abs(t.n[0]) > 0.9) { flat++; if (t.n[0] * (t.c[0] - xm) < 0) flatBad++; }
+      }
+      assert.ok(rimF > 20 && flat > 20 && rimBad === 0 && flatBad === 0, `disc faces: rim ${rimBad}/${rimF} in, flats ${flatBad}/${flat} in`);
+      let hub = 0, hubBad = 0; for (const t of tris(g)) if (t.colour && Math.abs(t.colour[0] - 0.32) < 1e-3 && Math.abs(radial(t.c) - K.hubR) < 0.003 && Math.abs(t.n[0]) < 0.3) { hub++; if ((t.n[1] * t.c[1] + t.n[2] * t.c[2]) / radial(t.c) < 0.9) hubBad++; }
+      assert.ok(hub > 10 && hubBad === 0, `hub faces ${hubBad}/${hub} in`);
       // the face normals agree with the stored normals (smooth or flat, never opposite)
       const n = g.attributes.normal; let opp = 0; for (const t of tris(g)) if (t.n[0] * n.getX(t.i) + t.n[1] * n.getY(t.i) + t.n[2] * n.getZ(t.i) < -0.2) opp++;
       assert.ok(opp <= 2, `${opp} faces against their normals`);
