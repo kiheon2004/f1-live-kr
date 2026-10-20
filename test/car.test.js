@@ -164,15 +164,19 @@ test("cars v0.39: cockpit place, wing spans, draw-call and triangle budget", asy
     // draw calls: v0.38 drew 35 meshes close up (33 for 2026), 27 at mid range – at most +30 %; triangles under 60k a car
     let near = 0, tris = 0; car.traverseVisible((o) => { if (o.isMesh) { near++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
     C.setDetail(car, "mid"); let mid = 0; car.traverseVisible((o) => { if (o.isMesh) mid++; });
-    assert.ok(near <= 45 && mid <= 35, `${season} ${team}: ${near} meshes near, ${mid} mid`);
+    // (v0.44: 46 – the 2026 front flaps in two halves, each about its own swept axis, C3.10.10)
+    assert.ok(near <= 46 && mid <= 35, `${season} ${team}: ${near} meshes near, ${mid} mid`);
     assert.ok(tris < 60000, `${season} ${team}: ${Math.round(tris)} triangles`);
     // the wings: 2026 front-wing profiles and endplates within |y| ≤ 0.68 m, rear wing within 0.575 m (C3.10 / C3.11)
     const fw = new THREE.Box3().setFromBufferAttribute(u.fwPivot.children[0].geometry.attributes.position), rw = new THREE.Box3().setFromBufferAttribute(u.rwPivot.children[0].geometry.attributes.position);
     if (P.era === "2026") { assert.ok(fw.max.x <= 0.69 && rw.max.x <= 0.58, `2026 wings ${fw.max.x.toFixed(3)} / ${rw.max.x.toFixed(3)}`); }
     else assert.ok(fw.max.x <= 1.0 && rw.max.x <= 0.52, `2022 wings ${fw.max.x.toFixed(3)} / ${rw.max.x.toFixed(3)}`);
-    // the moving flaps' pivots at their leading edges (2022–25: the front flaps never move – their endplates ride with them)
-    car.updateMatrixWorld(true);
-    for (const pv of P.era === "2026" ? [u.fwPivot, u.rwPivot] : [u.rwPivot]) { const bb = new THREE.Box3().setFromObject(pv.children[0]); assert.ok(Math.abs(bb.max.z - pv.position.z) < 0.1 && Math.abs(bb.min.y - pv.position.y) < 0.1, `pivot ${pv.position.toArray()} vs flap ${bb.max.toArray().map((v) => v.toFixed(3))}`); }
+    // v0.44: the hinges where the rules put them – the 2026 front flaps' axes by their leading edges (C3.10.10 (d): ≤ 25 mm),
+    // the 2026 rear flap's in its back half (C3.11.6 (b)), the 2022–25 DRS flap's at its trailing edge (2025 Art. 3.10.10 (b))
+    if (P.era === "2026") { const pv = u.fwPivot, bb = new THREE.Box3().setFromBufferAttribute(pv.children[0].geometry.attributes.position); assert.ok(Math.abs(bb.max.z - pv.position.z) < 0.1, `front axis ${pv.position.toArray()} vs flap ${bb.max.toArray().map((v) => v.toFixed(3))}`); }
+    { const pv = u.rwPivot, bb = new THREE.Box3().setFromBufferAttribute(pv.children[0].geometry.attributes.position), mid = (bb.max.z + bb.min.z) / 2;
+      assert.ok(pv.position.z <= mid + 1e-6 && pv.position.z >= bb.min.z - 0.005 && pv.position.y > bb.min.y && pv.position.y < bb.max.y + 0.005, `rear hinge ${pv.position.toArray()} vs flap ${bb.min.toArray().map((v) => v.toFixed(3))}…${bb.max.toArray().map((v) => v.toFixed(3))}`);
+      if (P.era !== "2026") assert.ok(bb.min.z > pv.position.z - 0.03 && bb.max.y < pv.position.y + 0.03, "DRS: by the trailing edge, near the top"); }
   }
 });
 test("cars v0.39: liveries by season and date; the painted parts' livery mapping stays in the texture", async () => {
