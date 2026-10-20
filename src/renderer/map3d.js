@@ -22,7 +22,7 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
-import { createMirrorPass, mirrorMode } from "./mirrors.js";
+import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { makeCar, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
@@ -3299,7 +3299,7 @@ function frame(now) {
 // The side mirrors' rear view (mirrors.js, v0.44): the car a cockpit camera rides in only – its picture drawn just before
 // the view (after the cars, the camera and the shadows' decision for this frame). The mode is the 🛰 settings' 사이드미러
 // (auto: by the quality setting), read when the settings change (mirrorSetting null: read again).
-let mirrorPass = null, mirrorSetting = null;
+let mirrorPass = null, mirrorSetting = null, mirrorStrained = false;
 const mirrorAux = (hide) => {
   // (the labels face the screen and are drawn over everything: not in a mirror)
   for (const c of cars.values()) { const sp = c.label.sp; if (hide) { sp.userData.mv = sp.visible; sp.visible = false; } else if (sp.userData.mv !== undefined) sp.visible = sp.userData.mv; }
@@ -3307,10 +3307,11 @@ const mirrorAux = (hide) => {
 };
 function updateMirrors() {
   if (!mirrorPass) mirrorPass = createMirrorPass();
-  if (mirrorSetting === null) { const o = geoSettings(); mirrorSetting = mirrorMode(o.mirrors, QUALITY[o.quality] ? o.quality : "balanced"); }
+  if (mirrorSetting === null) { const o = geoSettings(); mirrorSetting = { set: o.mirrors, q: QUALITY[o.quality] ? o.quality : "balanced" }; }
+  mirrorStrained = mirrorStrain(mirrorStrained, perf.late, perf.calm);
   const ride = camMode === "onboard" || camMode === "eye", num = ride ? app().focus || leader() : null, c = num ? cars.get(num) : null;
   const view = ride ? camMode + ":" + num : "";
-  mirrorPass.update(renderer, scene, camera, c?.obj.visible ? c.model : null, mirrorSetting, view, mirrorAux);
+  mirrorPass.update(renderer, scene, camera, c?.obj.visible ? c.model : null, mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), view, mirrorAux);
 }
 
 // Level of detail for vegetation: each tree chunk holds its instances in random order, so drawing only the
@@ -4260,7 +4261,7 @@ window.Map3D = {
   mirrors(o = {}) {
     if (o.mode) { saveGeoSettings({ ...geoSettings(), mirrors: o.mode }); mirrorSetting = null; }
     const S = mirrorPass?.state, ms = S?.car?.userData.mirrors;
-    return JSON.stringify({ setting: geoSettings().mirrors, mode: mirrorSetting, car: S?.car ? [...cars].find(([, c]) => c.model === S.car)?.[0] : null, view: S?.key, drawn: S?.drawn, rt: S?.rt ? [S.rt.width, S.rt.height, S.rt.samples] : null,
+    return JSON.stringify({ setting: geoSettings().mirrors, mode: mirrorSetting && mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), strained: mirrorStrained, car: S?.car ? [...cars].find(([, c]) => c.model === S.car)?.[0] : null, view: S?.key, drawn: S?.drawn, rt: S?.rt ? [S.rt.width, S.rt.height, S.rt.samples] : null,
       glass: ms?.material.type, stats: S?.stats, programs: renderer.info.programs?.length, frame: S?.frame });
   },
   // development (v0.44): the mirrors' picture (as drawn, unflipped: the left mirror's half first) shown over the page ×k

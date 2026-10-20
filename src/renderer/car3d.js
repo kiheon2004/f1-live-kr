@@ -1166,7 +1166,7 @@ function cockpit(p) {
   return {
     rim, headrest: merge([headrest, tub]), helmet, visor, torso: torsoGeometry(driverTorso(shoulder)),
     // (the arms: placed per car each frame from the plan, setWheels)
-    wheel: { body: SW.body, rubber: SW.rubber, bezel: SW.bezel, caps: SW.caps, metal: merge([SW.metal, column]), paddles: SW.paddles, screen: SW.screen, leds: SW.leds, led: ledGeometry(SW.led.r), ledWhere: W.leds?.where || null, spec: W,
+    wheel: { body: merge([SW.body, SW.paddles]), rubber: SW.rubber, bezel: SW.bezel, caps: SW.caps, metal: merge([SW.metal, column]), screen: SW.screen, leds: SW.leds, led: ledGeometry(SW.led.r), ledWhere: W.leds?.where || null, spec: W,
       flags: SW.flags, gloves: [left, right], glovesLo: [leftLo, rightLo], grip, arm: armSkin(), gauntlet: gauntletSkin(), at: [0, wy, wz], tilt, plan, shoulder },
   };
 }
@@ -1647,7 +1647,8 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // the driver's torso and thighs in the suit (the open tub shows them – close up only, as the arms)
   add(t.torso, suitMat, near, "torso");
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
-  add(t.wheel.body, wheelCarbon, wheel); add(t.wheel.paddles, wheelCarbon, wheel); add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
+  add(t.wheel.body, wheelCarbon, wheel);   // (v0.44: its paddles merged in – one draw: the mirrors' glass is a mesh of its own now)
+   add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
   const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen");
   // (the gloves: the fine pair only for the car a cockpit camera rides in – setCockpit; ~16k triangles – else a light pair;
   // each hand on a pivot at its grip's centre: the grip turns a little in the hand with the wheel's angle – placeArms)

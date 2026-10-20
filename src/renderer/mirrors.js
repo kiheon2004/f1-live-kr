@@ -31,9 +31,11 @@
 // first time the mirrors were drawn). The glass shows the picture as it is (MIRROR_SHADER: no second tone mapping),
 // dimmed to a silvered glass' reflectance (~0.85 – an estimate).
 //
-// Modes (the 🛰 settings' 사이드미러; "auto" by the quality setting – mirrorMode):
+// Modes (the 🛰 settings' 사이드미러; "auto": low with the quality setting 부드러움 or while frames come late – the
+// adaptive resolution's own test, mirrorStrain –, else full):
 //   full   – both mirrors every frame, 2 × 384 × 96 px, 4× multisampled
-//   low    – 2 × 192 × 48 px, every 3rd frame (the picture up to 2 frames old), no multisampling
+//   low    – 2 × 192 × 48 px, each mirror every 3rd frame, the two on different frames (one pass a frame at most: the
+//            picture up to 2 frames old, no frame carrying both), no multisampling
 //   simple – no rear view: the sky's reflection only (car3d.js glass) – no cars or scenery in it
 // Only when a mirror is in the camera's frustum and the camera in front of its glass; never in the helicopter or chase
 // views (a mirror there is a few pixels). Resources: one render target (made on first use, remade only when the mode's
@@ -42,17 +44,24 @@
 // glass back (a car or session change), dispose() frees the target (the world's teardown).
 import * as THREE from "./vendor/three.module.js";
 
-export const MIRROR = { yaw: (22 * Math.PI) / 180, spread: (8 * Math.PI) / 180, glass: [0.2, 0.05], far: 1500, reflectance: 0.85 };
+// (far: 150 m – a car there is ~10 px tall in the full picture (96 px over the glass' ~3.6° of height, seen from the eyes
+// ~0.8 m away); beyond it the sky. At 1500 m each mirror drew 1.2 M triangles in ~260 draws from the eyes – v0.44 runs)
+export const MIRROR = { yaw: (22 * Math.PI) / 180, spread: (8 * Math.PI) / 180, glass: [0.2, 0.05], far: 150, reflectance: 0.85 };
 export const MIRROR_MODES = {
   full: { w: 768, h: 96, every: 1, samples: 4 },
   low: { w: 384, h: 48, every: 3, samples: 0 },
   simple: null,
 };
 // the mode from the setting ("auto" | "full" | "low" | "simple") and the quality setting ("sharp" | "balanced" | "smooth")
-export function mirrorMode(setting, quality) {
+// strained: frames are coming late now (mirrorStrain)
+export function mirrorMode(setting, quality, strained = false) {
   if (setting === "full" || setting === "low" || setting === "simple") return setting;
-  return quality === "smooth" ? "low" : "full";
+  return quality === "smooth" || strained ? "low" : "full";
 }
+// Late frames (map3d's adaptive resolution: the share of the last 2 s window's frames that missed their refresh, and
+// how many calm windows in a row): strained from more than 1 late frame in 12 – the same line at which the resolution
+// steps down – until 15 calm windows (30 s), so the mode doesn't flip back and forth
+export function mirrorStrain(was, late, calm) { return was ? !((calm || 0) >= 15) : (late || 0) > 0.08; }
 
 const _d = new THREE.Vector3(), _x = new THREE.Vector3(), _z = new THREE.Vector3(), _m = new THREE.Matrix4();
 // Places `cam` (a PerspectiveCamera, never updateProjectionMatrix()'d) for a flat mirror: eye, glass centre c, unit
@@ -165,6 +174,8 @@ export function createMirrorPass(three = THREE) {
       if (!(st.seen[i] >= 0.5) || !frustum.intersectsSphere(sphere) || screenArea(renderer, camera, W, s.hw, s.hh) < MIN_PX) { st.stats.skipped++; continue; }
       const due = !st.drawn[i] || st.frame - st.last[i] >= M.every;
       if (!due) continue;
+      // (low: one mirror a frame – the other waits a frame unless it has never been drawn for this view)
+      if (M.every > 1 && todo && st.drawn[i]) continue;
       if (!mirrorCamera(cam, eye, W.c, W.n, W.h, W.up, s.hw, s.hh, MIRROR.spread, MIRROR.far)) continue;
       cam.userData.go = true; todo++;
     }

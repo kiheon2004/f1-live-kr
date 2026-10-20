@@ -161,9 +161,10 @@ test("mirror pass: the target made once and reused; a mode's size change remakes
   assert.equal(r.calls.length, 22);
   // low: its own smaller target (the old one freed), drawn every 3rd frame
   r.calls.length = 0;
-  for (let i = 0; i < 9; i++) P.update(r, scene, camera, car, "low", "onboard:16");
+  const per = []; for (let i = 0; i < 9; i++) { const n0 = r.calls.length; P.update(r, scene, camera, car, "low", "onboard:16"); per.push(r.calls.length - n0); }
   assert.equal(freed, 1); assert.notEqual(P.state.rt, rt); assert.deepEqual([P.state.rt.width, P.state.rt.height, P.state.rt.samples], [384, 48, 0]);
-  assert.equal(r.calls.length, 6, "3 of 9 frames, both halves");
+  assert.equal(r.calls.length, 6, "each mirror every 3rd frame");
+  assert.equal(per[0], 2, "both at once only when first drawn"); assert.ok(per.slice(1).every((n) => n <= 1), `one mirror a frame after that: ${per}`);
   // simple: no pass, the car's own glass
   r.calls.length = 0;
   P.update(r, scene, camera, car, "simple", "onboard:16");
@@ -197,7 +198,7 @@ test("mirror pass: no stale picture – a new car or camera draws afresh before 
   assert.equal(P.state.car, null);
 });
 
-test("mirror mode by setting: explicit choices kept, auto by the quality setting", () => {
+test("mirror mode by setting: explicit choices kept, auto by the quality setting and late frames", () => {
   assert.equal(M.mirrorMode("full", "smooth"), "full");
   assert.equal(M.mirrorMode("low", "sharp"), "low");
   assert.equal(M.mirrorMode("simple", "balanced"), "simple");
@@ -205,6 +206,12 @@ test("mirror mode by setting: explicit choices kept, auto by the quality setting
   assert.equal(M.mirrorMode(undefined, "balanced"), "full");
   assert.equal(M.mirrorMode("auto", "smooth"), "low");
   assert.equal(M.MIRROR_MODES.simple, null);
+  // auto while frames come late: low; an explicit choice stays
+  assert.equal(M.mirrorMode("auto", "balanced", true), "low"); assert.equal(M.mirrorMode("full", "balanced", true), "full");
+  // strained from > 1 late frame in 12, until 15 calm windows (no flipping)
+  assert.equal(M.mirrorStrain(false, 0.05, 0), false); assert.equal(M.mirrorStrain(false, 0.1, 0), true);
+  assert.equal(M.mirrorStrain(true, 0, 3), true); assert.equal(M.mirrorStrain(true, 0, 15), false);
+  assert.equal(M.mirrorStrain(false, undefined, undefined), false);
 });
 
 test("mirror pass: only glass the camera can see – past the car's own parts, and big enough on the screen to read", () => {
