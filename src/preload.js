@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld("api", {
     setGoogleKey: (key) => ipcRenderer.invoke("geo:googleKey", key),
     googleAttribution: (zoom, n, s, e, w) => ipcRenderer.invoke("geo:googleAttribution", zoom, n, s, e, w),
     onProgress: listen("geo:progress"),
+    // cloud cover at (lat, lon) round a moment (main/clouds.js) – { ok, hours: [[utcMs, 0–1]…], source } | { ok: false, reason }
+    clouds: (lat, lon, utc, live) => ipcRenderer.invoke("weather:clouds", lat, lon, utc, live),
   },
   compactWindow: (on) => ipcRenderer.invoke("win:compact", on),
   pinWindow: (on) => ipcRenderer.invoke("win:pin", on),

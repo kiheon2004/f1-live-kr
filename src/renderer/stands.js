@@ -542,6 +542,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     for (const k of [0, 1, 2, 0, 2, 3]) { spos.push(...vs[k]); snor.push(nn.x, nn.y, nn.z); suv.push(...uvs[k]); }
   };
   const seatGroups = [];   // { centre, matrices, colours }
+  const roofs = [];        // the roofs' outlines (weather.js: no rain under them)
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
   let seatTotal = 0;
   const report = [];
@@ -628,6 +629,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
         face([P(i, depth + 0.6, hb(i)), P(j, depth + 0.6, hb(j)), P(j, reach, hf(j)), P(i, reach, hf(i))], white, [0, 1, 0]);
         face([P(i, depth + 0.6, hb(i) - 0.45), P(j, depth + 0.6, hb(j) - 0.45), P(j, reach, hf(j) - 0.45), P(i, reach, hf(i) - 0.45)], under, [0, -1, 0]);
         face([P(i, reach, hf(i) - 0.9), P(j, reach, hf(j) - 0.9), P(j, reach, hf(j)), P(i, reach, hf(i))], white, [-F[i].nx, 0, -F[i].nz]);
+        // (where rain can't fall – weather.js coverRaster: the canopy's outline at its underside's lowest)
+        roofs.push({ pts: [P(i, depth + 0.6, 0), P(j, depth + 0.6, 0), P(j, reach, 0), P(i, reach, 0)].map((v) => [v[0], v[2]]), y: Math.min(hb(i), hb(j)) - 0.45, kind: "stand roof" });
       }
       for (let i = 0; i < F.length; i += Math.max(1, Math.round(12 / ((cum[cum.length - 1] / (F.length - 1)) || 6)))) {
         const c = P(i, depth + 0.3, 0), tx = -F[i].nz, tz = F[i].nx;
@@ -711,7 +714,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     return st.front.map((p) => [p.x - p.nx * 0.5, p.z - p.nz * 0.5]).concat(st.front.slice().reverse().map((p) => [p.x + p.nx * d, p.z + p.nz * d]));
   });
   return {
-    group, footprints, structure,
+    group, footprints, structure, roofs,
     // per frame: seats only near the camera (beyond that the treads carry their colour)
     update(cam, near = SEATS_NEAR) {
       structure.material.userData.seatFar.set(near * 0.55, near * 1.05);

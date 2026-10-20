@@ -34,6 +34,7 @@ import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js"
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
 import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
 import { footing } from "./footing.js";
+import { createWeather } from "./weather3d.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -47,6 +48,7 @@ const CIRCUIT_STYLE = {
 const app = () => window.F1KR;
 
 let renderer, scene, camera, controls, host, canvas, hemi, sun, daySky, nightSky;
+let wx = null;                // the session's weather in the view (weather3d.js)
 let world = null;             // built circuit: { key, samples, grid, center, size, … }
 let cars = new Map();         // racing number → car record
 let camMode = "heli", visible = false, lastT = 0, lastBuildCheck = 0;
@@ -86,6 +88,8 @@ function init() {
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 6000;
   sun.shadow.bias = -0.12 / (sun.shadow.camera.far - sun.shadow.camera.near); sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
+  wx = createWeather({ scene, renderer, daySky, fairEnv: () => carEnvironment(false) });
+  wx.configure({ sky: geoSettings().sky || "auto", clouds: geoSettings().cloudData !== false });
 
   camera = new THREE.PerspectiveCamera(50, 1, 0.3, 20000);
   camera.position.set(0, 1500, 1500);
@@ -126,6 +130,8 @@ function initGeoSettings() {
     document.getElementById("geoQuality").value = QUALITY[o.quality] ? o.quality : "balanced";
     paintQualityNow();
     document.getElementById("geoNight").value = o.night || "auto";
+    document.getElementById("geoSky").value = ["auto", "neutral", "fair", "overcast"].includes(o.sky) ? o.sky : "auto";
+    document.getElementById("geoCloudData").checked = o.cloudData !== false;
     document.getElementById("geoPitWork").value = ["record", "observed", "typical"].includes(o.pitWork) ? o.pitWork : "record";
     document.getElementById("geoAero").value = o.aero === "off" ? "off" : "estimate";
     document.getElementById("geoCorners").value = ["near", "all", "off"].includes(o.corners) ? o.corners : "near";
@@ -156,6 +162,8 @@ function initGeoSettings() {
   document.getElementById("geoBigCars").addEventListener("change", (e) => change({ bigCars: e.target.checked }, false));
   document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); applyQuality(); paintQualityNow(); });
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
+  document.getElementById("geoSky").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), sky: e.target.value }); wx?.configure({ sky: e.target.value }); });
+  document.getElementById("geoCloudData").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), cloudData: e.target.checked }); wx?.configure({ clouds: e.target.checked }); });
   document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
   document.getElementById("geoAero").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), aero: e.target.value }));
   document.getElementById("geoCorners").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), corners: e.target.value }));
@@ -3273,6 +3281,7 @@ function frame(now) {
   // redraws the static shadow map)
   if (peopleLod(camera.position)) refreshShadows();
   updateSun(now);
+  wx?.update({ A, world, camera, dt, night: !!nightNow, hemi, sun, fog: scene.fog });
   thinFarTrees();
   world?.real?.stands?.update(camera.position, camMode === "heli" || camMode === "inspect" ? 520 : 300);
   realPart("buildings")?.userData.update?.(camera.position);
@@ -4058,6 +4067,15 @@ window.Map3D = {
   },
   // development: night on / off / auto ("on" | "off" | "auto") and the real map built again with it
   nightMode(mode) { saveGeoSettings({ ...geoSettings(), night: mode }); rebuild(); return "ok"; },
+  // development: the weather state at the moment shown (weather.js / weather3d.js) – measured (raining, records) and
+  // estimated (wet, rainAmt, cloud) – and the roofs that keep rain off; weather({ rain, wet, cloud }) forces a look for
+  // testing (marked forced: true), weather(null) gives it back to the feed; weather({ sky }) sets the sky setting
+  weather(o) {
+    if (o === null) wx?.force(null); else if (o && typeof o === "object") { if (o.sky) wx?.configure({ sky: o.sky }); if ("rain" in o || "wet" in o || "cloud" in o) wx?.force(o); }
+    const e = wx?.env || {}, r = (v) => (typeof v === "number" ? +v.toFixed(3) : v);
+    return JSON.stringify({ t: e.t, raining: e.raining, rainAmt: r(e.rainAmt), wet: r(e.wet), wetModel: r(e.wetModel), wetTyres: r(e.wetTyres), wetSrc: e.wetSrc, cloud: r(e.cloud), cloudSrc: e.cloudSrc, cloudData: e.cloudData,
+      air: e.airTemp, track: e.trackTemp, hum: e.humidity, wind: [e.windSpeed, e.windDir], forced: e.forced, night: nightNow, covers: wx?.info });
+  },
   // development: the session times (ms, from t0 to t1 every `step`) at which car `num` is in or near covered stretch 0 –
   // [t, metres along from its entry] for each – to find a car driving through (the cars stepped as motionTest does)
   tunnelPass(num, t0, t1, step = 250) {
