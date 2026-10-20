@@ -416,14 +416,25 @@ function aeroZones() {
 }
 // A car's wing pose at t: { open 0..1, measured | estimated, why }
 let devAeroHold = null;
+// what every car's pose needs from the session, worked out once a frame (the setting, the venue's zones, lights out, race
+// control's word) – not per car: the setting is read from storage and the start found in the event list
+const AERO_CTX = { src: null, t: NaN, nMsg: -1, allowed: false, Z: null, t0: null, mode: "normal", isRace: false };
+function aeroCtx(src, t) {
+  const X = AERO_CTX, nMsg = src.messages?.length || 0;
+  if (X.src !== src) { X.src = src; X.isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || ""); X.t0 = X.isRace && src.startTime ? src.startTime() || null : null; X.nMsg = -1; X.t = NaN; }
+  if (X.isRace && X.t0 == null && src.isLive && src.startTime) X.t0 = src.startTime() || null;   // (live: lights out comes later)
+  if (X.nMsg !== nMsg) { X.nMsg = nMsg; X.mode = smModeOf(src.messages); }
+  if (X.t !== t) { X.t = t; X.allowed = aero2026Allowed(); X.Z = aeroZones(); }
+  return X;
+}
 function aeroPose(c, num, st, est, t, src) {
-  const era = c.model.userData.profile.era;
-  if (era === "2022") return drsAt(src.car?.[num], t) || { open: 0, measured: false, why: "no DRS data" };
-  if (!world?.samples?.length) return { open: 0, estimated: true, why: "no lap line" };
-  const Z = aeroZones(), isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || "");
-  const t0 = isRace && src.startTime ? src.startTime() || null : null;
-  return activeAeroAt({ allowed: aero2026Allowed(), spans: Z.spans, L: Z.L, s: st ? st.s : null, speed: c.speed * 3.6, tel: src.car?.[num] || null, t,
-    onTrack: !!st && !est && !c.pit, racing: t0 == null || t >= t0, startGate: t0, mode: smModeOf(src.messages) });
+  const era = c.model.userData.profile.era, out = c.aeroOut || (c.aeroOut = {});
+  if (era === "2022") { if (drsAt(src.car?.[num], t, 160, out)) return out; out.open = 0; out.front = 0; out.measured = false; out.estimated = false; out.why = "no DRS data"; return out; }
+  if (!world?.samples?.length) { out.open = 0; out.front = 0; out.estimated = true; out.why = "no lap line"; return out; }
+  const X = aeroCtx(src, t), I = c.aeroIn || (c.aeroIn = {});
+  I.allowed = X.allowed; I.spans = X.Z.spans; I.L = X.Z.L; I.s = st ? st.s : null; I.speed = c.speed * 3.6; I.tel = src.car?.[num] || null; I.t = t;
+  I.onTrack = !!st && !est && !c.pit; I.racing = X.t0 == null || t >= X.t0; I.startGate = X.t0; I.mode = X.mode;
+  return activeAeroAt(I, out);
 }
 function pitWorkPolicy() {
   const v = geoSettings().pitWork || "record", live = !!app()?.src?.isLive;
@@ -1691,7 +1702,7 @@ function updateCars(dt) {
     // event's Straight Mode zones, at speed, until the brake (v0.44; it was speed > 68 m/s and a low turning rate, eased
     // frame to frame – stale after a seek)
     c.aeroState = aeroPose(c, num, st, est, A.t, src);
-    if (devAeroHold != null && num === focusNum) c.aeroState = { open: devAeroHold, front: devAeroHold, why: "development hold" };
+    if (devAeroHold != null && num === focusNum) { c.aeroState.open = c.aeroState.front = devAeroHold; c.aeroState.why = "development hold"; }
     c.aero = c.aeroState.open; setAero(c.model, c.aero, c.aeroState.front ?? c.aero);
     // (the compound on the sidewalls: the stint now; a replay shown from its record has the new set on the car from the
     // stop it went on at – the new stint is sent ~15 s after the car left; a car at work in its box: updateCrews)

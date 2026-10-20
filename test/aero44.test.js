@@ -150,7 +150,7 @@ test("car joints: only the flaps move, about one axis each, monotonic from shut 
     assert.ok(r.steps.every((d) => Math.sign(d) === sign || Math.abs(d) < 1e-9), `${team}: one way only ${r.steps.map((d) => d.toFixed(3))}`);
     assert.ok(Math.abs(r.total) >= min && Math.abs(r.total) < 3.3, `${team}: ${r.total.toFixed(2)} rad`);
     // the main plane and the endplates are not on a joint
-    const moving = new Set(); for (const j of r.car.userData.aeroJoints) j.pv.traverse((o) => o.isMesh && moving.add(o));
+    const moving = new Set(); for (const j of r.car.userData.aeroJoints) (j.pv || j.morph).traverse((o) => o.isMesh && moving.add(o));
     r.car.traverse((o) => { if (o.isMesh && (o.name === "wing" || o.name === "painted")) assert.ok(!moving.has(o), `${team}: ${o.name} fixed`); });
   }
   // a quaternion per joint from its axis: half way is half the angle (no Euler blend)
@@ -164,5 +164,5 @@ test("car joints: only the flaps move, about one axis each, monotonic from shut 
   assert.strictEqual(u.aeroJoints.length, 1, "2025: the rear flap only");
   // low grip: the front alone
   const m = C.makeCar({ teamName: "Mercedes", teamColour: "888888", number: 63, season: 2026, date: "2026-09-06" }); C.setAero(m, 0, 1);
-  assert.ok(m.userData.rwPivot.quaternion.w === 1 && m.userData.fwPivot.quaternion.w < 1);
+  assert.ok(m.userData.rwPivot.quaternion.w === 1 && m.userData.fwPivot.children[0].morphTargetInfluences[0] === 1);
 });

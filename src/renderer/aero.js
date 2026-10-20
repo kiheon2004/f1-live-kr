@@ -29,7 +29,8 @@ export const ease = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
 // or null (no channel / no data near t). The open fraction is the time since the sample that changed state, so the
 // same t always gives the same pose (looked back at most `back` samples).
 const isOpenCode = (v) => v >= 10 && v !== 255;
-export function drsAt(tel, t, back = 160) {
+// (out: an object to fill and return – the 3D view passes one per car: no allocation per frame)
+export function drsAt(tel, t, back = 160, out = {}) {
   if (!tel || !tel.t || !tel.t.length || !tel.drs) return null;
   const T = tel.t, D = tel.drs; let lo = 0, hi = T.length - 1;
   if (T[0] > t) return null;
@@ -39,8 +40,9 @@ export function drsAt(tel, t, back = 160) {
   // the start of this run of samples (open or shut)
   let j = i; for (let k = 0; k < back && j > 0 && isOpenCode(D[j - 1]) === open && D[j - 1] !== 255; k++) j--;
   const since = (t - T[j]) / 1000, runStartKnown = j > 0 && D[j - 1] !== 255;
-  if (open) return { open: runStartKnown ? ease(since / MOVE.drsOpen) : 1, measured: true, code: D[i] };
-  return { open: runStartKnown ? 1 - ease(since / MOVE.drsClose) : 0, measured: true, code: D[i] };
+  out.open = open ? (runStartKnown ? ease(since / MOVE.drsOpen) : 1) : runStartKnown ? 1 - ease(since / MOVE.drsClose) : 0;
+  out.front = 0; out.measured = true; out.estimated = false; out.code = D[i]; out.why = "DRS (CarData channel 45)";
+  return out;
 }
 
 // ---------- zones along the lap ----------
@@ -57,15 +59,16 @@ export function zoneSpans(zones, stations, L) {
 }
 // The zone the place s is in → { span, into (m since its start), left (m to its end) }, else the one just behind it
 // → { span, after (m past its end) } (within `behind` m), else null.
-export function zoneAt(s, spans, L, behind = 400) {
-  s = wrapS(s, L); let best = null;
+export function zoneAt(s, spans, L, behind = 400, out = {}) {
+  s = wrapS(s, L); let best = null, bestAfter = Infinity;
   for (const sp of spans) {
     const into = wrapS(s - sp.a, L);
-    if (into <= sp.len) return { span: sp, into, left: sp.len - into };
+    if (into <= sp.len) { out.span = sp; out.into = into; out.left = sp.len - into; out.after = null; return out; }
     const after = wrapS(s - sp.b, L);
-    if (after <= behind && (!best || after < best.after)) best = { span: sp, after };
+    if (after <= behind && after < bestAfter) { best = sp; bestAfter = after; }
   }
-  return best;
+  if (!best) return null;
+  out.span = best; out.into = null; out.left = null; out.after = bestAfter; return out;
 }
 // Estimated zones where no official ones are known: the lap line's long, nearly straight stretches (heading turning
 // < `maxTurn` rad over any 100 m) of at least `minLen` m, from `startAfter` m into the stretch to `endBefore` m before
@@ -115,14 +118,16 @@ function firstBrake(tel, t0, t1) {
   for (let i = lo; i < T.length && T[i] <= t1; i++) if (tel.brk[i]) return T[i];
   return null;
 }
-export function activeAeroAt(inp) {
-  const shut = (why) => ({ open: 0, front: 0, estimated: true, why });
+const ZTMP = {};
+export function activeAeroAt(inp, out = {}) {
+  out.measured = false; out.estimated = true; out.code = null;
+  const shut = (why) => { out.open = 0; out.front = 0; out.why = why; return out; };
   if (!inp || !inp.allowed) return shut("not allowed");
   if (!inp.onTrack) return shut("off the lap (pit lane / no position)");
   if (inp.racing === false) return shut("not racing");
   if (inp.mode === "disabled") return shut("disabled by race control");
   if (!inp.spans?.length || !(inp.L > 0) || inp.s == null) return shut("no zone");
-  const z = zoneAt(inp.s, inp.spans, inp.L, 400);
+  const z = zoneAt(inp.s, inp.spans, inp.L, 400, ZTMP);
   const v = Math.max(1, (inp.speed || 0) / 3.6), t = inp.t;
   if (!z) return shut("outside the zones");
   if (inp.mode === "low" && z.span.z?.low === false) return shut("no low-grip zone here");
@@ -139,7 +144,7 @@ export function activeAeroAt(inp) {
   const k = trigger == null ? ease((t - tStart) / 1000 / MOVE.open) : ease((trigger - tStart) / 1000 / MOVE.open) * (1 - ease((t - trigger) / 1000 / MOVE.close));
   const why = trigger == null ? "straight mode (estimated)" : tb != null && tb === trigger ? "braking" : "zone end";
   // (low grip: the front wing alone – B7.1.1 / B7.1.2 (b), Issue 07: "partially activated")
-  return { open: inp.mode === "low" ? 0 : k, front: k, estimated: true, why };
+  out.open = inp.mode === "low" ? 0 : k; out.front = k; out.why = why; return out;
 }
 
 // ---------- the mechanisms: which parts move, about what, how far ----------

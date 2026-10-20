@@ -1064,7 +1064,7 @@ function body2026(p) {
     const half = (i) => wingSpan(fwSp[i], fwAt[i], 16, k > 0 ? [0.005, fwSp[i] / 2] : [-fwSp[i] / 2, -0.005]);
     const pt = (i, x) => edgePoint(fwSp[i], fwAt[i], k * x, 0.012);
     const primary = half(0), secondary = half(1);
-    return { side: k, primary, secondary, both: merge([primary, secondary]), A: pt(0, 0.1), B: pt(0, 0.6), C: pt(1, 0.1), D: pt(1, 0.6) };
+    return { side: k, primary, secondary, A: pt(0, 0.1), B: pt(0, 0.6), C: pt(1, 0.1), D: pt(1, 0.6) };
   });
   const epF = [[2.95, 0.075], [2.95, 0.2], [2.88, 0.3], [2.7, 0.365], [2.4, 0.375], [2.15, 0.33], [2.05, 0.2], [2.08, 0.075]];
   const fwPlates = merge([plate(epF, 0.63, 0.012), plate(epF, -0.63, 0.012)]);
@@ -1580,6 +1580,27 @@ export const TYRE_COLOURS = { SOFT: "#e8392f", MEDIUM: "#f2c230", HARD: "#eef0f2
 // opts: { teamName, teamColour, number, season } → a THREE.Group; userData: { profile, mounts: { tcam, eye },
 // wheels (steer groups), spins (roll groups), fwPivot, rwPivot, bandMat, near (the close-up parts), fine (wheel covers,
 // lights), helmet, wheel (steering wheel group), lod, compound, aero }.
+// The 2026 front flaps' two halves as one geometry with its open pose as a morph target (v0.44): each half's primary
+// flap (both elements) about its Primary Axis A–B, the secondary (rear) element first about C–D – C3.10.10 (a)–(g).
+// Kept on the profile's template per angle pair, shared (marked) by every car with those angles.
+function frontMorph(T, prim, sec) {
+  const key = `${prim}|${sec}`, M = T.fwMorphs || (T.fwMorphs = new Map());
+  if (M.has(key)) return M.get(key);
+  const turn = (geo, P, Q, a) => {
+    const d = new THREE.Vector3(Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]); if (d.x < 0) d.negate();   // (the same sense both sides)
+    const m = new THREE.Matrix4().makeTranslation(P[0], P[1], P[2]).multiply(new THREE.Matrix4().makeRotationAxis(d.normalize(), a)).multiply(new THREE.Matrix4().makeTranslation(-P[0], -P[1], -P[2]));
+    return geo.clone().applyMatrix4(m);
+  };
+  const closed = [], open = [];
+  for (const F of T.fwFront) {
+    closed.push(F.primary, F.secondary);
+    open.push(turn(F.primary, F.A, F.B, prim), turn(turn(F.secondary, F.C, F.D, sec), F.A, F.B, prim));
+  }
+  const g = merge(closed), o = merge(open);
+  g.morphAttributes.position = [o.attributes.position]; g.morphAttributes.normal = [o.attributes.normal];
+  g.userData.shared = true; M.set(key, g);
+  return g;
+}
 export function makeCar({ teamName, teamColour, number, season = null, date = null }) {
   const prof = profileFor(season, teamName, date), t = template(prof), l = liveryFor(teamName, teamColour, prof.season, date);
   const matte = l.finish === "matte";
@@ -1646,15 +1667,13 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const joints = [{ pv: rwPivot, angle: spec.rw.angle, front: false }];
   let fwPivot;
   if (t.fwFront) {
-    for (const F of t.fwFront) {
-      // (the axes pointing outboard on the left, inboard on the right: the same angle turns both halves the same way)
-      const ax = (P, Q) => { const d = [Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]]; return d[0] < 0 ? d.map((v) => -v) : d; };
-      // (a secondary flap of its own only where a mechanism turns it: one mesh a side otherwise – the draw-call budget)
-      const prim = joint(F.A, ax(F.A, F.B), spec.fw.secondary ? F.primary : F.both, fwPaint);
-      joints.push({ pv: prim, angle: spec.fw.primary, front: true });
-      if (spec.fw.secondary) joints.push({ pv: joint(F.C, ax(F.C, F.D), F.secondary, fwPaint, prim, F.A), angle: spec.fw.secondary, front: true });
-      if (F.side > 0) fwPivot = prim;
-    }
+    // (v0.44: both halves in ONE mesh – the draw-call budget – whose open pose is baked: each half turned about its own
+    // swept axis by the mechanism's angles (frontMorph); setAero blends to it (a morph target). The front flaps turn a few
+    // degrees: the straight blend between the two poses stays within ~1 % of the turn's arc – no flip, one way)
+    fwPivot = new THREE.Group(); fwPivot.name = "aeroFront"; g.add(fwPivot);
+    const m = new THREE.Mesh(frontMorph(t, spec.fw.primary, spec.fw.secondary), fwPaint); fwPivot.add(m);
+    m.morphTargetInfluences = [0];
+    joints.push({ morph: m, front: true });
   } else {
     fwPivot = joint([0, 0, 0], [1, 0, 0], t.fwFlaps, fwPaint);   // (fixed: 2022–25 front flaps)
   }
@@ -1736,7 +1755,7 @@ export function setAero(car, open, front = open) {
   const u = car.userData, c = (x) => (x > 1 ? 1 : x > 0 ? x : 0); open = c(open); front = c(front);
   if (u.aero === open && u.aeroFront === front) return;
   u.aero = open; u.aeroFront = front;
-  for (const j of u.aeroJoints) j.pv.quaternion.setFromAxisAngle(j.pv.userData.axis, j.angle * (j.front ? front : open));
+  for (const j of u.aeroJoints) { if (j.morph) j.morph.morphTargetInfluences[0] = j.front ? front : open; else j.pv.quaternion.setFromAxisAngle(j.pv.userData.axis, j.angle * (j.front ? front : open)); }
 }
 // Wheels: roll angle (rad) and the front wheels' steer angle (rad, + = left); the steering wheel turns with them at
 // a fixed ratio (STEER_RATIO, an estimate: 10:1 – about 50° of the wheel through a 130 km/h corner, the ±90° stop

@@ -70,7 +70,7 @@ test("car model: levels of detail hide only small parts; wheels steer and roll; 
   assert.strictEqual(car.userData.spins[3].rotation.x, 1.2);
   assert.ok(car.userData.wheel.rotation.z < 0 && car.userData.wheel.rotation.z >= -Math.PI / 2, "the steering wheel turns with them, within ±90°");
   C.setAero(car, 1); assert.ok(car.userData.rwPivot.rotation.x < 0, "DRS open"); assert.strictEqual(car.userData.fwPivot.rotation.x, 0, "2022–25: front flap fixed");
-  const c26 = C.makeCar({ teamName: "McLaren", teamColour: "FF8000", number: 4, season: 2026 }); C.setAero(c26, 1); assert.ok(c26.userData.fwPivot.rotation.x < 0, "2026: both wings");
+  const c26 = C.makeCar({ teamName: "McLaren", teamColour: "FF8000", number: 4, season: 2026 }); C.setAero(c26, 1); assert.ok(c26.userData.fwPivot.children[0].morphTargetInfluences[0] === 1 && c26.userData.rwPivot.quaternion.w < 1, "2026: both wings");
   // freeing one car leaves the shared geometry of its era's template and the shared materials for the others
   const other = C.makeCar({ teamName: "McLaren", teamColour: "FF8000", number: 81, season: 2025 });
   const shared = []; other.traverse((o) => { if (o.isMesh && o.geometry.userData.shared) shared.push(o.geometry); });
@@ -164,8 +164,7 @@ test("cars v0.39: cockpit place, wing spans, draw-call and triangle budget", asy
     // draw calls: v0.38 drew 35 meshes close up (33 for 2026), 27 at mid range – at most +30 %; triangles under 60k a car
     let near = 0, tris = 0; car.traverseVisible((o) => { if (o.isMesh) { near++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
     C.setDetail(car, "mid"); let mid = 0; car.traverseVisible((o) => { if (o.isMesh) mid++; });
-    // (v0.44: 46 – the 2026 front flaps in two halves, each about its own swept axis, C3.10.10)
-    assert.ok(near <= 46 && mid <= 35, `${season} ${team}: ${near} meshes near, ${mid} mid`);
+    assert.ok(near <= 45 && mid <= 35, `${season} ${team}: ${near} meshes near, ${mid} mid`);
     assert.ok(tris < 60000, `${season} ${team}: ${Math.round(tris)} triangles`);
     // the wings: 2026 front-wing profiles and endplates within |y| ≤ 0.68 m, rear wing within 0.575 m (C3.10 / C3.11)
     const fw = new THREE.Box3().setFromBufferAttribute(u.fwPivot.children[0].geometry.attributes.position), rw = new THREE.Box3().setFromBufferAttribute(u.rwPivot.children[0].geometry.attributes.position);
@@ -173,7 +172,12 @@ test("cars v0.39: cockpit place, wing spans, draw-call and triangle budget", asy
     else assert.ok(fw.max.x <= 1.0 && rw.max.x <= 0.52, `2022 wings ${fw.max.x.toFixed(3)} / ${rw.max.x.toFixed(3)}`);
     // v0.44: the hinges where the rules put them – the 2026 front flaps' axes by their leading edges (C3.10.10 (d): ≤ 25 mm),
     // the 2026 rear flap's in its back half (C3.11.6 (b)), the 2022–25 DRS flap's at its trailing edge (2025 Art. 3.10.10 (b))
-    if (P.era === "2026") { const pv = u.fwPivot, bb = new THREE.Box3().setFromBufferAttribute(pv.children[0].geometry.attributes.position); assert.ok(Math.abs(bb.max.z - pv.position.z) < 0.1, `front axis ${pv.position.toArray()} vs flap ${bb.max.toArray().map((v) => v.toFixed(3))}`); }
+    if (P.era === "2026") {
+      // (the front: one mesh, its open pose a morph target – the leading edge stays (≤ 25 mm off its axis), the trailing edge drops)
+      const m = u.fwPivot.children[0], g = m.geometry, P0 = g.attributes.position, P1 = g.morphAttributes.position[0];
+      let le = 0, te = 0; for (let i = 0; i < P0.count; i++) { if (Math.abs(P0.getX(i) - 0.3) > 0.02) continue; const d = Math.hypot(P1.getY(i) - P0.getY(i), P1.getZ(i) - P0.getZ(i)); if (P0.getZ(i) > 2.5) le = Math.max(le, d); else te = Math.max(te, d); }
+      assert.ok(le < 0.025 && te > le, `front hinge by the leading edge: ${le.toFixed(3)} / ${te.toFixed(3)} m`);
+    }
     { const pv = u.rwPivot, bb = new THREE.Box3().setFromBufferAttribute(pv.children[0].geometry.attributes.position), mid = (bb.max.z + bb.min.z) / 2;
       assert.ok(pv.position.z <= mid + 1e-6 && pv.position.z >= bb.min.z - 0.005 && pv.position.y > bb.min.y && pv.position.y < bb.max.y + 0.005, `rear hinge ${pv.position.toArray()} vs flap ${bb.min.toArray().map((v) => v.toFixed(3))}…${bb.max.toArray().map((v) => v.toFixed(3))}`);
       if (P.era !== "2026") assert.ok(bb.min.z > pv.position.z - 0.03 && bb.max.y < pv.position.y + 0.03, "DRS: by the trailing edge, near the top"); }
