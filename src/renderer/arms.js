@@ -44,10 +44,10 @@ const D = Math.PI / 180;
 // elbows low beside the driver's body the forearms rise to the grips, so the hands lean further that way than at a desk:
 // the limits below are the functional range's (Ryu 1991: 40° ulnar) – the model allows that much, no more)
 export const WRIST_COMFORT = { flex: -15, rad: -22, flexSpan: 26, radSpan: 14 };
-export const WRIST_LIMIT = { flex: [-62, 60], rad: [-40, 17] };
+export const WRIST_LIMIT = { flex: [-58, 54], rad: [-38, 16] };   // (v0.42: inside the daily-use range – Ryu 1991: 60° extension, 54° flexion, 40° ulnar, 17° radial – with a margin)
 export const PRONATION = { comfort: 0, span: 45, limit: [-75, 70] };   // (deg from neutral – thumb up; + = palm turning down)
-export const SHOULDER = { forward: 0.12, back: 0.02, up: 0.08, down: 0.03 };   // how far the shoulder joint may move (m)
-export const ROLL = 40 * D;   // how far the grip may turn in the closed hand either way (rad; an estimate – the glove and a loosened hand let a round 47 mm grip slide round; v0.42: 25° left the lower arm at a big lock no way across the chest)
+export const SHOULDER = { forward: 0.07, back: 0.02, up: 0.03, down: 0.02 };   // how far the shoulder joint may move (m)
+export const ROLL = 25 * D;   // how far the grip may turn in the closed hand either way (rad; an estimate – the glove and a loosened hand let a round grip slide round a little)
 // the elbow beside the driver's torso (never into it: x ≥ xBody), not down in the seat (y ≥ yMin), and only a little
 // over the shoulders (yHigh) – the car's own body is the room's (roomPenetration)
 export const ELBOW_ROOM = { xBody: 0.12, yMin: 0.22, yHigh: 0.72 };
@@ -202,7 +202,7 @@ export function elbowAt(geo, swivel, fwd, up, o) {
   o.tau = twistOf(o.H, o.f, o.hx) * D; o.pron = wrapDeg(o.tau / D - 90);
   return o;
 }
-export function armAt(geo, a, swivel, fwd, up, o, roll = 0) { handAt(geo, a, roll, o); o.room = geo.room || null; o.torso = geo.torso || null; return elbowAt(geo, swivel, fwd, up, o); }
+export function armAt(geo, a, swivel, fwd, up, o, roll = 0) { handAt(geo, a, roll, o); o.room = geo.room || null; o.torso = geo.torso || null; o.geo = geo; return elbowAt(geo, swivel, fwd, up, o); }
 const wrapDeg = (x) => ((((x + 180) % 360) + 360) % 360) - 180;
 // how unnatural the arm is (dimensionless): the wrist's bend and the forearm's turn from their comfortable centres, steep
 // past the limits; the elbow out of the cockpit's room; the shoulder moved
@@ -215,7 +215,7 @@ export function armCost(o, fwd, up, roll = 0) {
   // the arm in the car's body (the tub's walls and floor, the rim, the chassis' top – the room's table, roomPenetration)
   // or into the driver's own body (beside the torso: x ≥ xBody); a raised elbow high over the shoulders costs a little
   const pen = o.room || o.torso ? armPenetration(o.room, o, o.torso) : 0; o.pen = pen;
-  c += (pen / 0.004) ** 2 + (o.torso ? 0 : 40 * barrier(ex, R.xBody, 9, 0.012)) + 40 * barrier(ey, R.yMin, 9, 0.02) + 2 * barrier(ey, -9, R.yHigh, 0.04);
+  c += (pen / 0.0035) ** 2 + (o.torso ? 0 : 40 * barrier(ex, R.xBody, 9, 0.012)) + 40 * barrier(ey, R.yMin, 9, 0.02) + 2 * barrier(ey, -9, R.yHigh, 0.04);
   c += 0.4 * ((fwd / 0.04) ** 2 + (up / 0.02) ** 2) + ((roll / D) / 18) ** 2 + (o.short / 0.001) ** 2;   // (the hand out of reach: never – a millimetre costs as much as a bent wrist)
   return c;
 }
@@ -277,7 +277,7 @@ export function planArmsPath(geo, { swStep = 5 * D, rlStep = 2.5 * D, wSw = 4 * 
   for (let x = SW.lo; x <= SW.hi + 1e-9; x += swStep) sws.push(x);
   for (let x = -ROLL; x <= ROLL + 1e-9; x += rlStep) rls.push(x);
   const fws = [-SHOULDER.back, 0, 0.03, 0.07, SHOULDER.forward], ups = [-SHOULDER.down, 0, 0.03, SHOULDER.up], S = sws.length * rls.length;
-  _o.room = geo.room || null; _o.torso = geo.torso || null;
+  _o.room = geo.room || null; _o.torso = geo.torso || null; _o.geo = geo;
   const cost = new Float64Array(N * S), arg = new Int8Array(N * S * 2);
   for (let i = 0; i < N; i++) {
     const a = (i - n) * PLAN_STEP * D;

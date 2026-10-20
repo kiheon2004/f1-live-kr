@@ -4263,6 +4263,12 @@ window.Map3D = {
     c.model.traverse((o) => { if (o.isMesh) { if (on && !keep(o)) { o.userData.soloHid = o.visible; o.visible = false; } else if (!on && o.userData.soloHid != null) { o.visible = o.userData.soloHid; delete o.userData.soloHid; } } });
     return "ok";
   },
+  // development: the camera as it is – mode, lens, near plane, its place in the focused car's frame (cockpit checks)
+  camInfo() {
+    const c = cars.get(app().focus || leader()); let rel = null;
+    if (c) { c.model.updateWorldMatrix(true, false); rel = camera.position.clone().applyMatrix4(c.model.matrixWorld.clone().invert()).toArray().map((v) => +v.toFixed(3)); }
+    return { mode: camMode, fov: +camera.fov.toFixed(2), near: camera.near, aspect: +camera.aspect.toFixed(3), rel, look: { ...look, down: undefined } };
+  },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development: look at the focused car from a given offset (metres, car frame)

@@ -280,6 +280,8 @@ export function driverGlove(handleR = 0.0235, fine = 1) {
   // wrist joint's centre: in the hand's middle between palm and back, a centimetre before the heel of the palm
   out.userData.hand = [[co, so, 0], [-so, co, 0], [0, 0, 1]];
   out.userData.wrist = turn(new THREE.Vector3(0, -0.01, palmZ + 0.004)).toArray();
+  // the thumb's chain (its joints and radii, the glove's frame) – kept off the wheel's buttons and drums (arms.js)
+  out.userData.thumb = { pts: [t0, t1, t2, t3].map((v) => v.toArray()), r: [0.0125, 0.0112, 0.0102] };
   return out;
 }
 // the other hand: the glove mirrored across its own x (the grip's axis) – a right hand from the left one, the winding

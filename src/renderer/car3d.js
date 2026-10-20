@@ -980,7 +980,7 @@ function cockpit(p) {
   // the steering wheel (wheel3d.js): the team's where a source shows it (carshapes.js wheel), else the era's neutral
   // one – carbon body, rubber grips, display in its bezel, buttons, rotaries, paddles, hub, and its shift lights' places;
   // its face (−z, towards the driver) tilted up to the driver's eyes
-  const wz = WHEEL_MOUNT.z + ck, wy = WHEEL_MOUNT.y, tilt = WHEEL_MOUNT.tilt;
+  const wz = wheelZ(p), wy = WHEEL_MOUNT.y, tilt = WHEEL_MOUNT.tilt;
   const W = wheelSpec(p.wheel || null), SW = steeringParts(W, merge, metricUV);
   const column = rod([0, -0.02, 0.06], [0, -0.02, 0.24], 0.018, 10);
   // the gloves round the grips (body3d.js driverGlove: a left hand closed round the grip, phalanges tangent to it, the
@@ -1009,13 +1009,17 @@ function cockpit(p) {
 }
 // the head's side pads (left one: centre and half sizes, the car's frame with the cockpit's shift) – drawn by cockpit(),
 // kept clear by the arms (arms.js)
-export const headPads = (p) => [[0.21, 0.655, p.helmet[2] - 0.04], [0.0475, 0.065, 0.12]];
+export const headPads = (p) => [[0.21, 0.655, p.helmet[2] - 0.07], [0.0475, 0.065, 0.09]];   // (from behind the helmet to its middle: a raised arm at a big lock passes in front of them)
 // the HANS collar behind the helmet (centre and half sizes)
 export const hansBox = (p) => [[0, 0.6, p.helmet[2] - (p.helmetSize?.[2] ?? 0.155) - 0.05], [0.13, 0.05, 0.07]];
 // The steering wheel's mount in the cockpit (the car's frame, before the cockpit's shift ck): its middle and its face's
 // tilt back from upright. v0.42: 0.3 rad (17°) – research/cockpit.md: 10–20° in photos (L); it was 0.42 (24°), which
 // laid the grips back along the rising forearms (the wrists bent ~40° to the little finger with the wheel straight).
-export const WHEEL_MOUNT = { y: 0.61, z: 0.36, tilt: 0.3 };
+export const WHEEL_MOUNT = { y: 0.61, z: 0.36, tilt: 0.3, fromHelmet: 0.44 };
+// (z: v0.42 – the wheel's middle 0.44 m ahead of the helmet's in every era, the driver's reach; it was the cockpit's own
+// place (0.36 + ck), which with the 2026 profile's ck and the same helmet put the wheel 3 cm nearer the driver than in
+// 2022–25 – the arms more folded, into the torso at a big lock)
+export const wheelZ = (p) => (p.helmet?.[2] ?? 0.25) + WHEEL_MOUNT.fromHelmet;
 // The driver's torso and thighs (v0.42 – the open cockpit shows them; v0.41's closed paint hid that there were none):
 // the chest and pelvis (body3d's) along the back reclined from the shoulders – their middle at the arms' shoulder joints'
 // height – down to the hips on the seat, the thighs forward and a little up into the footwell under the bulkhead. The
@@ -1051,8 +1055,10 @@ function armGeometryOf(p, W) {
   // centre less its depth. v0.40 had them 0.13 m behind the eyes, under the middle of the helmet – the arm then had
   // ~0.44 m to reach a 0.59 m arm into, folding the elbow down beside the rim and bending the rising hand ~60°.)
   const hz = (p.helmet?.[2] ?? p.eye[2] - 0.05) - (p.helmetSize?.[2] ?? 0.155);
-  const base = { at: [0, WHEEL_MOUNT.y, WHEEL_MOUNT.z + (p.ck || 0)], tilt: WHEEL_MOUNT.tilt, shoulder: [0.19, p.eye[1] - 0.21, hz] };
+  const base = { at: [0, WHEEL_MOUNT.y, wheelZ(p)], tilt: WHEEL_MOUNT.tilt, shoulder: [0.19, p.eye[1] - 0.21, hz] };
   base.torso = driverTorso(base.shoulder).capsule; base.torso.boxes = [headPads(p), hansBox(p)];
+  // (the glove against the wheel's face parts – thumb drums, buttons – as the grip turns in the hand: clear on every
+  // wheel layout over ±40° of turn, measured on the glove's mesh (wheel42 test) – not a term of the plan)
   const grip = { c: [W.grip.x, 0, 0], up: [Math.sin(W.grip.tilt), Math.cos(W.grip.tilt), 0] }, glove = driverGlove(W.grip.r, 0).userData;
   // (v0.42: the cockpit's room – the arms kept out of the tub's walls, the rim and the chassis – in the plan and its key)
   base.room = roomOf(p);
