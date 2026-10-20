@@ -198,6 +198,22 @@ function acrossOf(v, px, py, pz, out) {
 // on the sleeve's end; the hand's own axes and its wrist joint's centre are in the glove's userData (hand, wrist).
 // The sleeve: five bones (shoulder, elbow, half way down the forearm, wrist, hand) – the forearm's turn shared out along
 // it, the elbow a hinge.
+// v0.44: the driver's kit in zones (KIT_ZONE) – each part's triangles carry their zone in the uv's u (a texel of the kit's
+// palette: kit.js), so one material per kit draws the glove's fabric, its back-of-hand panel, knuckles, seams, palm print,
+// cuff, the suit's sleeve and the harness each in its own colour and finish – the geometry shared by every team, the
+// colours the team's (no glove taking the car's body colour whole, v0.43's l.glove || l.base). Neighbouring zones along a
+// part (sleeve – seam, sleeve – cuff, gauntlet – band – hem) are neighbouring texels: a triangle across a border never
+// samples a third zone's colour. Vertex colours stay (white: the zone's colour as it is).
+export const KIT_ZONE = { fabric: 0, back: 1, knuckle: 2, seam: 3, palm: 4, band: 5, gauntlet: 6, hem: 7, suitSeam: 8, suit: 9, suitCuff: 10, webbing: 11, webEdge: 12, buckle: 13, buckleCap: 14, adjuster: 15 };
+export const KIT_TEXELS = 16;
+export const kitU = (z) => (z + 0.5) / KIT_TEXELS;
+// every vertex of g in zone z (white vertex colours)
+export function kitZone(g, z) {
+  const n = g.attributes.position.count;
+  g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(n * 2).fill(0.5).map((v, i) => (i & 1 ? 0.5 : kitU(z))), 2));
+  if (!g.attributes.color) g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+  return g;
+}
 export const GLOVE = {
   // phalanx lengths (m, gloved, proximal → distal) and radii, index → little; their places along the grip (x)
   fingers: [
@@ -216,8 +232,8 @@ export const GLOVE = {
 };
 export function driverGlove(handleR = 0.0235, fine = 1) {
   const G = BODY.grip, parts = [], seg = fine ? 12 : 6;
-  const shade = (g, k) => { const n = g.attributes.position.count, c = new Float32Array(n * 3).fill(k); g.setAttribute("color", new THREE.BufferAttribute(c, 3)); return g; };
-  const capsule = (A, B, r, k = 1) => {
+  const shade = (g, z) => kitZone(g, z);
+  const capsule = (A, B, r, k = KIT_ZONE.fabric) => {
     const d = new THREE.Vector3().subVectors(B, A), len = d.length();
     const g = new THREE.CapsuleGeometry(r, Math.max(0.001, len), fine ? 4 : 2, seg);
     g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
@@ -244,8 +260,8 @@ export function driverGlove(handleR = 0.0235, fine = 1) {
       parts.push(capsule(joints[i], joints[i + 1], r));
       // the pad – the half facing the grip – in the darker print: a thin capsule pressed onto that side (close up only)
       const mid = joints[i].clone().lerp(joints[i + 1], 0.5), toAxis = new THREE.Vector3(0, G - mid.y, -mid.z).normalize();
-      if (fine) parts.push(capsule(joints[i].clone().addScaledVector(toAxis, r * 0.25), joints[i + 1].clone().addScaledVector(toAxis, r * 0.25), r * 0.72, GLOVE.pad));
-      if (fine && i < 2) { const s = new THREE.TorusGeometry(r * 1.01, 0.0011, 4, seg); s.lookAt(new THREE.Vector3().subVectors(joints[i + 1], joints[i])); s.translate(joints[i + 1].x, joints[i + 1].y, joints[i + 1].z); parts.push(shade(s, 0.55)); }
+      if (fine) parts.push(capsule(joints[i].clone().addScaledVector(toAxis, r * 0.25), joints[i + 1].clone().addScaledVector(toAxis, r * 0.25), r * 0.72, KIT_ZONE.palm));
+      if (fine && i < 2) { const s = new THREE.TorusGeometry(r * 1.01, 0.0011, 4, seg); s.lookAt(new THREE.Vector3().subVectors(joints[i + 1], joints[i])); s.translate(joints[i + 1].x, joints[i + 1].y, joints[i + 1].z); parts.push(shade(s, KIT_ZONE.seam)); }
     }
     tips.push(joints[3]);
   }
@@ -259,12 +275,15 @@ export function driverGlove(handleR = 0.0235, fine = 1) {
   const turnGeo = (g) => { const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const v = turn(new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i))); p.setXYZ(i, v.x, v.y, v.z); } g.computeVertexNormals(); return g; };
   const palm = new THREE.SphereGeometry(1, seg + 4, fine ? seg : 8); palm.scale(0.043, (palmTop + 0.004) / 2, 0.019);
   { const p = palm.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i), t = Math.max(0, Math.min(1, y / ((palmTop + 0.004) / 2) * 0.5 + 0.5)); p.setX(i, p.getX(i) * (0.74 + 0.26 * t)); } }
-  palm.translate(0.001, (palmTop + 0.004) / 2 - 0.002, palmZ); turnGeo(palm); parts.push(shade(palm, 1));
+  palm.translate(0.001, (palmTop + 0.004) / 2 - 0.002, palmZ); turnGeo(palm);
+  // (v0.44: the back of the hand – the side away from the grip, from a little above the wrist to the knuckles – its own
+  // panel (most race gloves have one, in the team's second colour or the fabric's: kit.js); per triangle, by its middle)
+  parts.push(backPanel(palm.toNonIndexed(), palmZ - 0.006, 0.012, palmTop)); palm.dispose();
   const print = new THREE.SphereGeometry(1, seg, 6, 0, Math.PI * 2, 0, Math.PI / 2); print.rotateX(Math.PI / 2); print.scale(0.036, (palmTop - 0.01) / 2, 0.012);
-  print.translate(0.002, (palmTop - 0.01) / 2 + 0.006, palmZ + 0.008); turnGeo(print); parts.push(shade(print, GLOVE.pad));
+  print.translate(0.002, (palmTop - 0.01) / 2 + 0.006, palmZ + 0.008); turnGeo(print); parts.push(shade(print, KIT_ZONE.palm));
   // knuckle ridge (the glove's padding over the knuckles)
-  parts.push(capsule(kn[0].clone().add(new THREE.Vector3(-0.004, 0, -0.004)), kn[3].clone().add(new THREE.Vector3(0.004, 0, -0.004)), 0.0105));
-  const thenar = new THREE.SphereGeometry(1, seg, 8); thenar.scale(0.02, 0.03, 0.017); thenar.translate(-0.025, 0.032, palmZ + 0.009); turnGeo(thenar); parts.push(shade(thenar, 1));
+  parts.push(capsule(kn[0].clone().add(new THREE.Vector3(-0.004, 0, -0.004)), kn[3].clone().add(new THREE.Vector3(0.004, 0, -0.004)), 0.0105, KIT_ZONE.knuckle));
+  const thenar = new THREE.SphereGeometry(1, seg, 8); thenar.scale(0.02, 0.03, 0.017); thenar.translate(-0.025, 0.032, palmZ + 0.009); turnGeo(thenar); parts.push(shade(thenar, KIT_ZONE.fabric));
   // the thumb: from its base at the palm's index edge round the grip's wrist side (−y: the wheel's face, towards the
   // driver) to its inner side, over the index finger's tip – a closed hand's thumb on a wheel's grip (onboard footage:
   // the thumbs on the wheel's face by the grips' tops). Its joints on a circle round the grip (the grip's radius + the
@@ -272,7 +291,7 @@ export function driverGlove(handleR = 0.0235, fine = 1) {
   const ct = handleR + 0.0128, at = (x, th) => new THREE.Vector3(x, G + ct * Math.sin(th), -ct * Math.cos(th));
   const t0 = turn(new THREE.Vector3(-0.03, 0.034, palmZ + 0.006)), t1 = at(-0.036, -1.75), t2 = at(-0.031, -2.55), t3 = at(-0.022, -3.05);
   parts.push(capsule(t0, t1, 0.0125), capsule(t1, t2, 0.0112), capsule(t2, t3, 0.0102));
-  if (fine) parts.push(capsule(t1.clone().lerp(t2, 0.1).add(new THREE.Vector3(0, 0, -0.004)), t2.clone().lerp(t3, 0.9).add(new THREE.Vector3(0, 0, -0.004)), 0.0075, GLOVE.pad));
+  if (fine) parts.push(capsule(t1.clone().lerp(t2, 0.1).add(new THREE.Vector3(0, 0, -0.004)), t2.clone().lerp(t3, 0.9).add(new THREE.Vector3(0, 0, -0.004)), 0.0075, KIT_ZONE.palm));
   // (the gauntlet cuff and its strap: on the arm since v0.41 – gauntletSkin – bending over the wrist with it)
   const out = mergeColoured(parts);
   out.userData.tips = tips.map((v) => v.toArray());
@@ -284,25 +303,39 @@ export function driverGlove(handleR = 0.0235, fine = 1) {
   out.userData.thumb = { pts: [t0, t1, t2, t3].map((v) => v.toArray()), r: [0.0125, 0.0112, 0.0102] };
   return out;
 }
+// a non-indexed hand's palm block with the back of the hand's panel: triangles whose middle lies behind z0 (away from the
+// grip) and from y0 above the wrist to the knuckles' line top in KIT_ZONE.back, the rest the fabric
+function backPanel(g, z0, y0, top) {
+  const P = g.attributes.position, n = P.count, uv = new Float32Array(n * 2);
+  for (let i = 0; i < n; i += 3) {
+    let y = 0, z = 0; for (let k = 0; k < 3; k++) { y += P.getY(i + k) / 3; z += P.getZ(i + k) / 3; }
+    const u = kitU(z < z0 && y > y0 && y < top ? KIT_ZONE.back : KIT_ZONE.fabric);
+    for (let k = 0; k < 3; k++) { uv[(i + k) * 2] = u; uv[(i + k) * 2 + 1] = 0.5; }
+  }
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2)); g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+  return g;
+}
 // the other hand: the glove mirrored across its own x (the grip's axis) – a right hand from the left one, the winding
 // turned so its faces still face out
 export function mirrorGlove(g) {
   const m = g.clone(); m.scale(-1, 1, 1);
-  const p = m.attributes.position.array, n = m.attributes.normal?.array, c = m.attributes.color?.array;
+  const p = m.attributes.position.array, n = m.attributes.normal?.array, c = m.attributes.color?.array, uv = m.attributes.uv?.array;
   for (let i = 0; i < p.length; i += 9) for (const a of [p, n, c]) if (a) for (let k = 0; k < 3; k++) { const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t; }
+  if (uv) for (let i = 0; i < uv.length; i += 6) for (let k = 0; k < 2; k++) { const t = uv[i + 2 + k]; uv[i + 2 + k] = uv[i + 4 + k]; uv[i + 4 + k] = t; }
   m.computeVertexNormals();
   return m;
 }
 // geometries (position, normal, color) into one, non-indexed
 function mergeColoured(gs) {
-  const pos = [], nor = [], col = [];
+  const pos = [], nor = [], col = [], uvs = [];
   for (const g0 of gs) {
-    const g = g0.index ? g0.toNonIndexed() : g0, c = g.attributes.color;
+    const g = g0.index ? g0.toNonIndexed() : g0, c = g.attributes.color, uv = g.attributes.uv;
     for (const v of g.attributes.position.array) pos.push(v); for (const v of g.attributes.normal.array) nor.push(v);
-    for (let i = 0; i < g.attributes.position.count; i++) c ? col.push(c.getX(i), c.getY(i), c.getZ(i)) : col.push(1, 1, 1);
+    for (let i = 0; i < g.attributes.position.count; i++) { c ? col.push(c.getX(i), c.getY(i), c.getZ(i)) : col.push(1, 1, 1); uv ? uvs.push(uv.getX(i), uv.getY(i)) : uvs.push(kitU(KIT_ZONE.fabric), 0.5); }
     if (g !== g0) g.dispose(); g0.dispose();
   }
   const m = new THREE.BufferGeometry(); m.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); m.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); m.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  m.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   m.computeBoundingSphere(); return m;
 }
 // One sleeve from the shoulder (origin) along +y to the wrist (uarm + farm), the upper arm's and the forearm's swell,
@@ -323,7 +356,7 @@ export function armSkin(fine = 1) {
     const t = (y - L1) / L2, r = 0.043 - 0.012 * t + 0.006 * Math.exp(-(((t - 0.25) / 0.25) ** 2)), e = Math.max(0, Math.min(1, (y - (L1 + L2 - 0.105)) / 0.06));
     return r + (0.0255 - r) * e * e * (3 - 2 * e);
   };
-  const pos = [], idx = [], skI = [], skW = [], col = [];
+  const pos = [], idx = [], skI = [], skW = [], col = [], uvs = [];
   for (let i = 0; i <= rings; i++) {
     // (rings closer together round the elbow, where it bends)
     const u = i / rings, y = u < 0.5 ? L1 * Math.pow(u * 2, 0.8) : L1 + (len - L1) * (1 - Math.pow(1 - (u - 0.5) * 2, 0.8));
@@ -333,13 +366,14 @@ export function armSkin(fine = 1) {
     for (let k = 0; k <= seg; k++) {
       const a = (k / seg) * Math.PI * 2, x = Math.cos(a) * r, z = Math.sin(a) * r * 0.9;
       pos.push(x, y, z); skI.push(0, 1, 2, 3); skW.push(1 - w1, w1 * e1, w1 * e2, w1 * e3);
-      const seam = Math.abs(Math.sin(a) - 1) < 0.02 ? 0.6 : 1, cuff = y > len - 0.025 ? 0.8 : 1;
-      col.push(seam * cuff, seam * cuff, seam * cuff);
+      // (v0.44: the seam and the knitted cuff their own zones – the suit's colours, kit.js)
+      const seam = Math.abs(Math.sin(a) - 1) < 0.02, cuff = y > len - 0.025;
+      col.push(1, 1, 1); uvs.push(kitU(cuff ? KIT_ZONE.suitCuff : seam ? KIT_ZONE.suitSeam : KIT_ZONE.suit), 0.5);
     }
   }
   for (let i = 0; i < rings; i++) for (let k = 0; k < seg; k++) { const a = i * (seg + 1) + k, b = a + seg + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skI, 4)); g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skW, 4));
   g.setIndex(idx); g.computeVertexNormals();
   return g;
@@ -362,7 +396,7 @@ export function gauntletSkin(fine = 1) {
     const hd = 0.034 - 0.0125 * Math.min(1, t / 0.62) - 0.003 * Math.max(0, (t - 0.72) / 0.28);
     return [hw, hd];
   };
-  const pos = [], idx = [], skI = [], skW = [], col = [];
+  const pos = [], idx = [], skI = [], skW = [], col = [], uvs = [];
   // (rings evenly along it, plus a pair at each edge of the hem and the band – their shade changes there, sharp, not
   // smeared over a whole ring's length into a saw-tooth)
   const ys = Array.from({ length: rings + 1 }, (_, i) => y0 + ((y1 - y0) * i) / rings);
@@ -371,15 +405,15 @@ export function gauntletSkin(fine = 1) {
   for (let i = 0; i < ys.length; i++) {
     const y = ys[i], [hw, hd] = prof(y);
     const w4 = y <= W - B ? 0 : y >= W + B ? 1 : (() => { const t = (y - (W - B)) / (2 * B); return t * t * (3 - 2 * t); })();
-    const shade = y < y0 + 0.008 ? 0.78 : y > W - 0.048 && y < W - 0.026 ? 0.45 : 0.92;   // (hem, strap, the gauntlet)
+    const zone = y < y0 + 0.008 ? KIT_ZONE.hem : y > W - 0.048 && y < W - 0.026 ? KIT_ZONE.band : KIT_ZONE.gauntlet;   // (hem, strap, the gauntlet)
     for (let k = 0; k <= seg; k++) {
       const a = (k / seg) * Math.PI * 2;
-      pos.push(Math.cos(a) * hw, y, Math.sin(a) * hd); skI.push(3, 4, 0, 0); skW.push(1 - w4, w4, 0, 0); col.push(shade, shade, shade);
+      pos.push(Math.cos(a) * hw, y, Math.sin(a) * hd); skI.push(3, 4, 0, 0); skW.push(1 - w4, w4, 0, 0); col.push(1, 1, 1); uvs.push(kitU(zone), 0.5);
     }
   }
   for (let i = 0; i < ys.length - 1; i++) for (let k = 0; k < seg; k++) { const a = i * (seg + 1) + k, b = a + seg + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skI, 4)); g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skW, 4));
   g.setIndex(idx); g.computeVertexNormals();
   return g;

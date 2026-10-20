@@ -210,7 +210,20 @@
   // A load's progress message belongs to the load numbered job (messages without a number come from callers that
   // number nothing: shown, as before).
   const progressMatches = (job, p) => p?.job == null || p.job === job;
+  // v0.44: the timing screen's year and session pickers after a session was loaded (by the picker, the home screen or
+  // 이어보기): they show the session actually loaded – its year (added to the year list when it's outside it, e.g. a
+  // 2021 race opened from the home screen), that year's list (fetched again when another year was showing or the session
+  // isn't in it) and the session picked. The session's year is its archive path's ("2021/2021-03-28_…"), the same the
+  // 3D view's car profiles read (app.sessionYear: SessionInfo.Path). → null when the path has no year.
+  function pickerPlan({ years = [], year = null, paths = [] } = {}, path) {
+    const y = +String(path || "").slice(0, 4);
+    if (!(y >= 1950 && y <= 2100)) return null;
+    const has = years.map(Number).includes(y);
+    return { year: y, addYear: !has, reload: +year !== y || !paths.includes(path), select: path };
+  }
+  // the year options in order (newest first) with y among them
+  const yearsWith = (years, y) => [...new Set([...years.map(Number), +y])].sort((a, b) => b - a);
 
-  const API = { latLonToVec3, clusterPoints, placeGroups, dayNum, sessionAt, nextTimedSession, weekend, groupMeetings, matchRaces, scheduleStatus, dataStatus, sessionStatus, filterRaces, guard, progressMatches, SCHEDULE, DATA, ARCHIVE_FROM };
+  const API = { latLonToVec3, clusterPoints, placeGroups, dayNum, sessionAt, nextTimedSession, weekend, groupMeetings, matchRaces, scheduleStatus, dataStatus, sessionStatus, filterRaces, guard, progressMatches, pickerPlan, yearsWith, SCHEDULE, DATA, ARCHIVE_FROM };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.HomeData = API;
 })(typeof window !== "undefined" ? window : globalThis);

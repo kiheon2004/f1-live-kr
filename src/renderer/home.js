@@ -151,7 +151,11 @@ function rebuild() {
   S.items = items;
   if (items.length && metrics.tListReady == null) metrics.tListReady = Math.round(performance.now());
   // (a selection made by the app itself is made again as more arrives – the calendar after the archive list –; the user's stays)
-  if (S.selAuto || !itemById(S.sel) || !String(S.sel).startsWith(S.year + ":")) chooseDefault();
+  // (v0.44: a session loaded elsewhere – the timing screen's picker – is the race the home screen shows next, once its
+  // season's list has it)
+  const follow = S.follow && S.items.find((x) => itemHasPath(x, S.follow));
+  if (follow) { S.follow = null; select(fullId(follow), { scroll: true, probe: false }); }
+  else if (S.selAuto || !itemById(S.sel) || !String(S.sel).startsWith(S.year + ":")) chooseDefault();
   render();
 }
 // (an item's id is kept with its season: "2026:r6")
@@ -419,6 +423,15 @@ $("home").addEventListener("click", (e) => {
 addEventListener("f1kr-home", (e) => {
   if (e.detail.on) { globeShow(); render(); probeSelected(); }
   else { globeHide(); closePick(); clearInterval(liveTimer); liveTimer = null; }
+});
+// a session loaded (any way): the home screen's season and race follow it – the race picked here stays as it is when it
+// already is the loaded session's (a load started here)
+addEventListener("f1kr-loaded", (e) => {
+  const path = e.detail?.path, y = +String(path || "").slice(0, 4);
+  if (!y || S.all) return;
+  const cur = itemById(S.sel); if (cur && itemHasPath(cur, path)) return;
+  S.follow = path; store.set("homeYear", y);
+  if (y !== S.year) loadSeason(y); else rebuild();
 });
 addEventListener("f1kr-mode", () => { if (A().mode === "live" && S.year !== thisYear && !S.all) loadSeason(thisYear); else render(); });
 addEventListener("f1kr-live", () => { if (A().homeOn && A().mode === "live") renderLive(); });

@@ -4296,6 +4296,24 @@ window.Map3D = {
     });
     return "ok";
   },
+  // development (v0.44): the focused car's kit drawn in loud zone colours (kit.js zones: gloves, sleeves, harness) – on a
+  // copy of its material, put back with kitDiag(false); partVis hides / shows the focused car's parts by name
+  kitDiag(on = true) {
+    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const k = c.model.userData.kitMat; let n = 0;
+    c.model.traverse((o) => {
+      if (!o.isMesh) return;
+      if (!on && o.userData.kitDiag) { const m = o.material; o.material = o.userData.kitDiag; delete o.userData.kitDiag; if (!o.material.userData?.shared || m !== o.material) m.dispose?.(); n++; }
+      else if (on && o.material === k) {
+        const m = k.clone(), a = new Uint8Array(64);
+        for (let z = 0; z < 16; z++) { const col = new THREE.Color().setHSL((z * 0.381) % 1, 0.9, 0.55); a.set([col.r * 255, col.g * 255, col.b * 255, 255], z * 4); }
+        m.map = new THREE.DataTexture(a, 16, 1); m.map.magFilter = m.map.minFilter = THREE.NearestFilter; m.map.needsUpdate = true; m.sheen = 0;
+        o.userData.kitDiag = k; o.material = m; n++;
+      }
+    });
+    return n;
+  },
+  partVis(name, on) { const c = cars.get(app().focus || leader()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development: look at the focused car from a given offset (metres, car frame)

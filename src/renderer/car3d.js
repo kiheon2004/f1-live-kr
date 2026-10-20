@@ -26,7 +26,9 @@
 // car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
 import { shapeFor } from "./carshapes.js";
-import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R } from "./body3d.js";
+import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R, KIT_ZONE, kitZone } from "./body3d.js";
+import { kitStyle, kitEntry, kitMaterial } from "./kit.js";
+import { harnessGeometry, HARNESS } from "./harness.js";
 import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST } from "./arms.js";
 import { ARM_PLANS } from "./armplans.js";
 import { wheelSpec, wheelParts as steeringParts, ledGeometry, teamWheel } from "./wheel3d.js";
@@ -1130,7 +1132,7 @@ function cockpit(p) {
   const mirrorTips = (g, from) => { g.userData.tips = from.userData.tips.map(([x, y, z]) => [-x, y, z]); return g; };
   const right = mirrorTips(mirrorGlove(left), left), rightLo = mirrorTips(mirrorGlove(leftLo), leftLo);
   return {
-    rim, headrest: merge([headrest, tub]), helmet, visor, torso: torsoGeometry(driverTorso(shoulder)),
+    rim, headrest: merge([headrest, tub]), helmet, visor, torso: torsoKit(p, shoulder),
     // (the arms: placed per car each frame from the plan, setWheels)
     wheel: { body: SW.body, rubber: SW.rubber, bezel: SW.bezel, caps: SW.caps, metal: merge([SW.metal, column]), paddles: SW.paddles, screen: SW.screen, leds: SW.leds, led: ledGeometry(SW.led.r), ledWhere: W.leds?.where || null, spec: W,
       flags: SW.flags, gloves: [left, right], glovesLo: [leftLo, rightLo], grip, arm: armSkin(), gauntlet: gauntletSkin(), at: [0, wy, wz], tilt, plan, shoulder },
@@ -1171,6 +1173,16 @@ function geoTriangles(g) {
   for (let i = 0; i + 2 < n; i += 3) { const t = []; for (let j = 0; j < 3; j++) { const v = I ? I.getX(i + j) : i + j; t.push(P.getX(v), P.getY(v), P.getZ(v)); } out.push(t); }
   g.dispose(); return out;
 }
+// v0.44: the torso in the suit's kit zone with the six-point harness on it (harness.js: laid on this mesh and the HANS
+// collar), one geometry – the kit's material draws both (kit.js); the arms are planned against it as drawn
+function torsoKit(p, shoulder) {
+  const T = driverTorso(shoulder), body = kitZone(torsoGeometry(T), KIT_ZONE.suit);
+  // (the collar where cockpit() draws it: hansBox is in the car's frame – cockpit() shifts it back and forth by ck)
+  const [hC, hH] = hansBox(p), hans = softBox(hH[0] * 2, hH[1] * 2, hH[2] * 2, 0, hC[1], hC[2], 0.3, 4);
+  const belt = harnessGeometry(T, [body, hans]); hans.dispose();
+  const out = mergeColoured([body, belt]); out.userData.buckle = belt.userData.buckle; body.dispose(); belt.dispose();
+  return out;
+}
 function torsoGeometry(t) {
   // (the lathes' frame: +y up the spine, +x out of the chest, z across – into the car's: y → up, x → front, z → −x)
   const M = new THREE.Matrix4().makeBasis(t.front, t.up, new THREE.Vector3().crossVectors(t.front, t.up)).setPosition(t.L0);
@@ -1192,9 +1204,11 @@ function armGeometryOf(p, W) {
   const hz = (p.helmet?.[2] ?? p.eye[2] - 0.05) - (p.helmetSize?.[2] ?? 0.155);
   const base = { at: [0, WHEEL_MOUNT.y, wheelZ(p)], tilt: WHEEL_MOUNT.tilt, shoulder: [0.19, p.eye[1] - 0.21, hz] };
   base.torso = driverTorso(base.shoulder).capsule; base.torso.boxes = [headPads(p), hansBox(p)];
+  // (v0.44: the harness on the torso – in the plans' key, so plans baked without it are seen as stale)
+  base.torso.harness = HARNESS;
   // (v0.43: the torso as drawn – its mesh's triangles, for the planner's distance field (arms.js torsoField); a function,
   // so a car never builds them, and left out of the key's JSON – PLAN_COST says the field is used)
-  const sh = base.shoulder; base.torso.mesh = () => geoTriangles(torsoGeometry(driverTorso(sh)));
+  const sh = base.shoulder; base.torso.mesh = () => geoTriangles(torsoKit(p, sh));
   // (the glove against the wheel's face parts – thumb drums, buttons – as the grip turns in the hand: clear on every
   // wheel layout over ±40° of turn, measured on the glove's mesh (wheel42 test) – not a term of the plan)
   const grip = { c: [W.grip.x, 0, 0], up: [Math.sin(W.grip.tilt), Math.cos(W.grip.tilt), 0] }, glove = driverGlove(W.grip.r, 0).userData;
@@ -1588,9 +1602,9 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const bandMat = sidewallMaterial(0xf2c230, prof.era);
   const lightMat = mat("light", () => new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
   const helmetMat = skyLit(new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 }));
-  // the driver's gloves (fabric with darker grip print: vertex colours) and suit sleeves in the team's colour
-  const gloveMat = new THREE.MeshStandardMaterial({ color: l.glove || l.base, vertexColors: true, roughness: 0.82, metalness: 0 });
-  const suitMat = new THREE.MeshStandardMaterial({ color: l.suit || l.base, vertexColors: true, roughness: 0.86, metalness: 0 });
+  // the driver's kit – gloves, the suit's sleeves and torso, the harness – in the team's kit colours per zone (kit.js: one
+  // material per kit style, shared by the team's cars; v0.43 drew the gloves in the car's base colour all over)
+  const kitMat = kitMaterial(kitStyle(l, kitEntry(teamName, prof.season, date))), gloveMat = kitMat, suitMat = kitMat;
   const g = new THREE.Group();
   const add = (geo, m, parent = g, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; parent.add(mesh); return mesh; };
   add(t.painted, paint, g, "painted"); add(t.carbon, carbon, g, "carbon"); add(t.wing, wingPaint, g, "wing"); add(t.rim, pad, g, "rim");
@@ -1660,7 +1674,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
   g.userData = { profile: prof, mounts, wheels, spins, corners, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
-    leds, flagLights, gloveFine, gloveLo, cockpit: false, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat, gloveMat, suitMat], bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
+    leds, flagLights, gloveFine, gloveLo, cockpit: false, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat], kitMat, bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
 }
