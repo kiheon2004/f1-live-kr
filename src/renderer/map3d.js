@@ -4269,6 +4269,26 @@ window.Map3D = {
     if (c) { c.model.updateWorldMatrix(true, false); rel = camera.position.clone().applyMatrix4(c.model.matrixWorld.clone().invert()).toArray().map((v) => +v.toFixed(3)); }
     return { mode: camMode, fov: +camera.fov.toFixed(2), near: camera.near, aspect: +camera.aspect.toFixed(3), rel, look: { ...look, down: undefined } };
   },
+  // development (v0.43): the focused car's meshes drawn for diagnosis – "colors": each named part one flat colour (what
+  // the eye actually sees of which mesh), "wire": wireframe, "double": both faces drawn (a face turned the wrong way
+  // shows up), "normals": the normals as colours; null: the car's own materials back
+  carDiag(mode = "colors") {
+    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const COL = { painted: 0xd02020, carbon: 0x2050d0, wing: 0x8040c0, rim: 0xf0d000, tub: 0x20b040, headrest: 0x00c0c0, torso: 0xe040e0, helmet: 0xffffff, arm: 0xff8000, gauntlet: 0xffa060, glove: 0xffc090, gloveLo: 0xffc090 }, seen = new Set();
+    c.model.traverse((o) => {
+      if (!o.isMesh || seen.has(o)) return; seen.add(o);
+      if (o.userData.diagMat) { const m = o.material; o.material = o.userData.diagMat; delete o.userData.diagMat; if (m !== o.material) m.dispose(); }
+      if (!mode) return;
+      const base = o.material, under = (q) => { for (let p = q; p; p = p.parent) if (p.name === "steering") return true; return false; };
+      let m;
+      if (mode === "colors") m = new THREE.MeshLambertMaterial({ color: COL[o.name] ?? (under(o) ? 0xdddddd : 0x606060), side: THREE.DoubleSide });
+      else if (mode === "wire") m = new THREE.MeshBasicMaterial({ color: COL[o.name] ?? 0x888888, wireframe: true });
+      else if (mode === "double") { m = base.clone(); m.side = THREE.DoubleSide; }
+      else if (mode === "normals") m = new THREE.MeshNormalMaterial();
+      if (m) { if (o.isSkinnedMesh || o.isInstancedMesh) m.vertexColors = false; o.userData.diagMat = base; o.material = m; }
+    });
+    return "ok";
+  },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development: look at the focused car from a given offset (metres, car frame)

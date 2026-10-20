@@ -35,7 +35,8 @@
 //  - the shoulder joint's forward / upward travel with the shoulder blade: a few cm (L – no good figure in cm).
 // The model's own quality limits (what this code aims at and the tests check) are WRIST_COMFORT / WRIST_LIMIT /
 // PRONATION below – choices for a picture that reads as natural, inside the human ranges, not measurements of a driver.
-import { BODY } from "./body3d.js";
+import { BODY, armSkin } from "./body3d.js";
+import { distanceField, fieldAt } from "./meshgeo.js";
 
 const D = Math.PI / 180;
 // the wrist's comfortable centre and how far it may go before the cost climbs steeply (deg; flex + = towards the palm,
@@ -47,7 +48,10 @@ export const WRIST_COMFORT = { flex: -15, rad: -22, flexSpan: 26, radSpan: 14 };
 export const WRIST_LIMIT = { flex: [-58, 54], rad: [-38, 16] };   // (v0.42: inside the daily-use range – Ryu 1991: 60° extension, 54° flexion, 40° ulnar, 17° radial – with a margin)
 export const PRONATION = { comfort: 0, span: 45, limit: [-75, 70] };   // (deg from neutral – thumb up; + = palm turning down)
 export const SHOULDER = { forward: 0.07, back: 0.02, up: 0.03, down: 0.02 };   // how far the shoulder joint may move (m)
-export const ROLL = 25 * D;   // how far the grip may turn in the closed hand either way (rad; an estimate – the glove and a loosened hand let a round grip slide round a little)
+export const ROLL = 25 * D;
+// how much a millimetre of the arm in the car's body or the torso costs: (pen / PEN_SCALE)² (v0.43: 2 mm, was 3.5 – with the
+// torso as drawn (torsoField), 3.5 mm let the plan buy a few degrees of wrist with ~8 mm of the upper arm in the chest)
+export const PEN_SCALE = 0.002;   // how far the grip may turn in the closed hand either way (rad; an estimate – the glove and a loosened hand let a round grip slide round a little)
 // the elbow beside the driver's torso (never into it: x ≥ xBody), not down in the seat (y ≥ yMin), and only a little
 // over the shoulders (yHigh) – the car's own body is the room's (roomPenetration)
 export const ELBOW_ROOM = { xBody: 0.12, yMin: 0.22, yHigh: 0.72 };
@@ -79,8 +83,18 @@ export function roomPenetration(R, x, y, z, r) {
 }
 // How deep a ball of radius r at (x, y, z) sits in the driver's own torso or thighs (car3d driverTorso's capsules: the
 // trunk an elliptic section – hw across, hd front to back – along its back from lo to hi about L0; the thighs round)
+// v0.43: with the torso's mesh at hand (T.mesh – car3d), its signed distance field instead (torsoField): the planner
+// keeps the arms out of the torso as it is drawn and measured (cockpitcheck.js), not out of a narrower stand-in – the
+// capsule's ribcage was 0.14 m half across where the drawn chest is ~0.16 m, so a "clear" arm lay 2–3 cm in the suit.
+const FIELDS = new Map();
+export function torsoField(T) {
+  if (!T?.mesh) return null;
+  if (!T.field) { const k = JSON.stringify([T.L0, T.up]); if (!FIELDS.has(k)) FIELDS.set(k, distanceField(T.mesh(), 0.01, 0.07)); T.field = FIELDS.get(k); }
+  return T.field;
+}
 export function torsoPenetration(T, x, y, z, r) {
   if (!T) return 0;
+  if (T.field) return Math.max(0, r - fieldAt(T.field, x, y, z));
   const rx = x - T.L0[0], ry = y - T.L0[1], rz = z - T.L0[2], along = rx * T.up[0] + ry * T.up[1] + rz * T.up[2];
   let pen = 0;
   if (along > T.lo - r && along < T.hi + r) {
@@ -102,14 +116,25 @@ export function boxPenetration(boxes, x, y, z, r) {
   }
   return pen;
 }
-// the sleeve's radius along the arm (body3d armSkin: upper arm ~5 cm, forearm narrowing to ~2.6 cm at the wrist)
-const ARM_R = (u) => (u < 0.5 ? 0.052 - 0.014 * u * 2 : 0.042 - 0.016 * (u - 0.5) * 2);
-// the deepest the arm (shoulder → elbow → wrist, 12 balls along it) goes into the car's body, and into the driver's
+// the sleeve's radius along the arm – v0.43: read off the sleeve's own mesh (body3d armSkin, its widest every cm from the
+// shoulder), where v0.42's straight-line guess (5.2 → 2.6 cm) was 4–9 mm thinner than the drawn sleeve along most of
+// it: the plan's "clear" arms lay that much in the chest. u: 0 at the shoulder, ½ at the elbow, 1 at the wrist.
+let SLEEVE = null;
+function sleeveRadii() {
+  const g = armSkin(), P = g.attributes.position, r = new Float32Array(Math.ceil((BODY.uarm + BODY.farm) / 0.01) + 2);
+  for (let i = 0; i < P.count; i++) { const k = Math.max(0, Math.min(r.length - 1, Math.round(P.getY(i) / 0.01))); r[k] = Math.max(r[k], Math.hypot(P.getX(i), P.getZ(i))); }
+  for (let k = 1; k < r.length; k++) if (!r[k]) r[k] = r[k - 1];
+  g.dispose(); return r;
+}
+const ARM_R = (u) => { SLEEVE ||= sleeveRadii(); const a = (u < 0.5 ? u * 2 * BODY.uarm : BODY.uarm + (u - 0.5) * 2 * BODY.farm) / 0.01, k = Math.min(SLEEVE.length - 2, Math.floor(a)), t = a - k; return SLEEVE[k] + (SLEEVE[k + 1] - SLEEVE[k]) * t; };
+// the deepest the arm (shoulder → elbow → wrist, 24 balls along it) goes into the car's body, and into the driver's
 // torso and thighs (the balls more than 0.14 m from the shoulder joint: nearer, the arm grows out of the torso)
+// (v0.43: 24 balls – 12 were 5 cm apart on the upper arm, and the mesh's sleeve lay 8 mm in the chest between two of
+// them, just past the root's 14 cm)
 export function armPenetration(R, o, T = null) {
   let worst = 0;
-  for (let k = 0; k <= 12; k++) {
-    const u = k / 12, A = u <= 0.5 ? o.S : o.E, B = u <= 0.5 ? o.E : o.W, f = u <= 0.5 ? u * 2 : (u - 0.5) * 2;
+  for (let k = 0; k <= 24; k++) {
+    const u = k / 24, A = u <= 0.5 ? o.S : o.E, B = u <= 0.5 ? o.E : o.W, f = u <= 0.5 ? u * 2 : (u - 0.5) * 2;
     const x = A[0] + (B[0] - A[0]) * f, y = A[1] + (B[1] - A[1]) * f, z = A[2] + (B[2] - A[2]) * f, r = ARM_R(u);
     worst = Math.max(worst, roomPenetration(R, x, y, z, r), boxPenetration(T?.boxes, x, y, z, r));
     if (T && Math.hypot(x - o.S[0], y - o.S[1], z - o.S[2]) > 0.14) worst = Math.max(worst, torsoPenetration(T, x, y, z, r));
@@ -215,7 +240,7 @@ export function armCost(o, fwd, up, roll = 0) {
   // the arm in the car's body (the tub's walls and floor, the rim, the chassis' top – the room's table, roomPenetration)
   // or into the driver's own body (beside the torso: x ≥ xBody); a raised elbow high over the shoulders costs a little
   const pen = o.room || o.torso ? armPenetration(o.room, o, o.torso) : 0; o.pen = pen;
-  c += (pen / 0.0035) ** 2 + (o.torso ? 0 : 40 * barrier(ex, R.xBody, 9, 0.012)) + 40 * barrier(ey, R.yMin, 9, 0.02) + 2 * barrier(ey, -9, R.yHigh, 0.04);
+  c += (pen / PEN_SCALE) ** 2 + (o.torso ? 0 : 40 * barrier(ex, R.xBody, 9, 0.012)) + 40 * barrier(ey, R.yMin, 9, 0.02) + 2 * barrier(ey, -9, R.yHigh, 0.04);
   c += 0.4 * ((fwd / 0.04) ** 2 + (up / 0.02) ** 2) + ((roll / D) / 18) ** 2 + (o.short / 0.001) ** 2;   // (the hand out of reach: never – a millimetre costs as much as a bent wrist)
   return c;
 }
@@ -223,7 +248,7 @@ export function armCost(o, fwd, up, roll = 0) {
 // ---------- the plan: every 2° of the wheel ----------
 export const PLAN_STEP = 2, PLAN_MAX = 90;
 // everything the plan's cost depends on besides the geometry: part of a baked plan's key (a change asks for a re-bake)
-export const PLAN_COST = JSON.stringify({ WRIST_COMFORT, WRIST_LIMIT, PRONATION, SHOULDER, ROLL, ELBOW_ROOM, PLAN_STEP, PLAN_MAX, W: "1+12exp(-(a/35)^2)", SW: [-120, 150], BESIDE: [91, 0.16] });
+export const PLAN_COST = JSON.stringify({ WRIST_COMFORT, WRIST_LIMIT, PRONATION, SHOULDER, ROLL, ELBOW_ROOM, PLAN_STEP, PLAN_MAX, W: "1+12exp(-(a/35)^2)", SW: [-120, 150], BESIDE: [91, 0.16], TORSO: "mesh field 1 cm", PEN: PEN_SCALE, BALLS: 24, SLEEVE: "mesh" });
 const SW = { lo: -120 * D, hi: 150 * D };   // the swivel's range (the elbow from across the chest – a big lock's lower arm – to well up and out)
 const _o = armOut();
 const wrapRad = (x) => x - 2 * Math.PI * Math.round(x / (2 * Math.PI));
@@ -277,6 +302,7 @@ export function planArmsPath(geo, { swStep = 5 * D, rlStep = 2.5 * D, wSw = 4 * 
   for (let x = SW.lo; x <= SW.hi + 1e-9; x += swStep) sws.push(x);
   for (let x = -ROLL; x <= ROLL + 1e-9; x += rlStep) rls.push(x);
   const fws = [-SHOULDER.back, 0, 0.03, 0.07, SHOULDER.forward], ups = [-SHOULDER.down, 0, 0.03, SHOULDER.up], S = sws.length * rls.length;
+  torsoField(geo.torso);   // (the torso's field built once per torso, before the first pose is costed)
   _o.room = geo.room || null; _o.torso = geo.torso || null; _o.geo = geo;
   const cost = new Float64Array(N * S), arg = new Int8Array(N * S * 2);
   for (let i = 0; i < N; i++) {
