@@ -164,6 +164,7 @@ test("cars v0.39: cockpit place, wing spans, draw-call and triangle budget", asy
     // draw calls: v0.38 drew 35 meshes close up (33 for 2026), 27 at mid range – at most +30 %; triangles under 60k a car
     let near = 0, tris = 0; car.traverseVisible((o) => { if (o.isMesh) { near++; const g = o.geometry; tris += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
     C.setDetail(car, "mid"); let mid = 0; car.traverseVisible((o) => { if (o.isMesh) mid++; });
+    // (v0.44: the mirrors' glass is a mesh of its own – paid for by the steering wheel's paddles merged into its body)
     assert.ok(near <= 45 && mid <= 35, `${season} ${team}: ${near} meshes near, ${mid} mid`);
     assert.ok(tris < 60000, `${season} ${team}: ${Math.round(tris)} triangles`);
     // the wings: 2026 front-wing profiles and endplates within |y| ≤ 0.68 m, rear wing within 0.575 m (C3.10 / C3.11)

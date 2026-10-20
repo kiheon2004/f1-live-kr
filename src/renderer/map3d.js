@@ -22,6 +22,7 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
+import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { makeCar, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
@@ -130,6 +131,7 @@ function initGeoSettings() {
     document.getElementById("geoAero").value = o.aero === "off" ? "off" : "estimate";
     document.getElementById("geoCorners").value = ["near", "all", "off"].includes(o.corners) ? o.corners : "near";
     document.getElementById("geoShift").value = o.shiftLights === "fill" ? "fill" : "team";
+    document.getElementById("geoMirrors").value = ["full", "low", "simple"].includes(o.mirrors) ? o.mirrors : "auto";
   };
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
@@ -154,12 +156,13 @@ function initGeoSettings() {
   document.getElementById("geoShadows").addEventListener("change", (e) => change({ shadows: e.target.checked }, false));
   document.getElementById("geoFacilities").addEventListener("change", (e) => change({ facilities: e.target.checked }));
   document.getElementById("geoBigCars").addEventListener("change", (e) => change({ bigCars: e.target.checked }, false));
-  document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); applyQuality(); paintQualityNow(); });
+  document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); mirrorSetting = null; applyQuality(); paintQualityNow(); });
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
   document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
   document.getElementById("geoAero").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), aero: e.target.value }));
   document.getElementById("geoCorners").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), corners: e.target.value }));
   document.getElementById("geoShift").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), shiftLights: e.target.value }));
+  document.getElementById("geoMirrors").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), mirrors: e.target.value }); mirrorSetting = null; });
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
     m.textContent = "확인하는 중…"; m.classList.remove("bad");
@@ -2510,7 +2513,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near", shiftLights: "team" };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near", shiftLights: "team", mirrors: "auto" };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -2840,6 +2843,7 @@ function disposeWorld() {
   wheelScreens.reset(); wheelScreensFor = null;
   for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
   cars.clear();
+  mirrorPass?.dispose();   // (the rear view's picture with the world: made again on first use)
   releaseShadowRefs();
 }
 // the session a source key belongs to (a live key also carries the outline's length, which grows)
@@ -3284,11 +3288,30 @@ function frame(now) {
   GLOW.scale.value = renderer.getDrawingBufferSize(tmpV2).y / (2 * Math.tan((camera.fov * Math.PI) / 360));
   GLOW.fade.value.set(scene.fog.near, scene.fog.far);
   if (devGpu) devGpu.begin();
+  if (world) updateMirrors();
   devShadowDrawn = renderer.shadowMap.needsUpdate;
   renderer.render(scene, camera);
   if (devGpu) devGpu.end();
   adaptResolution(now, dt);
   rafId = requestAnimationFrame(frame);
+}
+
+// The side mirrors' rear view (mirrors.js, v0.44): the car a cockpit camera rides in only – its picture drawn just before
+// the view (after the cars, the camera and the shadows' decision for this frame). The mode is the 🛰 settings' 사이드미러
+// (auto: by the quality setting), read when the settings change (mirrorSetting null: read again).
+let mirrorPass = null, mirrorSetting = null, mirrorStrained = false;
+const mirrorAux = (hide) => {
+  // (the labels face the screen and are drawn over everything: not in a mirror)
+  for (const c of cars.values()) { const sp = c.label.sp; if (hide) { sp.userData.mv = sp.visible; sp.visible = false; } else if (sp.userData.mv !== undefined) sp.visible = sp.userData.mv; }
+  const cn = world?.corners?.group; if (cn) { if (hide) { cn.userData.mv = cn.visible; cn.visible = false; } else if (cn.userData.mv !== undefined) cn.visible = cn.userData.mv; }
+};
+function updateMirrors() {
+  if (!mirrorPass) mirrorPass = createMirrorPass();
+  if (mirrorSetting === null) { const o = geoSettings(); mirrorSetting = { set: o.mirrors, q: QUALITY[o.quality] ? o.quality : "balanced" }; }
+  mirrorStrained = mirrorStrain(mirrorStrained, perf.late, perf.calm);
+  const ride = camMode === "onboard" || camMode === "eye", num = ride ? app().focus || leader() : null, c = num ? cars.get(num) : null;
+  const view = ride ? camMode + ":" + num : "";
+  mirrorPass.update(renderer, scene, camera, c?.obj.visible ? c.model : null, mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), view, mirrorAux);
 }
 
 // Level of detail for vegetation: each tree chunk holds its instances in random order, so drawing only the
@@ -4234,6 +4257,43 @@ window.Map3D = {
     visible = true; resize(); resetPace(); lastT = performance.now(); cancelAnimationFrame(rafId); rafId = requestAnimationFrame(frame);
   },
   hide() { visible = false; },
+  // development (v0.44): the side mirrors' pass – { mode: "auto" | "full" | "low" | "simple" } sets the setting; returns its state
+  mirrors(o = {}) {
+    if (o.mode) { saveGeoSettings({ ...geoSettings(), mirrors: o.mode }); mirrorSetting = null; }
+    const S = mirrorPass?.state, ms = S?.car?.userData.mirrors;
+    return JSON.stringify({ setting: geoSettings().mirrors, mode: mirrorSetting && mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), strained: mirrorStrained, car: S?.car ? [...cars].find(([, c]) => c.model === S.car)?.[0] : null, view: S?.key, drawn: S?.drawn, rt: S?.rt ? [S.rt.width, S.rt.height, S.rt.samples] : null,
+      glass: ms?.material.type, stats: S?.stats, programs: renderer.info.programs?.length, frame: S?.frame });
+  },
+  // development (v0.44): the mirrors' picture (as drawn, unflipped: the left mirror's half first) shown over the page ×k
+  mirrorDump(k = 2) {
+    const rt = mirrorPass?.state.rt; if (!rt) return "no target";
+    const w = rt.width, h = rt.height, px = new Uint8Array(w * h * 4); renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h; const x = cv.getContext("2d"), im = x.createImageData(w, h);
+    for (let y = 0; y < h; y++) im.data.set(px.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+    x.putImageData(im, 0, 0);
+    let el = document.getElementById("mirrorDump"); if (!el) { el = document.createElement("img"); el.id = "mirrorDump"; el.style.cssText = "position:fixed;left:90px;top:200px;z-index:99999;image-rendering:pixelated;border:2px solid #f0f"; document.body.append(el); }
+    el.src = cv.toDataURL(); el.style.width = w * k + "px"; return "ok";
+  },
+  // development (v0.44): moments with one car close behind another (replay positions; minutes after lights out):
+  // [min, ahead, behind, metres behind, metres to the side (+ = the car ahead's left)]
+  closeBehind(fromMin = 3, toMin = 60, stepS = 4, maxM = 22) {
+    const src = app().src, t0 = src.startTime(), out = [], dz = (p) => p && Math.hypot(p[0], p[1]) > 1;
+    for (let t = t0 + fromMin * 60e3; t < t0 + toMin * 60e3; t += stepS * 1e3) {
+      const a = src.positionsAt(t), b = src.positionsAt(t - 1000);
+      for (const [n, p] of Object.entries(a)) {
+        const q = b[n]; if (!dz(p) || !q) continue;
+        const hx = p[0] - q[0], hy = p[1] - q[1], hl = Math.hypot(hx, hy); if (hl < 300) continue;   // (decimetres a second: > 30 m/s)
+        const fx = hx / hl, fy = hy / hl;
+        for (const [m, r] of Object.entries(a)) {
+          if (m === n || !dz(r)) continue;
+          const rx = (r[0] - p[0]) / 10, ry = (r[1] - p[1]) / 10, along = rx * fx + ry * fy, side = -rx * fy + ry * fx;
+          if (along < -maxM || along > -5 || Math.abs(side) > 5) continue;
+          out.push([+((t - t0) / 60e3).toFixed(2), n, m, +(-along).toFixed(1), +side.toFixed(1)]);
+        }
+      }
+    }
+    return JSON.stringify(out.slice(0, 400));
+  },
   dev(o) { if ("shadows" in o) { sun.castShadow = o.shadows; } if ("hud" in o) devNoHud = !o.hud; if ("labels" in o) devNoLabels = !o.labels; return "ok"; },
   // development: switch costly looks off to measure them – { roadGrain, carEnv, carNear, kerbRidge } (true = on)
   tune(o) {

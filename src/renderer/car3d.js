@@ -26,6 +26,7 @@
 // car number. Helmets are in team colours, not the drivers' own designs.
 import * as THREE from "./vendor/three.module.js";
 import { shapeFor } from "./carshapes.js";
+import { MIRROR } from "./mirrors.js";
 import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R, KIT_ZONE, kitZone } from "./body3d.js";
 import { kitStyle, kitEntry, kitMaterial } from "./kit.js";
 import { harnessGeometry, HARNESS } from "./harness.js";
@@ -898,18 +899,49 @@ function suspension(p, pullFront, pullRear = false) {
   return out;
 }
 // Mirrors: the housing (wider than tall, its glass facing back), its stays, a winglet under it
+// v0.44: the housing's plan sheared as the rules' mirror volume is – its outboard end MIRROR.yaw further back (2025
+// Technical Regulations Issue 03 App. §13 RV-MIR-HOU / 2026 Section C Issue 17 App. §14 RV-MIRROR-BODY: on Z 640 the
+// polygon [XC −830, 470] [−730, 470] [−650, 680] [−750, 680], i.e. its rear face 21° off the Y axis; read from the PDFs
+// 2026-10-20), so the glass on its rear face looks back and in towards the driver (Art. 14.2.2d / C14.2.2d: the glass'
+// inboard normal 24–28° to the X axis, towards Y = 0). The glass is its own mesh now (mirrorGlass) – it was a dark plane
+// merged into the carbon, which read as a black slot with no reflection at all
 function mirrorParts(at, size, root) {
-  const heads = [], stays = [];
+  const heads = [], stays = [], T = Math.tan(MIRROR.yaw);
   for (const k of [1, -1]) {
     const [x, y, z] = at, [w, h, d] = size;
-    heads.push(softBox(w, h, d, x * k, y, z, 0.22));
-    stays.push(strut([root[0] * k, root[1], root[2]], [(x - w * 0.25) * k, y - h * 0.4, z + 0.01], 0.03, 0.012), strut([(root[0] + 0.03) * k, root[1] + 0.02, root[2] - 0.12], [(x - w * 0.05) * k, y - h * 0.45, z - 0.01], 0.025, 0.01));
-    stays.push(boxAt(w * 0.9, 0.006, d * 1.4, x * k, y - h * 0.75, z + 0.01, 0.1));
+    const head = softBox(w, h, d, x * k, y, z, 0.06), q = head.attributes.position;
+    for (let i = 0; i < q.count; i++) q.setZ(i, q.getZ(i) - (q.getX(i) * k - x) * T);
+    head.computeVertexNormals(); heads.push(head);
+    stays.push(strut([root[0] * k, root[1], root[2]], [(x - w * 0.25) * k, y - h * 0.4, z + 0.01 + w * 0.25 * T], 0.03, 0.012), strut([(root[0] + 0.03) * k, root[1] + 0.02, root[2] - 0.12], [(x - w * 0.05) * k, y - h * 0.45, z - 0.01 + w * 0.05 * T], 0.025, 0.01));
+    const vane = boxAt(w * 0.9, 0.006, d * 1.4, x * k, y - h * 0.75, z + 0.01, 0.1), vq = vane.attributes.position;
+    for (let i = 0; i < vq.count; i++) vq.setZ(i, vq.getZ(i) - (vq.getX(i) * k - x) * T);
+    stays.push(vane);
   }
   return { heads, stays };
 }
-// the glass in each mirror (dark, a little in from the housing's back)
-const mirrorGlass = (at, size) => [1, -1].map((k) => { const g = new THREE.PlaneGeometry(size[0] * 0.86, size[1] * 0.72); g.rotateY(Math.PI); g.translate(at[0] * k, at[1], at[2] - size[2] / 2 - 0.002); return g; });
+// The mirrors' glass (v0.44): one flat quad a side on the housing's rear face, 2 mm out from it, its normal MIRROR.yaw in from
+// straight back; the reflective surface 200 × 50 mm (2025 Art. 14.2.2b, 2026 C14.2.2b: "a vertical rectangle 200 mm
+// wide and 50 mm high (+2/−0 mm)"; 2022 was 150 mm wide – Jalopnik 2022-11-28: 200 mm from 2023 – not drawn apart, no
+// 2022 session is cached; the model was 138 × 47 / 189 × 61 mm). Returns the two geometries (left (+x) first; the
+// template merges them – one mesh) with
+// their UVs into the mirror pass' two-in-one picture (mirrors.js: the left mirror's half u 0–0.5, the right's 0.5–1; u
+// grows towards the car's +x edge – the picture is a mirror image) and each glass' frame in the car: centre c, normal n
+// (towards the driver), h (along the glass towards the car's +x), half sizes – what mirrors.js's virtual camera needs.
+function mirrorGlass(at, size) {
+  const [gw, gh] = MIRROR.glass, s = Math.sin(MIRROR.yaw), c = Math.cos(MIRROR.yaw), out = [], spec = [];
+  for (const k of [1, -1]) {
+    const C = [at[0] * k, at[1], at[2] - size[2] / 2], n = [-k * s, 0, -c], h = [c, 0, -k * s];
+    for (let i = 0; i < 3; i++) C[i] += n[i] * 0.002;   // (2 mm proud of the housing's face, towards the driver)
+    const P = (a, b) => [C[0] + h[0] * a * gw / 2, C[1] + b * gh / 2, C[2] + h[2] * a * gw / 2], u0 = k > 0 ? 0 : 0.5;
+    const pts = [[-1, -1], [1, 1], [1, -1], [-1, -1], [-1, 1], [1, 1]];   // (wound to face along n)
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pts.flatMap(([a, b]) => P(a, b)), 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(pts.flatMap(() => n), 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(pts.flatMap(([a, b]) => [u0 + (a + 1) / 4, (b + 1) / 2]), 2));
+    out.push(g); spec.push({ k, c: C, n, h, up: [0, 1, 0], hw: gw / 2, hh: gh / 2 });
+  }
+  return { geos: out, spec };
+}
 
 // the padded rim on the opening's edge: a soft tube (3 × 2.2 cm) a little out over the edge, up one side, round the front
 // in front of the steering wheel (its middle at the opening's front) and down the other
@@ -991,7 +1023,9 @@ function body2022(p) {
   const beam = merge([wingSpan(0.88, (e) => [0.36, -2.3, 0.14, 0.02, 0.15], 10), wingSpan(0.84, (e) => [0.435, -2.42, 0.12, 0.018, 0.4], 10)]);
   const susp = suspension(p, (S?.fsusp ?? "pull") === "pull", S?.rsusp === "pull");
   // mirrors on the inlets' top, stays to the chassis's side
-  const M = mirrorParts([0.5, 0.68, 0.52 + ck], [0.16, 0.065, 0.06], [0.27, 0.6, 0.55 + ck]);
+  // (v0.44: the housing 0.21 m wide round the rules' 0.2 m glass, in the rules' volume – Y 470–680, Z 640–720 mm (a
+  // reference plane ~4 cm up); it was 0.16 m, at Y 420–580)
+  const M = mirrorParts([0.575, 0.715, 0.52 + ck], [0.21, 0.07, 0.065], [0.27, 0.6, 0.55 + ck]), MG = mirrorGlass([0.575, 0.715, 0.52 + ck], [0.21, 0.07, 0.065]);
   const tcamPod = softBox(0.1, 0.055, 0.13, 0, 0.995, -0.6 + ck, 0.3);   // (the lens at its front: the TCAM mount)
   // the shark fin (small on these cars), the exhaust over the crash structure
   const fin = plate([[-0.8, 0.935], [-1.0, 0.93], [-1.65, 0.68], [-1.65, 0.6], [-0.8, 0.9]].map(([z, y]) => [zb(z), y]), 0, 0.008);
@@ -1000,10 +1034,10 @@ function body2022(p) {
     body, tubIn: OB.inner, openEdge: OB.edge, room: OB.room, pods: both(merge([podL, inl.lip])),
     // (2022–25 halos are painted in the team's colours on most cars: with the body, the livery's zones decide)
     paintExtra: [paintUV(halo(p), true), rwPlates, ...M.heads],
-    carbon: metricUV(merge([...floor, fw0, fwPlates, rwPylon, beam, ...susp, ...corners(p), ...M.stays, fin, tcamPod, inlets, airbox, exhaust, ...mirrorGlass([0.5, 0.68, 0.52 + ck], [0.16, 0.065, 0.06]), ...shapeParts(S, p, fwSpan, 2.68, 0.35, zb)]), 0.04),
+    carbon: metricUV(merge([...floor, fw0, fwPlates, rwPylon, beam, ...susp, ...corners(p), ...M.stays, fin, tcamPod, inlets, airbox, exhaust, ...shapeParts(S, p, fwSpan, 2.68, 0.35, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge([...fwF, ...fwEnds]), rwFlaps: rwFlap,   // (2022–25 flaps never move: the endplates go with them)
     fwPivot: [0.13, 2.68], rwPivot: [0.855, -2.2], aeroOpen: { fw: 0, rw: -0.75 },   // (2022–25: DRS opens the rear flap only)
-    lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: null,
+    lights: [boxAt(0.14, 0.05, 0.02, 0, 0.3, -2.64)], halo: null, mirrors: merge(MG.geos), mirrorSpec: MG.spec,
   };
 }
 
@@ -1066,7 +1100,7 @@ function body2026(p) {
   const susp = suspension(p, S?.fsusp === "pull", S?.rsusp === "pull");
   // mirrors (C3.7.5: on stays from the chassis, the lateral safety light in the body; 2026 footage: larger and higher
   // than before, either side of the halo's legs)
-  const M = mirrorParts([0.56, 0.74, 0.48 + ck], [0.22, 0.085, 0.07], [0.27, 0.62, 0.5 + ck]);
+  const M = mirrorParts([0.56, 0.74, 0.48 + ck], [0.21, 0.085, 0.07], [0.27, 0.62, 0.5 + ck]), MG = mirrorGlass([0.56, 0.74, 0.48 + ck], [0.21, 0.085, 0.07]);
   // the T-cam pod on the airbox (2026 photos: a black pod with its antennas well over the helmet); the lens at its front
   const tcamPod = merge([softBox(0.11, 0.075, 0.16, 0, 1.06, -0.58 + ck, 0.3), boxAt(0.006, 0.07, 0.03, 0.03, 1.12, -0.62 + ck), boxAt(0.006, 0.07, 0.03, -0.03, 1.12, -0.62 + ck)]);
   const fin = plate([[-0.78, 0.99], [-0.98, 0.99], [-1.55, 0.93], [-1.75, 0.8], [-1.75, 0.72], [-0.78, 0.95]].map(([z, y]) => [zb(z), y]), 0, 0.008);
@@ -1074,14 +1108,14 @@ function body2026(p) {
   return {
     body, tubIn: OB.inner, openEdge: OB.edge, room: OB.room, pods: both(merge([podL, inl.lip])), paintExtra: [rwPlates, ...M.heads],
     // (2026 halos are black carbon on every car in the footage and photos – not painted)
-    carbon: metricUV(merge([...floor, fw0, pylons, fwPlates, boards, rwPylon, ...susp, ...corners(p), ...M.stays, tcamPod, fin, inlets, airbox, exhaust, halo(p), ...mirrorGlass([0.56, 0.74, 0.48 + ck], [0.22, 0.085, 0.07]), ...shapeParts(S, p, fwSpan, 2.5, 0.37, zb)]), 0.04),
+    carbon: metricUV(merge([...floor, fw0, pylons, fwPlates, boards, rwPylon, ...susp, ...corners(p), ...M.stays, tcamPod, fin, inlets, airbox, exhaust, halo(p), ...shapeParts(S, p, fwSpan, 2.5, 0.37, zb)]), 0.04),
     wing: rwMain, fwFlaps: merge(fwF), rwFlaps,
     fwPivot: [0.16, 2.5], rwPivot: [0.81, -2.09], aeroOpen: { fw: -0.28, rw: -0.55 },   // (2026: both wings' flaps open)
     // (v0.40, C14.3 Issue 17: two lights in the endplates, lenses facing back – within 5° of the X-axis –, between Z 700
     // and 870, and the middle one's rear face centred at Z 295–305 on Y = 0. They were 0.36 m strips along the endplates'
     // outer faces, lit sideways: now upright strips at the endplates' trailing edges, a reference plane ~4 cm up)
     lights: [boxAt(0.012, 0.13, 0.014, 0.555, 0.825, p.RZ - 0.755), boxAt(0.012, 0.13, 0.014, -0.555, 0.825, p.RZ - 0.755), boxAt(0.06, 0.05, 0.02, 0, 0.34, -2.51)],
-    halo: null,
+    halo: null, mirrors: merge(MG.geos), mirrorSpec: MG.spec,
   };
 }
 
@@ -1134,7 +1168,7 @@ function cockpit(p) {
   return {
     rim, headrest: merge([headrest, tub]), helmet, visor, torso: torsoKit(p, shoulder),
     // (the arms: placed per car each frame from the plan, setWheels)
-    wheel: { body: SW.body, rubber: SW.rubber, bezel: SW.bezel, caps: SW.caps, metal: merge([SW.metal, column]), paddles: SW.paddles, screen: SW.screen, leds: SW.leds, led: ledGeometry(SW.led.r), ledWhere: W.leds?.where || null, spec: W,
+    wheel: { body: merge([SW.body, SW.paddles]), rubber: SW.rubber, bezel: SW.bezel, caps: SW.caps, metal: merge([SW.metal, column]), screen: SW.screen, leds: SW.leds, led: ledGeometry(SW.led.r), ledWhere: W.leds?.where || null, spec: W,
       flags: SW.flags, gloves: [left, right], glovesLo: [leftLo, rightLo], grip, arm: armSkin(), gauntlet: gauntletSkin(), at: [0, wy, wz], tilt, plan, shoulder },
   };
 }
@@ -1611,6 +1645,11 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // the tub inside the cockpit's opening (the chassis' fold: walls, floor, bulkhead, seat back) – dark carbon, every LOD
   // (it shows from the helicopter too)
   if (t.tubIn) add(t.tubIn, tubMat, g, "tub");
+  // the mirrors' glass (v0.44), every LOD: a silvered mirror lit by the sky – the simple reflection; the car a cockpit
+  // camera rides in gets the real rear view on it instead (mirrors.js swaps the material; userData.glass is this one)
+  const glassMat = mat("mirrorGlass", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x8c939b, roughness: 0.08, metalness: 1 })));
+  // (both glasses one mesh – one draw: the halves of the rear view's picture are in their UVs)
+  const mirrors = add(t.mirrors, glassMat, g, "mirrors"); mirrors.userData.spec = t.mirrorSpec; mirrors.userData.glass = glassMat;
   // active aero / DRS: the flaps pivot about their leading edges (closed = corner mode, open = straight mode / DRS)
   const pivot = ([y, z], geo, m0) => { const pv = new THREE.Group(); pv.position.set(0, y, z); const m = new THREE.Mesh(geo, m0); m.position.set(0, -y, -z); pv.add(m); g.add(pv); return pv; };
   const fwPivot = pivot(t.fwPivot, t.fwFlaps, fwPaint), rwPivot = pivot(t.rwPivot, t.rwFlaps, wingPaint);
@@ -1622,7 +1661,8 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   // the driver's torso and thighs in the suit (the open tub shows them – close up only, as the arms)
   add(t.torso, suitMat, near, "torso");
   const wheel = new THREE.Group(); wheel.name = "steering"; wheel.position.set(...t.wheel.at); wheel.rotation.x = t.wheel.tilt; near.add(wheel);
-  add(t.wheel.body, wheelCarbon, wheel); add(t.wheel.paddles, wheelCarbon, wheel); add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
+  add(t.wheel.body, wheelCarbon, wheel);   // (v0.44: its paddles merged in – one draw: the mirrors' glass is a mesh of its own now)
+   add(t.wheel.rubber, rubberMat, wheel); add(t.wheel.bezel, bezelMat, wheel); add(t.wheel.caps, capsMat, wheel); add(t.wheel.metal, metalMat, wheel);
   const screen = add(t.wheel.screen, screenMat, wheel, "wheelScreen");
   // (the gloves: the fine pair only for the car a cockpit camera rides in – setCockpit; ~16k triangles – else a light pair;
   // each hand on a pivot at its grip's centre: the grip turns a little in the hand with the wheel's angle – placeArms)
@@ -1674,7 +1714,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
   g.userData = { profile: prof, mounts, wheels, spins, corners, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroOpen: t.aeroOpen,
-    leds, flagLights, gloveFine, gloveLo, cockpit: false, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat], kitMat, bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
+    leds, flagLights, gloveFine, gloveLo, cockpit: false, mirrors, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat], kitMat, bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
 }
