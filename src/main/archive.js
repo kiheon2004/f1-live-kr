@@ -125,6 +125,27 @@ function sessionUtc({ start, gmtOffset }) {
   return Date.parse(`${start}${m[1] ? "-" : "+"}${m[2]}:${m[3]}`);
 }
 
+// A season's Index.json → its sessions. path is the archive's own id for a session (what loadSession takes); the
+// meeting's own key and code are kept beside the display names, so a meeting is never told apart by its name alone.
+function parseIndex(text) {
+  const idx = JSON.parse(text);
+  const out = [];
+  for (const m of idx.Meetings || []) {
+    for (const s of m.Sessions || []) {
+      if (!s.Path) continue;
+      out.push({
+        path: s.Path, type: s.Type, name: s.Name, start: s.StartDate, gmtOffset: s.GmtOffset,
+        meeting: m.Name, location: m.Location, country: m.Country?.Name,
+        // (the venue apart from the Grand Prix's name: F1's circuit key – 2026's "Bahrain Grand Prix" ran at Sepang)
+        circuitKey: Number.isFinite(+m.Circuit?.Key) ? +m.Circuit.Key : null, circuit: m.Circuit?.ShortName || null,
+        meetingKey: Number.isFinite(+m.Key) ? +m.Key : null, meetingCode: m.Code || null, officialName: m.OfficialName || null,
+        countryCode: m.Country?.Code || null, sessionKey: Number.isFinite(+s.Key) ? +s.Key : null, end: s.EndDate || null,
+      });
+    }
+  }
+  return out;
+}
+
 class Archive {
   constructor(cacheDir) {
     this.cacheDir = cacheDir;
@@ -179,29 +200,42 @@ class Archive {
 
   // Finished sessions never change, so cached files are reused forever; indexes refresh hourly.
   // onBytes(received, total) reports download progress (a cached file reports itself as complete).
-  async getText(rel, { maxAgeMs = Infinity, onBytes } = {}) {
+  // → the text (the contract every caller has relied on); getTextMeta says where it came from as well.
+  async getText(rel, opts) { return (await this.getTextMeta(rel, opts)).text; }
+
+  // The same, with where the text came from: { text, source: "cache" (fresh enough) | "network" | "stale-cache" (an old
+  // copy because the request failed), fetchedAt (ms: the file's time, or now), offline (no answer at all), status (the
+  // HTTP status that was refused, else null) }. cacheOnly: never asks the network (a copy or a "not cached" error) –
+  // for views that may only show what the app has already checked.
+  async getTextMeta(rel, { maxAgeMs = Infinity, onBytes, cacheOnly = false } = {}) {
     const file = this.cachePath(rel);
+    const stats = this.stats || (this.stats = { network: 0, cache: 0, stale: 0 });
+    const old = (extra) => { const text = fs.readFileSync(file, "utf8"); let at = Date.now(); try { at = fs.statSync(file).mtimeMs; } catch {} onBytes?.(text.length, text.length); stats.stale++; return { text, source: "stale-cache", fetchedAt: at, ...extra }; };
     try {
       const st = fs.statSync(file);
-      if (Date.now() - st.mtimeMs < maxAgeMs) {
+      if (Date.now() - st.mtimeMs < maxAgeMs || cacheOnly) {
         // (a kept-for-good file is marked as just used, so pruning takes the ones not opened for longest)
         if (maxAgeMs === Infinity) { try { const now = new Date(); fs.utimesSync(file, now, now); } catch {} }
-        onBytes?.(st.size, st.size); return fs.readFileSync(file, "utf8");
+        onBytes?.(st.size, st.size); stats.cache++;
+        return { text: fs.readFileSync(file, "utf8"), source: Date.now() - st.mtimeMs < maxAgeMs ? "cache" : "stale-cache", fetchedAt: st.mtimeMs, offline: false, status: null };
       }
     } catch { /* not cached */ }
+    if (cacheOnly) { const err = new Error("이 컴퓨터에 받아 둔 기록이 없어요"); err.notCached = true; throw err; }
     let res;
+    stats.network++;
     try { res = await this.fetchAuthed(rel); }
     catch (e) {
       // Offline: an old copy (e.g. a season index older than an hour) is better than nothing.
-      try { const text = fs.readFileSync(file, "utf8"); onBytes?.(text.length, text.length); return text; } catch {}
+      try { return old({ offline: true, status: null }); } catch {}
       onBytes?.(0, 0);
-      throw new Error(`인터넷 연결을 확인해 주세요 (${e.cause?.code || e.name})`);
+      const err = new Error(`인터넷 연결을 확인해 주세요 (${e.cause?.code || e.name})`);
+      err.offline = true; throw err;
     }
     if (!res.ok) {
       // Refused (F1 closed its public archive to anonymous requests on 2026-10-16: 401 for every file) or a server
       // error: an old copy is better than nothing, as when offline. A missing file (404) is no reason to.
       if ([401, 403, 429].includes(res.status) || res.status >= 500) {
-        try { const text = fs.readFileSync(file, "utf8"); onBytes?.(text.length, text.length); return text; } catch {}
+        try { return old({ offline: false, status: res.status }); } catch {}
       }
       onBytes?.(0, 0);
       const refused = res.status === 401 || res.status === 403;
@@ -218,24 +252,56 @@ class Archive {
       text = stripBom(Buffer.concat(chunks).toString("utf8"));
     } else text = stripBom(await res.text());
     fs.writeFileSync(file, text);
-    return text;
+    return { text, source: "network", fetchedAt: Date.now(), offline: false, status: null };
   }
 
   async listSessions(year) {
-    const idx = JSON.parse(await this.getText(`${year}/Index.json`, { maxAgeMs: 3600e3 }));
-    const out = [];
-    for (const m of idx.Meetings || []) {
-      for (const s of m.Sessions || []) {
-        if (!s.Path) continue;
-        out.push({
-          path: s.Path, type: s.Type, name: s.Name, start: s.StartDate, gmtOffset: s.GmtOffset,
-          meeting: m.Name, location: m.Location, country: m.Country?.Name,
-          // (the venue apart from the Grand Prix's name: F1's circuit key – 2026's "Bahrain Grand Prix" ran at Sepang)
-          circuitKey: Number.isFinite(+m.Circuit?.Key) ? +m.Circuit.Key : null, circuit: m.Circuit?.ShortName || null,
-        });
+    return parseIndex(await this.getText(`${year}/Index.json`, { maxAgeMs: 3600e3 }));
+  }
+
+  // The season's sessions with where the list came from (getTextMeta): { year, sessions, source, fetchedAt, offline,
+  // status }. cacheOnly: only a copy already on this computer (nothing fetched).
+  // (asks for one season at a time are shared, and an answer from an old copy – F1 refused or no connection – is reused
+  // for two minutes: going back and forth between seasons doesn't ask a refusing server again each time)
+  async listSessionsMeta(year, { cacheOnly = false } = {}) {
+    const memo = this.listMemo || (this.listMemo = new Map()), key = `${year}:${cacheOnly}`, had = memo.get(key);
+    if (had && (had.pending || Date.now() - had.at < 120e3)) { (this.stats || (this.stats = { network: 0, cache: 0, stale: 0 })).shared = (this.stats.shared || 0) + 1; return had.promise; }
+    const promise = this.getTextMeta(`${year}/Index.json`, { maxAgeMs: 3600e3, cacheOnly })
+      .then((m) => ({ year, sessions: parseIndex(m.text), source: m.source, fetchedAt: m.fetchedAt, offline: !!m.offline, status: m.status ?? null }));
+    const entry = { pending: true, at: 0, promise };
+    memo.set(key, entry);
+    try {
+      const r = await promise;
+      // (a fresh answer needs no memo: the file itself is fresh for an hour)
+      if (r.source === "stale-cache") Object.assign(entry, { pending: false, at: Date.now() }); else memo.delete(key);
+      return r;
+    } catch (e) { memo.delete(key); throw e; }
+  }
+
+  // Which of these sessions have their recording on this computer: path → { core: the topics a replay needs are all
+  // there, topics: how many files } – read from the file list only (nothing opened, nothing touched).
+  cachedSessions(paths) {
+    const out = {};
+    for (const p of paths) {
+      let n = 0, core = 0;
+      for (const topic of TOPICS) {
+        try { if (fs.statSync(this.cachePath(`${p}${topic}.jsonStream`)).size > 0) { n++; if (CORE.includes(topic)) core++; } } catch {}
       }
+      out[p] = { core: core === CORE.length, topics: n };
     }
     return out;
+  }
+
+  // Whether F1's archive would give this session now, asked with one small file (SessionInfo) whose body is never read
+  // or kept: { state: "remote" (it answers), "auth" (refused: 401/403 – sign-in needed or refused), "none" (404: not
+  // published), "failed" (no answer / server error), status, authTried }. A listed session isn't a downloadable one.
+  async probeSession(sessionPath) {
+    let res;
+    try { res = await this.fetchAuthed(`${sessionPath}SessionInfo.jsonStream`); }
+    catch (e) { return { state: "failed", status: null, offline: true, message: e.cause?.code || e.name }; }
+    try { await res.body?.cancel?.(); } catch {}
+    const s = res.status;
+    return { state: res.ok ? "remote" : s === 401 || s === 403 ? "auth" : s === 404 ? "none" : "failed", status: s, authTried: this.authTried || null };
   }
 
   // Progress events: { phase: "download", received, total, known } then { phase: "parse", done, total }.
@@ -334,4 +400,4 @@ class Archive {
   }
 }
 
-module.exports = { Archive, parseStream, flattenPositions, flattenTracks, flattenCarData, inflateZ, TOPICS };
+module.exports = { Archive, parseIndex, parseStream, flattenPositions, flattenTracks, flattenCarData, inflateZ, TOPICS };

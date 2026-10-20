@@ -50,6 +50,8 @@
   let seenMsgs = 0, prevPos = {};
   let notifyOn = store.get("notify", false);
   let liveKey = null, liveEpoch = 0;
+  // The season globe home screen (home.js) is on at launch; the timing screen stays built underneath it.
+  let homeOn = document.body.classList.contains("home-on");
 
   // ---------- modes ----------
   function setMode(m) {
@@ -62,6 +64,7 @@
     rcCount = -1; seenMsgs = src?.rc ? src.rc.added : 0; prevPos = {}; outline = []; outlineFor = null;
     radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
     refreshOutline(); refreshTitle(); renderAll(true);
+    paintHomeBtn(); dispatchEvent(new CustomEvent("f1kr-mode", { detail: { mode: m } }));
   }
   $("modeReplay").addEventListener("click", () => setMode("replay"));
   $("modeLive").addEventListener("click", () => setMode("live"));
@@ -101,9 +104,14 @@
     bar.hidden = false; bar.classList.toggle("done", pct >= 100);
     bar.firstElementChild.style.width = pct + "%"; bar.setAttribute("aria-valuenow", pct);
     $("progress").textContent = `${text} ${pct}%`;
+    // (the home screen shows the same progress beside the session it started – told which load this is)
+    dispatchEvent(new CustomEvent("f1kr-load", { detail: { job: loadJob, pct, text } }));
   }
   const mb = (b) => (b / 1048576).toFixed(1);
+  // (a progress message carries the number of the load it belongs to: an earlier load still downloading in the main
+  // process – it isn't cancelled, its result is ignored – never moves the bar of the newer one)
   window.api.onProgress((p) => {
+    if (!HomeData.progressMatches(loadJob, p)) return;
     if (p.phase === "download") {
       // Until every file's size is known the total is still growing, so hold the bar near the start.
       const frac = p.total ? p.received / p.total : 0;
@@ -114,17 +122,22 @@
     }
   });
 
-  $("load").addEventListener("click", async () => {
-    const path = $("session").value; if (!path) return;
-    const info = sessions.find((s) => s.path === path), job = ++loadJob;   // (what was picked, kept as it was at the click)
+  // Loading a session – the one path the picker's button and the home screen both take. path: the archive's own id
+  // for the session (listSessions' path); info: that list entry. Each load is numbered: a newer one makes an older
+  // one's answer and progress be ignored (the older download itself runs on in the main process – not cancelled).
+  // at: a moment to open at instead of the session's start (이어보기). → { ok, job, error, superseded }
+  async function loadReplay(path, info, { at = null } = {}) {
+    if (!path) return { ok: false, error: "no session" };
+    const job = ++loadJob;   // (what was picked, kept as it was at the click)
+    if (replay && replayInfo && replayInfo.path !== path) rememberRecent(replayInfo, t);   // (where the last one was left)
     pause(); $("load").disabled = true;
     showLoad(0, "연결 중 ·");
     try {
-      const data = await window.api.loadSession(path);
-      if (job !== loadJob) return;
+      const data = await window.api.loadSession(path, job);
+      if (job !== loadJob) return { ok: false, job, superseded: true };
       showLoad(95, "화면 준비 중 ·");
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));   // paint 95% before the rebuild
-      if (job !== loadJob) return;
+      if (job !== loadJob) return { ok: false, job, superseded: true };
       const r = new ReplayKit.Replay(data);
       replay = r; replayInfo = info;
       // The recording starts long before the session (an hour before a race); the bar covers the session itself.
@@ -132,7 +145,8 @@
       [t0, tOpen] = gridFormed(r, tStart); t1 = Math.max(tStart + 1000, r.endTime());
       $("seek").min = t0; $("seek").max = t1;
       for (const id of ["play", "speed", "toStart", "seek"]) $(id).disabled = false;
-      t = tOpen; r.seek(tOpen);
+      const open = at != null && Number.isFinite(at) ? Math.max(t0, Math.min(at, t1)) : tOpen;
+      t = open; r.seek(open);
       // (switched to live while it downloaded: the replay is ready for when replay is picked again – setMode shows it
       // then – and the live screen's circuit, alerts, lists and title are left as they are)
       if (mode === "replay") {
@@ -140,13 +154,57 @@
         rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
         outline = r.lapShape() || replayFallbackLap(); if (!outline.length) outline = r.trackOutline(); outlineFor = "replay";
         refreshTitle();
-        seekTo(tOpen);
+        seekTo(open);
       }
+      rememberRecent(info, open);
       showLoad(100, "준비 완료 ·");
       loadHideTimer = setTimeout(() => { $("loadBar").hidden = true; $("progress").textContent = "준비 완료"; }, 2500);
-    } catch (e) { $("loadBar").hidden = true; $("progress").textContent = `불러오지 못했어요 (${e.message})`; }
-    finally { $("load").disabled = false; }
-  });
+      paintHomeBtn();
+      return { ok: true, job };
+    } catch (e) {
+      if (job === loadJob) { $("loadBar").hidden = true; $("progress").textContent = `불러오지 못했어요 (${e.message})`; }
+      return { ok: false, job, error: String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), superseded: job !== loadJob };
+    } finally { if (job === loadJob) $("load").disabled = false; }
+  }
+  $("load").addEventListener("click", () => { const path = $("session").value; loadReplay(path, sessions.find((s) => s.path === path)); });
+
+  // Recently watched sessions with where they were left (이어보기 on the home screen): the list entry (enough to load
+  // it again through loadReplay) and the moment on its timeline.
+  const RECENT_MAX = 8;
+  function rememberRecent(info, pos) {
+    if (!info?.path || !/^\d{4}\//.test(info.path)) return;
+    const keep = ["path", "type", "name", "start", "gmtOffset", "meeting", "location", "country", "circuitKey", "circuit", "meetingKey"];
+    const entry = Object.fromEntries(keep.filter((k) => info[k] != null).map((k) => [k, info[k]]));
+    const same = replayInfo?.path === info.path && replay;
+    Object.assign(entry, { year: +info.path.slice(0, 4), pos: Number.isFinite(pos) ? Math.round(pos) : null, tStart: same ? tStart : null, t1: same ? t1 : null, at: Date.now() });
+    store.set("recent", [entry, ...store.get("recent", []).filter((x) => x?.path !== info.path)].slice(0, RECENT_MAX));
+  }
+  addEventListener("pagehide", () => { if (replay && replayInfo) rememberRecent(replayInfo, t); });
+
+  // ---------- home screen ----------
+  // Showing it pauses the replay (its place is kept and remembered) and stops the 3D view's drawing; leaving it brings
+  // the timing screen back as it was – nothing loaded is thrown away.
+  function setHome(on) {
+    on = !!on;
+    if (on === homeOn) return;
+    homeOn = on;
+    document.body.classList.toggle("home-on", on); $("home").hidden = !on;
+    if (on) { pause(); if (replay && replayInfo) rememberRecent(replayInfo, t); window.Map3D?.hide(); }
+    else {
+      if (mapView === "3d" && window.Map3D) window.Map3D.show();
+      setTimeout(() => { applySizes(); renderAll(true); }, 0);
+      refreshTitle();
+    }
+    paintHomeBtn();
+    dispatchEvent(new CustomEvent("f1kr-home", { detail: { on } }));
+  }
+  function paintHomeBtn() {
+    const b = $("homeBtn"); if (!b) return;
+    const canLeave = mode === "live" || !!replay;
+    b.textContent = homeOn ? "타이밍 화면 →" : "⌂ 홈";
+    b.title = homeOn ? "불러온 세션의 타이밍 화면으로 돌아가요" : "시즌 지구본 홈 (재생은 멈추고 위치를 기억해요)";
+    b.hidden = homeOn && !canLeave;
+  }
 
   // ---------- replay playback ----------
   function play() { if (!replay || mode !== "replay") return; playing = true; $("play").textContent = "❚❚ 일시정지"; lastFrame = performance.now(); }
@@ -165,7 +223,7 @@
   // straight away), so the focus is dropped first.
   const typing = (el) => el.closest?.("select, input, textarea, audio, [contenteditable], .splitter");
   document.addEventListener("keydown", (e) => {
-    if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey || homeOn) return;
     if (e.code === "Space" && e.target.closest("button")) e.target.blur();
     if (mode === "live") {
       if (e.code === "Space") { e.preventDefault(); toggleLivePause(); }
@@ -267,10 +325,12 @@
     $("liveDot").classList.toggle("on", s.state === "live");
     $("liveToggle").textContent = s.state === "stopped" ? "연결" : "연결 끊기";
     if (mode === "live") { src = s.state === "live" ? live : src; refreshOutline(); renderAll(true); }
+    dispatchEvent(new CustomEvent("f1kr-live"));
   });
   window.api.live.onSnapshot((snap) => {
     live.snapshot(snap);
     if (mode === "live") { src = live; refreshOutline(); renderAll(true); }
+    dispatchEvent(new CustomEvent("f1kr-live"));
   });
   window.api.live.onFeed((topic, data) => live.push(topic, data));
   $("liveToggle").addEventListener("click", () => (liveStatus.state === "stopped" ? window.api.live.start() : window.api.live.stop()));
@@ -312,6 +372,8 @@
       if (t >= t1) { t = t1; pause(); }
       replay.seek(t);
       renderAll(false); paceUi(now);
+    } else if (mode === "live" && src === live && homeOn) {
+      live.tick();   // (the home screen covers the timing screen: the state stays current, nothing is drawn)
     } else if (mode === "live" && src === live) {
       live.tick();
       // A new session, or a fresh snapshot after a reconnect: lists start over and old messages don't alert again.
@@ -1446,7 +1508,8 @@
     $("mapCard").dataset.view = v;
     $("map3d").hidden = v !== "3d";
     document.querySelectorAll(".view-switch button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
-    const go = () => (v === "3d" ? window.Map3D.show() : window.Map3D.hide());
+    // (the home screen covers the map: the 3D view starts drawing only once it's left – setHome)
+    const go = () => (v === "3d" && !homeOn ? window.Map3D.show() : window.Map3D.hide());
     if (window.Map3D) go(); else if (v === "3d") addEventListener("map3d-ready", go, { once: true });
   }
   document.querySelectorAll(".view-switch button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
@@ -1544,20 +1607,32 @@
     $("authBtn").title = s.signedIn ? `실시간 차량 위치를 받아요${s.expires ? ` · 만료 ${kstFull.format(s.expires)}` : ""} · 누르면 로그아웃` : "F1 TV 구독 계정으로 로그인하면 실시간 차량 위치까지 받아요";
     return s;
   }
-  $("authBtn").addEventListener("click", async () => {
-    const s = await window.api.auth.status();
-    if (s.signedIn) { if (confirm("F1 TV에서 로그아웃할까요?")) await window.api.auth.logout(); }
-    else await window.api.auth.login();
+  // (the home screen's 로그인 button takes this same path)
+  async function signIn() {
+    await window.api.auth.login();
     await paintAuth();
     if (liveStatus.state !== "stopped") { await window.api.live.stop(); await window.api.live.start(); }
+  }
+  $("authBtn").addEventListener("click", async () => {
+    const s = await window.api.auth.status();
+    if (s.signedIn) {
+      if (confirm("F1 TV에서 로그아웃할까요?")) await window.api.auth.logout();
+      await paintAuth();
+      if (liveStatus.state !== "stopped") { await window.api.live.stop(); await window.api.live.start(); }
+    } else await signIn();
   });
 
   // ---------- schedule (KST) ----------
   const loadSchedule = () => (schedulePromise ||= window.api.getSchedule(thisYear).then((s) => (schedule = s)).catch((e) => { schedulePromise = null; throw e; }));
+  // (only a session with a published start time: a date-only one – 2018–21 practice and qualifying – is never counted
+  // down to, nor taken for one under way)
   function nextSession(now = Date.now()) {
     if (!schedule) return null;
-    return schedule.flatMap((r) => r.sessions.map((s) => ({ r, s, at: Date.parse(s.utc) }))).find((x) => x.at > now) || null;
+    return HomeData.nextTimedSession(schedule, now);
   }
+  const kstDay = KST({ month: "long", day: "numeric", weekday: "short" });
+  // a calendar session's KST start: the time when one was published, else its day and "시간 미정"
+  const sessionWhen = (s) => (s.utc ? kstFull.format(Date.parse(s.utc)) : s.date ? `${kstDay.format(Date.parse(s.date + "T12:00:00Z"))} · 시간 미정` : "시간 미정");
   const untilText = (d) => {
     const days = Math.floor(d / 864e5), hrs = Math.floor((d % 864e5) / 36e5), mins = Math.floor((d % 36e5) / 6e4);
     return d < 6e4 ? "곧 시작" : `${days ? days + "일 " : ""}${days || hrs ? hrs + "시간 " : ""}${mins}분 후`;
@@ -1598,10 +1673,12 @@
     const next = nextSession(now);
     if (next) $("nextUp").innerHTML = `다음 세션: <b>${esc(nextLabel(next))}</b> — ${kstFull.format(next.at)} (${untilText(next.at - now)})`;
     else $("nextUp").textContent = "남은 세션이 없어요.";
+    // (a date-only session is over once its day is over everywhere – UTC−12; until then it isn't marked done)
+    const over = (s) => (s.utc ? Date.parse(s.utc) < now : s.date ? Date.parse(s.date + "T00:00:00Z") + 864e5 + 12 * 3600e3 < now : false);
     $("scheduleList").innerHTML = schedule.map((r) => {
-      const past = Date.parse(r.sessions[r.sessions.length - 1].utc) < now;
+      const past = (HomeData.weekend(r)?.end ?? Infinity) < now;
       return `<div class="race ${past ? "past" : ""}"><h3>${r.round}라운드 · ${esc(KO.gpName(r.name))}<small>${esc(r.locality || "")}</small></h3><ul>
-        ${r.sessions.map((s) => `<li class="${s.name === "Race" ? "main" : ""} ${Date.parse(s.utc) < now ? "done" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span>${kstFull.format(Date.parse(s.utc))}</span></li>`).join("")}
+        ${r.sessions.map((s) => `<li class="${s.name === "Race" ? "main" : ""} ${over(s) ? "done" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span>${esc(sessionWhen(s))}</span></li>`).join("")}
       </ul></div>`;
     }).join("");
     document.querySelector(".race:not(.past)")?.scrollIntoView({ block: "start" });
@@ -1632,9 +1709,29 @@
   $("glossaryClose").addEventListener("click", () => { $("glossary").hidden = true; });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("schedule").hidden = true; $("glossary").hidden = true; $("syncPop").hidden = true; } });
 
+  // ---------- the home screen's bridge (home.js, an ES module) ----------
+  // What the home screen may do with the app: the same load path, the mode, the live connection (the one LiveClient in
+  // the main process – start() does nothing when it's already running), the sign-in, recent sessions. No hidden
+  // controls are driven.
+  window.F1KRApp = {
+    loadReplay, setHome, setMode, signIn,
+    get mode() { return mode; }, get homeOn() { return homeOn; }, get loadJob() { return loadJob; },
+    loaded: () => (replay && replayInfo ? { info: replayInfo, t, t0, t1, tStart, playing } : null),
+    // back to the loaded session where it was left (nothing reloaded)
+    resumeLoaded() { if (!replay) return false; if (mode !== "replay") setMode("replay"); setHome(false); return true; },
+    recent: () => store.get("recent", []).filter((x) => x && typeof x.path === "string"),
+    forgetRecent(path) { store.set("recent", store.get("recent", []).filter((x) => x?.path !== path)); },
+    live: () => ({ conn: liveStatus.state, message: liveStatus.message || "", positions: !!liveStatus.positions, session: live.state.SessionInfo ? { name: live.state.SessionInfo.Name, type: live.state.SessionInfo.Type, meeting: live.state.SessionInfo.Meeting?.Name, path: live.state.SessionInfo.Path || null } : null, status: live.state.SessionStatus?.Status || null, drivers: !!live.state.DriverList, waitingMs: liveStatus.state !== "stopped" ? live.waitingMs() : 0 }),
+    startLive: () => window.api.live.start(), stopLive: () => window.api.live.stop(),
+    nextSession: () => nextSession(), loadSchedule: () => loadSchedule(),
+  };
+  // (the home button in the top bar: to the home screen and back)
+  $("homeBtn").addEventListener("click", () => setHome(!homeOn));
+
   // ---------- boot ----------
   paintAuth();
   loadSessionList();
   setMode(store.get("mode", "replay") === "live" ? "live" : "replay");
   setPanel("rc");
+  paintHomeBtn();
 })();

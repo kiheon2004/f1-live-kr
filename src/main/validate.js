@@ -20,12 +20,19 @@ function inside(dir, file) {
 }
 
 const year = (v) => { if (!isInt(v, 2018, 2100)) throw new Error("bad year"); return v; };
+// a calendar season (the home screen shows calendars from before the archive's first season, 2018, as out of its range)
+const season = (v) => { if (!isInt(v, 1950, 2100)) throw new Error("bad season"); return v; };
 // MultiViewer circuit keys are small integers
 const circuitKey = (v) => { const k = typeof v === "string" && /^\d{1,4}$/.test(v) ? +v : v; if (!isInt(k, 0, 9999)) throw new Error("bad circuit key"); return k; };
 // a short plain string (location names, session paths), else throws
 const text = (v, max = 300) => { if (typeof v !== "string" || !v || v.length > max || /[\0]/.test(v)) throw new Error("bad text argument"); return v; };
 // archive session paths look like "2025/2025-09-07_Italian_Grand_Prix/2025-09-07_Race/"
 const sessionPath = (v) => { text(v); if (!/^\d{4}\/[^/]+\/[^/]+\/$/.test(v) || v.includes("..")) throw new Error("bad session path"); return v; };
+
+// a loading job's number (the page numbers its loads; progress messages carry it back): a positive whole number
+const jobId = (v) => { if (v === undefined || v === null) return null; if (!isInt(v, 1, 2 ** 31 - 1)) throw new Error("bad job id"); return v; };
+// a list of session paths (the home screen asks which of a season's sessions are on this computer)
+const sessionPaths = (v) => { if (!Array.isArray(v) || v.length > 400) throw new Error("bad session list"); return v.map(sessionPath); };
 
 // Links the app hands to the system browser: web pages only (no file:, javascript:, custom app schemes).
 function externalUrl(url) {
@@ -45,4 +52,4 @@ function trustedSender(frame, win, pageUrl) {
 // a facility model file name (src/data/models): "silverstone-wing.glb"
 const modelFile = (v) => { if (typeof v !== "string" || !/^[a-z0-9][a-z0-9_-]{0,80}\.glb$/.test(v)) throw new Error("bad model file"); return v; };
 
-module.exports = { modelFile, tileArgs, inside, year, circuitKey, text, sessionPath, externalUrl, trustedSender };
+module.exports = { modelFile, tileArgs, inside, year, season, circuitKey, text, sessionPath, jobId, sessionPaths, externalUrl, trustedSender };

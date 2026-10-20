@@ -3253,10 +3253,13 @@ function updateCorners(dt) {
 // a lap-line point's distance along the lap (the corners' own measure)
 function cornerS(i) { return world.corners.cum[i] ?? null; }
 
+// (one frame loop at a time: hide() then show() before the hidden loop's last frame ran would otherwise start a second
+// loop – the home screen hides and shows the view on every switch; rafId is the loop's pending frame)
+let rafId = 0;
 function frame(now) {
   if (!visible) return;
   // (held to 60 a second: every other refresh of a 120 Hz screen is left out, evenly)
-  if (perf.cap && now - lastT < 1000 / 60 - 4) { requestAnimationFrame(frame); return; }
+  if (perf.cap && now - lastT < 1000 / 60 - 4) { rafId = requestAnimationFrame(frame); return; }
   const dt = Math.min(0.1, (now - lastT) / 1000 || 0.016); lastT = now;
   ensureWorld(now);
   cornerMarks();
@@ -3284,7 +3287,7 @@ function frame(now) {
   renderer.render(scene, camera);
   if (devGpu) devGpu.end();
   adaptResolution(now, dt);
-  requestAnimationFrame(frame);
+  rafId = requestAnimationFrame(frame);
 }
 
 // Level of detail for vegetation: each tree chunk holds its instances in random order, so drawing only the
@@ -4227,7 +4230,7 @@ window.Map3D = {
       try { const m = JSON.parse(localStorage.getItem("f1kr:cam3d")); if (["heli", "chase", "onboard", "eye"].includes(m)) { camMode = m; paintCamButtons(); } } catch {}
     }
     if (visible) return;
-    visible = true; resize(); resetPace(); lastT = performance.now(); requestAnimationFrame(frame);
+    visible = true; resize(); resetPace(); lastT = performance.now(); cancelAnimationFrame(rafId); rafId = requestAnimationFrame(frame);
   },
   hide() { visible = false; },
   dev(o) { if ("shadows" in o) { sun.castShadow = o.shadows; } if ("hud" in o) devNoHud = !o.hud; if ("labels" in o) devNoLabels = !o.labels; return "ok"; },

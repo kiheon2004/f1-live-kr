@@ -19,6 +19,9 @@
 //   F1KR_DELAY=30    (live) broadcast delay in seconds before connecting
 //   F1KR_SWEEP=…     runs the 3D occlusion check on a list of races (see below)
 //   F1KR_LIVE=1      instead connects in live mode and captures after a few seconds
+//   F1KR_HOME=1      stays on the season globe home screen (shown at launch): waits until its list is usable, logs
+//                    HOMEREADY with its timings, then runs F1KR_SHOTS there (every other mode leaves the home screen first)
+//   F1KR_KEEP=1      keeps the page's storage of the last run (recent sessions, 이어보기 across launches)
 const fs = require("node:fs");
 const { app } = require("electron");
 
@@ -29,10 +32,15 @@ module.exports = function snapshot(win, outFile) {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   win.webContents.on("console-message", (...a) => { const e = a[0]?.message !== undefined ? a[0] : { level: a[1], message: a[2] }; if (e.level === "error" || e.level >= 2) console.log("RENDERER", e.message); });
   win.webContents.once("did-finish-load", async () => {
-    await run(`localStorage.clear()`);
+    if (!process.env.F1KR_KEEP) await run(`localStorage.clear()`);
+    if (!process.env.F1KR_HOME) await run(`window.F1KRApp?.setHome(false)`);
     if (process.env.F1KR_SIZE) { const [w, h] = process.env.F1KR_SIZE.split("x").map(Number); win.setSize(w, h); await wait(300); }
     if (process.env.F1KR_BIGMAP) await run(`localStorage.setItem("f1kr:sideW","900"); localStorage.setItem("f1kr:mapH","640"); dispatchEvent(new Event("resize"))`);
-    if (process.env.F1KR_GRIDSWEEP) {
+    if (process.env.F1KR_HOME) {
+      let m = {};
+      for (let i = 0; i < 120; i++) { m = JSON.parse(await run(`window.HomeDev?.metrics() || "{}"`)); if (m.tListReady != null) break; await wait(250); }
+      console.log("HOMEREADY", JSON.stringify(m));
+    } else if (process.env.F1KR_GRIDSWEEP) {
       // F1KR_GRIDSWEEP="2026:모나코 그랑프리 · 결승,…" – per race: load it (it opens at the standing grid), the 3D view with
       // its real surroundings, Map3D.gridCheck(), the cameras on the first and last car on the grid before play, and
       // two pictures (down the grid from behind; the last slots) next to the output file
