@@ -1385,6 +1385,7 @@ function gridCar(c, num, v, ctx) {
   c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
+let devSpin = null;   // (development, v0.43: the focused car's wheels rolled at this many turns a second – Map3D.spinWheels)
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
@@ -1654,7 +1655,7 @@ function updateCars(dt) {
     }
     c.steerT = A.t;
     if (devSteer != null && num === focusNum) c.steer = devSteerNow();
-    setWheels(c.model, c.spinW, c.steer);
+    setWheels(c.model, devSpin != null && num === focusNum ? (performance.now() / 1000) * devSpin * 2 * Math.PI : c.spinW, c.steer);
     if (devArmDiag && num === focusNum) drawArmDiag(c.model);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
@@ -4254,6 +4255,9 @@ window.Map3D = {
   occlusionTest,
   // development: hold the focused car's steering wheel at `deg` (+ = its left grip up – a right turn), or sweep it
   // (period s, amplitude deg) – the arms' poses at any lock with the car standing still; null lets go
+  // development (v0.43): roll the focused car's wheels at `rps` turns a second whatever it does (null lets go) – what turns
+  // and what doesn't inside the wheel, the car standing
+  spinWheels(rps = 0.5) { devSpin = rps == null ? null : +rps; return "ok"; },
   steerWheel(deg, period = 0) { devSteer = deg == null ? null : period ? { amp: deg, period, t0: performance.now() } : deg; return "ok"; },
   // development (v0.42): the focused car's steering wheel alone (its body, arms – and with hands false its gloves – hidden)
   // for close looks at the wheel; false shows them again

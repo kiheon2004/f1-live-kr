@@ -58,6 +58,10 @@ test("corners v0.43: the drum, disc, caliper and upright inside the rim's barrel
     // the rim's barrel (in the lip) at barrelR, inside the tyre's bead (0.247) and outside the drum
     const lip = u.spins[0].children[2].geometry, lr = []; for (const t of tris(lip)) lr.push(...t.pts.map(radial));
     assert.ok(lr.some((v) => Math.abs(v - K.barrelR) < 1e-4) && K.barrelR < 0.247 && K.barrelR - K.drumR >= 0.015);
+    // its faces towards the axle (seen from inside the wheel), the rim centre's web facing inboard (−x on the left wheel)
+    let bar = 0, barBad = 0, web = 0, webBad = 0;
+    for (const t of tris(lip)) { const rr = radial(t.c); if (Math.abs(rr - K.barrelR) < 0.002 && Math.abs(t.n[0]) < 0.3) { bar++; if ((t.n[1] * t.c[1] + t.n[2] * t.c[2]) / rr > -0.9) barBad++; } else if (rr > K.hubR + 0.01 && rr < K.barrelR - 0.01 && Math.abs(t.c[0] - (hw - 0.075)) < 0.002) { web++; if (t.n[0] > -0.9) webBad++; } }
+    assert.ok(bar > 20 && barBad === 0 && web > 20 && webBad === 0, `barrel ${barBad}/${bar}, web ${webBad}/${web} facing the wrong way`);
     // the 2022–25 arch: points over the tread (within the tyre's width, beyond its radius) – none in 2026 (no arch:
     // C3.14); 2026's Front Drum Rear Deflector instead: inboard of the tyre, behind and under the axle (C3.14.7)
     let above = 0, board = 0; for (const t of tris(g)) for (const q of t.pts) { if (radial(q) > r + 0.02 && q[0] > -hw) above++; if (q[0] < -hw - 0.005 && q[2] < -0.3 && q[1] < -0.09) board++; }
