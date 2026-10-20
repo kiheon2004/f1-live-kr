@@ -22,7 +22,7 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
-import { makeCar, setCompound, setAero, setWheels, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
+import { makeCar, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
@@ -474,12 +474,12 @@ function applyLift(c, vis, dims) {
   const [lf, lr] = vis.lift, u = c.model.userData;
   c.model.position.y = (lf + lr) / 2;
   c.model.rotation.x -= Math.atan2(lf - lr, dims.FZ - dims.RZ);
-  u.wheels.forEach((w, i) => { w.visible = !vis.off[i]; });
+  u.wheels.forEach((w, i) => setWheelOff(c.model, i, !!vis.off[i]));   // (v0.43: the wheel only – drum, upright, disc stay)
   c.lifted = true;
 }
 function restoreCar(c) {
   if (!c.lifted) return;
-  c.model.position.y = 0; c.model.userData.wheels.forEach((w) => { w.visible = true; }); c.lifted = false;
+  c.model.position.y = 0; c.model.userData.wheels.forEach((w, i) => setWheelOff(c.model, i, false)); c.lifted = false;
 }
 function pitWorkNote(text) {
   let el = document.getElementById("pitWorkNote");
@@ -1385,6 +1385,7 @@ function gridCar(c, num, v, ctx) {
   c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
+let devSpin = null;   // (development, v0.43: the focused car's wheels rolled at this many turns a second – Map3D.spinWheels)
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
@@ -1654,7 +1655,7 @@ function updateCars(dt) {
     }
     c.steerT = A.t;
     if (devSteer != null && num === focusNum) c.steer = devSteerNow();
-    setWheels(c.model, c.spinW, c.steer);
+    setWheels(c.model, devSpin != null && num === focusNum ? (performance.now() / 1000) * devSpin * 2 * Math.PI : c.spinW, c.steer);
     if (devArmDiag && num === focusNum) drawArmDiag(c.model);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
@@ -2206,7 +2207,7 @@ function leader() {
 // settings' "차량 크게" – a readability option, off by default: the names over them say who is where).
 // Level of detail by the car's size on screen (pixels along its length), with a margin each way so it doesn't flick:
 // close up (over ~260 px, or the car the cockpit cameras are in) the cockpit interior, hands and steering wheel;
-// under ~26 px no wheel covers, deflectors or lights either.
+// under ~26 px no wheel covers or lights either (the corners' drums and the 2022–25 front fences stay – v0.43).
 function scaleForView() {
   const H = hostH || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H, big = geoSettings().bigCars === true, focusNum = app().focus || leader();
   for (const c of cars.values()) {
@@ -3897,7 +3898,7 @@ window.Map3D = {
   crewState() {
     let h = 0, n = 0;
     for (const m of world?.crews?.group.children || []) for (let i = 0; i < m.count; i++) { const e = m.instanceMatrix.array; for (let k = 12; k < 15; k++) { h = (h * 31 + Math.round(e[i * 16 + k] * 100)) | 0; } n++; }
-    const lifted = [...cars.values()].filter((c) => c.lifted).map((c) => ({ num: c.num, y: +c.model.position.y.toFixed(3), wheels: c.model.userData.wheels.map((w) => (w.visible ? 1 : 0)).join(""), pos: c.pos.toArray().map((v) => +v.toFixed(3)), raw: c.raw?.toArray().map((v) => +v.toFixed(3)), yaw: +c.yaw.toFixed(4) }));
+    const lifted = [...cars.values()].filter((c) => c.lifted).map((c) => ({ num: c.num, y: +c.model.position.y.toFixed(3), wheels: c.model.userData.wheels.map((w, i) => (wheelIsOn(c.model, i) ? 1 : 0)).join(""), pos: c.pos.toArray().map((v) => +v.toFixed(3)), raw: c.raw?.toArray().map((v) => +v.toFixed(3)), yaw: +c.yaw.toFixed(4) }));
     return JSON.stringify({ t: app().t, instances: n, hash: h, lifted, note: document.getElementById("pitWorkNote")?.hidden === false ? document.getElementById("pitWorkNote").textContent : null });
   },
   // development: the starts as the lights use them (race control's + the field's launch by telemetry)
@@ -4257,6 +4258,9 @@ window.Map3D = {
   occlusionTest,
   // development: hold the focused car's steering wheel at `deg` (+ = its left grip up – a right turn), or sweep it
   // (period s, amplitude deg) – the arms' poses at any lock with the car standing still; null lets go
+  // development (v0.43): roll the focused car's wheels at `rps` turns a second whatever it does (null lets go) – what turns
+  // and what doesn't inside the wheel, the car standing
+  spinWheels(rps = 0.5) { devSpin = rps == null ? null : +rps; return "ok"; },
   steerWheel(deg, period = 0) { devSteer = deg == null ? null : period ? { amp: deg, period, t0: performance.now() } : deg; return "ok"; },
   // development (v0.42): the focused car's steering wheel alone (its body, arms – and with hands false its gloves – hidden)
   // for close looks at the wheel; false shows them again
