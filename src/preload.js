@@ -9,8 +9,16 @@ const listen = (channel) => (fn) => {
 // The only bridge between the page and the main process.
 contextBridge.exposeInMainWorld("api", {
   listSessions: (year) => ipcRenderer.invoke("sessions:list", year),
-  loadSession: (sessionPath) => ipcRenderer.invoke("session:load", sessionPath),
+  loadSession: (sessionPath, job) => ipcRenderer.invoke("session:load", sessionPath, job),
   getSchedule: (year) => ipcRenderer.invoke("schedule:get", year),
+  // home screen: the season's sessions and calendar with where they came from, which sessions are on this computer,
+  // whether F1 would give one now, the calendars already checked (nothing fetched)
+  listSessionsMeta: (year, cacheOnly) => ipcRenderer.invoke("sessions:listMeta", year, cacheOnly),
+  cachedSessions: (paths) => ipcRenderer.invoke("sessions:cached", paths),
+  probeSession: (sessionPath) => ipcRenderer.invoke("session:probe", sessionPath),
+  getScheduleMeta: (year) => ipcRenderer.invoke("schedule:meta", year),
+  checkedSchedules: () => ipcRenderer.invoke("schedule:checked"),
+  metaStats: () => ipcRenderer.invoke("meta:stats"),
   trackOutline: (location) => ipcRenderer.invoke("track:outline", location),
   trackCircuit: (key, year) => ipcRenderer.invoke("track:circuit", key, year),
   onProgress: listen("session:progress"),

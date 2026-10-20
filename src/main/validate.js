@@ -27,6 +27,11 @@ const text = (v, max = 300) => { if (typeof v !== "string" || !v || v.length > m
 // archive session paths look like "2025/2025-09-07_Italian_Grand_Prix/2025-09-07_Race/"
 const sessionPath = (v) => { text(v); if (!/^\d{4}\/[^/]+\/[^/]+\/$/.test(v) || v.includes("..")) throw new Error("bad session path"); return v; };
 
+// a loading job's number (the page numbers its loads; progress messages carry it back): a positive whole number
+const jobId = (v) => { if (v === undefined || v === null) return null; if (!isInt(v, 1, 2 ** 31 - 1)) throw new Error("bad job id"); return v; };
+// a list of session paths (the home screen asks which of a season's sessions are on this computer)
+const sessionPaths = (v) => { if (!Array.isArray(v) || v.length > 400) throw new Error("bad session list"); return v.map(sessionPath); };
+
 // Links the app hands to the system browser: web pages only (no file:, javascript:, custom app schemes).
 function externalUrl(url) {
   try { const u = new URL(url); return u.protocol === "https:" || u.protocol === "http:"; } catch { return false; }
@@ -45,4 +50,4 @@ function trustedSender(frame, win, pageUrl) {
 // a facility model file name (src/data/models): "silverstone-wing.glb"
 const modelFile = (v) => { if (typeof v !== "string" || !/^[a-z0-9][a-z0-9_-]{0,80}\.glb$/.test(v)) throw new Error("bad model file"); return v; };
 
-module.exports = { modelFile, tileArgs, inside, year, circuitKey, text, sessionPath, externalUrl, trustedSender };
+module.exports = { modelFile, tileArgs, inside, year, circuitKey, text, sessionPath, jobId, sessionPaths, externalUrl, trustedSender };

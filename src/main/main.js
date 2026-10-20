@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, Notification, powerMonitor } = requi
 const path = require("node:path");
 const fs = require("node:fs");
 const { Archive } = require("./archive");
-const { getSchedule } = require("./schedule");
+const { ScheduleStore } = require("./schedule");
 const { LiveClient } = require("./live");
 const { Auth } = require("./auth");
 const { getCircuit } = require("./circuit");
@@ -20,7 +20,7 @@ const DEV_DATA = !app.isPackaged && process.env.F1KR_USERDATA;
 app.setPath("userData", DEV_DATA || path.join(app.getPath("appData"), "f1-live-kr"));
 app.setName("라이브 타이밍 KR");
 
-let archive, auth, live, mainWin, scenes, google;
+let archive, auth, live, mainWin, scenes, google, schedules;
 const PAGE = path.join(__dirname, "..", "renderer", "index.html"), PAGE_URL = pathToFileURL(PAGE).href;
 
 function createWindow() {
@@ -44,8 +44,14 @@ function createWindow() {
 
 const send = (channel, ...args) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, ...args); };
 
+// (development only: F1KR_OFFLINE=1 – the main process gets no answer from any server, as on a plane: the home screen,
+// cached calendars and cached sessions are checked that way. The page itself never fetches (its CSP allows only 'self').)
+if (!app.isPackaged && process.env.F1KR_OFFLINE) global.fetch = async () => { throw new TypeError("fetch failed", { cause: { code: "ENOTFOUND (F1KR_OFFLINE)" } }); };
+
 app.whenReady().then(() => {
   const data = app.getPath("userData"), cacheDir = (DEV_DATA && process.env.F1KR_CACHE) || path.join(data, "cache");
+  // season calendars (Jolpica) are kept in the app's own data folder, apart from the session cache
+  schedules = new ScheduleStore(path.join(data, "meta"));
   archive = new Archive(cacheDir);
   setTimeout(() => archive.prune(), 5000);   // (old session recordings, past 3 GB)
   auth = new Auth(data);
@@ -69,9 +75,20 @@ app.whenReady().then(() => {
   });
   const num = (v) => { if (!Number.isFinite(v)) throw new Error("bad number"); return v; };
   handle("sessions:list", (_e, year) => archive.listSessions(V.year(year)));
-  handle("session:load", (e, sessionPath) =>
-    archive.loadSession(V.sessionPath(sessionPath), (p) => { if (!e.sender.isDestroyed()) e.sender.send("session:progress", p); }));
-  handle("schedule:get", (_e, year) => getSchedule(V.year(year)));
+  // the same list with where it came from (fresh / cached copy while offline or refused) – the home screen's states
+  handle("sessions:listMeta", (_e, year, cacheOnly) => archive.listSessionsMeta(V.year(year), { cacheOnly: cacheOnly === true }));
+  handle("sessions:cached", (_e, paths) => archive.cachedSessions(V.sessionPaths(paths)));
+  handle("session:probe", (_e, sessionPath) => archive.probeSession(V.sessionPath(sessionPath)));
+  // (each progress message carries the page's number for that load: an earlier load still downloading never moves the
+  // bar of a newer one)
+  handle("session:load", (e, sessionPath, job) => {
+    const id = V.jobId(job);
+    return archive.loadSession(V.sessionPath(sessionPath), (p) => { if (!e.sender.isDestroyed()) e.sender.send("session:progress", id == null ? p : { ...p, job: id }); });
+  });
+  handle("schedule:get", async (_e, year) => (await schedules.get(V.year(year))).races);
+  handle("schedule:meta", async (_e, year) => ({ ...(await schedules.get(V.year(year))), stats: { ...schedules.stats } }));
+  handle("schedule:checked", () => schedules.checked());
+  handle("meta:stats", () => ({ schedule: { ...schedules.stats }, archive: { ...(archive.stats || {}) } }));
   handle("track:outline", (_e, location) => { const y = new Date().getFullYear(); return archive.findOutline(V.text(location, 80), [y, y - 1, y - 2]); });
   handle("track:circuit", (_e, key, year) => getCircuit(cacheDir, key, year));
   // Real-world 3D surroundings: fitted scene, map tiles (terrain heights, imagery), optional Google imagery.
