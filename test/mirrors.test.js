@@ -216,6 +216,10 @@ test("mirror pass: only glass the camera can see – past the car's own parts, a
     const t = M.seenShare(car, V(...P.tcam), car.userData.mirrors);
     if (season === 2025) assert.ok(t.every((x) => x < 0.5), `2025 T-cam sees ${t}`); else assert.ok(t.every((x) => x > 0.5), `2026 T-cam sees ${t}`);
   }
+  // the 2025 T-cam: no pass (its glass behind the halo)
+  { const sc = new THREE.Scene(), car = C.makeCar({ teamName: "Haas F1 Team", season: 2025 }), P = car.userData.profile; sc.add(car); car.updateMatrixWorld(true);
+    const cam = new THREE.PerspectiveCamera(60, 16 / 9, 0.05, 2000); cam.position.set(...P.tcam); cam.lookAt(0, 0.7, 3); cam.updateMatrixWorld(true);
+    const r = mockRenderer(); assert.equal(M.createMirrorPass().update(r, sc, cam, car, "full", "onboard:31"), 0); }
   // a camera 40 m behind: the glass a few pixels – the simple glass, no pass
   const { scene, car } = rig(), r = mockRenderer(), P = M.createMirrorPass();
   const far = new THREE.PerspectiveCamera(50, 16 / 9, 0.3, 2000); far.position.set(0, 3, -40); far.lookAt(0, 0.7, 0); far.updateMatrixWorld(true);

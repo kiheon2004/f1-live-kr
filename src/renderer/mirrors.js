@@ -160,7 +160,9 @@ export function createMirrorPass(three = THREE) {
       cam.userData.go = false;
       W.c.set(s.c[0], s.c[1], s.c[2]).applyMatrix4(mw); W.n.set(s.n[0], s.n[1], s.n[2]).transformDirection(mw); W.h.set(s.h[0], s.h[1], s.h[2]).transformDirection(mw); W.up.set(s.up[0], s.up[1], s.up[2]).transformDirection(mw);
       sphere.center.copy(W.c); sphere.radius = Math.hypot(s.hw, s.hh);
-      if (!(st.seen[i] > 0) || !frustum.intersectsSphere(sphere) || screenArea(renderer, camera, W, s.hw, s.hh) < MIN_PX) { st.stats.skipped++; continue; }
+      // (under half the glass in sight past the car's own parts – the 2022–25 T-cam's, behind the halo – no pass: what
+      // shows of it is a sliver, measured as nothing in the app's frames)
+      if (!(st.seen[i] >= 0.5) || !frustum.intersectsSphere(sphere) || screenArea(renderer, camera, W, s.hw, s.hh) < MIN_PX) { st.stats.skipped++; continue; }
       const due = !st.drawn[i] || st.frame - st.last[i] >= M.every;
       if (!due) continue;
       if (!mirrorCamera(cam, eye, W.c, W.n, W.h, W.up, s.hw, s.hh, MIRROR.spread, MIRROR.far)) continue;
