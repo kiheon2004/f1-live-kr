@@ -4184,7 +4184,9 @@ window.Map3D = {
       let trackY = null; if (edge != null) { const [x, z] = at(edge), pr = F.project(x, z); if (pr) trackY = +(pr.sample.p.y - s.floor).toFixed(2); }
       // the feed's pit path across here: the nearest path point in front of this garage (within ±6 m along it)
       let path = null; if (world.pitLane) { let best = Infinity; for (const q of world.pitLane.pts) { const pr = G.project(q.x, q.z); if (Math.abs(pr.u - s.uc) < 6 && Math.abs(pr.u - s.uc) < best) { best = Math.abs(pr.u - s.uc); path = +pr.off.toFixed(1); } } }
-      rows.push({ k, u: Math.round(s.uc), floor: +s.floor.toFixed(2), groundOver: gr, path, edge, wallOff, trackOverFloor: trackY });
+      // (the lap's nearest sample to where the floor's tarmac height is taken – 1.5 m out from the front: scenery.js surfaceAt)
+      const [nx, nz] = at(1.5), [ns, nd] = world.grid.nearest(nx, nz, 6), near = ns ? [ns.i, +(ns.p.y - s.floor).toFixed(2), +nd.toFixed(1)] : null;
+      rows.push({ k, u: Math.round(s.uc), floor: +s.floor.toFixed(2), groundOver: gr, path, edge, wallOff, trackOverFloor: trackY, near });
     }
     const pitCars = [...cars.values()].filter((c) => c.pit && c.obj.visible).map((c) => { const p = G.project(c.pos.x, c.pos.z), s = G.slots[Math.max(0, Math.min(G.slots.length - 1, Math.round((p.u - G.gStart) / G.pitch - 0.5)))]; return [c.num, Math.round(p.u), +p.off.toFixed(1), +(c.obj.position.y - s.floor).toFixed(3)]; });
     return JSON.stringify({ ok: true, facility: G.facility, n: G.slots.length, pitch: +G.pitch.toFixed(2), depth: G.slots[0].depth, rows, pitCars });

@@ -937,7 +937,18 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const alongTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); return s?.tan ? [s.tan.x, s.tan.z] : [1, 0]; };
     // (the pit lane's tarmac height, for garage floors: as the other tarmac is laid below – on the terrain, at the
     // track's height near it)
-    const surfaceAt = (x, z) => { const [s, d] = nearTrack(x, z); const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06); };
+    // (v0.44: toward – the way to the track from a garage's front: a nearest stretch behind the building is not the one
+    // the pit lane runs beside. Monaco 2025: past Haas' garage the nearest lap was the Piscine 25 m behind the garages,
+    // 2.3 m above the straight in front of them – the floors stepped 1.7 m up from one garage to the next. There the
+    // nearest stretch on the track's side)
+    const surfaceAt = (x, z, toward = null) => {
+      let [s, d] = nearTrack(x, z);
+      if (s && toward && (s.p.x - x) * toward[0] + (s.p.z - z) * toward[1] < -0.3 * d * Math.hypot(toward[0], toward[1])) {
+        s = null; d = Infinity;
+        for (const q of world.samples) { const dx = q.p.x - x, dz = q.p.z - z, e = Math.hypot(dx, dz); if (e < d && dx * toward[0] + dz * toward[1] > 0) { s = q; d = e; } }
+      }
+      const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06);
+    };
     // metres from a point to the edge of the track's tarmac (the measured half width), negative on it
     const trackEdge = sideEdge;
     // the map's solid barriers (walls, jersey barriers, retaining walls, guard rails – not fences) as segments, and the
