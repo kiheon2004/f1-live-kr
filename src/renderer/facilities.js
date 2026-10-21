@@ -1452,6 +1452,8 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     }
     if (!made) { info.push({ id: spec.id, how: "fallback", reason, ...(spec.found ? { found: spec.found } : {}) }); continue; }   // the map's buildings stay
     made.object.name = spec.id; made.object.userData.facility = spec.id;
+    // (its outline and top: no rain inside it – weather.js coverRaster; the garages' interiors are in it)
+    if (made.footprint?.length > 2 && Number.isFinite(made.top)) made.object.userData.cover = { pts: made.footprint, y: made.top };
     group.add(made.object);
     const anchorXZ = spec.model?.anchor ? gf.fromLL(spec.model.anchor[0], spec.model.anchor[1]) : null;
     // (an entry that picks its own buildings – genericPitSpec – also takes every map building standing inside what it

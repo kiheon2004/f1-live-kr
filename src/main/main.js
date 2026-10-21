@@ -8,6 +8,7 @@ const { Auth } = require("./auth");
 const { getCircuit } = require("./circuit");
 const { Scenes } = require("./scene");
 const { GoogleTiles } = require("./google");
+const { Clouds } = require("./clouds");
 const geo = require("./geo");
 const V = require("./validate");
 const { pathToFileURL } = require("node:url");
@@ -61,6 +62,8 @@ app.whenReady().then(() => {
   live = !app.isPackaged && process.env.F1KR_LIVEFILE ? new (require("./dev-livefile").LiveFile)(cacheDir, process.env.F1KR_LIVEFILE) : new LiveClient({ getToken: () => auth.getToken() });
   scenes = new Scenes(cacheDir);
   google = new GoogleTiles(data);
+  // (cloud cover for the 3D sky – clouds.js: Open-Meteo, anonymous; kept in the app's own data folder)
+  const clouds = new Clouds(path.join(data, "weather"));
   // After sleep the socket is usually dead without noticing; reconnect straight away.
   powerMonitor.on("resume", () => { if (!live.stopped) { live.retry = 0; live.connect(); } });
   live.on("snapshot", (snap) => send("live:snapshot", snap));
@@ -114,6 +117,7 @@ app.whenReady().then(() => {
   handle("geo:google", () => ({ hasKey: google.hasKey() }));
   handle("geo:googleCheck", () => google.check());
   handle("geo:googleKey", (_e, key) => { if (typeof key !== "string" || key.length > 300) throw new Error("bad key"); return google.setKey(key); });
+  handle("weather:clouds", (_e, lat, lon, utc, live) => clouds.get(lat, lon, utc, live === true));
   handle("geo:googleAttribution", (_e, zoom, n, s, eLon, w) => google.attribution(V.tileArgs(zoom, 0, 0)[0], num(n), num(s), num(eLon), num(w)).catch(() => "Google"));
   handle("live:start", () => { live.start(); });
   handle("live:stop", () => { live.stop(); });
