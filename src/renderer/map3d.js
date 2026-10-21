@@ -350,7 +350,7 @@ function pitFrame(src, t, lag, isRace) {
     let pitStart = null;
     if (ctx && carKind(S.hist, ctx, num, t).kind === "pit") pitStart = speed <= PIT.still ? "queue" : "go";
     const inRun = pr.off > -3 && pr.off < 40;
-    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
+    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), retiredFor: outFor(S.hist, num, t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
   }
   for (const r of out.values()) r.state = pitState(r.input);
   // (a teammate in the box – or still pulling out of it – and this car standing or creeping up behind: a double stack)
@@ -364,6 +364,12 @@ function pitFrame(src, t, lag, isRace) {
     Object.assign(r, { at, want, turn: Math.atan2(ahead - want, 1), inRun });
   }
   return out;
+}
+// seconds since the car's Retired or Stopped flag was last set (up to t); null: neither set
+function outFor(hist, num, t) {
+  let since = null;
+  for (const k of ["Retired", "Stopped"]) { let s = null; for (const [ts, x] of hist.flags.get(num + ":" + k) || []) { if (ts > t) break; s = x ? s ?? ts : null; } if (s != null) since = since == null ? s : Math.min(since, s); }
+  return since == null ? null : (t - since) / 1000;
 }
 const pitCost = { ms: 0, frames: 0 };
 // the nearest point of the measured pit path to (x, z): { x, z, d, tx, tz (the way cars go along it there) }
