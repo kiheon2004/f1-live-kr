@@ -1446,6 +1446,7 @@ function gridCar(c, num, v, ctx) {
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devSpin = null;   // (development, v0.43: the focused car's wheels rolled at this many turns a second – Map3D.spinWheels)
+let devRoadJoin = true;   // (development: the ground between two stretches of the lap as before v0.44 – Map3D.roadJoin(false))
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
 let devTrafMark = false;   // (development: red rings under cars with an overlap left – Map3D.trafficState(at, true))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
@@ -2619,7 +2620,7 @@ async function loadGeo(w) {
     const circ = A.circuitKey?.() != null ? await window.api.trackCircuit(A.circuitKey(), A.sessionYear?.() || null).catch(() => null) : null;
     if (job !== geoJob || world !== w) return;
     const corners = (circ?.corners || []).map((k) => ({ n: k.n, x: k.x * DM - w.center.x, z: -(k.y * DM - w.center.z) }));
-    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners, groundOld: devGroundOld,
+    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners, groundOld: devGroundOld, roadJoin: devRoadJoin,
       facilities: opts.facilities, year: A.sessionYear?.() || null, venue: venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
     if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
@@ -3985,6 +3986,10 @@ window.Map3D = {
   // development: the map's buildings and stand outlines within r m of (lat, lon) or a listed stand's ends – kind, name,
   // height, area, distance, whether the grandstands treat it as an obstacle (area > 900 m² or over 14 m)
   // development: the level yards and footings on (true) or off (false – as before v0.39); resolves once rebuilt
+  roadJoin(on = true) {
+    devRoadJoin = !!on; rebuild(); const t0 = performance.now();
+    return new Promise((res) => { const t = setInterval(() => { if (world?.real?.info || performance.now() - t0 > 150e3) { clearInterval(t); res(world?.real ? `rebuilt (join ${on ? "on" : "off"}) ${Math.round(performance.now() - t0)} ms` : "timeout"); } }, 400); });
+  },
   groundFix(on = true) {
     devGroundOld = !on; rebuild(); const t0 = performance.now();
     return new Promise((res) => { const t = setInterval(() => { if (world?.real?.info || performance.now() - t0 > 150e3) { clearInterval(t); res(world?.real ? `rebuilt (${on ? "fix" : "old"}) ${Math.round(performance.now() - t0)} ms` : "timeout"); } }, 400); });
@@ -4100,6 +4105,65 @@ window.Map3D = {
   },
   // development: what is seen at screen point (x, y: −1…1) – the first few objects a ray from the camera meets, named
   // by their nearest named parent, with the distance and whether their material is shown
+  // development (v0.44 §3): spiky ground beside the road – terrainscan.js over the drawn terrain grid (vertices standing
+  // out of their neighbours) and over every mesh of the world near the track (steep thin triangles rising over the road,
+  // up-facing surfaces turned over), plus the rocks' instances near the road. → JSON (scene x, y, z and lat/lon)
+  async terrainScan(maxD = 40, top = 25, minDev = 2.5) {
+    const R = world?.real; if (!R?.terrainAt) return "no map";
+    const { gridSpikes, triScan } = await import("./terrainscan.js");
+    const roadAt = (x, z) => { const [s] = world.grid.nearest(x, z, 2); if (!s) return null; const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; return { y: s.p.y, d: l >= 0 ? l - edgeOf(s, 1) : -l + edgeOf(s, -1), i: s.i }; };
+    const f = (v) => +v.toFixed(2), ll = (x, z) => R.geo.toLL(x, z).map((v) => +v.toFixed(6));
+    const ter = R.group.getObjectByName("terrain"), b = R.bounds, nx = Math.round((b.x1 - b.x0) / R.terrainCell[0]), nz = Math.round((b.z1 - b.z0) / R.terrainCell[1]);
+    const P = ter.geometry.attributes.position.array;
+    const sp = gridSpikes(P, nx, nz, 3, 1, (i, j) => [P[(j * (nx + 1) + i) * 3], P[(j * (nx + 1) + i) * 3 + 2]], roadAt, { maxD, minDev });
+    const meshes = {}, tmp = new THREE.Vector3();
+    world.group.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry?.attributes?.position) return;
+      const path = []; for (let p = o; p && p !== world.group; p = p.parent) path.push(p.name || p.type);
+      const key = path.reverse().join("/"), A = o.geometry.attributes.position, W = new Float32Array(A.count * 3); o.updateWorldMatrix(true, false);
+      for (let k = 0; k < A.count; k++) { tmp.fromBufferAttribute(A, k).applyMatrix4(o.matrixWorld); W[k * 3] = tmp.x; W[k * 3 + 1] = tmp.y; W[k * 3 + 2] = tmp.z; }
+      const up = /terrain|auxTarmac|road|kerb|ground/i.test(key), hits = triScan(W, o.geometry.index?.array || null, roadAt, { maxD, upFacing: up });
+      if (!hits.length) return;
+      const m = meshes[key] || (meshes[key] = { spike: 0, down: 0, thin: 0, worst: [] });
+      for (const h of hits) m[h.flag]++;
+      m.worst.push(...hits.sort((a, c) => c.rise - a.rise).slice(0, top).map((h) => ({ flag: h.flag, t: h.t, ll: ll(h.cx, h.cz), rise: f(h.rise), road: f(h.road), d: f(h.d), ny: f(h.ny), thin: f(h.thin), s: h.s, v: h.v.map((q) => q.map(f)) })));
+      m.worst = m.worst.sort((a, c) => c.rise - a.rise).slice(0, top);
+    });
+    const rocks = []; R.group.traverse((o) => { if (o.name !== "rocks" || !o.isInstancedMesh) return; const M = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); for (let k = 0; k < o.count; k++) { o.getMatrixAt(k, M); M.decompose(p, q, s); const r = roadAt(p.x, p.z); if (r && r.d < maxD) rocks.push({ k, ll: ll(p.x, p.z), x: f(p.x), y: f(p.y), z: f(p.z), size: f(Math.max(s.x, s.y, s.z)), above: f(p.y - r.y), d: f(r.d) }); } });
+    return JSON.stringify({ grid: { nx, nz, cell: R.terrainCell.map(f), n: sp.length, peaks: sp.filter((v) => v.peak).length, pits: sp.filter((v) => v.pit).length,
+      worst: sp.slice(0, top).map((v) => ({ ij: [v.i, v.j], ll: ll(v.x, v.z), xyz: [f(v.x), f(v.y), f(v.z)], med: f(v.med), dev: f(v.dev), peak: v.peak, pit: v.pit, road: f(v.road), d: f(v.d), s: v.s })) },
+      meshes, rocks: { n: rocks.length, list: rocks.sort((a, c) => a.d - c.d).slice(0, top) },
+      // the lap's height every 20 samples, and the stretches of the lap that pass close by another at another height
+      profile: world.samples.filter((s) => s.i % 20 === 0).map((s) => [s.i, f(s.p.y)]),
+      stacked: (() => { const out = []; for (const s of world.samples) { if (s.i % 4) continue; let best = null; for (const q of world.samples) { const di = Math.abs(q.i - s.i); if (Math.min(di, world.n - di) < 60 || Math.abs(q.p.y - s.p.y) < 3) continue; const d = Math.hypot(q.p.x - s.p.x, q.p.z - s.p.z); if (d < 70 && (!best || d < best[1])) best = [q, d]; } if (best && s.i < best[0].i) out.push([s.i, best[0].i, f(best[1]), f(best[0].p.y - s.p.y), ll(s.p.x, s.p.z)]); } return out; })() });
+  },
+  // development: show / hide the real surroundings' parts by name ("buildings,landmarks,trees") and draw the terrain as
+  // its wireframe – for seeing the ground's own triangles
+  partsShown(names, v = false) { const R = world?.real; if (!R) return "no map"; const set = names.split(","); for (const c of R.group.children) if (set.includes(c.name)) c.visible = !!v; return R.group.children.map((c) => c.name + (c.visible ? "" : "(off)")).join(","); },
+  // development: the first mesh triangle under a screen point (−1..1): the mesh's path, the triangle's corners (scene) and
+  // the lap sample nearest each corner with its road height
+  // development: one line per circuit – the terrain poking through the tarmac, sheer faces near the road (> 5 and > 10 m
+  // across one grid edge, on land off the tarmac – under a road its own walls stand), stacked
+  // stretches of the lap, what roadground.js changed (Map3D.roadJoin(false) for the ground as before)
+  async terrainSummary(maxD = 40) {
+    const R = world?.real; if (!R?.terrainAt) return "no map";
+    const { pokeThrough, gridSteps, gridSpikes } = await import("./terrainscan.js"), { roadProbes } = await import("./roadground.js");
+    const roadAt = (x, z) => { const [s] = world.grid.nearest(x, z, 2); if (!s) return null; const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; return { y: s.p.y, d: l >= 0 ? l - edgeOf(s, 1) : -l + edgeOf(s, -1), i: s.i }; };
+    const ter = R.group.getObjectByName("terrain"), b = R.bounds, nx = Math.round((b.x1 - b.x0) / R.terrainCell[0]), nz = Math.round((b.z1 - b.z0) / R.terrainCell[1]), P = ter.geometry.attributes.position.array;
+    const xz = (i, j) => [P[(j * (nx + 1) + i) * 3], P[(j * (nx + 1) + i) * 3 + 2]], f = (v) => +v.toFixed(2), ll = (a) => a && R.geo.toLL(...a).map((v) => +v.toFixed(5));
+    const poke = pokeThrough(roadProbes(world.samples, edgeOf), R.terrainAt), L = Float32Array.from(P), _sea = (() => { for (let k = 0; k < L.length; k += 3) { const r = roadAt(L[k], L[k + 2]); if (R.isSea?.(L[k], L[k + 2]) || (r && r.d < 0.5)) L[k + 1] = NaN; } })(), steps = gridSteps(L, nx, nz, 3, 1, xz, roadAt, { maxD }), steps10 = gridSteps(L, nx, nz, 3, 1, xz, roadAt, { maxD, minStep: 10 }), spikes = gridSpikes(P, nx, nz, 3, 1, xz, roadAt, { maxD, minDev: 2.5 });
+    let stacked = 0, maxDy = 0; for (const s of world.samples) { if (s.i % 4) continue; for (const q of world.samples) { const di = Math.abs(q.i - s.i); if (Math.min(di, world.n - di) < 60) continue; const dy = Math.abs(q.p.y - s.p.y); if (dy >= 3 && Math.hypot(q.p.x - s.p.x, q.p.z - s.p.z) < 40) { stacked++; maxDy = Math.max(maxDy, dy); break; } } }
+    const w = R.group.getObjectByName("roadWalls");
+    return JSON.stringify({ loc: app().location?.(), join: devRoadJoin, poke: { n: poke.n, worst: f(poke.worst), at: ll(poke.at) }, steps: { n: steps.n, n10: steps10.n, worst: f(steps.worst), at: ll(steps.at) }, spikes: { n: spikes.length, peaks: spikes.filter((v) => v.peak).length }, stacked: { samples: stacked * 4, maxDy: f(maxDy) }, roadGround: R.info?.roadGround ?? null, buildMs: R.info?.ms?.total ?? null, wallTris: w ? w.geometry.index.count / 3 : 0 });
+  },
+  hitTri(x = 0, y = 0) {
+    const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x, y), camera);
+    const h = rc.intersectObject(world.group, true).find((q) => q.object.isMesh && q.face); if (!h) return "nothing";
+    const o = h.object, A = o.geometry.attributes.position, path = []; for (let p = o; p && p !== world.group; p = p.parent) path.push(p.name || p.type);
+    const v = [h.face.a, h.face.b, h.face.c].map((k) => { const p = new THREE.Vector3().fromBufferAttribute(A, k).applyMatrix4(o.matrixWorld), [s, d] = world.grid.nearest(p.x, p.z, 2); return [k, +p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2), s?.i ?? null, s ? +s.p.y.toFixed(2) : null, +d.toFixed(1)]; });
+    return JSON.stringify({ mesh: path.reverse().join("/"), dist: +h.distance.toFixed(2), face: h.faceIndex, v });
+  },
+  terrainWire(on = true) { const t = world?.real?.group.getObjectByName("terrain"); if (!t) return "no map"; t.material.wireframe = !!on; return "ok"; },
   hitAt(x = 0, y = 0) {
     const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x, y), camera); rc.camera = camera;
     const name = (o) => { const out = []; let q = o; while (q && out.length < 3) { if (q.name) out.push(q.name); q = q.parent; } return out.join("<") || o.type; };
