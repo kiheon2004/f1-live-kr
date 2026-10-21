@@ -78,20 +78,32 @@
 
   // (each request numbered: a slow answer for a year since changed doesn't replace the newer list)
   let listReq = 0, loadJob = 0;
-  async function loadSessionList() {
+  const sessionLabel = (s) => `${KO.gpName(s.meeting)} · ${KO.sessionName(s.name)} — ${kstFull.format(new Date(s.start + toOffset(s.gmtOffset)))}`;
+  // (quiet: the list fetched again to show a session just loaded – the load's own progress line stays)
+  async function loadSessionList({ quiet = false } = {}) {
     const req = ++listReq;
     store.set("year", +$("year").value);
-    $("session").innerHTML = ""; $("loadBar").hidden = true; $("progress").textContent = "목록 불러오는 중…";
+    $("session").innerHTML = ""; if (!quiet) { $("loadBar").hidden = true; $("progress").textContent = "목록 불러오는 중…"; }
     try {
       const list = (await window.api.listSessions(+$("year").value)).reverse();
-      if (req !== listReq) return;
+      if (req !== listReq) return false;
       sessions = list;
-      for (const s of sessions) {
-        const label = `${KO.gpName(s.meeting)} · ${KO.sessionName(s.name)} — ${kstFull.format(new Date(s.start + toOffset(s.gmtOffset)))}`;
-        $("session").add(new Option(label, s.path));
-      }
-      $("progress").textContent = "";
-    } catch (e) { if (req === listReq) $("progress").textContent = `목록을 불러오지 못했어요 (${e.message})`; }
+      for (const s of sessions) $("session").add(new Option(sessionLabel(s), s.path));
+      if (!quiet) $("progress").textContent = "";
+      return true;
+    } catch (e) { if (req === listReq && !quiet) $("progress").textContent = `목록을 불러오지 못했어요 (${e.message})`; return false; }
+  }
+  // v0.44: after a load, the pickers show the session loaded (HomeData.pickerPlan) – before, a session opened from the
+  // home screen left the picker on the year and session it showed before (v0.43 report §8). A list that can't be
+  // fetched (offline) gets the loaded session as its one entry: the picker never names another session than the one
+  // shown. A later load (job) wins over this one's list answer.
+  async function syncPicker(path, info, job) {
+    const years = [...$("year").options].map((o) => +o.value), plan = HomeData.pickerPlan({ years, year: +$("year").value, paths: sessions.map((s) => s.path) }, path);
+    if (!plan) return;
+    if (plan.addYear) { const sel = $("year"); sel.innerHTML = ""; for (const y of HomeData.yearsWith(years, plan.year)) sel.add(new Option(`${y}년`, y)); }
+    if (plan.reload) { $("year").value = plan.year; await loadSessionList({ quiet: true }); if (job !== loadJob) return; }
+    if (![...$("session").options].some((o) => o.value === path)) $("session").add(new Option(info?.meeting ? sessionLabel(info) : path, path), 0);
+    $("session").value = path;
   }
   $("year").addEventListener("change", loadSessionList);
   // Loading runs in stages; the bar maps them onto one 0–100%:
@@ -157,6 +169,8 @@
         seekTo(open);
       }
       rememberRecent(info, open);
+      syncPicker(path, info, job);
+      dispatchEvent(new CustomEvent("f1kr-loaded", { detail: { path, job } }));
       showLoad(100, "준비 완료 ·");
       loadHideTimer = setTimeout(() => { $("loadBar").hidden = true; $("progress").textContent = "준비 완료"; }, 2500);
       paintHomeBtn();

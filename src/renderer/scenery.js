@@ -22,6 +22,7 @@ import { pathFrame } from "./pitlane.js";
 import { planTunnels, buildTunnels } from "./tunnel.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
+import { otherSection, joinHeight, roadProbes, clearRoads, skirtStrips, shoreCap } from "./roadground.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
 const DEM_ZOOM = 14;
@@ -581,6 +582,14 @@ function barriersMesh(lines, gf, heightAt) {
       if (l.sub !== kind) continue;
       const pts = l.pts.map(gf.xz);
       let run = 0;
+      // (a piece whose ends stand at heights a metre or more apart is cut into ≤ 3 m pieces: its foot follows the ground
+      // between them instead of a straight line through it)
+      for (let i = pts.length - 1; i > 0; i--) {
+        const [ax, az] = pts[i - 1], [bx, bz] = pts[i];
+        if (Math.abs(heightAt(ax, az) - heightAt(bx, bz)) < 1) continue;
+        const m = Math.ceil(Math.hypot(bx - ax, bz - az) / 3);
+        pts.splice(i, 0, ...Array.from({ length: m - 1 }, (_, k) => [ax + ((bx - ax) * (k + 1)) / m, az + ((bz - az) * (k + 1)) / m]));
+      }
       for (let i = 1; i < pts.length; i++) {
         const [ax, az] = pts[i - 1], [bx, bz] = pts[i];
         const ya = heightAt(ax, az), yb = heightAt(bx, bz), v = pos.length / 3, len = Math.hypot(bx - ax, bz - az);
@@ -661,8 +670,33 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // The sea surface, in scene height. The elevation model is only good to a few metres on flat reclaimed land
   // (Yas Island, Monaco's port), and levelling it to the track can leave the track itself under the sea:
   // no circuit is, so the sea stays at least 1.2 m below the lowest point of the lap.
-  const seaLevel = demOk && coast.length ? Math.min((scene.sea ?? 0) + offset, lowTrack - 1.2) : null;
+  // (v0.44) …and no higher than `freeboard` under the lap where it runs along the water: the elevation model reads high in
+  // a dense town (its surface takes in the buildings – Monaco: levelled by the median over the lap, the sea came out
+  // 11 m under the harbour-front road and 17 m under the tunnel; real harbour quays stand 2–3 m over the water –
+  // estimate, not measured), and the land between that road and a sea so far below stood up as saw-toothed cliffs and
+  // road-high peaks out of the water (roadground.js shoreCap). Never above the old rule's 1.2 m under the lowest point.
+  const coastTrack = (() => {
+    if (!demOk || !coast.length || !seaR) return null;
+    let lo = Infinity;
+    for (let i = 0; i < world.samples.length; i += 2) {
+      const s = world.samples[i];
+      for (const side of [1, -1]) for (let o = 0; o <= 15; o += 3) { const e = (side > 0 ? s.L ?? 7 : -(s.R ?? -7)) + o, x = s.p.x + s.nor.x * e * side, z = s.p.z + s.nor.z * e * side; if (isSea(x, z)) { lo = Math.min(lo, s.p.y); break; } }
+    }
+    return Number.isFinite(lo) ? lo : null;
+  })();
+  const freeboard = 3;
+  const seaLevel0 = demOk && coast.length ? Math.min((scene.sea ?? 0) + offset, lowTrack - 1.2) : null;
+  const seaLevel = seaLevel0 != null && coastTrack != null && opts.roadJoin !== false ? Math.min(Math.max(seaLevel0, coastTrack - freeboard), lowTrack - 1.2) : seaLevel0;
   let seaCells = 0;
+  // the ground held by one stretch of the track d metres from its line: at the road's height (less 0.35 m) to the measured
+  // half width of the tarmac plus a margin, eased into the elevation model `far` over 120 m, never above the road edge
+  // within 11 m of that margin
+  const edgeKept = (s) => Math.max(s?.L ?? 7, -(s?.R ?? -7)) + 2;
+  const held = (s, d, far) => { const edge = edgeKept(s); if (d < edge) return s.p.y - 0.35; const k = Math.min(1, (d - edge) / 120), y = s.p.y * (1 - k) + far * k; return d < edge + 11 ? Math.min(y, s.p.y - 0.35) : y; };
+  // (another stretch: 60 m or more along the lap from the nearest sample – not the same bend)
+  const nSamples = world.samples.length, lapLen = world.samples.reduce((a, s, i) => a + (i ? Math.hypot(s.p.x - world.samples[i - 1].p.x, s.p.z - world.samples[i - 1].p.z) : 0), 0);
+  const sectionGap = Math.max(10, Math.round(60 / Math.max(0.5, lapLen / nSamples)));
+  const joinOn = opts.roadJoin !== false;   // (development: off – the ground as before v0.44, Map3D.roadJoin(false))
   // (groundBase: before the level yards round the buildings – groundAt, below, is the drawn ground with them)
   const groundBase = (x, z) => {
     let h = demOk ? dem(...gf.toLL(x, z)) : null, sea = false;
@@ -673,15 +707,24 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     }
     const far = h != null ? h + offset : demOk ? lowTrack : lowTrack - 2.5;
     const [s, d] = nearTrack(x, z);
-    const edge = Math.max(s?.L ?? 7, -(s?.R ?? -7)) + 2;      // the measured half width of the tarmac, plus a margin
+    const edge = edgeKept(s);
     if (!s || (sea && d > edge)) return far;   // water stays water right up to the quay
     if (d < edge) return s.p.y - 0.35;                     // under and right beside the tarmac
-    const k = Math.min(1, (d - edge) / 120), y = s.p.y * (1 - k) + far * k;
-    return d < edge + 11 ? Math.min(y, s.p.y - 0.35) : y;   // never above the road edge
+    const y = held(s, d, far);
+    // Another stretch of the lap close by at another height (roadground.js – Monaco: the Beau Rivage climb over the
+    // harbour-front road, the roads below the hairpin): from one road's height to the other's across the gap, not a
+    // sheer saw-toothed face where the nearest road changes
+    const o = joinOn ? otherSection(world.grid, x, z, s, nSamples, sectionGap) : null;
+    if (!o || o[1] > 90 || Math.abs(o[0].p.y - s.p.y) < 0.5) return y;
+    const [s1, d1] = o, e1 = d1 - edgeKept(s1);
+    return e1 < 0 ? s1.p.y - 0.35 : joinHeight(y, d - edge, held(s1, d1, far), e1);
   };
   const trackDist = (x, z) => nearTrack(x, z)[1];
   const corridor = trackCorridor(world, opts.street ? 1.8 : 3.5);
 
+  // Covered stretches of the lap (tunnel.js – Monaco's tunnel), planned before the terrain (kept out of the shore's bank)
+  // and the buildings, which the map has standing over them (drawn from the slab's top up, not cleared off the road)
+  const tplan = planTunnels({ venueKey: opts.venue?.key, samples: world.samples, geo: gf, buildings: scene.buildings });
   // terrain mesh
   onStep?.("지형 만드는 중");
   const nx = coast.length ? 380 : 240, nz = nx, W = ext.x1 - ext.x0, H = ext.z1 - ext.z0;   // finer near a coast: the shoreline
@@ -703,6 +746,21 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   };
   // height of the drawn terrain surface (the grid's triangles), for things that must lie on it
   const terrainAt = onGrid(pos, 3, 1);
+  const edgeAt = (s, side) => (side > 0 ? s.L ?? 7 : s.R ?? -7);
+  // The shore (roadground.js shoreCap): land beside the sea comes down to the water as a bank, not road-high peaks over it
+  let shore = new Map();
+  if (joinOn && seaLevel != null && seaCells > 200) {
+    const N = (nx + 1) * (nz + 1), seaV = new Uint8Array(N), keep = new Uint8Array(N), far = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+      const x = pos[k * 3], z = pos[k * 3 + 2], [s, d] = nearTrack(x, z);
+      if (isSea(x, z)) seaV[k] = 1;
+      far[k] = Math.max(0, (s ? d : Infinity) - 40);
+      // (kept at the road's height: the ground under the tarmac – to 0.5 m short of its edge, so the road's edge stands on
+      // a wall – skirtStrips – over the bank, not on a road-high tooth sticking out over the water – and in a tunnel)
+      if ((s && d < edgeKept(s) && sideEdge(x, z) < -0.5) || tplan?.inside(x, z, 2)) keep[k] = 1;
+    }
+    shore = shoreCap(pos, nx, nz, W / nx, H / nz, seaV, keep, seaLevel, { far });
+  }
   // Level yards round the map's buildings (footing.js padPlan – why: there): the grid's vertices by a footprint levelled
   // to the middle of the ground under it, never where the yard would reach the track and its run-off (30 m beyond
   // the tarmac's measured edge), the circuit's other mapped tarmac (pit lane, escape roads), a river or the sea.
@@ -710,6 +768,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // same triangles.
   let pads = null, padKeepOut = null, padWhy = null;
   const dY = new Float32Array((nx + 1) * (nz + 1));
+  for (const [k, y0] of shore) dY[k] = pos[k * 3 + 1] - y0;
   // (not on street circuits: there the buildings stand along the very streets the cars use, on real slopes (Monaco,
   // Baku's old town), the yards changed the ground right beside the kerbs and took seconds over thousands of buildings
   // (Baku: 4.1 s) – the footing alone stands them level there)
@@ -745,11 +804,18 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     padKeepOut = keepOut;
     const padded = scene.buildings.filter((b) => b.kind !== "grandstand" && !(b.min > 3)), fps = padded.map((b) => b.pts.map(gf.xz));
     const plan = padPlan({ x0: ext.x0, z0: ext.z0, W, H, nx, nz }, (k) => pos[k * 3 + 1], terrainAt, fps, keepOut);
-    for (const [k, t] of plan.targets) { dY[k] = t - pos[k * 3 + 1]; pos[k * 3 + 1] = t; }
+    for (const [k, t] of plan.targets) { dY[k] += t - pos[k * 3 + 1]; pos[k * 3 + 1] = t; }
     padWhy = new WeakMap(padded.map((b, i) => [b, plan.why[i] ?? null]));
     pads = { yards: plan.pads, vertices: plan.targets.size, skipped: plan.skipped, ms: Math.round(performance.now() - t0) };
   }
-  const padAt = pads?.vertices ? onGrid(dY, 1, 0) : () => 0;
+  // No drawn triangle above the tarmac of any stretch of the lap (roadground.js clearRoads): where two stretches at
+  // different heights pass within a cell or two of each other, the upper one's vertices tilted triangles up over the
+  // lower road. Those vertices come down to the lower road's ground (the upper road's edge gets a wall – below).
+  // (after the yards: one standing over a road's edge – Spa, Barcelona – is lowered too)
+  const cleared = !joinOn ? new Map() : clearRoads(pos, { x0: ext.x0, z0: ext.z0, W, H, nx, nz }, roadProbes(world.samples, edgeAt));
+  for (const [k, y0] of cleared) dY[k] += pos[k * 3 + 1] - y0;
+  let shoreDrop = 0, shoreAt = null; for (const [k, y0] of shore) if (y0 - pos[k * 3 + 1] > shoreDrop) { shoreDrop = y0 - pos[k * 3 + 1]; shoreAt = gf.toLL(pos[k * 3], pos[k * 3 + 2]).map((v) => +v.toFixed(5)); }
+  const padAt = pads?.vertices || cleared.size || shore.size ? onGrid(dY, 1, 0) : () => 0;
   const groundAt = (x, z) => groundBase(x, z) + padAt(x, z);
   const tg = new THREE.BufferGeometry();
   tg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -861,9 +927,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     terrain.material = gm.material;
   }
 
-  // Covered stretches of the lap (tunnel.js – Monaco's tunnel): planned before the buildings, which the map has standing
-  // over them (drawn from the slab's top up, not cleared off the road)
-  const tplan = planTunnels({ venueKey: opts.venue?.key, samples: world.samples, geo: gf, buildings: scene.buildings });
+  // (tplan, the covered stretches: planned with the terrain, above)
   let bld = null, lm = null;
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");
@@ -873,7 +937,18 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const alongTrack = (x, z) => { const [s] = world.grid.nearest(x, z, 8); return s?.tan ? [s.tan.x, s.tan.z] : [1, 0]; };
     // (the pit lane's tarmac height, for garage floors: as the other tarmac is laid below – on the terrain, at the
     // track's height near it)
-    const surfaceAt = (x, z) => { const [s, d] = nearTrack(x, z); const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06); };
+    // (v0.44: toward – the way to the track from a garage's front: a nearest stretch behind the building is not the one
+    // the pit lane runs beside. Monaco 2025: past Haas' garage the nearest lap was the Piscine 25 m behind the garages,
+    // 2.3 m above the straight in front of them – the floors stepped 1.7 m up from one garage to the next. There the
+    // nearest stretch on the track's side)
+    const surfaceAt = (x, z, toward = null) => {
+      let [s, d] = nearTrack(x, z);
+      if (s && toward && (s.p.x - x) * toward[0] + (s.p.z - z) * toward[1] < -0.3 * d * Math.hypot(toward[0], toward[1])) {
+        s = null; d = Infinity;
+        for (const q of world.samples) { const dx = q.p.x - x, dz = q.p.z - z, e = Math.hypot(dx, dz); if (e < d && dx * toward[0] + dz * toward[1] > 0) { s = q; d = e; } }
+      }
+      const h = s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); return Math.max(h, terrainAt(x, z) + 0.06);
+    };
     // metres from a point to the edge of the track's tarmac (the measured half width), negative on it
     const trackEdge = sideEdge;
     // the map's solid barriers (walls, jersey barriers, retaining walls, guard rails – not fences) as segments, and the
@@ -921,6 +996,20 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   }
   const tun = tplan?.list.length ? buildTunnels(tplan, terrainAt) : null;
   if (tun) group.add(tun.group);
+  // Retaining walls where the drawn ground falls away beside a road's edge (roadground.js skirtStrips – after the
+  // clearing above, and the garages' floors): from the tarmac's edge down into the ground, not a hole under the road
+  let roadWalls = 0;
+  {
+    const overOther = (x, z, s) => { const o = otherSection(world.grid, x, z, s, nSamples, sectionGap, 1); return !!o && o[1] < edgeKept(o[0]) + 1; };
+    const sk = skirtStrips(world.samples, edgeAt, terrainAt, { skip: (x, z, s) => (tplan?.list.length && tplan.inside(x, z, 2)) || overOther(x, z, s) });
+    if (sk.n && joinOn) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(sk.pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(sk.nor, 3)); g.setIndex(sk.idx);
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x9c978d, roughness: 0.92, metalness: 0, side: THREE.DoubleSide }));
+      m.name = "roadWalls"; m.receiveShadow = true; m.castShadow = true;
+      group.add(m); roadWalls = sk.n;
+    }
+  }
   // (nothing grows or lies in a tunnel or on its slab's edge)
   const blocked0 = tplan?.list.length ? (x, z) => blocked(x, z) || tplan.inside(x, z, 1.5) : blocked;
   const blockedTrees = lm ? (x, z) => blocked0(x, z) || lm.keepOut(x, z) : blocked0;
@@ -935,12 +1024,16 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   }
   // Other tarmac of the venue: mapped raceways that are not on the F1 lap (escape roads, rejoin routes, pit lane, other
   // layouts) and service roads that meet the track – strips at the map's width, joined to the track's edge (auxroads.js)
-  const heightNear = (x, z) => { const [s, d] = nearTrack(x, z); return s && d < 60 ? s.p.y - 0.02 : groundAt(x, z); };
+  // (beside two stretches of the lap at different heights the nearest one's height jumped from point to point – a mapped
+  // retaining wall between Monaco's hairpin roads stood as a sloping bar from one road's height to the other's: there,
+  // off the tarmac and with the other stretch about as near, things lie on the drawn ground)
+  const between = (x, z, s, d) => { if (!joinOn || d < edgeKept(s)) return false; const o = otherSection(world.grid, x, z, s, nSamples, sectionGap); return !!o && o[1] - edgeKept(o[0]) < d - edgeKept(s) + 20 && Math.abs(o[0].p.y - s.p.y) >= 0.5; };
+  const heightNear = (x, z) => { const [s, d] = nearTrack(x, z); return s && d < 60 ? (between(x, z, s, d) ? terrainAt(x, z) - 0.05 : s.p.y - 0.02) : groundAt(x, z); };
   const T = { local: corridor.local, edge: (s, side) => (side > 0 ? s.L ?? 7 : s.R ?? -7) };
   const aux = auxRuns(scene.lines.map((l) => ({ ...l, pts: l.pts.map(gf.xz) })), T, { street: !!opts.street, skip: world.laneZone || null });
   // (the track's height only right by it, the terrain's from 10–25 m out: held at the track's height to 60 m, strips
   // floated up to 2.3 m over lower ground beside it – Spa, audit)
-  const auxY = (x, z) => { const [s, d] = nearTrack(x, z); const ty = terrainAt(x, z); return s ? blendHeight(s.p.y, ty, d, 10, 25) : ty + 0.05; };
+  const auxY = (x, z) => { const [s, d] = nearTrack(x, z); const ty = terrainAt(x, z); return s && !between(x, z, s, d) ? blendHeight(s.p.y, ty, d, 10, 25) : ty + 0.05; };
   const tm = auxMesh(aux, T, auxY);
   if (tm) group.add(tm);
   // Real barriers within 45 m of the track.
@@ -996,7 +1089,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     landmarks: lm, stands, classAt: (x, z) => groundInfo.classAt?.(x, z) ?? 255, seaLevel: seaLevel != null && seaCells > 200 ? seaLevel + 0.15 : null,
     info: { ms: { total: Math.round(performance.now() - own.t0), lightField: lightMs }, pads, footing: bld?.userData.footing ?? null, tiles: ground.tiles, failedTiles: ground.failed, zoom: ground.zoom, dem: demOk, buildings: bld?.userData.count ?? 0,
       clearedFromTrack: bld ? { moved: bld.userData.moved, dropped: bld.userData.dropped, raisedOver: bld.userData.overTrack, overTunnel: bld.userData.raised } : null,
-      tunnels: tplan?.info || null,
+      tunnels: tplan?.info || null, roadGround: { cleared: cleared.size, shore: shore.size, shoreDrop: +shoreDrop.toFixed(2), shoreAt, walls: roadWalls, sea: seaLevel != null ? { was: +seaLevel0.toFixed(2), now: +seaLevel.toFixed(2), coastTrack: coastTrack != null ? +coastTrack.toFixed(2) : null } : null },
       trees: group.getObjectByName("trees")?.userData.count ?? 0, landmarks: lm?.count ?? 0, facilities: lm?.facilities || [], garagePlan, region: bld?.userData.region,
       stands: stands ? { stands: stands.info.stands, mapped: stands.info.mapped, seats: stands.info.seats, target: stands.info.target, dead: stands.info.dead, between: stands.info.between, rows: stands.info.list.map((s) => `${s.n}:${s.rows}/${s.max}`).join(", ") } : null },
     bounds: ext,

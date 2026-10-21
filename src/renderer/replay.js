@@ -677,13 +677,15 @@
   // cars: [{ id, x, z, hx, hz }] in metres with unit heading (hx, hz); returns { id: [dx, dz] } offsets.
   // `memory` (an object kept between calls) holds each pair's side.
   const CAR_LEN = 5.5, CAR_WID = 2.05;
-  function separateCars(cars, memory = {}, iterations = 16, maxShift = 5) {
+  // (skip(a, b): a pair left to another correction – v0.44: two cars on the track, which map3d's traffic.js keeps apart)
+  function separateCars(cars, memory = {}, iterations = 16, maxShift = 5, skip = null) {
     const off = {}, P = cars.map((c) => ({ ...c, ox: 0, oz: 0 }));
     for (const c of P) off[c.id] = [0, 0];
     for (let it = 0; it < iterations; it++) {
       let moved = false;
       for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
         const a = P[i], b = P[j];
+        if (skip && skip(a, b)) continue;
         const dx = b.x + b.ox - (a.x + a.ox), dz = b.z + b.oz - (a.z + a.oz);
         if (dx * dx + dz * dz > CAR_LEN * CAR_LEN + CAR_WID * CAR_WID) continue;
         let hx = a.hx + b.hx, hz = a.hz + b.hz, hl = Math.hypot(hx, hz);

@@ -87,7 +87,9 @@ test("cockpit v0.43: the arms against the torso as drawn – within ±55° no mo
   const C = await import("../src/renderer/car3d.js"), K = await import("../src/renderer/cockpitcheck.js");
   for (const [season, team] of [[2025, "Aston Martin"], [2026, "Ferrari"]]) {
     const car = C.makeCar({ teamName: team, teamColour: "888888", number: 7, season }), solids = K.cockpitSolids(car, ["torso"]);
-    assert.strictEqual(solids.length, 4, "chest, pelvis and two thighs: four pieces judged apart");
+    // (v0.44: the six-point harness on the torso, in its mesh – six straps, two adjusters, the buckle and its lever, each a
+    // closed piece: the arms are kept out of them as out of the body)
+    assert.strictEqual(solids.length, 4 + 10, "chest, pelvis and two thighs, the harness' ten pieces: fourteen judged apart");
     let lock = 0;
     for (let deg = -90; deg <= 90; deg += 10) {
       C.setWheels(car, 0, -(deg * D) / C.STEER_RATIO); car.updateMatrixWorld(true);

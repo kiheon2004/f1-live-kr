@@ -22,6 +22,7 @@ import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalti
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
+import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { makeCar, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
@@ -32,8 +33,11 @@ import { NL, GLOW, nightLit, lightField, glowPoints, releaseField } from "./nigh
 import { tunnelLight } from "./tunnel.js";
 import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
-import { venueOf, aeroLocked, wallOpeningsFor } from "./venues.js";
+import { venueOf, wallOpeningsFor } from "./venues.js";
+import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, estimateZones, smModeOf } from "./aero.js";
 import { footing } from "./footing.js";
+import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, TRAFFIC } from "./traffic.js";
+import { createWeather } from "./weather3d.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -47,6 +51,7 @@ const CIRCUIT_STYLE = {
 const app = () => window.F1KR;
 
 let renderer, scene, camera, controls, host, canvas, hemi, sun, daySky, nightSky;
+let wx = null;                // the session's weather in the view (weather3d.js)
 let world = null;             // built circuit: { key, samples, grid, center, size, … }
 let cars = new Map();         // racing number → car record
 let camMode = "heli", visible = false, lastT = 0, lastBuildCheck = 0;
@@ -86,6 +91,9 @@ function init() {
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 6000;
   sun.shadow.bias = -0.12 / (sun.shadow.camera.far - sun.shadow.camera.near); sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
+  wx = createWeather({ scene, renderer, daySky, fairEnv: () => carEnvironment(false) });
+  wx.configure({ sky: geoSettings().sky || "auto", clouds: geoSettings().cloudData !== false });
+  wx.spray(geoSettings().spray !== false);
 
   camera = new THREE.PerspectiveCamera(50, 1, 0.3, 20000);
   camera.position.set(0, 1500, 1500);
@@ -126,10 +134,14 @@ function initGeoSettings() {
     document.getElementById("geoQuality").value = QUALITY[o.quality] ? o.quality : "balanced";
     paintQualityNow();
     document.getElementById("geoNight").value = o.night || "auto";
+    document.getElementById("geoSky").value = ["auto", "neutral", "fair", "overcast"].includes(o.sky) ? o.sky : "auto";
+    document.getElementById("geoCloudData").checked = o.cloudData !== false;
+    document.getElementById("geoSpray").checked = o.spray !== false;
     document.getElementById("geoPitWork").value = ["record", "observed", "typical"].includes(o.pitWork) ? o.pitWork : "record";
     document.getElementById("geoAero").value = o.aero === "off" ? "off" : "estimate";
     document.getElementById("geoCorners").value = ["near", "all", "off"].includes(o.corners) ? o.corners : "near";
     document.getElementById("geoShift").value = o.shiftLights === "fill" ? "fill" : "team";
+    document.getElementById("geoMirrors").value = ["full", "low", "simple"].includes(o.mirrors) ? o.mirrors : "auto";
   };
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
@@ -154,12 +166,16 @@ function initGeoSettings() {
   document.getElementById("geoShadows").addEventListener("change", (e) => change({ shadows: e.target.checked }, false));
   document.getElementById("geoFacilities").addEventListener("change", (e) => change({ facilities: e.target.checked }));
   document.getElementById("geoBigCars").addEventListener("change", (e) => change({ bigCars: e.target.checked }, false));
-  document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); applyQuality(); paintQualityNow(); });
+  document.getElementById("geoQuality").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), quality: e.target.value }); mirrorSetting = null; applyQuality(); paintQualityNow(); });
   document.getElementById("geoNight").addEventListener("change", (e) => change({ night: e.target.value }, !!world?.real));
+  document.getElementById("geoSky").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), sky: e.target.value }); wx?.configure({ sky: e.target.value }); });
+  document.getElementById("geoSpray").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), spray: e.target.checked }); wx?.spray(e.target.checked); });
+  document.getElementById("geoCloudData").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), cloudData: e.target.checked }); wx?.configure({ clouds: e.target.checked }); });
   document.getElementById("geoPitWork").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), pitWork: e.target.value }));
   document.getElementById("geoAero").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), aero: e.target.value }));
   document.getElementById("geoCorners").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), corners: e.target.value }));
   document.getElementById("geoShift").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), shiftLights: e.target.value }));
+  document.getElementById("geoMirrors").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), mirrors: e.target.value }); mirrorSetting = null; });
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
     m.textContent = "확인하는 중…"; m.classList.remove("bad");
@@ -334,7 +350,7 @@ function pitFrame(src, t, lag, isRace) {
     let pitStart = null;
     if (ctx && carKind(S.hist, ctx, num, t).kind === "pit") pitStart = speed <= PIT.still ? "queue" : "go";
     const inRun = pr.off > -3 && pr.off < 40;
-    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
+    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), retiredFor: outFor(S.hist, num, t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
   }
   for (const r of out.values()) r.state = pitState(r.input);
   // (a teammate in the box – or still pulling out of it – and this car standing or creeping up behind: a double stack)
@@ -348,6 +364,12 @@ function pitFrame(src, t, lag, isRace) {
     Object.assign(r, { at, want, turn: Math.atan2(ahead - want, 1), inRun });
   }
   return out;
+}
+// seconds since the car's Retired or Stopped flag was last set (up to t); null: neither set
+function outFor(hist, num, t) {
+  let since = null;
+  for (const k of ["Retired", "Stopped"]) { let s = null; for (const [ts, x] of hist.flags.get(num + ":" + k) || []) { if (ts > t) break; s = x ? s ?? ts : null; } if (s != null) since = since == null ? s : Math.min(since, s); }
+  return since == null ? null : (t - since) / 1000;
 }
 const pitCost = { ms: 0, frames: 0 };
 // the nearest point of the measured pit path to (x, z): { x, z, d, tx, tz (the way cars go along it there) }
@@ -391,12 +413,49 @@ function pitDraw(c, r, v) {
 // crew's hands are copies of the car's). Anything else: the crew round the car, nothing played.
 // 2026 active aero, estimated (the feed has nothing about it): only if the viewer leaves it on, and never where the FIA
 // locked the cars in corner mode for the weekend – Monaco 2026 (formula1.com, 4 June 2026: "effectively locked in
-// Corner Mode for the entire Monte Carlo weekend"). The real straight-mode zones are set circuit by circuit and not
-// in the data, so the flaps open on any fast straight: a look, not the car's state.
+// Corner Mode for the entire Monte Carlo weekend"). v0.44: the zones are the FIA's where the app has them (aero.js
+// ZONES), else estimated from the lap line's long straights – either way a look from the rules and the car's speed and
+// brake, not the car's state.
 function aero2026Allowed() {
   if (geoSettings().aero === "off") return false;
   const A = app(), v = venueOf({ circuitKey: A?.circuitKey?.(), location: A?.location?.() });
-  return !aeroLocked(v?.key, A?.sessionYear?.() || 0);
+  return !aeroLock(v?.key, A?.sessionYear?.() || 0, sessionDate());
+}
+// v0.44: the zones on this world's lap line (aero.js zonesFor: the event's own, placed from the corners' stations; else
+// estimated from the line's long straights), kept per world, season and venue
+function aeroZones() {
+  const A = app(), season = A?.sessionYear?.() || 0, v = venueOf({ circuitKey: A?.circuitKey?.(), location: A?.location?.() }), key = `${season}|${v?.key}|${sessionDate()}|${A?.circuit?.corners?.length || 0}`;   // (again once the circuit's corners have come)
+  if (world.aeroZones?.key === key) return world.aeroZones;
+  const S = world.samples, pts = S.map((q) => q.p), cum = new Float64Array(S.length);
+  for (let i = 1; i < S.length; i++) cum[i] = cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+  const L = cum[S.length - 1] + Math.hypot(pts[0].x - pts[S.length - 1].x, pts[0].z - pts[S.length - 1].z);
+  const circ = A.circuit, ks = (circ?.corners || []).map((k) => { const q = toWorld([k.x, k.y, 0], world.center); return { n: k.n, x: q.x, z: q.z }; });
+  const official = zonesFor(v?.key, season, sessionDate());
+  const spans = official && ks.length ? zoneSpans(official.zones, cornerStations(ks, pts, cum, L), L) : [];
+  world.aeroZones = spans.length ? { key, L, spans, official } : { key, L, spans: estimateZones(pts, cum, L), official: null };
+  return world.aeroZones;
+}
+// A car's wing pose at t: { open 0..1, measured | estimated, why }
+let devAeroHold = null;
+// what every car's pose needs from the session, worked out once a frame (the setting, the venue's zones, lights out, race
+// control's word) – not per car: the setting is read from storage and the start found in the event list
+const AERO_CTX = { src: null, t: NaN, nMsg: -1, allowed: false, Z: null, t0: null, mode: "normal", isRace: false };
+function aeroCtx(src, t) {
+  const X = AERO_CTX, nMsg = src.messages?.length || 0;
+  if (X.src !== src) { X.src = src; X.isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || ""); X.t0 = X.isRace && src.startTime ? src.startTime() || null : null; X.nMsg = -1; X.t = NaN; }
+  if (X.isRace && X.t0 == null && src.isLive && src.startTime) X.t0 = src.startTime() || null;   // (live: lights out comes later)
+  if (X.nMsg !== nMsg) { X.nMsg = nMsg; X.mode = smModeOf(src.messages); }
+  if (X.t !== t) { X.t = t; X.allowed = aero2026Allowed(); X.Z = aeroZones(); }
+  return X;
+}
+function aeroPose(c, num, st, est, t, src) {
+  const era = c.model.userData.profile.era, out = c.aeroOut || (c.aeroOut = {});
+  if (era === "2022") { if (drsAt(src.car?.[num], t, 160, out)) return out; out.open = 0; out.front = 0; out.measured = false; out.estimated = false; out.why = "no DRS data"; return out; }
+  if (!world?.samples?.length) { out.open = 0; out.front = 0; out.estimated = true; out.why = "no lap line"; return out; }
+  const X = aeroCtx(src, t), I = c.aeroIn || (c.aeroIn = {});
+  I.allowed = X.allowed; I.spans = X.Z.spans; I.L = X.Z.L; I.s = st ? st.s : null; I.speed = c.speed * 3.6; I.tel = src.car?.[num] || null; I.t = t;
+  I.onTrack = !!st && !est && !c.pit; I.racing = X.t0 == null || t >= X.t0; I.startGate = X.t0; I.mode = X.mode;
+  return activeAeroAt(I, out);
 }
 function pitWorkPolicy() {
   const v = geoSettings().pitWork || "record", live = !!app()?.src?.isLive;
@@ -1185,6 +1244,21 @@ function carFor(num, d) {
   return c;
 }
 
+// A car's footprint from its model's bounds (metres from its origin: ahead, behind, to the side), once per model –
+// the contact shadow left out (development: Map3D.overlapScan; traffic.js boxes)
+const dimBox = new THREE.Box3(), dimM = new THREE.Matrix4();
+function carDims(c) {
+  if (c.dims?.key === c.key) return c.dims;
+  const m = c.model, inv = new THREE.Matrix4(); m.updateWorldMatrix(true, true); inv.copy(m.matrixWorld).invert();
+  let f = 0, b = 0, h = 0;
+  m.traverse((o) => {
+    if (!o.isMesh || !o.geometry || o.material?.map === shadowTex()) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    dimBox.copy(o.geometry.boundingBox).applyMatrix4(dimM.multiplyMatrices(inv, o.matrixWorld));
+    f = Math.max(f, dimBox.max.z); b = Math.max(b, -dimBox.min.z); h = Math.max(h, dimBox.max.x, -dimBox.min.x);
+  });
+  return (c.dims = { key: c.key, front: f, back: b, half: h, era: m.userData.profile?.era || "?" });
+}
 // ---------- per-frame update ----------
 function trackPointFor(c, x, z) {
   // Keep cars glued to the road surface and remember where on the lap they are.
@@ -1203,70 +1277,56 @@ function spring(o, key, rateKey, target, w, dt) {
 }
 const smoothstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 
-// Traffic. Every car is drawn on the racing line (the position data has them all on one line), so when one
-// catches and passes another, or two run side by side, someone has to make room: the car going past (seen in
-// the timing: it's behind now and ahead within 3 s, or the other way round in the last 3 s) pulls out by a car's
-// width to the side with room – the inside of the next corner if it can, as a real pass is set up – and the car
-// being passed gives a little room the other way. Two cars overlapping without a pass: the one behind goes to
-// the side. Offsets are eased (≈0.4 s), so cars swing out and back in like cars, not jump.
-const trafSide = new Map(), trafSt = {}, trafA = {}, trafB = {};
-let trafT = null;
+// Traffic (traffic.js): every car is drawn on the racing line (the position data has them all on one line), so cars
+// side by side or nose to tail in the data would be drawn through each other. traffic.js parts them – across the
+// track for passes and cars alongside, along it (within a few metres, never past each other) in queues – as offsets
+// on top of the steadied tracks (c.trafD across, c.trafS along, eased in the session's time), and records what it
+// can't solve (c.trafRes). Only where the cars are drawn: the order, laps and timing are the data's.
+// (v0.44: this replaced a pairwise push – each car the largest push each way, summed – that cancelled for a car
+// between two others and put queues side by side; and that looked 1–3 s ahead live, where smooth.js holds the newest
+// position: the "future" was the latest data, every car standing still)
+const trafSt = {}, trafPk = {}, trafItems = new Map(), trafList = [], trafEdge = { L: 7, R: -7 }, KA2 = [0, 0, 0], KB2 = [0, 0, 0], KD1 = [0, 0], KD2 = [0, 0];
+const traf = { S: makeTraffic(), sm: null, env: null, lastT: null }, trafCost = { ms: 0, frames: 0 };   // (development: its share of a frame)
 function traffic(sm, F, t, dt, pos) {
-  const L = F.L, list = [];
-  const wrapL = (x) => ((x % L) + L * 1.5) % L - L / 2;
+  if (traf.sm !== sm) { resetTraffic(traf.S); traf.sm = sm; }   // (another session or circuit: nothing carried over)
+  const env = traf.env || (traf.env = {
+    L: 0, live: false,
+    edges(s) { const q = traf.F.sampleAt(s); trafEdge.L = q.L ?? 7; trafEdge.R = q.R ?? -7; return trafEdge; },
+    // (the next 200 m's turning: > 0 the next corner goes left)
+    turnAhead(s) { const i = traf.F.sampleAt(s).i; let x = 0; for (let k = 0; k < 100; k++) x += world.samples[(i + k) % world.n].turn; return x; },
+    kappa(s) { traf.F.at(s - 4, 0, KA2, KD1); traf.F.at(s + 4, 0, KB2, KD2); return Math.atan2(KD1[0] * KD2[1] - KD1[1] * KD2[0], KD1[0] * KD2[0] + KD1[1] * KD2[1]) / 8; },
+    peek(num, tt) { const q = traf.sm.state(num, tt, trafPk); return q ? q.s : null; },
+    // (where a car at (s, d) is and faces: the path at that offset over ±2 m – the boxes check)
+    pose(s, d, o) { traf.F.at(s - 2, d, KA2); traf.F.at(s + 2, d, KB2); o.x = (KA2[0] + KB2[0]) / 2; o.z = (KA2[2] + KB2[2]) / 2; o.yaw = Math.atan2(KB2[0] - KA2[0], KB2[2] - KA2[2]); return o; },
+  });
+  traf.F = F; env.L = F.L; env.live = !!app().src?.isLive;
+  if (traf.lastT == null || t < traf.lastT || t - traf.lastT > TRAFFIC.JUMP_MS) sepMemory = {};   // (a seek: separate()'s sides start over too)
+  traf.lastT = t;
+  const list = trafList; list.length = 0;
+  // (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already)
+  const held = (c) => { const g = c.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
   for (const num of Object.keys(pos)) {
-    const st = sm.state(num, t, trafSt[num] || (trafSt[num] = {}));
-    if (st && cars.get(num)) list.push({ num, u: ((st.s % L) + L) % L, st });
+    const c = cars.get(num), st = c && sm.state(num, t, trafSt[num] || (trafSt[num] = {}));
+    if (!st) continue;
+    const D = carDims(c), it = trafItems.get(num) || {}; trafItems.set(num, it);
+    it.num = num; it.s = st.s; it.d = st.d; it.vs = st.vs; it.y = F.sampleAt(st.s).p.y; it.held = held(c); it.front = D.front; it.back = D.back; it.half = D.half;
+    list.push(it);
   }
-  // per car the biggest push each way (several cars at once don't add up beyond a car's width)
-  const want = new Map();
-  const add = (num, x) => { const w = want.get(num) || [0, 0]; if (x > 0) w[0] = Math.max(w[0], x); else w[1] = Math.min(w[1], x); want.set(num, w); };
-  // (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already:
-  // no room-making between them, which pushed one into the other column)
-  const held = (num) => { const g = cars.get(num)?.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
-  for (const A of list) for (const B of list) {
-    if (A === B || held(A.num) || held(B.num)) continue;
-    const du = wrapL(B.u - A.u);
-    if (du <= 0 || du > 25) continue;   // B ahead of A, within 25 m
-    let passer = null;
-    for (const tau of [-3000, -2000, -1000, 1000, 2000, 3000]) {
-      const sa = sm.state(A.num, t + tau, trafA), sb = sm.state(B.num, t + tau, trafB);
-      if (!sa || !sb) continue;
-      if (wrapL(sb.s - sa.s) < -1) { passer = tau > 0 ? A : B; break; }
+  const t0 = performance.now(), out = stepTraffic(traf.S, list, env, t); trafCost.ms += performance.now() - t0; trafCost.frames++;
+  for (const [num, c] of cars) {
+    const m = out.get(num);
+    c.trafD = m ? m.dOff : 0; c.trafRate = m ? m.dRate : 0; c.trafS = m ? m.sOff : 0; c.trafSRate = m ? m.sRate : 0;
+    c.trafTgt = m ? m.tD : 0; c.trafRes = m ? m.res : 0; c.trafMode = m ? m.mode : "";
+    // (development: a red ring under a car the correction couldn't keep clear – one shared ring, never in the app's views)
+    if (devTrafMark || c.trafRing) {
+      if (!c.trafRing) { c.trafRing = new THREE.Mesh(trafRingGeo(), trafRingMat()); c.trafRing.rotation.x = -Math.PI / 2; c.trafRing.position.y = 0.06; c.obj.add(c.trafRing); }
+      c.trafRing.visible = devTrafMark && c.trafRes > 0.05;
     }
-    const overlap = du < 6;
-    if (!passer && !overlap) continue;
-    const mover = passer || A, other = mover === A ? B : A;
-    const w = passer ? smoothstep(25, 9, du) : smoothstep(6.5, 3.5, du);
-    const key = mover.num + ">" + other.num;
-    const smp = F.sampleAt(mover.st.s), ln = F.lineAt(mover.st.s);
-    const roomL = (smp.L ?? 7) - 0.95 - ln, roomR = ln - ((smp.R ?? -7) + 0.95);
-    let side = trafSide.get(key)?.side;
-    if (!side) {
-      // the inside of the next corner (the turning over the next 200 m), if there's a car's width of room there
-      let turn = 0; for (let k = 0; k < 100; k++) turn += world.samples[(smp.i + k) % world.n].turn;
-      side = turn >= 0 ? 1 : -1;
-      if ((side > 0 ? roomL : roomR) < 1.8 && (side > 0 ? roomR : roomL) > (side > 0 ? roomL : roomR)) side = -side;
-    }
-    trafSide.set(key, { side, t });
-    add(mover.num, side * Math.max(0, Math.min(2.5, side > 0 ? roomL : roomR)) * w);
-    const os = F.sampleAt(other.st.s), oln = F.lineAt(other.st.s);
-    const oRoom = side > 0 ? oln - ((os.R ?? -7) + 0.95) : (os.L ?? 7) - 0.95 - oln;
-    add(other.num, -side * Math.max(0, Math.min(0.8, oRoom)) * w);
   }
-  for (const [key, v] of trafSide) if (Math.abs(t - v.t) > 8000) trafSide.delete(key);
-  const jump = trafT == null || Math.abs(t - trafT) > 2000;
-  trafT = t;
-  for (const { num, st } of list) {
-    const w = want.get(num) || [0, 0], smp = F.sampleAt(st.s), ln = F.lineAt(st.s);
-    const tgt = Math.max((smp.R ?? -7) + 0.95 - ln, Math.min((smp.L ?? 7) - 0.95 - ln, w[0] + w[1]));   // on the tarmac
-    // a critically damped spring (ω 3/s: a lane change takes ~1.5 s, starting and ending gently, like a car's)
-    const c = cars.get(num);
-    if (jump) { c.trafD = tgt; c.trafRate = 0; continue; }
-    spring(c, "trafD", "trafRate", tgt, 3, dt);
-  }
-  for (const [num, c] of cars) if (!list.some((x) => x.num === num)) { c.trafD = 0; c.trafRate = 0; }
 }
+let trafRingG = null, trafRingM = null;
+const trafRingGeo = () => trafRingG || (trafRingG = Object.assign(new THREE.RingGeometry(2.6, 3.0, 32), { userData: { shared: true } }));
+const trafRingMat = () => trafRingM || (trafRingM = Object.assign(new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.85, depthWrite: false }), { userData: { shared: true } }));
 // Steadied car tracks per source and world, built a moment after the world (a replay takes a few hundred ms).
 let smooth = { src: null, world: null, tr: null, pending: false };
 function smoothFor(src) {
@@ -1386,7 +1446,9 @@ function gridCar(c, num, v, ctx) {
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devSpin = null;   // (development, v0.43: the focused car's wheels rolled at this many turns a second – Map3D.spinWheels)
+let devRoadJoin = true;   // (development: the ground between two stretches of the lap as before v0.44 – Map3D.roadJoin(false))
 let devGroundOld = false;   // (development: buildings on the ground as before v0.39 – Map3D.groundFix(false))
+let devTrafMark = false;   // (development: red rings under cars with an overlap left – Map3D.trafficState(at, true))
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
 const KA = [0, 0, 0], KB = [0, 0, 0], KC = [0, 0, 0];   // (the steering's curvature: three points of the path)
@@ -1499,17 +1561,19 @@ function updateCars(dt) {
       // moves: the path's heading and turning rate, the body a touch more into the corner than the path (slip),
       // the nose dipping under braking, the car leaning a little and squatting on its downforce at speed.
       const off = est ? 0 : c.trafD || 0, offRate = est ? 0 : c.trafRate || 0;
+      // (and along it: a queue's spacing, traffic.js – a few metres at most, never past the car ahead)
+      const sD = st.s + (est ? 0 : c.trafS || 0), sRate = st.vs + (est ? 0 : c.trafSRate || 0);
       const dTot = st.d + off, dRate = st.vd + offRate;
-      F.at(st.s, dTot, P0, DIR);
-      speed = Math.hypot(st.vs, dRate);
+      F.at(sD, dTot, P0, DIR);
+      speed = Math.hypot(sRate, dRate);
       v.set(P0[0], P0[1], P0[2]);
-      c.sample = F.sampleAt(st.s);
+      c.sample = F.sampleAt(sD);
       // heading: the direction of the path over a few metres either side (3–10 m, with the speed): the lap line has
       // fine wiggles from the reference line it's made of, which its tangent shows and a chord averages out
       let pathYaw;
       if (Math.abs(st.vs) > 1.5) {
         const ds = Math.max(3, Math.min(10, Math.abs(st.vs) * 0.1)), h = ds / Math.abs(st.vs);
-        F.at(st.s - st.vs * h, dTot - dRate * h, PA); F.at(st.s + st.vs * h, dTot + dRate * h, PB);
+        F.at(sD - st.vs * h, dTot - dRate * h, PA); F.at(sD + st.vs * h, dTot + dRate * h, PB);
         pathYaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
       } else pathYaw = Math.atan2(DIR[0], DIR[1]);
       if (devMotion) c.dbg = [Math.atan2(DIR[0], DIR[1]), Math.atan2(dRate, st.vs || 1), st.s, dTot, st.vs, st.d, off, P0[0], P0[2]];
@@ -1527,7 +1591,7 @@ function updateCars(dt) {
       if (!c.has || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * (1 - Math.exp(-dt * 30));
       c.pathYaw = pathYaw; c.yawRate = yawRate; c.slide = exitSlide;
       // the road's slope over ±4 m
-      F.at(st.s + 4, 0, PA); F.at(st.s - 4, 0, PB);
+      F.at(sD + 4, 0, PA); F.at(sD - 4, 0, PB);
       const fwd = st.vs >= 0 ? 1 : -1, slope = -Math.atan2((PA[1] - PB[1]) * fwd, 8);
       const pitchT = slope + Math.max(-0.006, Math.min(0.02, -aLong * 0.00032));     // −5 g: nose down ~0.9°
       const rollT = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));               // 5 g: ~0.55° out of the corner
@@ -1659,13 +1723,13 @@ function updateCars(dt) {
     if (devArmDiag && num === focusNum) drawArmDiag(c.model);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
-    // the wings' flaps: 2022–25 cars – DRS as the car's telemetry says (open ≥ 10); 2026 cars – active aero, estimated
-    // (straight mode at speed on straights, corner mode otherwise: the feed has no channel for it)
-    let wantOpen;
-    if (c.model.userData.profile.era === "2022") { const cd = src.carAt?.(num, A.t); wantOpen = cd && cd.drs != null ? (cd.drs >= 10 ? 1 : 0) : 0; }
-    else wantOpen = aero2026Allowed() && c.speed > 68 && Math.abs(yawRate) < 0.04 ? 1 : 0;
-    c.aero += (wantOpen - c.aero) * (1 - Math.exp(-dt * 6));
-    setAero(c.model, c.aero);
+    // the wings' flaps (aero.js – a function of the moment shown: a seek or a pause shows the pose at once): 2022–25
+    // cars – DRS as the car's telemetry says; 2026 cars – active aero, ESTIMATED (the feed has no channel for it): in the
+    // event's Straight Mode zones, at speed, until the brake (v0.44; it was speed > 68 m/s and a low turning rate, eased
+    // frame to frame – stale after a seek)
+    c.aeroState = aeroPose(c, num, st, est, A.t, src);
+    if (devAeroHold != null && num === focusNum) { c.aeroState.open = c.aeroState.front = devAeroHold; c.aeroState.why = "development hold"; }
+    c.aero = c.aeroState.open; setAero(c.model, c.aero, c.aeroState.front ?? c.aero);
     // (the compound on the sidewalls: the stint now; a replay shown from its record has the new set on the car from the
     // stop it went on at – the new stint is sent ~15 s after the car left; a car at work in its box: updateCrews)
     if (!liftedCars.has(num) && (!c.compoundAt || performance.now() - c.compoundAt > 1500)) {
@@ -2171,13 +2235,17 @@ function updateWheelScreens(src, t) {
 // amount (ReplayKit.separateCars). The correction is eased in and out so nothing jumps, and a car pushed
 // sideways stays on the tarmac.
 let sepMemory = {};
+const sepSkip = (a, b) => a.track && b.track;
 function separate(dt, seen) {
   const list = [];
   for (const num of seen) {
     const c = cars.get(num);
-    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw) });   // c.pos is this frame's raw position
+    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw), track: c.onTrack && !c.est && !c.pit && !(c.grid && c.grid.state !== "free") });   // c.pos is this frame's raw position
   }
-  const off = window.ReplayKit.separateCars(list, sepMemory);
+  // (v0.44: two cars on the track are traffic.js's – traffic() above, along and across the track, checked as boxes; this
+  // pass is for the rest – the pit lane, a car off the steadied tracks, grid slots, placements without data – so no pair
+  // gets two corrections on top of each other)
+  const off = window.ReplayKit.separateCars(list, sepMemory, 16, 5, sepSkip);
   const k = Math.min(1, dt * 9);
   for (const o of list) {
     const c = cars.get(o.id);
@@ -2510,7 +2578,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near", shiftLights: "team" };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near", shiftLights: "team", mirrors: "auto" };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -2552,7 +2620,7 @@ async function loadGeo(w) {
     const circ = A.circuitKey?.() != null ? await window.api.trackCircuit(A.circuitKey(), A.sessionYear?.() || null).catch(() => null) : null;
     if (job !== geoJob || world !== w) return;
     const corners = (circ?.corners || []).map((k) => ({ n: k.n, x: k.x * DM - w.center.x, z: -(k.y * DM - w.center.z) }));
-    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners, groundOld: devGroundOld,
+    const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners, groundOld: devGroundOld, roadJoin: devRoadJoin,
       facilities: opts.facilities, year: A.sessionYear?.() || null, venue: venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
     if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
@@ -2840,6 +2908,7 @@ function disposeWorld() {
   wheelScreens.reset(); wheelScreensFor = null;
   for (const c of cars.values()) { scene.remove(c.obj); disposeGroup(c.obj); }   // labels and shadows have their own textures
   cars.clear();
+  mirrorPass?.dispose();   // (the rear view's picture with the world: made again on first use)
   releaseShadowRefs();
 }
 // the session a source key belongs to (a live key also carries the outline's length, which grows)
@@ -3273,6 +3342,7 @@ function frame(now) {
   // redraws the static shadow map)
   if (peopleLod(camera.position)) refreshShadows();
   updateSun(now);
+  wx?.update({ A, world, camera, dt, night: !!nightNow, hemi, sun, fog: scene.fog, pitFac: pitTeams.facility, teams: pitTeams.group, cars, viewH: renderer.getDrawingBufferSize(tmpV2).y });
   thinFarTrees();
   world?.real?.stands?.update(camera.position, camMode === "heli" || camMode === "inspect" ? 520 : 300);
   realPart("buildings")?.userData.update?.(camera.position);
@@ -3284,11 +3354,30 @@ function frame(now) {
   GLOW.scale.value = renderer.getDrawingBufferSize(tmpV2).y / (2 * Math.tan((camera.fov * Math.PI) / 360));
   GLOW.fade.value.set(scene.fog.near, scene.fog.far);
   if (devGpu) devGpu.begin();
+  if (world) updateMirrors();
   devShadowDrawn = renderer.shadowMap.needsUpdate;
   renderer.render(scene, camera);
   if (devGpu) devGpu.end();
   adaptResolution(now, dt);
   rafId = requestAnimationFrame(frame);
+}
+
+// The side mirrors' rear view (mirrors.js, v0.44): the car a cockpit camera rides in only – its picture drawn just before
+// the view (after the cars, the camera and the shadows' decision for this frame). The mode is the 🛰 settings' 사이드미러
+// (auto: by the quality setting), read when the settings change (mirrorSetting null: read again).
+let mirrorPass = null, mirrorSetting = null, mirrorStrained = false;
+const mirrorAux = (hide) => {
+  // (the labels face the screen and are drawn over everything: not in a mirror)
+  for (const c of cars.values()) { const sp = c.label.sp; if (hide) { sp.userData.mv = sp.visible; sp.visible = false; } else if (sp.userData.mv !== undefined) sp.visible = sp.userData.mv; }
+  const cn = world?.corners?.group; if (cn) { if (hide) { cn.userData.mv = cn.visible; cn.visible = false; } else if (cn.userData.mv !== undefined) cn.visible = cn.userData.mv; }
+};
+function updateMirrors() {
+  if (!mirrorPass) mirrorPass = createMirrorPass();
+  if (mirrorSetting === null) { const o = geoSettings(); mirrorSetting = { set: o.mirrors, q: QUALITY[o.quality] ? o.quality : "balanced" }; }
+  mirrorStrained = mirrorStrain(mirrorStrained, perf.late, perf.calm);
+  const ride = camMode === "onboard" || camMode === "eye", num = ride ? app().focus || leader() : null, c = num ? cars.get(num) : null;
+  const view = ride ? camMode + ":" + num : "";
+  mirrorPass.update(renderer, scene, camera, c?.obj.visible ? c.model : null, mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), view, mirrorAux);
 }
 
 // Level of detail for vegetation: each tree chunk holds its instances in random order, so drawing only the
@@ -3632,6 +3721,83 @@ window.Map3D = {
     finally { window.F1KR = real; }
     return JSON.stringify(hits.slice(0, 60)) + " total " + hits.length;
   },
+  // development (v0.44): cars drawn overlapping over [t0, t1] (stream ms, every `step` ms, driven like trafficScan):
+  // oriented boxes from each car's model bounds at its drawn pose (C), at its steadied place without the correction
+  // (B) and at the feed's own interpolated position (A); overlap episodes per pair, classified (traffic.js
+  // classifyOverlap), with counts, durations and depths per cause and the worst ones (time from lights out, cars, place)
+  overlapScan(t0, t1, step = 100, o = {}) {
+    const src = app().src, sm = smoothFor(src); if (!sm || !world) return "no tracks";
+    const F = sm.frame, real = window.F1KR, st0 = src.startTime?.() || 0; let fakeT = t0;
+    const log = episodeLog(step * 2.5), RAW = [0, 0, 0], B = [0, 0, 0], c0 = world.center;
+    const res = { frames: 0, carFrames: 0, acknowledged: 0, byMode: {}, byPlace: {}, levels: 0, sameLat: 0, closePairs: 0, queue: { brake: { pairs: 0, rawBelow: 0, alignedBelow: 0 }, other: { pairs: 0, rawBelow: 0, alignedBelow: 0 } }, rawGapMs: null, dims: {} };
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try {
+      for (fakeT = t0; fakeT <= t1; fakeT += step) {
+        updateCars(step / 1000); res.frames++;
+        const list = [];
+        for (const [num, c] of cars) {
+          if (!c.has || !c.obj.visible || !c.pos) continue;
+          const D = carDims(c); res.dims[D.era] = [+(D.front + D.back).toFixed(2), +(2 * D.half).toFixed(2)];
+          const onT = c.onTrack && c.st && !c.est && !c.pit;
+          if (onT) F.at(c.st.s, c.st.d, B);
+          const r = src.tracks.at(num, fakeT, RAW) ? [RAW[0] * DM - c0.x, -(RAW[1] * DM - c0.z)] : null;
+          list.push({ num, c, D, x: c.pos.x, y: c.pos.y, z: c.pos.z, yaw: c.yaw, bx: onT ? B[0] : c.feedPos.x, bz: onT ? B[2] : c.feedPos.z, s: onT ? c.st.s : null, d: onT ? c.st.d : null, raw: r,
+            pit: !!c.pit, offT: !onT && !c.pit && !c.est, est: !!c.est, grid: !!c.grid && c.grid.state !== "free" && !c.grid.estimated, off: c.trafD || 0, tgt: c.trafTgt ?? 0, want: c.trafWant || [0, 0], as: c.st?.as || 0 });
+        }
+        res.carFrames += list.length;
+        // nose to tail on the track (neighbours along the lap within 15 m): how often the feed (A) and the steadied
+        // tracks (B) have them closer than a car's length – braking (−12 m/s² or harder) and all
+        { const on = list.filter((q) => q.s != null).map((q) => [((q.s % F.L) + F.L) % F.L, q]).sort((x, y) => x[0] - y[0]);
+          for (let k = 0; k < on.length; k++) {
+            const [ua, a] = on[k], [ub, b] = on[(k + 1) % on.length]; if (a === b) continue;
+            const dsB = ((ub - ua) % F.L + F.L) % F.L; if (dsB > 15) continue;
+            const need = (a.D.front + a.D.back + b.D.front + b.D.back) / 2, pa = a.raw && F.project(a.raw[0], a.raw[1]), pb = b.raw && F.project(b.raw[0], b.raw[1]);
+            const q = Math.min(a.as, b.as) < -12 ? res.queue.brake : res.queue.other;
+            q.pairs++; if (dsB < need) q.alignedBelow++;
+            if (pa && pb) { const dsA = Math.abs(((pb.s - pa.s) % F.L + F.L * 1.5) % F.L - F.L / 2); if (dsA < need) q.rawBelow++; }
+          }
+        }
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+          const a = list[i], b = list[j];
+          if (Math.hypot(a.x - b.x, a.z - b.z) > 8) continue;
+          const dC = boxDepth(a.x, a.z, a.yaw, a.D, b.x, b.z, b.yaw, b.D);
+          // (on the track, one behind the other: the feed's spacing in a braking queue, and how often B has them on the same line)
+          if (a.s != null && b.s != null) {
+            res.closePairs++; if (Math.abs(a.d - b.d) < 0.3) res.sameLat++;
+          }
+          if (!dC) continue;
+          if (Math.abs(a.y - b.y) > 2.5) { res.levels++; continue; }   // (one over the other: a bridge, a tunnel – not an overlap)
+          const dB = boxDepth(a.bx, a.bz, a.yaw, a.D, b.bx, b.bz, b.yaw, b.D);
+          const dA = a.raw && b.raw ? boxDepth(a.raw[0], a.raw[1], a.yaw, a.D, b.raw[0], b.raw[1], b.yaw, b.D) : 0;
+          const smp = a.s != null ? F.sampleAt(a.s) : null, room = smp ? (smp.L ?? 7) - (smp.R ?? -7) - 1.9 : 99;
+          const cause = classifyOverlap({ pitA: a.pit, pitB: b.pit, offA: a.offT, offB: b.offT, est: a.est || b.est, grid: a.grid || b.grid, aligned: dB, raw: dA, room, need: a.D.half + b.D.half,
+            cancel: [a, b].some((q) => q.want[0] > 0.3 && q.want[1] < -0.3), tgtSep: a.d != null && b.d != null ? Math.abs(a.d + a.tgt - b.d - b.tgt) : 0, moved: Math.abs(a.off) + Math.abs(b.off) > 0.3 });
+          if (Math.max(a.c.trafRes || 0, b.c.trafRes || 0) > 0) res.acknowledged++;
+          { const mk = cause + "|" + [a.c.trafMode || "-", b.c.trafMode || "-"].sort().join("+"); res.byMode[mk] = (res.byMode[mk] || 0) + 1; if (a.s != null) { const bin = Math.floor(((a.s % F.L) + F.L) % F.L / 50) * 50; res.byPlace[bin] = (res.byPlace[bin] || 0) + 1; } }   // (frames the correction itself reports as left over)
+          log.add(fakeT, a.num + "/" + b.num, dC, cause, { s: a.s != null ? Math.round(((a.s % F.L) + F.L) % F.L) : null, x: +a.x.toFixed(1), y: +a.y.toFixed(1), z: +a.z.toFixed(1), off: [+a.off.toFixed(2), +b.off.toFixed(2)], sOff: [+(a.c.trafS || 0).toFixed(2), +(b.c.trafS || 0).toFixed(2)], mode: [a.c.trafMode || "", b.c.trafMode || ""], pit: [a.c.pit?.state?.state || "", b.c.pit?.state?.state || ""], sep: [+Math.hypot(a.c.sepX || 0, a.c.sepZ || 0).toFixed(2), +Math.hypot(b.c.sepX || 0, b.c.sepZ || 0).toFixed(2)], raw: +dA.toFixed(2), aligned: +dB.toFixed(2) });
+        }
+      }
+    } finally { window.F1KR = real; }
+    // the feed's sample spacing (ms) over the window: median and 95th percentile
+    { const g = []; for (const c of Object.values(src.tracks.cars)) for (let k = 1; k < c.n; k++) if (c.t[k] >= t0 && c.t[k] <= t1) g.push(c.t[k] - c.t[k - 1]); g.sort((x, y) => x - y); res.rawGapMs = g.length ? [g[g.length >> 1], g[Math.floor(g.length * 0.95)]] : null; }
+    const eps = log.finish();
+    res.episodes = eps.length; res.overlapFrames = eps.reduce((x, e) => x + e.frames, 0);
+    res.byCause = summarise(eps, step);
+    res.worst = eps.sort((x, y) => y.depth * (y.t1 - y.t0 + step) - x.depth * (x.t1 - x.t0 + step)).slice(0, o.top ?? 12).map((e) => ({ t: +((e.worstT - st0) / 1000).toFixed(1), pair: e.key, cause: e.cause, depth: +e.depth.toFixed(2), dur: +((e.t1 - e.t0 + step) / 1000).toFixed(1), ...e.at }));
+    return JSON.stringify(res);
+  },
+  // development (v0.44): the traffic correction now (D) – per car its place (s, d: the steadied tracks), the offsets
+  // across and along (drawn and target), the overlap left (res, m) and why (mode); the close pairs and what each
+  // needs. `at` (stream ms): driven there first, from 8 s before (like trafficScan). `mark`: a red ring under every
+  // car with an overlap left (development only)
+  trafficState(at = null, mark = null) {
+    if (at != null) { const real = window.F1KR; let fakeT = at - 8000; window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) }); try { for (; fakeT <= at; fakeT += 50) updateCars(0.05); } finally { window.F1KR = real; } }
+    if (mark != null) devTrafMark = !!mark;
+    const S = traf.S, r2 = (x) => +x.toFixed(2);
+    return JSON.stringify({ t: S.lastT, live: !!traf.env?.live, stats: S.stats, costMs: +(trafCost.ms / Math.max(1, trafCost.frames)).toFixed(4), limits: TRAFFIC,
+      cars: S.cand.length || S.cars.size ? [...trafItems.values()].filter((c) => S.cars.has(c.num)).map((c) => { const m = S.cars.get(c.num); return { num: c.num, s: r2(c.s % traf.F.L), d: r2(c.d), lo: r2(c.lo), hi: r2(c.hi), dOff: r2(m.dOff), tD: r2(m.tD), sOff: r2(m.sOff), tS: r2(m.tS), res: r2(m.res), mode: m.mode }; }) : [],
+      pairs: S.cand.slice(0, S.cand.length).map((P) => ({ r: P.r.num, f: P.f.num, du: r2(P.du), Lneed: r2(P.Lneed), deficit: r2(P.deficit), wLat: r2(P.wLat), wLong: r2(P.wLong), pass: P.pass, side: P.side })) });
+  },
   // development: the racing line's offset (and the edges, turning) every 10 m over ±80 m of the k sharpest corners
   lineProfile(k = 3) {
     const S = world.samples, n = world.n, res = [];
@@ -3820,6 +3986,10 @@ window.Map3D = {
   // development: the map's buildings and stand outlines within r m of (lat, lon) or a listed stand's ends – kind, name,
   // height, area, distance, whether the grandstands treat it as an obstacle (area > 900 m² or over 14 m)
   // development: the level yards and footings on (true) or off (false – as before v0.39); resolves once rebuilt
+  roadJoin(on = true) {
+    devRoadJoin = !!on; rebuild(); const t0 = performance.now();
+    return new Promise((res) => { const t = setInterval(() => { if (world?.real?.info || performance.now() - t0 > 150e3) { clearInterval(t); res(world?.real ? `rebuilt (join ${on ? "on" : "off"}) ${Math.round(performance.now() - t0)} ms` : "timeout"); } }, 400); });
+  },
   groundFix(on = true) {
     devGroundOld = !on; rebuild(); const t0 = performance.now();
     return new Promise((res) => { const t = setInterval(() => { if (world?.real?.info || performance.now() - t0 > 150e3) { clearInterval(t); res(world?.real ? `rebuilt (${on ? "fix" : "old"}) ${Math.round(performance.now() - t0)} ms` : "timeout"); } }, 400); });
@@ -3935,6 +4105,65 @@ window.Map3D = {
   },
   // development: what is seen at screen point (x, y: −1…1) – the first few objects a ray from the camera meets, named
   // by their nearest named parent, with the distance and whether their material is shown
+  // development (v0.44 §3): spiky ground beside the road – terrainscan.js over the drawn terrain grid (vertices standing
+  // out of their neighbours) and over every mesh of the world near the track (steep thin triangles rising over the road,
+  // up-facing surfaces turned over), plus the rocks' instances near the road. → JSON (scene x, y, z and lat/lon)
+  async terrainScan(maxD = 40, top = 25, minDev = 2.5) {
+    const R = world?.real; if (!R?.terrainAt) return "no map";
+    const { gridSpikes, triScan } = await import("./terrainscan.js");
+    const roadAt = (x, z) => { const [s] = world.grid.nearest(x, z, 2); if (!s) return null; const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; return { y: s.p.y, d: l >= 0 ? l - edgeOf(s, 1) : -l + edgeOf(s, -1), i: s.i }; };
+    const f = (v) => +v.toFixed(2), ll = (x, z) => R.geo.toLL(x, z).map((v) => +v.toFixed(6));
+    const ter = R.group.getObjectByName("terrain"), b = R.bounds, nx = Math.round((b.x1 - b.x0) / R.terrainCell[0]), nz = Math.round((b.z1 - b.z0) / R.terrainCell[1]);
+    const P = ter.geometry.attributes.position.array;
+    const sp = gridSpikes(P, nx, nz, 3, 1, (i, j) => [P[(j * (nx + 1) + i) * 3], P[(j * (nx + 1) + i) * 3 + 2]], roadAt, { maxD, minDev });
+    const meshes = {}, tmp = new THREE.Vector3();
+    world.group.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry?.attributes?.position) return;
+      const path = []; for (let p = o; p && p !== world.group; p = p.parent) path.push(p.name || p.type);
+      const key = path.reverse().join("/"), A = o.geometry.attributes.position, W = new Float32Array(A.count * 3); o.updateWorldMatrix(true, false);
+      for (let k = 0; k < A.count; k++) { tmp.fromBufferAttribute(A, k).applyMatrix4(o.matrixWorld); W[k * 3] = tmp.x; W[k * 3 + 1] = tmp.y; W[k * 3 + 2] = tmp.z; }
+      const up = /terrain|auxTarmac|road|kerb|ground/i.test(key), hits = triScan(W, o.geometry.index?.array || null, roadAt, { maxD, upFacing: up });
+      if (!hits.length) return;
+      const m = meshes[key] || (meshes[key] = { spike: 0, down: 0, thin: 0, worst: [] });
+      for (const h of hits) m[h.flag]++;
+      m.worst.push(...hits.sort((a, c) => c.rise - a.rise).slice(0, top).map((h) => ({ flag: h.flag, t: h.t, ll: ll(h.cx, h.cz), rise: f(h.rise), road: f(h.road), d: f(h.d), ny: f(h.ny), thin: f(h.thin), s: h.s, v: h.v.map((q) => q.map(f)) })));
+      m.worst = m.worst.sort((a, c) => c.rise - a.rise).slice(0, top);
+    });
+    const rocks = []; R.group.traverse((o) => { if (o.name !== "rocks" || !o.isInstancedMesh) return; const M = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); for (let k = 0; k < o.count; k++) { o.getMatrixAt(k, M); M.decompose(p, q, s); const r = roadAt(p.x, p.z); if (r && r.d < maxD) rocks.push({ k, ll: ll(p.x, p.z), x: f(p.x), y: f(p.y), z: f(p.z), size: f(Math.max(s.x, s.y, s.z)), above: f(p.y - r.y), d: f(r.d) }); } });
+    return JSON.stringify({ grid: { nx, nz, cell: R.terrainCell.map(f), n: sp.length, peaks: sp.filter((v) => v.peak).length, pits: sp.filter((v) => v.pit).length,
+      worst: sp.slice(0, top).map((v) => ({ ij: [v.i, v.j], ll: ll(v.x, v.z), xyz: [f(v.x), f(v.y), f(v.z)], med: f(v.med), dev: f(v.dev), peak: v.peak, pit: v.pit, road: f(v.road), d: f(v.d), s: v.s })) },
+      meshes, rocks: { n: rocks.length, list: rocks.sort((a, c) => a.d - c.d).slice(0, top) },
+      // the lap's height every 20 samples, and the stretches of the lap that pass close by another at another height
+      profile: world.samples.filter((s) => s.i % 20 === 0).map((s) => [s.i, f(s.p.y)]),
+      stacked: (() => { const out = []; for (const s of world.samples) { if (s.i % 4) continue; let best = null; for (const q of world.samples) { const di = Math.abs(q.i - s.i); if (Math.min(di, world.n - di) < 60 || Math.abs(q.p.y - s.p.y) < 3) continue; const d = Math.hypot(q.p.x - s.p.x, q.p.z - s.p.z); if (d < 70 && (!best || d < best[1])) best = [q, d]; } if (best && s.i < best[0].i) out.push([s.i, best[0].i, f(best[1]), f(best[0].p.y - s.p.y), ll(s.p.x, s.p.z)]); } return out; })() });
+  },
+  // development: show / hide the real surroundings' parts by name ("buildings,landmarks,trees") and draw the terrain as
+  // its wireframe – for seeing the ground's own triangles
+  partsShown(names, v = false) { const R = world?.real; if (!R) return "no map"; const set = names.split(","); for (const c of R.group.children) if (set.includes(c.name)) c.visible = !!v; return R.group.children.map((c) => c.name + (c.visible ? "" : "(off)")).join(","); },
+  // development: the first mesh triangle under a screen point (−1..1): the mesh's path, the triangle's corners (scene) and
+  // the lap sample nearest each corner with its road height
+  // development: one line per circuit – the terrain poking through the tarmac, sheer faces near the road (> 5 and > 10 m
+  // across one grid edge, on land off the tarmac – under a road its own walls stand), stacked
+  // stretches of the lap, what roadground.js changed (Map3D.roadJoin(false) for the ground as before)
+  async terrainSummary(maxD = 40) {
+    const R = world?.real; if (!R?.terrainAt) return "no map";
+    const { pokeThrough, gridSteps, gridSpikes } = await import("./terrainscan.js"), { roadProbes } = await import("./roadground.js");
+    const roadAt = (x, z) => { const [s] = world.grid.nearest(x, z, 2); if (!s) return null; const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; return { y: s.p.y, d: l >= 0 ? l - edgeOf(s, 1) : -l + edgeOf(s, -1), i: s.i }; };
+    const ter = R.group.getObjectByName("terrain"), b = R.bounds, nx = Math.round((b.x1 - b.x0) / R.terrainCell[0]), nz = Math.round((b.z1 - b.z0) / R.terrainCell[1]), P = ter.geometry.attributes.position.array;
+    const xz = (i, j) => [P[(j * (nx + 1) + i) * 3], P[(j * (nx + 1) + i) * 3 + 2]], f = (v) => +v.toFixed(2), ll = (a) => a && R.geo.toLL(...a).map((v) => +v.toFixed(5));
+    const poke = pokeThrough(roadProbes(world.samples, edgeOf), R.terrainAt), L = Float32Array.from(P), _sea = (() => { for (let k = 0; k < L.length; k += 3) { const r = roadAt(L[k], L[k + 2]); if (R.isSea?.(L[k], L[k + 2]) || (r && r.d < 0.5)) L[k + 1] = NaN; } })(), steps = gridSteps(L, nx, nz, 3, 1, xz, roadAt, { maxD }), steps10 = gridSteps(L, nx, nz, 3, 1, xz, roadAt, { maxD, minStep: 10 }), spikes = gridSpikes(P, nx, nz, 3, 1, xz, roadAt, { maxD, minDev: 2.5 });
+    let stacked = 0, maxDy = 0; for (const s of world.samples) { if (s.i % 4) continue; for (const q of world.samples) { const di = Math.abs(q.i - s.i); if (Math.min(di, world.n - di) < 60) continue; const dy = Math.abs(q.p.y - s.p.y); if (dy >= 3 && Math.hypot(q.p.x - s.p.x, q.p.z - s.p.z) < 40) { stacked++; maxDy = Math.max(maxDy, dy); break; } } }
+    const w = R.group.getObjectByName("roadWalls");
+    return JSON.stringify({ loc: app().location?.(), join: devRoadJoin, poke: { n: poke.n, worst: f(poke.worst), at: ll(poke.at) }, steps: { n: steps.n, n10: steps10.n, worst: f(steps.worst), at: ll(steps.at) }, spikes: { n: spikes.length, peaks: spikes.filter((v) => v.peak).length }, stacked: { samples: stacked * 4, maxDy: f(maxDy) }, roadGround: R.info?.roadGround ?? null, buildMs: R.info?.ms?.total ?? null, wallTris: w ? w.geometry.index.count / 3 : 0 });
+  },
+  hitTri(x = 0, y = 0) {
+    const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x, y), camera);
+    const h = rc.intersectObject(world.group, true).find((q) => q.object.isMesh && q.face); if (!h) return "nothing";
+    const o = h.object, A = o.geometry.attributes.position, path = []; for (let p = o; p && p !== world.group; p = p.parent) path.push(p.name || p.type);
+    const v = [h.face.a, h.face.b, h.face.c].map((k) => { const p = new THREE.Vector3().fromBufferAttribute(A, k).applyMatrix4(o.matrixWorld), [s, d] = world.grid.nearest(p.x, p.z, 2); return [k, +p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2), s?.i ?? null, s ? +s.p.y.toFixed(2) : null, +d.toFixed(1)]; });
+    return JSON.stringify({ mesh: path.reverse().join("/"), dist: +h.distance.toFixed(2), face: h.faceIndex, v });
+  },
+  terrainWire(on = true) { const t = world?.real?.group.getObjectByName("terrain"); if (!t) return "no map"; t.material.wireframe = !!on; return "ok"; },
   hitAt(x = 0, y = 0) {
     const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x, y), camera); rc.camera = camera;
     const name = (o) => { const out = []; let q = o; while (q && out.length < 3) { if (q.name) out.push(q.name); q = q.parent; } return out.join("<") || o.type; };
@@ -3955,7 +4184,9 @@ window.Map3D = {
       let trackY = null; if (edge != null) { const [x, z] = at(edge), pr = F.project(x, z); if (pr) trackY = +(pr.sample.p.y - s.floor).toFixed(2); }
       // the feed's pit path across here: the nearest path point in front of this garage (within ±6 m along it)
       let path = null; if (world.pitLane) { let best = Infinity; for (const q of world.pitLane.pts) { const pr = G.project(q.x, q.z); if (Math.abs(pr.u - s.uc) < 6 && Math.abs(pr.u - s.uc) < best) { best = Math.abs(pr.u - s.uc); path = +pr.off.toFixed(1); } } }
-      rows.push({ k, u: Math.round(s.uc), floor: +s.floor.toFixed(2), groundOver: gr, path, edge, wallOff, trackOverFloor: trackY });
+      // (the lap's nearest sample to where the floor's tarmac height is taken – 1.5 m out from the front: scenery.js surfaceAt)
+      const [nx, nz] = at(1.5), [ns, nd] = world.grid.nearest(nx, nz, 6), near = ns ? [ns.i, +(ns.p.y - s.floor).toFixed(2), +nd.toFixed(1)] : null;
+      rows.push({ k, u: Math.round(s.uc), floor: +s.floor.toFixed(2), groundOver: gr, path, edge, wallOff, trackOverFloor: trackY, near });
     }
     const pitCars = [...cars.values()].filter((c) => c.pit && c.obj.visible).map((c) => { const p = G.project(c.pos.x, c.pos.z), s = G.slots[Math.max(0, Math.min(G.slots.length - 1, Math.round((p.u - G.gStart) / G.pitch - 0.5)))]; return [c.num, Math.round(p.u), +p.off.toFixed(1), +(c.obj.position.y - s.floor).toFixed(3)]; });
     return JSON.stringify({ ok: true, facility: G.facility, n: G.slots.length, pitch: +G.pitch.toFixed(2), depth: G.slots[0].depth, rows, pitCars });
@@ -4058,6 +4289,15 @@ window.Map3D = {
   },
   // development: night on / off / auto ("on" | "off" | "auto") and the real map built again with it
   nightMode(mode) { saveGeoSettings({ ...geoSettings(), night: mode }); rebuild(); return "ok"; },
+  // development: the weather state at the moment shown (weather.js / weather3d.js) – measured (raining, records) and
+  // estimated (wet, rainAmt, cloud) – and the roofs that keep rain off; weather({ rain, wet, cloud }) forces a look for
+  // testing (marked forced: true), weather(null) gives it back to the feed; weather({ sky }) sets the sky setting
+  weather(o) {
+    if (o === null) wx?.force(null); else if (o && typeof o === "object") { if (o.sky) wx?.configure({ sky: o.sky }); if ("rain" in o || "wet" in o || "cloud" in o) wx?.force(o); }
+    const e = wx?.env || {}, r = (v) => (typeof v === "number" ? +v.toFixed(3) : v);
+    return JSON.stringify({ t: e.t, raining: e.raining, rainAmt: r(e.rainAmt), wet: r(e.wet), wetModel: r(e.wetModel), wetTyres: r(e.wetTyres), wetSrc: e.wetSrc, cloud: r(e.cloud), cloudSrc: e.cloudSrc, cloudData: e.cloudData,
+      air: e.airTemp, track: e.trackTemp, hum: e.humidity, wind: [e.windSpeed, e.windDir], forced: e.forced, night: nightNow, covers: wx?.info });
+  },
   // development: the session times (ms, from t0 to t1 every `step`) at which car `num` is in or near covered stretch 0 –
   // [t, metres along from its entry] for each – to find a car driving through (the cars stepped as motionTest does)
   tunnelPass(num, t0, t1, step = 250) {
@@ -4234,6 +4474,43 @@ window.Map3D = {
     visible = true; resize(); resetPace(); lastT = performance.now(); cancelAnimationFrame(rafId); rafId = requestAnimationFrame(frame);
   },
   hide() { visible = false; },
+  // development (v0.44): the side mirrors' pass – { mode: "auto" | "full" | "low" | "simple" } sets the setting; returns its state
+  mirrors(o = {}) {
+    if (o.mode) { saveGeoSettings({ ...geoSettings(), mirrors: o.mode }); mirrorSetting = null; }
+    const S = mirrorPass?.state, ms = S?.car?.userData.mirrors;
+    return JSON.stringify({ setting: geoSettings().mirrors, mode: mirrorSetting && mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), strained: mirrorStrained, car: S?.car ? [...cars].find(([, c]) => c.model === S.car)?.[0] : null, view: S?.key, drawn: S?.drawn, rt: S?.rt ? [S.rt.width, S.rt.height, S.rt.samples] : null,
+      glass: ms?.material.type, stats: S?.stats, programs: renderer.info.programs?.length, frame: S?.frame });
+  },
+  // development (v0.44): the mirrors' picture (as drawn, unflipped: the left mirror's half first) shown over the page ×k
+  mirrorDump(k = 2) {
+    const rt = mirrorPass?.state.rt; if (!rt) return "no target";
+    const w = rt.width, h = rt.height, px = new Uint8Array(w * h * 4); renderer.readRenderTargetPixels(rt, 0, 0, w, h, px);
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h; const x = cv.getContext("2d"), im = x.createImageData(w, h);
+    for (let y = 0; y < h; y++) im.data.set(px.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+    x.putImageData(im, 0, 0);
+    let el = document.getElementById("mirrorDump"); if (!el) { el = document.createElement("img"); el.id = "mirrorDump"; el.style.cssText = "position:fixed;left:90px;top:200px;z-index:99999;image-rendering:pixelated;border:2px solid #f0f"; document.body.append(el); }
+    el.src = cv.toDataURL(); el.style.width = w * k + "px"; return "ok";
+  },
+  // development (v0.44): moments with one car close behind another (replay positions; minutes after lights out):
+  // [min, ahead, behind, metres behind, metres to the side (+ = the car ahead's left)]
+  closeBehind(fromMin = 3, toMin = 60, stepS = 4, maxM = 22) {
+    const src = app().src, t0 = src.startTime(), out = [], dz = (p) => p && Math.hypot(p[0], p[1]) > 1;
+    for (let t = t0 + fromMin * 60e3; t < t0 + toMin * 60e3; t += stepS * 1e3) {
+      const a = src.positionsAt(t), b = src.positionsAt(t - 1000);
+      for (const [n, p] of Object.entries(a)) {
+        const q = b[n]; if (!dz(p) || !q) continue;
+        const hx = p[0] - q[0], hy = p[1] - q[1], hl = Math.hypot(hx, hy); if (hl < 300) continue;   // (decimetres a second: > 30 m/s)
+        const fx = hx / hl, fy = hy / hl;
+        for (const [m, r] of Object.entries(a)) {
+          if (m === n || !dz(r)) continue;
+          const rx = (r[0] - p[0]) / 10, ry = (r[1] - p[1]) / 10, along = rx * fx + ry * fy, side = -rx * fy + ry * fx;
+          if (along < -maxM || along > -5 || Math.abs(side) > 5) continue;
+          out.push([+((t - t0) / 60e3).toFixed(2), n, m, +(-along).toFixed(1), +side.toFixed(1)]);
+        }
+      }
+    }
+    return JSON.stringify(out.slice(0, 400));
+  },
   dev(o) { if ("shadows" in o) { sun.castShadow = o.shadows; } if ("hud" in o) devNoHud = !o.hud; if ("labels" in o) devNoLabels = !o.labels; return "ok"; },
   // development: switch costly looks off to measure them – { roadGrain, carEnv, carNear, kerbRidge } (true = on)
   tune(o) {
@@ -4296,8 +4573,34 @@ window.Map3D = {
     });
     return "ok";
   },
+  // development (v0.44): the focused car's kit drawn in loud zone colours (kit.js zones: gloves, sleeves, harness) – on a
+  // copy of its material, put back with kitDiag(false); partVis hides / shows the focused car's parts by name
+  kitDiag(on = true) {
+    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const k = c.model.userData.kitMat; let n = 0;
+    c.model.traverse((o) => {
+      if (!o.isMesh) return;
+      if (!on && o.userData.kitDiag) { const m = o.material; o.material = o.userData.kitDiag; delete o.userData.kitDiag; if (!o.material.userData?.shared || m !== o.material) m.dispose?.(); n++; }
+      else if (on && o.material === k) {
+        const m = k.clone(), a = new Uint8Array(64);
+        for (let z = 0; z < 16; z++) { const col = new THREE.Color().setHSL((z * 0.381) % 1, 0.9, 0.55); a.set([col.r * 255, col.g * 255, col.b * 255, 255], z * 4); }
+        m.map = new THREE.DataTexture(a, 16, 1); m.map.magFilter = m.map.minFilter = THREE.NearestFilter; m.map.needsUpdate = true; m.sheen = 0;
+        o.userData.kitDiag = k; o.material = m; n++;
+      }
+    });
+    return n;
+  },
+  partVis(name, on) { const c = cars.get(app().focus || leader()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
+  // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones
+  // development: hold the focused car's wings at a fraction (0 shut … 1 open; null: back to the estimate / data)
+  aeroHold(v = null) { devAeroHold = v; return "ok"; },
+  aeroState(num = null) {
+    const c = cars.get(num || app().focus || leader()); if (!c) return "no car";
+    const Z = world?.aeroZones, u = c.model.userData;
+    return JSON.stringify({ num: c.num, ...c.aeroState, open: +(c.aero ?? 0).toFixed(3), spec: u.aeroSpec?.id, conf: u.aeroSpec?.conf, zones: Z ? { official: !!Z.official, src: Z.official?.src || "estimated (long straights)", spans: Z.spans.map((q) => [Math.round(q.a), Math.round(q.b)]), L: Math.round(Z.L) } : null, s: c.st ? Math.round(((c.st.s % (Z?.L || 1)) + (Z?.L || 1)) % (Z?.L || 1)) : null });
+  },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {
     const c = cars.get(app().focus || leader()); if (!c) return "no car";

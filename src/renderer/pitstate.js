@@ -32,7 +32,8 @@ const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
 //   onLane (its raw position on the measured pit path), speed (m/s), stillFor (s it has stood, 0 moving),
 //   boxU (its team's box along the garages; null: not known), boxFrom ("order" | "stops" | null), penalty (null |
 //   "drive-through" | "stop-go": given by race control, not yet served), pitStart (null | "queue" | "go"), race (bool),
-//   teammateInBox (bool), lastBox: { endU, ago } (it left its box `ago` s ago at endU) or null }
+//   teammateInBox (bool), lastBox: { endU, ago } (it left its box `ago` s ago at endU) or null, retired (bool: the
+//   Retired or Stopped flag), retiredFor (s since that flag was set) }
 // → { state, lane: "feed" | "fast" | "box" | "garage", w (0–1 of the way from the fast lane to the box, or into the
 //   garage), evidence: [...] }
 export function pitState(c, P = PIT) {
@@ -54,8 +55,16 @@ export function pitState(c, P = PIT) {
   if (box) ev.push(`box (${c.boxFrom || "?"})`);
   const d = box ? c.u - c.boxU : null;   // + past its box
   const tol = Math.min(P.atBox, c.boxTol ?? P.atBox);
-  // retired or stopped: nobody works on it – left standing where it stood (its box, if that is where), else the fast lane
-  if (c.retired) { ev.push("retired / stopped (timing)"); return { state: "retired", lane: standing && box && Math.abs(d) <= tol ? "box" : "fast", w: 1, evidence: ev }; }
+  // retired or stopped: nobody works on it. Standing, it is wheeled off the lane into the garage where it stands (along
+  // the lane where the feed last had it), eased in over `garageIn` s from the flag or the standstill, whichever came last –
+  // an ESTIMATE: the feed says nothing of it, but a retired car isn't left in the lane the others drive and stop in
+  // (v0.44: 2025 Monaco, Gasly's car – retired at 1:10:41 – stood for the rest of the race in Williams' box, where both
+  // Williams stopped, the feed's position frozen there). Still moving: the fast lane, or its box if it is there.
+  if (c.retired) {
+    ev.push("retired / stopped (timing)");
+    if (standing) { ev.push("wheeled into the garage (estimate)"); return { state: "retired", lane: "garage", w: ss(0, P.garageIn, Math.min(c.retiredFor ?? Infinity, c.stillFor)), evidence: ev }; }
+    return { state: "retired", lane: box && Math.abs(d) <= tol ? "box" : "fast", w: 1, evidence: ev };
+  }
   if (standing) {
     // behind its box while a teammate is in it (a double stack): waits in the inner lane, where it stands – even within
     // the box's tolerance (the second car stops a car's length or two behind the first: never "in box" with it)

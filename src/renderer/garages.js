@@ -566,6 +566,7 @@ const textOn = (hex) => { const n = parseInt(hex.slice(1), 16), l = 0.299 * (n >
 // The layer for one allocation: returns a THREE.Group owning its geometry, materials and label texture.
 export function teamLayer(garages, teams, drivers, season = null) {
   const S = shared(), group = new THREE.Group(); group.name = "pitTeams";
+  group.userData.covers = [];   // (the pit wall stands' canopies: no rain under them – weather3d.js)
   if (!teams.length) return group;
   const bySlot = new Map(garages.slots.map((s) => [s.k, s]));
   // frame of a slot: a point d m inside from the front, w m along from the opening's centre, y over the floor
@@ -638,6 +639,8 @@ export function teamLayer(garages, teams, drivers, season = null) {
     // canopy: posts at the corners, the roof in the team's colour, its front fascia carrying the name
     for (const a of [-L / 2 + 0.05, L / 2 - 0.05]) for (const o of [-0.72, 0.82]) boxQ(panels, at(a, o, 1.35), A, up, O, 0.07, 2.7, 0.07, steel);
     boxQ(panels, at(0, 0.1, 2.72), A, up, O, L + 0.3, 0.08, 2.0, team.clone().multiplyScalar(0.8));
+    // (where rain can't fall – weather.js coverRaster: the canopy's outline at its underside)
+    { const c = (da, dn) => { const v = at(da, 0.1 + dn, 0); return [v.x, v.z]; }, h = (L + 0.3) / 2; group.userData.covers.push({ pts: [c(-h, -1), c(h, -1), c(h, 1), c(-h, 1)], y: p.y + 2.68, kind: "pit wall canopy" }); }
     boxQ(panels, at(0, 1.1, 2.55), A, up, O, L + 0.3, 0.42, 0.04, team, 3);
     quad(labels, at(0, 1.13, 2.55), A.clone().multiplyScalar(Math.min(L, 3.6)), up.clone().multiplyScalar(Math.min(L, 3.6) / 8), O, lab.uv(t.row));
     // railings at both ends, a step up onto the deck at the far end

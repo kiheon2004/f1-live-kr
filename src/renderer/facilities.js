@@ -641,7 +641,7 @@ function pitBuilding(ctx, p) {
   }
   const stationAt = (uu) => { let i = 0; while (i + 1 < stations.length && stations[i + 1].u < uu) i++; const a = stations[i], b = stations[Math.min(i + 1, stations.length - 1)]; const f = b.u > a.u ? Math.max(0, Math.min(1, (uu - a.u) / (b.u - a.u))) : 0; return [a, b, f]; };
   const frontV = (uu) => { const [a, b, f] = stationAt(uu); return sideV(a, 1) + (sideV(b, 1) - sideV(a, 1)) * f; };
-  const floorAt = (uu) => { const g = baseAt(uu); if (!ctx.surfaceAt) return g; const [x, z] = P(uu, frontV(uu) + vTrack * 1.5); const sy = ctx.surfaceAt(x, z); return Number.isFinite(sy) ? Math.max(g, sy) : g; };
+  const floorAt = (uu) => { const g = baseAt(uu); if (!ctx.surfaceAt) return g; const [x, z] = P(uu, frontV(uu) + vTrack * 1.5), [x1, z1] = P(uu, frontV(uu) + vTrack * 2.5); const sy = ctx.surfaceAt(x, z, [x1 - x, z1 - z]); return Number.isFinite(sy) ? Math.max(g, sy) : g; };
   const inGarages = (uu) => G > 0 && uu >= gStart - 1e-6 && uu <= gEnd + 1e-6;
   // walls along both long sides, station to station
   for (let i = 0; i + 1 < stations.length; i++) {
@@ -1452,6 +1452,8 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     }
     if (!made) { info.push({ id: spec.id, how: "fallback", reason, ...(spec.found ? { found: spec.found } : {}) }); continue; }   // the map's buildings stay
     made.object.name = spec.id; made.object.userData.facility = spec.id;
+    // (its outline and top: no rain inside it – weather.js coverRaster; the garages' interiors are in it)
+    if (made.footprint?.length > 2 && Number.isFinite(made.top)) made.object.userData.cover = { pts: made.footprint, y: made.top };
     group.add(made.object);
     const anchorXZ = spec.model?.anchor ? gf.fromLL(spec.model.anchor[0], spec.model.anchor[1]) : null;
     // (an entry that picks its own buildings – genericPitSpec – also takes every map building standing inside what it
