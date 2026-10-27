@@ -221,6 +221,11 @@ export function stepTraffic(S, list, env, t) {
       follow(m, "eD", "eDr", 0, T.LAT_W, T.LAT_V, dt); follow(m, "eS", "eSr", 0, T.LONG_W, T.LONG_V, dt);
       m.dRate = kD / dt + m.eDr; m.sRate = kS / dt + m.eSr;
       m.dOff = m.tD + m.eD; m.sOff = m.tS + m.eS;
+      // (the drawn place kept on the tarmac too, not only the target: a target let go and taken up again – a pass
+      // train – comes back faster than the eased lag goes, and target + lag went up to 0.5 m past the edge allowance
+      // at Monaco 2025 (v0.45 Map3D.trafficAudit); a car the data has outside the allowance keeps its own place)
+      const lo = Math.min(c.lo, c.d), hi = Math.max(c.hi, c.d), x = c.d + m.dOff;
+      if (x > hi || x < lo) { const y = x > hi ? hi : lo; m.dOff = y - c.d; m.eD = m.dOff - m.tD; if (m.eDr * (x - y) > 0) { m.dRate -= m.eDr; m.eDr = 0; } }
     }
     m.pD = m.tD; m.pS = m.tS;
     // (the along offset never takes a car past the one it follows, eased or not – clamped again on the drawn value)
