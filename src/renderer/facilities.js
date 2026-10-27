@@ -854,7 +854,9 @@ function pitBuilding(ctx, p) {
     // (the walkway behind a mapped wall – the stands' platform – is the plain one: the map gives the wall, not what is
     // behind it. v0.45 drew none there and put the stands on the wall's track side, between it and the tarmac, the
     // wall between them and the pit lane – Silverstone, Suzuka, Melbourne…: v0.46 run/pitwall)
-    const base = mappedWall ? 0 : pw.thick, walk = mappedWall ? PLAIN_PIT_WALL.walk : pw.walk, deckH = mappedWall ? PLAIN_PIT_WALL.deck : pw.deck;
+    // (1.7 m: a stand's 1.6 m deck – garages.js pitWallStand – and a little room either side of it, against the map's
+    // wall wobbling about the line fitted to it; the plain walkway is 1.5 m and its stand stands 0.05 m over its edge)
+    const base = mappedWall ? 0 : pw.thick, walk = mappedWall ? 1.7 : pw.walk, deckH = mappedWall ? PLAIN_PIT_WALL.deck : pw.deck;
     if (W.length > 3) {
       // the wall's line smoothed (a wall is straight where the edge wobbles in the data), as a line across the lane – the
       // building's front plus the distance –, not the distance alone: where the front steps in or out, the wall doesn't
