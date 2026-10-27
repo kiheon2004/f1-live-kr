@@ -22,6 +22,7 @@ import { pathFrame } from "./pitlane.js";
 import { planTunnels, buildTunnels } from "./tunnel.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
+import { pitLaneOf } from "./pitwallcheck.js";
 import { otherSection, joinHeight, roadProbes, clearRoads, skirtStrips, shoreCap } from "./roadground.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
@@ -928,7 +929,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   }
 
   // (tplan, the covered stretches: planned with the terrain, above)
-  let bld = null, lm = null;
+  let bld = null, lm = null, pitG = null;
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");
     lm = buildLandmarks({ scene, gf, groundAt, location: scene.location, venue: opts.venue, toTrack });
@@ -975,6 +976,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // the floor there – nothing is raised, nothing else moves.
     if (fac?.group) fac.group.traverse((o) => {
       const G = o.userData?.garages; if (!G) return;
+      pitG = pitG || G;
       let n = 0; const cell = Math.max(W / nx, H / nz);
       for (let k = 0; k < pos.length / 3; k++) {
         const x = pos[k * 3], z = pos[k * 3 + 2], p = G.project(x, z);
@@ -1037,14 +1039,21 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   const tm = auxMesh(aux, T, auxY);
   if (tm) group.add(tm);
   // Real barriers within 45 m of the track.
-  // Mapped barriers within 45 m of the track, cut where a mapping error puts them on the tarmac.
-  const near = [];
+  // Mapped barriers within 45 m of the track, cut where a mapping error puts them on the tarmac – or across the pit lane
+  // in front of the garages, where the session's cars drive in and out of their boxes (v0.46: Imola 2025, two mapped
+  // fences ran across the lane between the boxes and the fast lane, the teams' stands shut off from the lane behind
+  // them; run/pitwall) – the pit wall a map has stays (it is the lane's end: pitwallcheck.js pitLaneOf)
+  const near = [], inLane = pitLaneOf(pitG);
+  let laneCut = 0;
   for (const l of scene.lines) {
     if (l.k !== "barrier" || !l.pts.some((p) => { const [x, z] = gf.xz(p); return trackDist(x, z) < 45; })) continue;
     let run = [];
-    for (const p of l.pts) { const [x, z] = gf.xz(p); if (corridor.on(x, z, -0.3)) { if (run.length > 1) near.push({ ...l, pts: run }); run = []; } else run.push(p); }
+    // (with a pit lane to keep clear: points every 2 m along the line – a straight piece can cross the lane between two)
+    const pts = inLane ? l.pts.flatMap((p, i) => { if (!i) return [p]; const q = l.pts[i - 1], [ax, az] = gf.xz(q), [bx, bz] = gf.xz(p), m = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2)); return Array.from({ length: m }, (_, k) => q.map((c, j) => c + ((p[j] - c) * (k + 1)) / m)); }) : l.pts;
+    for (const p of pts) { const [x, z] = gf.xz(p), lane = !!inLane?.(x, z); laneCut += lane; if (lane || corridor.on(x, z, -0.3)) { if (run.length > 1) near.push({ ...l, pts: run }); run = []; } else run.push(p); }
     if (run.length > 1) near.push({ ...l, pts: run });
   }
+  if (pitG) pitG.mapBarrierPointsCut = laneCut;
   let covered = 0;
   const bm = barriersMesh(near, gf, heightNear);
   if (bm) group.add(bm);

@@ -57,3 +57,11 @@ export function pitsUpToWall(G, margin = 0.3) {
   if (!G?.wallOut || !G.project) return null;
   return (x, z) => { const p = G.project(x, z); return p.u > G.gStart - 3 && p.u < G.gEnd + 3 && p.off > -1 && p.off < G.wallOut(Math.max(G.gStart, Math.min(G.gEnd, p.u))) + margin; };
 }
+
+// The pit lane in front of the garages, short of its wall (G: facilities.js garages – project, wallFace): (x, z) → true
+// there. The session's cars drive across it into their boxes and out: a mapped barrier there is not where the map has
+// it (scenery.js cuts it) – the map's own pit wall is the lane's end, past `margin` (v0.46: Imola's mapped fences).
+export function pitLaneOf(G, margin = 0.3) {
+  if (!G?.wallFace || !G.project) return null;
+  return (x, z) => { const p = G.project(x, z); return p.u > G.gStart && p.u < G.gEnd && p.off > 0.3 && p.off < G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, p.u))) - margin; };
+}

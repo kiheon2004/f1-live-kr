@@ -121,3 +121,16 @@ test("mapped pit wall that stops short of the garages' end (Silverstone): ours c
     assert.ok(v.ok, `u ${u}: ${v.order} – ${v.problems.join("; ")}`);
   }
 });
+
+test("the pit lane in front of the garages is kept clear of mapped barriers; the map's pit wall at its end stays (Imola: fences across the lane)", async () => {
+  const barrierRay = (x, z, dx, dz, max) => { const s = (z - -57.5) / -dz; return dz < 0 && s > 0 && s <= max ? s : Infinity; };
+  const { G } = await build({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 }, barrierRay);
+  const { pitLaneOf } = await import("../src/renderer/pitwallcheck.js");
+  const inLane = pitLaneOf(G);
+  assert.ok(inLane, "the pit building says where its lane ends");
+  // scene z: garages' front −30, the map's wall −57.5 (its pit face −57.25), the stands' walkway 1.5 m in from there
+  assert.strictEqual(inLane(0, -45), true, "a fence across the lane: cut");
+  assert.strictEqual(inLane(0, -57.5), false, "the map's pit wall: kept");
+  assert.strictEqual(inLane(0, -29.5), false, "the garages' front");
+  assert.strictEqual(inLane(400, -45), false, "past the garages");
+});
