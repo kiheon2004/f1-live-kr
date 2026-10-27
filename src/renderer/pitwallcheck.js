@@ -49,3 +49,11 @@ export function circuitVerdict(sections) {
   for (const r of res) for (const p of r.problems) { const k = p.replace(/[-\d.]+( m|\))/g, "…$1").replace(/\(\S+ > edge \S+\)/, ""); count.set(k, (count.get(k) || 0) + 1); }
   return { stands: res.length, wrong: res.filter((r) => !r.ok).length, problems: [...count].map(([p, n]) => `${n}× ${p}`), res };
 }
+
+// Between a pit building's garages and the track face of its pit wall (G: facilities.js garages – project, wallOut):
+// (x, z) → true there. Nothing generated (map3d.js walls: a barrier 12 m out from a stretch of tarmac) stands in it –
+// one stood in the walkway, through the teams' stands, at Jeddah (v0.46, run/pitwall).
+export function pitsUpToWall(G, margin = 0.3) {
+  if (!G?.wallOut || !G.project) return null;
+  return (x, z) => { const p = G.project(x, z); return p.u > G.gStart - 3 && p.u < G.gEnd + 3 && p.off > -1 && p.off < G.wallOut(Math.max(G.gStart, Math.min(G.gEnd, p.u))) + margin; };
+}

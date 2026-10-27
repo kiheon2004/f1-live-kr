@@ -21,7 +21,7 @@ import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
-import { circuitVerdict } from "./pitwallcheck.js";
+import { circuitVerdict, pitsUpToWall } from "./pitwallcheck.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { probeMirrorPass, samePipeline, glassVsPicture, rendererState, flatFill, glassPixels, glassOnScreen } from "./mirrorprobe.js";
@@ -204,7 +204,7 @@ function initGeoSettings() {
 // evidence isn't enough. Checked every 2 s (live: 15 s).
 let pitTeams = { key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null, frame: null };
 function clearPitTeams() {
-  if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); }
+  if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); pitTeams.facility?.userData?.garages?.openRail?.([]); }
   pitTeams.group = null; pitTeams.key = null;
 }
 // (the layer went with the world or the real map it was in: nothing of it is freed again, the next check rebuilds it)
@@ -268,6 +268,8 @@ function updatePitTeams(force = false) {
   // a layer added at night takes the light field too (its own materials only – the rest of the world has it already)
   pitTeams.group.traverse((o) => { for (const m of [].concat(o.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
+  // (the walkway's railing open in front of each team's stand: the stand is open to its pit lane – facilities.js openRail)
+  G.openRail?.(pitTeams.group.userData.standSpans || []);
   warmShaders();
 }
 // ---------- the pit lane across (pitlane.js crossSection), at every garage of the pit building ----------
@@ -2668,7 +2670,12 @@ async function loadGeo(w) {
     const gap0 = aux && openAt ? (x, z) => aux(x, z) || openAt(x, z) : aux || openAt;
     // (none of the generated barriers or fences in a tunnel: its own walls and armco are there – tunnel.js; the fence stood
     // through the ceiling)
-    const inTun = built.tunnel?.inside, gap = inTun ? (gap0 ? (x, z) => gap0(x, z) || inTun(x, z, 2) : (x, z) => inTun(x, z, 2)) : gap0;
+    // (v0.46: none between the pit building's garages and its pit wall – one 12 m out from a stretch of tarmac stood in
+    // the pit wall's walkway, through the teams' stands: Jeddah 2025, run/pitwall)
+    let PG = null; built.group.getObjectByName("facilities")?.traverse((o) => { if (!PG && o.userData?.garages?.wallOut) PG = o.userData.garages; });
+    const inPits = PG ? pitsUpToWall(PG) : null;
+    const gap1 = inPits ? (gap0 ? (x, z) => gap0(x, z) || inPits(x, z) : inPits) : gap0;
+    const inTun = built.tunnel?.inside, gap = inTun ? (gap1 ? (x, z) => gap1(x, z) || inTun(x, z, 2) : (x, z) => inTun(x, z, 2)) : gap1;
     if (built.barrierShare > 0.35 && !w.street) w.group.remove(w.syn.walls);
     else if (gap) {
       const open = w.street ? streetWalls(w.samples, w.grid, gap) : walls(w.samples, w.grid, 12, 1.1, undefined, 0, w.laneZone, gap); open.name = "syntheticWalls"; open.traverse((o) => { o.castShadow = true; });

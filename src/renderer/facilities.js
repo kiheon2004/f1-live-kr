@@ -822,8 +822,11 @@ function pitBuilding(ctx, p) {
   // The pit wall (p.pitWall): along the garages, where the track's measured edge is (ctx.trackEdge: metres from a
   // point to the edge of the tarmac) – a concrete wall with the catch fence over it on the track side, and behind it a
   // raised walkway with a railing on the pit lane side (the mapped footway band; photo). Stands for the teams on it are
-  // added with the teams (garages.js: wallAt).
-  let wallAt = null, wallDbg = null, wallFace = null, wallFrom = null;
+  // added with the teams (garages.js: wallAt) – on the pit lane's side of the wall, against it, open to the lane: the
+  // railing is opened in front of each (openRail). (FIA Appendix O 2026 §7.9: the pit lane "separated by a pit wall and
+  // signalling platform" from the straight; Autosport 2024-03-19: the stands "built along the top of the chemin de ronde
+  // (wall-walk), against the fence between the pitlane and the main straight" – H.)
+  let wallAt = null, wallDbg = null, wallFace = null, wallOut = null, wallFrom = null, railU = [];
   const occupancy = [];   // what the wall and the paddock stand on (scene x, z): trees keep off it – it isn't the building replaced
   if (p.pitWall && ctx.trackEdge && G > 0) {
     const pw = p.pitWall, W = [];
@@ -840,8 +843,18 @@ function pitBuilding(ctx, p) {
     // (mapped along most of the run: the map's wall is the pit wall – none is drawn over it; the lane's model and the
     // teams' stands use it)
     const mappedWall = W.length > 3 && W.filter((w) => w.mapped).length >= W.length * 0.6;
-    if (mappedWall) for (const w of W) if (!w.mapped) w.d = NaN;
-    if (mappedWall) { const keep = W.filter((w) => Number.isFinite(w.d)); W.length = 0; W.push(...keep); }
+    // (where the map's wall has a gap or stops short of the garages' ends – Silverstone 2024–25: the last team's stand had
+    // no wall before the tarmac, v0.46 run/pitwall – ours, the same way out from the tarmac as the map's nearest station
+    // has it: an estimate, said so in wallFrom)
+    let own = 0;
+    if (mappedWall) for (const w of W) if (!w.mapped) {
+      const m = W.filter((q) => q.mapped).reduce((a, q) => (Math.abs(q.u - w.u) < Math.abs(a.u - w.u) ? q : a));
+      w.d = w.edge - (m.edge - m.d); w.own = true; own++;
+    }
+    // (the walkway behind a mapped wall – the stands' platform – is the plain one: the map gives the wall, not what is
+    // behind it. v0.45 drew none there and put the stands on the wall's track side, between it and the tarmac, the
+    // wall between them and the pit lane – Silverstone, Suzuka, Melbourne…: v0.46 run/pitwall)
+    const base = mappedWall ? 0 : pw.thick, walk = mappedWall ? PLAIN_PIT_WALL.walk : pw.walk, deckH = mappedWall ? PLAIN_PIT_WALL.deck : pw.deck;
     if (W.length > 3) {
       // the wall's line smoothed (a wall is straight where the edge wobbles in the data), as a line across the lane – the
       // building's front plus the distance –, not the distance alone: where the front steps in or out, the wall doesn't
@@ -850,25 +863,36 @@ function pitBuilding(ctx, p) {
       const vS = fitLine(W.map((w) => [w.u, frontV(w.u) + vTrack * w.d]));
       const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, vS[i] - vTrack * dd); return [x, floorAt(W[i].u) + y, z]; };
       wallDbg = W.filter((_, i) => i % 8 === 0).map((w, k) => { const i = k * 8; return [Math.round(w.u), w.d, +((vS[i] - frontV(w.u)) * vTrack).toFixed(1)]; });
-      for (let i = 0; i + 1 < W.length && !mappedWall; i++) {
+      for (let i = 0; i + 1 < W.length; i++) {
         const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
-        // wall (track face, top, pit face), fence above it
-        F.poly("pitWall", [ptAt(i, 0, 0), ptAt(i + 1, 0, 0), ptAt(i + 1, 0, pw.height), ptAt(i, 0, pw.height)], null, o);
-        F.poly("pitWall", [ptAt(i, 0, pw.height), ptAt(i + 1, 0, pw.height), ptAt(i + 1, pw.thick, pw.height), ptAt(i, pw.thick, pw.height)], null, [0, 1, 0]);
-        F.poly("fence", [ptAt(i, 0.05, pw.height), ptAt(i + 1, 0.05, pw.height), ptAt(i + 1, 0.05, pw.height + pw.fence), ptAt(i, 0.05, pw.height + pw.fence)], [[W[i].u / 2, 0], [W[i + 1].u / 2, 0], [W[i + 1].u / 2, pw.fence / 2], [W[i].u / 2, pw.fence / 2]], o);
-        // the walkway: deck, its edge to the pit lane, the railing
-        const w0 = pw.thick, w1 = pw.thick + pw.walk;
-        F.poly("walkway", [ptAt(i, w0, pw.deck), ptAt(i + 1, w0, pw.deck), ptAt(i + 1, w1, pw.deck), ptAt(i, w1, pw.deck)], null, [0, 1, 0]);
-        F.poly("pitWall", [ptAt(i, w1, 0), ptAt(i + 1, w1, 0), ptAt(i + 1, w1, pw.deck), ptAt(i, w1, pw.deck)], null, io);
-        F.poly("rail", [ptAt(i, w1, pw.deck), ptAt(i + 1, w1, pw.deck), ptAt(i + 1, w1, pw.deck + 1.1), ptAt(i, w1, pw.deck + 1.1)], [[0, 0], [1, 0], [1, 1], [0, 1]], io);
+        // wall (track face, top, pit face), fence above it – none over the map's own (a mapped station's d is its wall's
+        // pit face: ours, where the map has none, stands out from there)
+        if (!mappedWall || W[i].own || W[i + 1].own) {
+          const t0 = mappedWall ? -pw.thick : 0;
+          F.poly("pitWall", [ptAt(i, t0, 0), ptAt(i + 1, t0, 0), ptAt(i + 1, t0, pw.height), ptAt(i, t0, pw.height)], null, o);
+          F.poly("pitWall", [ptAt(i, t0, pw.height), ptAt(i + 1, t0, pw.height), ptAt(i + 1, t0 + pw.thick, pw.height), ptAt(i, t0 + pw.thick, pw.height)], null, [0, 1, 0]);
+          F.poly("fence", [ptAt(i, t0 + 0.05, pw.height), ptAt(i + 1, t0 + 0.05, pw.height), ptAt(i + 1, t0 + 0.05, pw.height + pw.fence), ptAt(i, t0 + 0.05, pw.height + pw.fence)], [[W[i].u / 2, 0], [W[i + 1].u / 2, 0], [W[i + 1].u / 2, pw.fence / 2], [W[i].u / 2, pw.fence / 2]], o);
+        }
+        // the walkway: deck, its edge to the pit lane, the railing (one quad a segment, in order: openRail)
+        const w0 = base, w1 = base + walk;
+        F.poly("walkway", [ptAt(i, w0, deckH), ptAt(i + 1, w0, deckH), ptAt(i + 1, w1, deckH), ptAt(i, w1, deckH)], null, [0, 1, 0]);
+        F.poly("pitWall", [ptAt(i, w1, 0), ptAt(i + 1, w1, 0), ptAt(i + 1, w1, deckH), ptAt(i, w1, deckH)], null, io);
+        F.poly("rail", [ptAt(i, w1, deckH), ptAt(i + 1, w1, deckH), ptAt(i + 1, w1, deckH + 1.1), ptAt(i, w1, deckH + 1.1)], [[0, 0], [1, 0], [1, 1], [0, 1]], io);
+        railU.push([W[i].u, W[i + 1].u]);
       }
       // the walkway's centre at u (for the teams' stands): [x, y, z], facing the pit lane – between two samples, between
       // their points (a team's box is anywhere along the wall, not only every 3 m)
-      // (the face to the pit lane: thick + walk in from the track side)
+      // (the face to the pit lane: thick + walk in from the track side; a mapped wall: the walkway in from its pit face)
       wallFace = (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
-        // (a mapped wall: its own thickness only – no walkway of ours behind it)
-        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - vTrack * (pw.thick + (mappedWall ? 0 : pw.walk)) - frontV(W[k].u)) * vTrack;
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - vTrack * (base + walk) - frontV(W[k].u)) * vTrack;
+        return at(i) + (at(i + 1) - at(i)) * f;
+      };
+      // (its face to the track – the map's wall: its pit face –, the same way: nothing generated stands between the
+      // garages and it – map3d.js, the generated walls)
+      wallOut = (uu) => {
+        let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - frontV(W[k].u)) * vTrack;
         return at(i) + (at(i + 1) - at(i)) * f;
       };
       wallAt = pw.stands === "upper" ? (uu) => {
@@ -878,15 +902,15 @@ function pitBuilding(ctx, p) {
         return { p: [x, floorAt(uu) + 3.4, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]], upper: true };
       } : (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
-        // (a mapped wall: the stand behind it, on its track side, where 2.4 m are left before the tarmac – else none)
-        if (mappedWall) { const room = Math.min(W[i].edge - W[i].d, W[i + 1].edge - W[i + 1].d); if (!(room >= 2.4)) return null; }
-        const back = mappedWall ? -1.3 : pw.thick + pw.walk / 2, deck = mappedWall ? 0 : pw.deck;
-        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, back, deck), b = ptAt(i + 1, back, deck);
+        // (on the walkway, the pit lane's side of the wall – a mapped one too: v0.45 put it on that wall's track side,
+        // between it and the tarmac, where 2.4 m were left, else none)
+        const back = base + walk / 2;
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, back, deckH), b = ptAt(i + 1, back, deckH);
         return { p: a.map((x, k) => x + (b[k] - x) * f), out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]] };
       };
       // (what the wall and its walkway stand on)
-      if (!mappedWall) { const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, pw.thick + pw.walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]); occupancy.push(strip); }
-      wallFrom = mappedWall ? "the map's wall" : p.pitWallFrom || "drawn at the track's edge";
+      { const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, base + walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]); occupancy.push(strip); }
+      wallFrom = mappedWall ? "the map's wall" + (own ? ` (ours at ${own} of ${W.length} stations where it has none – estimate)` : "") : p.pitWallFrom || "drawn at the track's edge";
     }
   }
   // The paddock behind the garages (p.paddock, for the years it was seen): awnings along the garages' back and a row
@@ -957,6 +981,14 @@ function pitBuilding(ctx, p) {
     paddockInfo = { units: n, shifted, skipped, placed, estimated: true, basis: pd.basis || null };
   }
   const meshes = F.meshes((key) => facilityMaterial(key, p));
+  // The railing opened in front of the teams' stands (garages.js teamLayer: spans [u0, u1] along the garages; [] closes
+  // it): its segments over a span are left out of its index – a stand is open to its pit lane. → segments left out
+  const railMesh = meshes.find((m) => m.name === "rail");
+  const openRail = railMesh ? (spans = []) => {
+    const idx = []; let cut = 0;
+    railU.forEach(([a, b], i) => { if (spans.some(([s0, s1]) => b > s0 && a < s1)) { cut++; return; } for (let k = 0; k < 6; k++) idx.push(i * 6 + k); });
+    railMesh.geometry.setIndex(cut ? idx : null); return cut;
+  } : null;
   let interior = null;
   if (FI.m.size) { interior = new THREE.Group(); interior.name = "garageInteriors"; for (const m of FI.meshes((key) => facilityMaterial(key, p))) { m.castShadow = false; interior.add(m); } meshes.push(interior); }
   // a pod at one end (Suzuka's silver capsule): a long rounded body lying along the building, sticking out `out` m
@@ -988,7 +1020,7 @@ function pitBuilding(ctx, p) {
   const project = (x, z) => { const uu = (x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], vv = (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]; return { u: uu, off: (vv - frontV(Math.max(gStart, Math.min(gEnd, uu)))) * vTrack }; };
   // (for the pit lane across – map3d.js pitModel: the wall's face to the lane, metres out from the garages' front, and
   // the garages' floor height, both along the garages)
-  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt, wallFace, wallFrom, floorAt, plan: plan ? { ...p.bays.meta, ...planInfo } : null } : null;
+  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt, wallFace, wallOut, wallFrom, openRail, floorAt, plan: plan ? { ...p.bays.meta, ...planInfo } : null } : null;
   return { meshes, footprint, occupancy, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
