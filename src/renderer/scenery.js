@@ -1051,7 +1051,9 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     if (l.k !== "barrier" || !l.pts.some((p) => { const [x, z] = gf.xz(p); return trackDist(x, z) < 45; })) continue;
     let run = [];
     // (with a pit lane to keep clear: points every 2 m along the line – a straight piece can cross the lane between two)
-    const pts = inLane ? l.pts.flatMap((p, i) => { if (!i) return [p]; const q = l.pts[i - 1], [ax, az] = gf.xz(q), [bx, bz] = gf.xz(p), m = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2)); return Array.from({ length: m }, (_, k) => q.map((c, j) => c + ((p[j] - c) * (k + 1)) / m)); }) : l.pts;
+    // (only near the garages: the rest as mapped)
+    const nearPits = (x, z) => { const p = pitG.project(x, z); return p.u > pitG.gStart - 80 && p.u < pitG.gEnd + 80 && Math.abs(p.off) < 120; };
+    const pts = inLane ? l.pts.flatMap((p, i) => { if (!i) return [p]; const q = l.pts[i - 1], [ax, az] = gf.xz(q), [bx, bz] = gf.xz(p); if (!nearPits(ax, az) && !nearPits(bx, bz)) return [p]; const m = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2)); return Array.from({ length: m }, (_, k) => q.map((c, j) => c + ((p[j] - c) * (k + 1)) / m)); }) : l.pts;
     for (const p of pts) { const [x, z] = gf.xz(p), lane = !!inLane?.(x, z); laneCut += lane; if (lane || corridor.on(x, z, -0.3)) { if (run.length > 1) near.push({ ...l, pts: run }); run = []; } else run.push(p); }
     if (run.length > 1) near.push({ ...l, pts: run });
   }
