@@ -10,7 +10,8 @@
 // rain one draw of line segments, its drops moved on the GPU (no buffer is written per frame); the wet road its own
 // material's uniforms. Nothing is allocated per frame.
 import * as THREE from "./vendor/three.module.js";
-import { WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, roofAt, INTENSITY } from "./weather.js";
+import { wetRoad, WR } from "./wetroad.js";
+import { COVERED_WET, WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, roofAt, INTENSITY } from "./weather.js";
 
 // ---------- the overcast sky (equirectangular, as the fair one in map3d.js) ----------
 // A grey deck of stratus / stratocumulus: brighter towards the zenith's diffuse light, darker lumps underneath, a pale
@@ -178,7 +179,7 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   const rain = rainMesh(), spray = sprayMesh();
   scene.add(dome, rain, spray);
   const ru = rain.material.uniforms;
-  const S = { log: null, logFor: null, liveKey: null, liveSeen: "", clouds: null, cloudsKey: null, cloudsAsk: 0, cloudsGen: 0, coverFor: null, raster: null, coverTex: null,
+  const S = { log: null, logFor: null, liveList: null, liveN: 0, clouds: null, cloudsKey: null, cloudsAsk: 0, cloudsGen: 0, coverFor: null, raster: null, coverTex: null,
     camPrev: new THREE.Vector3(), camVel: new THREE.Vector3(), hasPrev: false, north: [0, -1], east: [1, 0], wind: [0, 0], tyresAt: 0, tyres: null,
     forced: null, sprayOn: true, roadFor: null, roadMats: [], roadWet: -1, roadEnv: null, skyMode: "auto", useClouds: true, enabled: true };
   const sc = { sun: scaler(), hemi: scaler(), near: scaler(), far: scaler(), exp: scaler() };
@@ -186,21 +187,19 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   const GREY = new THREE.Color(0xdfe3e8), FOGGREY = new THREE.Color(0xa9afb6), SUNGREY = new THREE.Color(0xe8ecf2);
   const fall = new THREE.Vector3(), streak = new THREE.Vector3();
 
-  // the log for this source: a replay's whole recording once; a live feed's records as they're shown (a new session's
-  // key starts a new one)
+  // the log for this source: a replay's whole recording once; a live feed's from the records its source logged as they
+  // were applied (LiveSource.weather – the data layer's, kept while the 3D view is closed, the app is on the home or
+  // timing screen, or several updates come in one tick), taken in from where it left off. Nothing is read from the
+  // state at the moment drawn. (A new session's source starts a new list: a new log.)
   function logFor(src) {
     if (!src) { S.log = null; S.logFor = null; return null; }
     if (!src.isLive) {
       if (S.logFor !== src) { S.logFor = src; S.log = WeatherLog.fromEvents(src.events); S.tyresAt = 0; }
       return S.log;
     }
-    const key = src.state?.SessionInfo?.Key ?? null;
-    if (S.logFor !== src || key !== S.liveKey) { S.logFor = src; S.liveKey = key; S.log = new WeatherLog(); S.liveSeen = ""; S.tyresAt = 0; }
-    const w = src.state?.WeatherData;
-    if (w) {
-      const sig = `${w.AirTemp}|${w.Humidity}|${w.Pressure}|${w.Rainfall}|${w.TrackTemp}|${w.WindDirection}|${w.WindSpeed}`;
-      if (sig !== S.liveSeen) { S.liveSeen = sig; S.log.push(src.now(), w); }
-    }
+    const list = Array.isArray(src.weather) ? src.weather : null;
+    if (S.logFor !== src || S.liveList !== list) { S.logFor = src; S.liveList = list; S.liveN = 0; S.log = new WeatherLog(); S.tyresAt = 0; }
+    if (list) while (S.liveN < list.length) { const r = list[S.liveN++]; S.log.push(r.ms, r.data); }
     return S.log;
   }
   // the hourly cloud cover for this place and session (asked once per session; none until it comes)
@@ -286,12 +285,15 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     if (S.roadFor !== world || S.roadKerb !== world.kerb || S.roadReal !== real || S.roadPitSeen !== S.roadPit) {
       S.roadFor = world; S.roadKerb = world.kerb; S.roadReal = real; S.roadPitSeen = S.roadPit; S.roadMats = []; S.roadWet = -1; S.roadEnv = undefined;
       const seen = new Set(), aux = real?.group.getObjectByName("auxTarmac") || null;
-      for (const part of [world.road, world.lines, world.kerb, S.roadPit, aux]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); const b = m.userData.wxBase || (m.userData.wxBase = { color: m.color.clone(), rough: m.roughness }); S.roadMats.push({ m, color: b.color, rough: b.rough, road: o === world.road || o === aux || o.name === "pitLaneTarmac" }); } });
+      for (const part of [world.road, world.lines, world.kerb, S.roadPit, aux]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); const b = m.userData.wxBase || (m.userData.wxBase = { color: m.color.clone(), rough: m.roughness }); const road = o === world.road || o === aux || o.name === "pitLaneTarmac"; S.roadMats.push({ m, color: b.color, rough: b.rough, road }); wetRoad(m, road ? 0.42 : 0.25, b.rough); } });
+      WR.open.value = 0;
     }
     const q = Math.round(wet * 50) / 50;
     const envNow = !night && q > 0.03 ? S.envSky || null : null;
     if (q === S.roadWet && envNow === S.roadEnv) return;
     S.roadWet = q; const envChanged = envNow !== S.roadEnv; S.roadEnv = envNow;
+    // (under a roof the shader takes a share of it – wetroad.js)
+    WR.open.value = q;
     for (const r of S.roadMats) {
       r.m.color.copy(r.color).multiplyScalar(1 - (r.road ? 0.42 : 0.25) * q);
       r.m.roughness = r.rough + ((r.road ? 0.3 : 0.3) - r.rough) * q;
@@ -343,13 +345,15 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     env,
     get info() { return S.info || null; },
     get raster() { return S.raster; },
+    // the weather log in use (development / tests: what has been taken in)
+    get log() { return S.log; },
     // settings: { sky: "auto" | "neutral" | "fair" | "overcast", clouds: true/false }
     configure(o = {}) { if (o.sky) S.skyMode = o.sky; if ("clouds" in o) { S.useClouds = o.clouds !== false; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.cloudsGen++; } },
     // development: a state forced for testing the look (the covers, the wet road) – { rain: 0–1, wet: 0–1, cloud: 0–1 } or null
     force(o) { S.forced = o || null; },
     // spray on / off (settings: 차량 물보라)
     spray(on) { S.sprayOn = on !== false; },
-    reset() { S.log = null; S.logFor = null; S.liveKey = null; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.cloudsGen++; S.hasPrev = false; },
+    reset() { S.log = null; S.logFor = null; S.liveList = null; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.cloudsGen++; S.hasPrev = false; },
     // once a frame, before drawing. A: window.F1KR; world: map3d's world; night: the night look is on.
     // pitFac / teams: map3d's pit building in use and its teams' layer (for the pit lane's tarmac and the pit wall canopies)
     update({ A, world, camera, dt, night, hemi, sun, fog, pitFac = null, teams = null, cars = null, viewH = 0 }) {
@@ -361,7 +365,7 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       const cover = src ? clouds(A, world, src, t) : null;
       environmentAt(log, Number.isFinite(t) ? t : -Infinity, { tyres: src ? S.tyres : null, cover, sky: S.skyMode }, env);
       env.cloudData = cover != null ? S.clouds?.source || null : null;
-      if (S.forced) { const f = S.forced; env.forced = true; if (f.rain != null) { env.rainAmt = f.rain; env.raining = f.rain > 0 ? 1 : 0; } if (f.wet != null) env.wet = f.wet; if (f.cloud != null) env.cloud = f.cloud; }
+      if (S.forced) { const f = S.forced; env.forced = true; if (f.rain != null) { env.rainAmt = f.rain; env.raining = f.rain > 0 ? 1 : 0; } if (f.wet != null) { env.wet = f.wet; env.wetCovered = f.wet * COVERED_WET; } if (f.cloud != null) env.cloud = f.cloud; }
       const day = !night, m = env.cloud, rp = Math.min(1, env.rainAmt / INTENSITY);
       // sky: the dome by day (the fair sky mixed towards the overcast one); the night's own gradient stays the background
       if (day) {

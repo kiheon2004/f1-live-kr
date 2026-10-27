@@ -4295,7 +4295,7 @@ window.Map3D = {
   weather(o) {
     if (o === null) wx?.force(null); else if (o && typeof o === "object") { if (o.sky) wx?.configure({ sky: o.sky }); if ("rain" in o || "wet" in o || "cloud" in o) wx?.force(o); }
     const e = wx?.env || {}, r = (v) => (typeof v === "number" ? +v.toFixed(3) : v);
-    return JSON.stringify({ t: e.t, raining: e.raining, rainAmt: r(e.rainAmt), wet: r(e.wet), wetModel: r(e.wetModel), wetTyres: r(e.wetTyres), wetSrc: e.wetSrc, cloud: r(e.cloud), cloudSrc: e.cloudSrc, cloudData: e.cloudData,
+    return JSON.stringify({ t: e.t, raining: e.raining, rainAmt: r(e.rainAmt), wet: r(e.wet), wetModel: r(e.wetModel), wetSpan: r(e.wetSpan), wetStart: e.wetStart, wetTyres: r(e.wetTyres), wetSrc: e.wetSrc, wetCovered: r(e.wetCovered), log: wx?.log ? { n: wx.log.size, refused: wx.log.refused } : null, liveRecords: window.F1KR?.src?.weather?.length ?? null, cloud: r(e.cloud), cloudSrc: e.cloudSrc, cloudData: e.cloudData,
       air: e.airTemp, track: e.trackTemp, hum: e.humidity, wind: [e.windSpeed, e.windDir], forced: e.forced, night: nightNow, covers: wx?.info });
   },
   // development: the session times (ms, from t0 to t1 every `step`) at which car `num` is in or near covered stretch 0 –

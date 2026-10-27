@@ -230,12 +230,15 @@ test("weather3d: the live path – records taken as they're shown, a new session
   const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 20000);
   const W = createWeather({ scene, renderer, daySky: null, fairEnv: () => null });
   let now = 1000;
+  // (v0.45: a live source logs its weather records as they are applied – LiveSource.weather – and the 3D view reads
+  // that list; a new session's source starts a new list)
   const src = { isLive: true, state: { SessionInfo: { Key: 1 }, WeatherData: { Rainfall: "0", WindSpeed: "1", WindDirection: "90" } }, now: () => now, utcAt: (t) => t };
+  src.weather = [{ ms: now, data: src.state.WeatherData }];
   const A = { src, get t() { return now; }, rate: 1, sourceKey: () => "live:1:0" };
   const step = () => W.update({ A, world: null, camera, dt: 0.016, night: true, hemi, sun, fog });
   step();
   assert.strictEqual(W.env.raining, 0);
-  now = 61000; src.state.WeatherData = { ...src.state.WeatherData, Rainfall: "1" }; step();
+  now = 61000; src.state.WeatherData = { ...src.state.WeatherData, Rainfall: "1" }; src.weather.push({ ms: now, data: { Rainfall: "1" } }); step();
   assert.strictEqual(W.env.raining, 1);
   for (let i = 0; i < 50; i++) { now += 1000; step(); }
   assert.ok(W.env.rainAmt > 0 && W.env.wet > 0);
@@ -245,7 +248,7 @@ test("weather3d: the live path – records taken as they're shown, a new session
   sun.intensity = 0.16; step();                       // (applyLighting's night value)
   assert.ok(Math.abs(sun.intensity - 0.16 * (1 - 0.5 * Math.min(1, W.env.rainAmt / 0.6))) < 1e-9);
   // a new live session: nothing of the last one's rain or wet road
-  src.state = { SessionInfo: { Key: 2 }, WeatherData: { Rainfall: "0" } }; now += 1000; step();
+  src.state = { SessionInfo: { Key: 2 }, WeatherData: { Rainfall: "0" } }; now += 1000; src.weather = [{ ms: now, data: { Rainfall: "0" } }]; step();
   assert.strictEqual(W.env.raining, 0); assert.strictEqual(W.env.wet, 0); assert.strictEqual(W.env.rainAmt, 0);
   // no session at all: unknown, nothing drawn
   const B = { src: null, t: null, rate: 1 };

@@ -26,13 +26,16 @@ class LiveFile extends EventEmitter {
     }
     all.sort((a, b) => a.ms - b.ms);
     this.events = all;
+    // (the hub stamps each feed message with its own UTC time – the feed's third argument; here from the recording's
+    // heartbeats, as Replay.utcAt does)
+    this.beats = all.filter((e) => e.topic === "Heartbeat" && e.data?.Utc).map((e) => [e.ms, Date.parse(/Z$/.test(e.data.Utc) ? e.data.Utc : e.data.Utc + "Z")]).filter((b) => Number.isFinite(b[1]));
     const start = all.find((e) => e.topic === "ExtrapolatedClock" && e.data.Extrapolating)?.ms ?? 0;
     this.from = start + (+(process.env.F1KR_LIVEFROM ?? -90)) * 1000;
     this.speed = +(process.env.F1KR_LIVESPEED || 1);
   }
   start() {
     if (!this.stopped) return;
-    this.stopped = false;
+    this.stopped = false; this.bi = 0;   // (a restart plays from the start again: utcOf's cursor too)
     this.emit("status", { state: "connecting" });
     // the snapshot: every topic but the positions and telemetry merged up to the starting moment
     const snap = {};
@@ -50,11 +53,18 @@ class LiveFile extends EventEmitter {
       const tick = () => {
         if (this.stopped) return;
         const now = m0 + (Date.now() - t0) * this.speed;
-        while (i < this.events.length && this.events[i].ms <= now) { const e = this.events[i++]; this.emit("feed", e.topic, e.data, e.ms); }
+        while (i < this.events.length && this.events[i].ms <= now) { const e = this.events[i++]; this.emit("feed", e.topic, e.data, this.utcOf(e.ms)); }
         if (i < this.events.length) this.timer = setTimeout(tick, 20);
       };
       tick();
     }, 300);
+  }
+  utcOf(ms) {
+    // (messages go out in time order: a cursor, not a search per message)
+    const B = this.beats; let k = this.bi || 0;
+    while (k + 1 < B.length && B[k + 1][0] <= ms) k++;
+    this.bi = k; const b = B[k];
+    return b ? new Date(b[1] + (ms - b[0])).toISOString() : null;
   }
   stop() { this.stopped = true; clearTimeout(this.timer); this.emit("status", { state: "stopped" }); }
   connect() {}

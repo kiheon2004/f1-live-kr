@@ -814,6 +814,8 @@
       this.positions = []; this.lapMarks = []; this.trail = {}; this.lapShape = null; this.lapShapeAt = 0;
       this.tracks = new CarTracks(); this.supportTracks = new CarTracks();
       this.car = {};
+      // the session's weather records as they were applied (see noteWeather) – the 3D view's weather reads only these
+      this.weather = [];
     }
     // A full picture from the server (on connect and every reconnect). It goes through the delay queue
     // like every update, so reconnecting never shows the screen ahead of the TV.
@@ -823,8 +825,10 @@
       for (const [topic, data] of Object.entries(snap)) if (topic !== "SessionInfo") this.noteRaw(topic, data, at);
       this.queue.push({ at, snap });
     }
-    push(topic, data, immediate = false) {
+    // ts: the hub's own timestamp for the message (the feed's third argument, an ISO UTC string), when it came with one
+    push(topic, data, immediate = false, ts = null) {
       const item = { at: Date.now(), topic, data };
+      if (typeof ts === "string") { const u = parseUtc(ts); if (Number.isFinite(u)) item.utc = u; }
       this.noteRaw(topic, data, item.at);
       if (immediate) this.apply(item); else this.queue.push(item);
     }
@@ -845,13 +849,28 @@
         const key = item.snap.SessionInfo?.Key;
         if (key && this.state.SessionInfo?.Key && key !== this.state.SessionInfo.Key) this.resetHistory();
         this.state = {}; resetMessages(this); this.stintEnd = {};
-        for (const [topic, data] of Object.entries(item.snap)) this.applyOne(item.at, topic, data);
+        for (const [topic, data] of Object.entries(item.snap)) this.applyOne(item.at, topic, data, item);
         this.epoch++;
         return;
       }
-      this.applyOne(item.at, item.topic, item.data);
+      this.applyOne(item.at, item.topic, item.data, item);
     }
-    applyOne(at, topic, data) {
+    // A WeatherData update as it is applied (after the delay; so a 3D view opened late, or several updates applied in
+    // one tick, lose nothing). Each record: ms – the moment on this source's clock (now()/t: this computer's receive
+    // time) the record holds from = its receive time `at`, kept monotone (a step back of the computer's clock never puts
+    // a record before the last); utc – the hub's own timestamp for the message (server clock), null when it came without
+    // one (a snapshot: the hub's current state, measured at some moment before it); via – "feed" | "snapshot" | "gap".
+    // A snapshot after more than GAP of silence (a reconnect after a dropped link or sleep) is preceded by an explicit
+    // unknown ("gap", at the last record + GAP: the station sends a record about every 60 s, so by then one was missed) –
+    // the rain while disconnected isn't known and isn't assumed to have held. data: the update as sent (not changed).
+    noteWeather(at, data, item) {
+      const w = this.weather, last = w[w.length - 1], via = item?.snap ? "snapshot" : "feed", GAP = 90e3;
+      if (!data || typeof data !== "object") return;
+      if (via === "snapshot" && last && at - last.ms > GAP) w.push({ ms: last.ms + GAP, at: null, utc: null, via: "gap", data: { Rainfall: null } });
+      const prev = w[w.length - 1];
+      w.push({ ms: prev ? Math.max(at, prev.ms) : at, at, utc: item?.utc ?? null, via, data });
+    }
+    applyOne(at, topic, data, item = null) {
       if (topic === "SessionInfo" && data.Key && this.state.SessionInfo?.Key && data.Key !== this.state.SessionInfo.Key) {
         this.state = {}; resetMessages(this); this.stintEnd = {}; this.resetHistory();
       }
@@ -896,6 +915,7 @@
       if (topic === "TimingData") this.tracker.feed(at, data.Lines);
       this.pitLog.feed(at, topic, data); this.statusLog.feed(at, topic, data); this.tyreLog.feed(at, topic, data);
       if (topic === "LapCount" && data.CurrentLap) this.lapMarks.push([at, data.CurrentLap]);
+      if (topic === "WeatherData") this.noteWeather(at, data, item);
       applyTo(this, topic, data);
     }
     // Apply everything older than the chosen delay. While paused nothing moves.
