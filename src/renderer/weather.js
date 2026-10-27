@@ -81,6 +81,7 @@ export const CLOUD_TAU = 15 * 60e3;
 // in the starting value, so span decays as the model does (rain: e^−dt/TAU_WET, dry: e^−dt/TAU_DRY, unknown: held).
 // Nothing is invented: what is drawn is the lower bound (and the tyres' evidence over it), and span says how sure that is.
 const FIELDS = ["AirTemp", "Humidity", "Pressure", "TrackTemp", "WindDirection", "WindSpeed"];
+const spanAt = (log, k, t) => spanAfter(log.span[k], log.rain[k], t - log.ms[k]);
 function spanAfter(s, rain, dt) {
   if (!(dt > 0) || !s) return s;
   if (rain === 1) return s * Math.exp(-dt / TAU_WET);
@@ -163,7 +164,7 @@ export const cloudLook = (c) => Math.max(0, Math.min(1, (c - 0.2) / 0.75));
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 export function newEnvironment() {
-  return { t: null, known: false, raining: null, rainAmt: 0, wet: 0, wetModel: null, wetTyres: null, wetSrc: "none", cloud: NEUTRAL_CLOUD, cloudSrc: "neutral",
+  return { t: null, known: false, raining: null, rainAmt: 0, wet: 0, wetModel: null, wetSpan: null, wetStart: null, wetTyres: null, wetSrc: "none", cloud: NEUTRAL_CLOUD, cloudSrc: "neutral",
     airTemp: null, trackTemp: null, humidity: null, windSpeed: null, windDir: null, forced: false };
 }
 // Fills `out` (reused: no garbage per frame). opts: { tyres (wetTyreEvidence at t, or null), cover (0–1 hourly cloud
@@ -180,12 +181,18 @@ export function environmentAt(log, t, opts = {}, out = newEnvironment()) {
   if (out.raining === 1) out.rainAmt = I * clamp01((t - log.since[k]) / RAMP);
   else if (k >= 0 && log.rainEnd[k] != null && log.since[k] === log.rainEnd[k]) out.rainAmt = I * clamp01(1 - (t - log.rainEnd[k]) / RAMP);
   else out.rainAmt = 0;
-  // wetness: the model, the tyres as a floor under it
+  // wetness: the model (its lower bound: the recorded rain alone), the tyres as a floor under it. wetSrc says what it
+  // rests on: "rain" – the rain record's estimate; "tyres" – the cars' tyres raise it; "unknown" – the record has no rain
+  // of its own yet, nothing else says, and the road before the record began isn't known (wetSpan: how much of that
+  // unknown start could still be there – what's drawn is the lower bound, no rain is invented); "none" – no data.
   out.wetModel = k >= 0 ? evolveWet(log.wet[k], log.rain[k], t - log.ms[k]) : null;
+  out.wetSpan = k >= 0 && log.span ? spanAt(log, k, t) : null;
+  out.wetStart = log?.start ?? null;
   out.wetTyres = opts.tyres ?? null;
   const a = out.wetModel ?? 0, b = out.wetTyres ?? 0;
   out.wet = Math.max(a, b);
-  out.wetSrc = out.wetModel == null && out.wetTyres == null ? "none" : b > a ? "tyres" : "rain";
+  out.wetSrc = out.wetModel == null && out.wetTyres == null ? "none" : b > a ? "tyres"
+    : out.wetTyres == null && a < 0.03 && (out.wetSpan ?? 0) >= 0.05 ? "unknown" : "rain";
   // the sky: what the setting / the cloud data says, overcast while it rains (faded in over 2 min) and for a while after
   const sky = opts.sky || "auto";
   let base, src;

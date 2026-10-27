@@ -346,7 +346,7 @@
     if (mode === "live") { src = live; refreshOutline(); renderAll(true); }
     dispatchEvent(new CustomEvent("f1kr-live"));
   });
-  window.api.live.onFeed((topic, data) => live.push(topic, data));
+  window.api.live.onFeed((topic, data, ts) => live.push(topic, data, false, ts));   // (ts: the hub's timestamp – the weather records keep it)
   $("liveToggle").addEventListener("click", () => (liveStatus.state === "stopped" ? window.api.live.start() : window.api.live.stop()));
 
   // Live circuit shape, best first: one clean lap from an earlier session here (it has elevation for 3D),
