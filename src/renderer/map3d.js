@@ -23,6 +23,7 @@ import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, 
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
+import { probeMirrorPass, samePipeline, glassVsPicture, rendererState, flatFill, glassPixels, glassOnScreen } from "./mirrorprobe.js";
 import { makeCar, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
@@ -3362,6 +3363,7 @@ function frame(now) {
   if (world) updateMirrors();
   devShadowDrawn = renderer.shadowMap.needsUpdate;
   renderer.render(scene, camera);
+  if (mirrorProbePost) { const f = mirrorProbePost; mirrorProbePost = null; f(); }   // (development: Map3D.mirrorProbe)
   if (devGpu) devGpu.end();
   adaptResolution(now, dt);
   rafId = requestAnimationFrame(frame);
@@ -3382,8 +3384,21 @@ function updateMirrors() {
   mirrorStrained = mirrorStrain(mirrorStrained, perf.late, perf.calm);
   const ride = camMode === "onboard" || camMode === "eye", num = ride ? app().focus || leader() : null, c = num ? cars.get(num) : null;
   const view = ride ? camMode + ":" + num : "";
-  mirrorPass.update(renderer, scene, camera, c?.obj.visible ? c.model : null, mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), view, mirrorAux);
+  const run = () => mirrorPass.update(renderer, scene, camera, c?.obj.visible ? c.model : null, mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), view, mirrorAux);
+  if (!mirrorProbeReq) return run();
+  // (development: Map3D.mirrorProbe – this frame's pass watched; an error the pass lets out goes on as it would)
+  const q = mirrorProbeReq; mirrorProbeReq = null;
+  const out = probeMirrorPass({ renderer, scene, pass: mirrorPass, fault: q.fault }, run);
+  if (q.needPass && !out.error && !out.calls.some((k) => k.inPass) && (q.tries = (q.tries || 0) + 1) < 12) { mirrorProbeReq = q; return out.result; }   // (low: a frame with a pass)
+  out.tries = q.tries || 0;
+  if (q.colour) out.pipeline = [0, 1].map((i) => samePipeline(renderer, scene, mirrorPass, i, (h) => { const m = mirrorPass.state.car?.userData.mirrors; if (m) m.visible = !h; mirrorAux(h); }));
+  if (q.flat != null) out.flat = flatFill(renderer, mirrorPass, q.flat);
+  mirrorProbePost = () => { out.afterMain = rendererState(renderer, mirrorPass); out.screen = glassOnScreen(renderer, camera, mirrorPass); if (q.colour) out.glass = glassVsPicture(renderer, camera, mirrorPass); if (out.flat) out.flatGlass = glassPixels(renderer, camera, mirrorPass); };
+  const t0 = lastT; setTimeout(() => { out.loopAlive = lastT !== t0; out.later = rendererState(renderer, mirrorPass); q.done(JSON.stringify(out)); }, 700);
+  if (out.error) throw new Error(out.error);
+  return out.result;
 }
+let mirrorProbeReq = null, mirrorProbePost = null;
 
 // Level of detail for vegetation: each tree chunk holds its instances in random order, so drawing only the
 // first part of them thins a far-away forest evenly. Near chunks get all their trees.
@@ -4484,8 +4499,14 @@ window.Map3D = {
     if (o.mode) { saveGeoSettings({ ...geoSettings(), mirrors: o.mode }); mirrorSetting = null; }
     const S = mirrorPass?.state, ms = S?.car?.userData.mirrors;
     return JSON.stringify({ setting: geoSettings().mirrors, mode: mirrorSetting && mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), strained: mirrorStrained, car: S?.car ? [...cars].find(([, c]) => c.model === S.car)?.[0] : null, view: S?.key, drawn: S?.drawn, rt: S?.rt ? [S.rt.width, S.rt.height, S.rt.samples] : null,
-      glass: ms?.material.type, stats: S?.stats, programs: renderer.info.programs?.length, frame: S?.frame });
+      glass: ms?.material.type, stats: S?.stats, programs: renderer.info.programs?.length, frame: S?.frame,
+      live: [...cars].filter(([, c]) => mirrorPass && c.model.userData.mirrors?.material === mirrorPass.material).map(([n]) => n), failed: S?.failed ?? null });
   },
+  // development (v0.45): the next frame's mirror pass against the real renderer (mirrorprobe.js) – { fault: "throw" |
+  // "loop", colour: true, flat: v (low mode: the picture cleared to sRGB grey v, the glass' centre pixels read), needPass: true
+  // (wait up to 12 frames for one with a mirror render – low mode draws every 3rd) }; resolves ~0.7 s later with the state
+  // before/after, GL errors, each glass on the screen, and whether frames still come
+  mirrorProbe(o = {}) { return new Promise((done) => { mirrorProbeReq = { ...o, done }; }); },
   // development (v0.44): the mirrors' picture (as drawn, unflipped: the left mirror's half first) shown over the page ×k
   mirrorDump(k = 2) {
     const rt = mirrorPass?.state.rt; if (!rt) return "no target";
