@@ -283,3 +283,31 @@ test("weather45 §4: tyres on a live join – wet tyres say wet at once (labelle
   const d = new WeatherLog({ start: "dry" }); d.push(0, full("0"));
   assert.strictEqual(environmentAt(d, MIN).wetSrc, "rain"); assert.strictEqual(environmentAt(d, MIN).wetSpan, 0);
 });
+
+// ---------- §9: the covered road's own wetness ----------
+test("weather45 §9: the road under a roof takes a share of the open road's wetness (estimate), blended by the tunnel mask; the shader patch chains nightLit", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const { wetRoad, wetUnder, WR } = await import("../src/renderer/wetroad.js");
+  const { COVERED_WET, WeatherLog, environmentAt } = await W();
+  assert.ok(COVERED_WET > 0 && COVERED_WET < 1);
+  assert.strictEqual(wetUnder(0.8, 0), 0.8); assert.ok(Math.abs(wetUnder(0.8, 1) - 0.8 * COVERED_WET) < 1e-12);
+  assert.ok(wetUnder(0.8, 0.5) < 0.8 && wetUnder(0.8, 0.5) > 0.8 * COVERED_WET, "the mouths blend");
+  // in time: it follows the open road – gradual, no step when the rain starts
+  const log = new WeatherLog(); log.push(0, full("0")); log.push(MIN, full("1"));
+  const cov = [0, 30e3, 60e3, 120e3, 600e3].map((d) => environmentAt(log, MIN + d).wetCovered);
+  for (let i = 1; i < cov.length; i++) assert.ok(cov[i] > cov[i - 1] && cov[i] - cov[i - 1] < 0.2, `${cov}`);
+  // the patch: chained after nightLit, program key kept apart, uniforms shared
+  const m = new THREE.MeshStandardMaterial({ roughness: 0.9 });
+  const u = wetRoad(m, 0.42, 0.9);
+  assert.strictEqual(u.dark.value, 0.42); assert.strictEqual(wetRoad(m, 0.42, 0.9), u, "once per material");
+  assert.ok(/nightLit\|wetRoad$/.test(m.customProgramCacheKey()), m.customProgramCacheKey());
+  const sh = { uniforms: {}, vertexShader: "#include <common>\n#include <project_vertex>", fragmentShader: "#include <common>\n#include <roughnessmap_fragment>\n#include <lights_fragment_maps>" };
+  m.onBeforeCompile(sh, null);
+  assert.strictEqual(sh.uniforms.wrOpen, WR.open); assert.ok(sh.uniforms.tnTex, "nightLit's tunnel mask uniforms there");
+  assert.ok(/float wrQ/.test(sh.fragmentShader) && /vNlPos/.test(sh.vertexShader) && /radiance \*= wrQ \/ wrOpen \* wrSky/.test(sh.fragmentShader));
+  // (the first real-app check: the covered road came out brighter wet than dry – the wet road's sky map lit it with the
+  // open sky's diffuse light, which TN_FRAG doesn't cut; it must be cut under the roof as the hemisphere's is)
+  assert.ok(/iblIrradiance \*= wrQ \/ wrOpen \* wrSky/.test(sh.fragmentShader) && /wrSky = mix\(1\.0, min\(1\.0, tnAmb/.test(sh.fragmentShader), "the sky's diffuse light cut under the roof");
+  assert.ok(sh.fragmentShader.indexOf("uniform float wrOpen") < sh.fragmentShader.indexOf("float wrQ"));
+  assert.ok(sh.fragmentShader.indexOf("uniform sampler2D tnTex") < sh.fragmentShader.indexOf("float wrQ"));
+});

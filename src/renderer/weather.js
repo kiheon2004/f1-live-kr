@@ -61,6 +61,11 @@ export function evolveWet(w, rain, dt) {
 export const INTENSITY = 0.6, RAMP = 40e3;
 // clouds linger after the rain stops (presentation; nothing in the feed): the overcast look fades over CLOUD_TAU
 export const CLOUD_TAU = 15 * 60e3;
+// Under a roof (a tunnel) no rain falls, but the cars carry water in on their tyres and bodies: the covered road is drawn
+// at this share of the open road's wetness (v0.45; an estimate, nothing measures it – L). It follows the open road's
+// wetness, so it wets and dries with it, gradually; at a tunnel's mouths it blends over the light mask's ~9 m spill
+// (wetroad.js).
+export const COVERED_WET = 0.3;
 
 // The session's records in time order: rain state, wetness at each record (computed once, from the records before it),
 // when the current rain state began and when the last rain ended. push() appends (live: as records are applied; replay:
@@ -164,7 +169,7 @@ export const cloudLook = (c) => Math.max(0, Math.min(1, (c - 0.2) / 0.75));
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 export function newEnvironment() {
-  return { t: null, known: false, raining: null, rainAmt: 0, wet: 0, wetModel: null, wetSpan: null, wetStart: null, wetTyres: null, wetSrc: "none", cloud: NEUTRAL_CLOUD, cloudSrc: "neutral",
+  return { t: null, known: false, raining: null, rainAmt: 0, wet: 0, wetModel: null, wetSpan: null, wetStart: null, wetTyres: null, wetSrc: "none", wetCovered: 0, cloud: NEUTRAL_CLOUD, cloudSrc: "neutral",
     airTemp: null, trackTemp: null, humidity: null, windSpeed: null, windDir: null, forced: false };
 }
 // Fills `out` (reused: no garbage per frame). opts: { tyres (wetTyreEvidence at t, or null), cover (0–1 hourly cloud
@@ -193,6 +198,8 @@ export function environmentAt(log, t, opts = {}, out = newEnvironment()) {
   out.wet = Math.max(a, b);
   out.wetSrc = out.wetModel == null && out.wetTyres == null ? "none" : b > a ? "tyres"
     : out.wetTyres == null && a < 0.03 && (out.wetSpan ?? 0) >= 0.05 ? "unknown" : "rain";
+  // under a roof (Monaco's tunnel): only the water the cars carry in – a share of the open road's (an estimate, L)
+  out.wetCovered = out.wet * COVERED_WET;
   // the sky: what the setting / the cloud data says, overcast while it rains (faded in over 2 min) and for a while after
   const sky = opts.sky || "auto";
   let base, src;

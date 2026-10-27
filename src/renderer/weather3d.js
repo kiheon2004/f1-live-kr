@@ -10,7 +10,8 @@
 // rain one draw of line segments, its drops moved on the GPU (no buffer is written per frame); the wet road its own
 // material's uniforms. Nothing is allocated per frame.
 import * as THREE from "./vendor/three.module.js";
-import { WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, roofAt, INTENSITY } from "./weather.js";
+import { wetRoad, WR } from "./wetroad.js";
+import { COVERED_WET, WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, roofAt, INTENSITY } from "./weather.js";
 
 // ---------- the overcast sky (equirectangular, as the fair one in map3d.js) ----------
 // A grey deck of stratus / stratocumulus: brighter towards the zenith's diffuse light, darker lumps underneath, a pale
@@ -270,12 +271,15 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     if (S.roadFor !== world || S.roadKerb !== world.kerb || S.roadReal !== real || S.roadPitSeen !== S.roadPit) {
       S.roadFor = world; S.roadKerb = world.kerb; S.roadReal = real; S.roadPitSeen = S.roadPit; S.roadMats = []; S.roadWet = -1; S.roadEnv = undefined;
       const seen = new Set(), aux = real?.group.getObjectByName("auxTarmac") || null;
-      for (const part of [world.road, world.lines, world.kerb, S.roadPit, aux]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); const b = m.userData.wxBase || (m.userData.wxBase = { color: m.color.clone(), rough: m.roughness }); const road = o === world.road || o === aux || o.name === "pitLaneTarmac"; S.roadMats.push({ m, color: b.color, rough: b.rough, road }); } });
+      for (const part of [world.road, world.lines, world.kerb, S.roadPit, aux]) part?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.isMeshStandardMaterial && !seen.has(m)) { seen.add(m); const b = m.userData.wxBase || (m.userData.wxBase = { color: m.color.clone(), rough: m.roughness }); const road = o === world.road || o === aux || o.name === "pitLaneTarmac"; S.roadMats.push({ m, color: b.color, rough: b.rough, road }); wetRoad(m, road ? 0.42 : 0.25, b.rough); } });
+      WR.open.value = 0;
     }
     const q = Math.round(wet * 50) / 50;
     const envNow = !night && q > 0.03 ? S.envSky || null : null;
     if (q === S.roadWet && envNow === S.roadEnv) return;
     S.roadWet = q; const envChanged = envNow !== S.roadEnv; S.roadEnv = envNow;
+    // (under a roof the shader takes a share of it – wetroad.js)
+    WR.open.value = q;
     for (const r of S.roadMats) {
       r.m.color.copy(r.color).multiplyScalar(1 - (r.road ? 0.42 : 0.25) * q);
       r.m.roughness = r.rough + ((r.road ? 0.3 : 0.3) - r.rough) * q;
@@ -347,7 +351,7 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       const cover = src ? clouds(A, world, src, t) : null;
       environmentAt(log, Number.isFinite(t) ? t : -Infinity, { tyres: src ? S.tyres : null, cover, sky: S.skyMode }, env);
       env.cloudData = cover != null ? S.clouds?.source || null : null;
-      if (S.forced) { const f = S.forced; env.forced = true; if (f.rain != null) { env.rainAmt = f.rain; env.raining = f.rain > 0 ? 1 : 0; } if (f.wet != null) env.wet = f.wet; if (f.cloud != null) env.cloud = f.cloud; }
+      if (S.forced) { const f = S.forced; env.forced = true; if (f.rain != null) { env.rainAmt = f.rain; env.raining = f.rain > 0 ? 1 : 0; } if (f.wet != null) { env.wet = f.wet; env.wetCovered = f.wet * COVERED_WET; } if (f.cloud != null) env.cloud = f.cloud; }
       const day = !night, m = env.cloud, rp = Math.min(1, env.rainAmt / INTENSITY);
       // sky: the dome by day (the fair sky mixed towards the overcast one); the night's own gradient stays the background
       if (day) {
