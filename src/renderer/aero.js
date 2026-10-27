@@ -155,8 +155,22 @@ function passBrakes(tel, t0, t1) {
     if (i >= T.length || T[i] > t1) { PB.act = null; return PB; }
     PB.act = T[i];
   }
-  for (; i < T.length && T[i] <= t1; i++) if (B[i]) { PB.brake = T[i]; break; }
+  for (; i < T.length && T[i] <= t1; i++) if (B[i] && realBrake(tel, i, t1)) { PB.brake = T[i]; break; }
   return PB;
+}
+// A brake sample that counts: the next sample braking too, or the speed falling ≥ BRAKE.fall km/h within BRAKE.ms after
+// it, or no speed channel to tell (the sample stands). A lone sample with the speed level or rising is taken as a flicker
+// of the channel or a touch that didn't slow the car, not the brake that ends Straight Mode – v0.45, the user's call
+// after car 10 (Italian GP 2026, A3): one sample at 188 km/h while accelerating (188 → 188 → 192 …) shut a 300+ km/h
+// zone (estimate, L: the F1 brake channel is on/off at ~4 Hz, no published debounce). Only samples up to t1 are read, so
+// a lone newest sample waits for the next one (live never looks ahead; replay reads the same data at the same t).
+export const BRAKE = { fall: 3, ms: 1000 };
+function realBrake(tel, i, t1) {
+  const T = tel.t, B = tel.brk, V = tel.v;
+  if (i + 1 < T.length && T[i + 1] <= t1 && B[i + 1]) return true;
+  if (!V || V.length !== T.length) return true;
+  for (let j = i + 1; j < T.length && T[j] <= t1 && T[j] - T[i] <= BRAKE.ms; j++) if (V[j] <= V[i] - BRAKE.fall) return true;
+  return false;
 }
 // the history's index at t: the last sample at or before t (−1: none)
 function histIndex(H, t) {

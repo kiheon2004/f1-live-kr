@@ -17,8 +17,9 @@ function hist(points, { step = 125, run = () => 1, t0 = points[0][0], t1 = point
   }
   return { t: Float64Array.from(t), s: Float64Array.from(s), run: Int32Array.from(r) };
 }
-// telemetry every 250 ms: brake on at the given times (± 125 ms), speed v(t)
-function telOf(t1, brakeAt = [], v = () => 250, t0 = 0) {
+// telemetry every 250 ms: brake on at the given times (± 125 ms), speed v(t) – by default 250 km/h, 10 km/h less for
+// the second after each brake sample (a brake slows the car: a lone sample with no fall in speed is not counted)
+function telOf(t1, brakeAt = [], v = (t) => (brakeAt.some((b) => t > b + 125 && t - b <= 1000) ? 240 : 250), t0 = 0) {
   const tel = { t: [], v: [], brk: [] };
   for (let t = t0; t <= t1; t += 250) { tel.t.push(t); tel.v.push(v(t)); tel.brk.push(brakeAt.some((b) => Math.abs(b - t) < 125) ? 1 : 0); }
   return tel;
@@ -50,8 +51,9 @@ test("the speed now does not move the entry: accelerating, slowing and a single 
     const r = activeAeroAt(base({ spans, tel: free, hist: H, t, s: sOf(H, t) % 5000, speed }));
     assert.strictEqual(r.open, 1, `no brake: open at ${t} / ${speed} (${r.why})`); assert.strictEqual(Math.round(r.tEntry), 10000);
   }
-  // one 250 ms brake sample at 14 s (a dab): shut from then to the end of the pass, at any speed
-  const dab = telOf(40000, [14000]);
+  // one 250 ms brake sample at 14 s (a dab that slows the car: 250 → 240 km/h over the next second): shut from then to
+  // the end of the pass, at any speed (a lone sample with no fall in speed is not a brake – the next test)
+  const dab = telOf(40000, [14000], (t) => (t > 14000 && t <= 15000 ? 240 : 250));
   assert.ok(activeAeroAt(base({ spans, tel: dab, hist: H, t: 13900, s: sOf(H, 13900), speed: 300 })).open === 1, "before the dab");
   for (let t = 14000 + MOVE.close * 1000 + 1; t < 24000; t += 450) for (const speed of [300, 340, 120]) {
     const r = activeAeroAt(base({ spans, tel: dab, hist: H, t, s: sOf(H, t), speed }));
@@ -68,7 +70,7 @@ test("a zone across the lap line's start, and the same zone on the next lap (the
   // 80 m/s; lap 1 enters the zone at 20 s (s 4800), crosses the line at 22.5 s, leaves it at 26.25 s; lap 2 enters at 82.5 s
   const H = hist([[0, 3200], [20000, 4800], [100000, 11200]]);
   const brakes = [20900];   // at s 4872 – inside the zone, before the line
-  const tel = telOf(100000, brakes, () => 288);
+  const tel = telOf(100000, brakes, (t) => (brakes.some((b) => t > b + 125 && t - b <= 1000) ? 278 : 288));
   for (const t of [22500, 24000, 26000]) { const r = activeAeroAt(base({ spans, tel, hist: H, t, s: sOf(H, t) % 5000, speed: 330 })); assert.strictEqual(r.open, 0, `lap 1 across the line, ${t}`); }
   // no brake: open on both sides of the line, the entry the crossing of 4800
   const free = telOf(100000, [], () => 288);
@@ -97,7 +99,7 @@ test("missing position samples: a gap that splits the history is bridged (the ea
   // 80 m/s: enters at 10 s; positions missing 13–19 s (smooth.js starts a new run after a gap ≥ 4 s, s re-based)
   const A = hist([[0, 200], [10000, 1000], [13000, 1240]]), B = hist([[19000, 1720 + 5000], [26000, 2280 + 5000]]);
   const H = { t: Float64Array.from([...A.t, ...B.t]), s: Float64Array.from([...A.s, ...B.s]), run: Int32Array.from([...A.t].map(() => 3).concat([...B.t].map(() => 4))) };
-  const tel = telOf(30000, [12000], () => 288);
+  const tel = telOf(30000, [12000], (t) => (t > 12125 && t <= 13000 ? 278 : 288));
   const r = activeAeroAt(base({ spans, tel, hist: H, t: 21000, s: 1880, speed: 300 }));
   assert.strictEqual(r.open, 0, `bridged: ${r.why}`); assert.strictEqual(Math.round(r.tEntry), 10000); assert.strictEqual(r.entryKnown, true);
   assert.strictEqual(activeAeroAt(base({ spans, tel: telOf(30000, [], () => 288), hist: H, t: 21000, s: 1880, speed: 300 })).open, 1);
@@ -215,9 +217,9 @@ test("smooth.js coordinates as the history: replay and live (cut at now) agree; 
   for (let k = 0; k < N; k++) { const t = k * dt; if (k) s += ((v(t) + v(t - dt)) / 2) * (dt / 1000); S.push(s); const a = ((s % 1000) / n) * 2 * Math.PI; pt[k] = t; px[k] = (R * Math.cos(a)) / 0.1; py[k] = -(R * Math.sin(a)) / 0.1; }
   const sAt = (t) => { const k = Math.min(N - 2, Math.floor(t / dt)), f = (t - k * dt) / dt; return S[k] + (S[k + 1] - S[k]) * f; };
   const tAtS = (x) => { let k = 0; while (S[k + 1] < x) k++; return (k + (x - S[k]) / (S[k + 1] - S[k])) * dt; };
-  // the zone 300–800 m; on lap 3 (s 2300–2800) one brake sample 1.5 s after the entry; lap 4 free
+  // the zone 300–800 m; on lap 3 (s 2300–2800) a brake (two samples) 1.5 s after the entry; lap 4 free
   const tIn3 = tAtS(2300), tOut3 = tAtS(2800), tb = Math.round((tIn3 + 1500) / dt) * dt;
-  const tel = { t: [], v: [], brk: [] }; for (let k = 0; k < N; k++) { tel.t.push(k * dt); tel.v.push(Math.round(v(k * dt) * 3.6)); tel.brk.push(k * dt === tb ? 1 : 0); }
+  const tel = { t: [], v: [], brk: [] }; for (let k = 0; k < N; k++) { tel.t.push(k * dt); tel.v.push(Math.round(v(k * dt) * 3.6)); tel.brk.push(k * dt === tb || k * dt === tb + dt ? 1 : 0); }
   const cars = { 1: { t: pt, x: px, y: py, z: pz, n: N } };
   const rep = smoothedTracks({ isLive: false, car: { 1: tel }, tracks: { cars } }, world, CarTracks);
   assert.ok(rep?.coords("1"), "replay coords"); assert.strictEqual(rep.stateLag, 0); assert.ok(Math.abs(rep.telLag) <= 100, `lag ${rep.telLag}`);
@@ -244,4 +246,35 @@ test("smooth.js coordinates as the history: replay and live (cut at now) agree; 
   // lap 4: open again from its own entry, replay and live alike
   const tIn4 = tAtS(3300), t4 = tIn4 + 3000, r4 = replayAt(t4, 250), l4 = liveAt(t4 + 600, 250);
   assert.strictEqual(r4.open, 1, r4.why); assert.ok(Math.abs(r4.tEntry - tIn4) < 150); assert.strictEqual(l4.open, 1); assert.strictEqual(l4.entryKnown, true);
+});
+
+test("a lone brake sample with no fall in speed is not a brake (car 10, Italian GP 2026: one sample at 188 km/h while accelerating shut a 300+ km/h zone); two samples, a fall in speed, or no speed data still count", async () => {
+  const { activeAeroAt } = await load();
+  const spans = [{ a: 1000, b: 2200, len: 1200, z: {} }];
+  const H = hist([[0, 400], [10000, 1000], [15000, 1375], [20000, 1825], [25000, 2275], [40000, 3600]]);
+  const at = (tel, t) => activeAeroAt(base({ spans, tel, hist: H, t, s: sOf(H, t), speed: 300 }));
+  const rising = (t) => 180 + (t - 10000) / 100;   // accelerating through the zone
+  // lone sample at 12 s, speed still rising after it: ignored – open for the rest of the pass
+  const glitch = telOf(40000, [12000], rising);
+  for (let t = 12500; t < 24000; t += 900) assert.strictEqual(at(glitch, t).open, 1, `lone sample, no slowing: open at ${t} (${at(glitch, t).why})`);
+  // the same sample with the speed level (188, 188 – car 10's case): ignored
+  const level = telOf(40000, [12000], (t) => (t >= 11750 && t <= 12250 ? 188 : rising(t)));
+  assert.strictEqual(at(level, 16000).open, 1, "a level speed after the sample: not a brake");
+  // two samples in a row: a brake, whatever the speed
+  const two = telOf(40000, [12000, 12250], rising);
+  assert.strictEqual(at(two, 16000).open, 0); assert.strictEqual(at(two, 16000).why, "braking");
+  // a lone sample after which the speed falls (≥ 3 km/h within 1 s): a brake
+  const slows = telOf(40000, [12000], (t) => (t > 12000 && t <= 13000 ? rising(12000) - 6 : rising(t)));
+  assert.strictEqual(at(slows, 16000).open, 0, "a lone sample that slows the car is a brake");
+  // no speed channel (the request's repro): a lone sample still counts
+  const nov = telOf(40000, [12000]); delete nov.v;
+  assert.strictEqual(at(nov, 16000).open, 0, "no speed data: the sample counts");
+  // live: the newest sample is a lone brake not yet followed by another – not counted until the data says so; the
+  // state at each t is the same as with the whole record (never looks ahead)
+  const cut = (tel, now) => { const n = tel.t.findIndex((x) => x > now); const k = n < 0 ? tel.t.length : n; return { t: tel.t.slice(0, k), v: tel.v.slice(0, k), brk: tel.brk.slice(0, k) }; };
+  for (const tel of [glitch, two, slows]) for (const t of [12000, 12100, 12300, 13100, 16000]) {
+    const whole = activeAeroAt(base({ spans, tel, hist: H, t, s: sOf(H, t), speed: 300, now: t }));
+    const live = activeAeroAt(base({ spans, tel: cut(tel, t), hist: H, t, s: sOf(H, t), speed: 300, now: t }));
+    assert.deepStrictEqual([live.open, live.why], [whole.open, whole.why], `live = record at ${t}`);
+  }
 });
