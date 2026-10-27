@@ -22,9 +22,9 @@ const UA = { "User-Agent": "f1-live-kr (personal, non-commercial desktop app)" }
 const HOURLY = "cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high";
 
 // Checked arguments: lat, lon in range; a moment between 2018 and tomorrow. Throws otherwise.
-function args(lat, lon, utc) {
+function args(lat, lon, utc, now = Date.now()) {
   if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) throw new Error("bad coordinates");
-  if (!Number.isFinite(utc) || utc < Date.UTC(2018, 0, 1) || utc > Date.now() + 864e5) throw new Error("bad time");
+  if (!Number.isFinite(utc) || utc < Date.UTC(2018, 0, 1) || utc > now + 864e5) throw new Error("bad time");
   return [Math.round(lat * 100) / 100, Math.round(lon * 100) / 100, utc];
 }
 const day = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -97,47 +97,53 @@ async function writeAtomic(file, text) {
 const usable = (hours, utc) => hours.some(([ms]) => Math.abs(ms - utc) <= 90 * 60e3);
 
 class Clouds {
-  constructor(dir, fetchFn = (...a) => fetch(...a)) { this.dir = dir; this.fetch = fetchFn; this.mem = new Map(); }
+  // opts.now: the clock (tests)
+  constructor(dir, fetchFn = (...a) => fetch(...a), opts = {}) { this.dir = dir; this.fetch = fetchFn; this.mem = new Map(); this.now = opts.now || Date.now; }
   async get(lat, lon, utc, live = false) {
-    [lat, lon, utc] = args(lat, lon, utc);
+    [lat, lon, utc] = args(lat, lon, utc, this.now());
     if (live) return this.current(lat, lon);
     const d0 = day(utc - 864e5), d1 = day(utc + 864e5), key = `${lat}_${lon}_${d0}_${d1}`;
     if (this.mem.has(key)) return this.mem.get(key);
+    // the asked dates as UTC hours: [d0 00:00, the day after d1 00:00) – 72 of them when complete
+    const range = [Date.parse(d0 + "T00:00Z"), Date.parse(d1 + "T00:00Z") + 864e5], all = (range[1] - range[0]) / 36e5;
     const file = path.join(this.dir, `archive_${key}.json`);
+    // (a file that isn't hours as written below – half-written, corrupt, another shape – is ignored and replaced)
     let hours = null;
-    try { hours = JSON.parse(await fs.promises.readFile(file, "utf8")); } catch {}
-    if (!Array.isArray(hours) || !usable(hours, utc)) {
+    try { hours = cachedHours(JSON.parse(await fs.promises.readFile(file, "utf8")), range); } catch {}
+    if (!hours || !usable(hours, utc)) {
       const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${d0}&end_date=${d1}&hourly=${HOURLY}&timezone=GMT`;
       try {
         const res = await this.fetch(url, { headers: UA, signal: AbortSignal.timeout(15000) });
         if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
-        hours = parseHourly(await res.json(), lat, lon);
+        hours = parseHourly(await res.json(), lat, lon, range);
       } catch (e) { return { ok: false, reason: e.message }; }
       if (!usable(hours, utc)) return { ok: false, reason: "no archive data for that time yet" };
-      // (kept once complete: a day still being published isn't stored)
-      try { await fs.promises.mkdir(this.dir, { recursive: true }); await fs.promises.writeFile(file, JSON.stringify(hours)); } catch {}
+      // kept on disk once complete: a day still being published (some hours null) is used now but asked again next run
+      if (hours.length === all) try { await fs.promises.mkdir(this.dir, { recursive: true }); await writeAtomic(file, JSON.stringify(hours)); } catch {}
     }
     const r = { ok: true, hours, source: "Open-Meteo historical archive (reanalysis)", lat, lon };
     this.mem.set(key, r);
     return r;
   }
-  // live: the forecast model's current value (15-minute steps), held for 15 minutes
+  // live: the forecast model's current value (15-minute steps), held for 15 minutes; the same checks as an hourly answer
   async current(lat, lon) {
-    const key = `now_${lat}_${lon}`, m = this.mem.get(key);
-    if (m && Date.now() - m.at < 15 * 60e3) return m.r;
+    const key = `now_${lat}_${lon}`, m = this.mem.get(key), now = this.now();
+    if (m && now - m.at < 15 * 60e3) return m.r;
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${HOURLY}&timezone=GMT`;
     try {
       const res = await this.fetch(url, { headers: UA, signal: AbortSignal.timeout(15000) });
       if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
       const j = await res.json(), c = j?.current;
-      if (!c || Math.abs(j.latitude - lat) > 0.5 || Math.abs(j.longitude - lon) > 0.5) return { ok: false, reason: "answer for another place" };
-      const ms = Date.parse(c.time + "Z"), cover = coverOf(c.cloud_cover_low, c.cloud_cover_mid, c.cloud_cover_high);
-      if (!Number.isFinite(ms) || cover == null || Math.abs(ms - Date.now()) > 90 * 60e3) return { ok: false, reason: "no current value" };
+      if (!c || typeof c !== "object") return { ok: false, reason: "no current value" };
+      checkPlace(j, lat, lon);
+      if (j.current_units?.time != null && j.current_units.time !== "iso8601") throw new Error("answer not in UTC ISO time");
+      const ms = utcOf(c.time), cover = coverOf(c.cloud_cover_low, c.cloud_cover_mid, c.cloud_cover_high);
+      if (!Number.isFinite(ms) || cover == null || Math.abs(ms - now) > 90 * 60e3) return { ok: false, reason: "no current value" };
       const r = { ok: true, hours: [[ms, +cover.toFixed(3)]], source: "Open-Meteo forecast (current)", lat, lon };
-      this.mem.set(key, { at: Date.now(), r });
+      this.mem.set(key, { at: now, r });
       return r;
     } catch (e) { return { ok: false, reason: e.message }; }
   }
 }
 
-module.exports = { Clouds, coverOf, parseHourly, args, usable };
+module.exports = { Clouds, coverOf, parseHourly, args, usable, utcOf, cachedHours, checkPlace };
