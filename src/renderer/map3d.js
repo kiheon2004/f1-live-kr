@@ -4615,6 +4615,13 @@ window.Map3D = {
     });
     return n;
   },
+  // development (v0.45): the focused car's glove look and how each look's material is lit – patched (the light field /
+  // tunnel lamps: nightLit), its night glow and environment map – to check a look switched by night or in a tunnel
+  gloveState() {
+    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const u = c.model.userData, st = (m) => ({ patched: Object.prototype.hasOwnProperty.call(m, "onBeforeCompile"), glow: +m.emissiveIntensity.toFixed(3), env: !!m.envMap, onCar: u.kitMat === m });
+    return JSON.stringify({ num: app().focus, look: u.kitMode, night: nightNow, readable: st(u.kitMats.readable), real: st(u.kitMats.real) });
+  },
   partVis(name, on) { const c = cars.get(app().focus || leader()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
