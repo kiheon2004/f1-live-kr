@@ -22,6 +22,19 @@ const contrast = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a),
 const modes = (K) => K.KIT_MODES || [null];
 const setMode = (C, car, m) => { if (m && C.setKitMode) C.setKitMode(car, m); };
 
+test("gloves v0.45: the light glove (other cars, the chase view) shows every colour the fine one does – the seams' colour too", async () => {
+  const { C, K } = await load();
+  for (const [season, grid] of Object.entries(GRIDS)) for (const [team, num] of grid) for (const mode of modes(K)) {
+    const car = C.makeCar({ teamName: team, teamColour: "888888", number: num, season: +season }), u = car.userData; setMode(C, car, mode);
+    const m = u.gloveFine[0].material;
+    assert.strictEqual(u.gloveLo[0].material, m, `${season} ${team} ${mode}: the two gloves on different materials`);
+    // what the hand shows: the glove plus its gauntlet (one mesh on every LOD)
+    const shown = (g) => new Set([...zonesOf(g), ...zonesOf(u.arms[0].gauntlet.geometry)].map((z) => colourOf(m, z)));
+    const fine = shown(u.gloveFine[0].geometry), lo = shown(u.gloveLo[0].geometry);
+    for (const c of fine) assert.ok(lo.has(c), `${season} ${team} #${num} ${mode || ""}: colour ${c} on the fine glove only (zones fine ${[...zonesOf(u.gloveFine[0].geometry)]} / light ${[...zonesOf(u.gloveLo[0].geometry)]})`);
+  }
+});
+
 // (v0.44's kitPalette wrote THREE.Color's LINEAR components into a texture marked sRGB: the GPU decoded them a second
 // time – "#2a2c30" black knit drew as #060608, papaya #ff8000 as #ff3700: every kit far darker than its research)
 test("gloves v0.45: the kit palette holds each zone's sRGB colour as written in the kit (decoded once, not twice)", async () => {
