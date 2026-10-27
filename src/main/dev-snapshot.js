@@ -87,6 +87,16 @@ module.exports = function snapshot(win, outFile) {
         console.log("GRIDSWEEP", JSON.stringify({ item, loc: dbg.loc, key: dbg.key, t, lights, real: !!dbg.real, check, cams }));
         // F1KR_ITEM_JS: run on every race of the sweep (its result logged with the race)
         if (process.env.F1KR_ITEM_JS) console.log("ITEMJS", item, await run(process.env.F1KR_ITEM_JS).catch((e) => "error " + e.message));
+        // F1KR_ITEM_SHOTS="js1;;js2;;…": on every race of the sweep, each run, F1KR_SHOT_WAIT ms, then a picture <tag>_sN.png
+        // ("burst:N:ms[:width]" as in F1KR_SHOTS: N frames ms apart, <tag>_sN_fNN.png)
+        if (process.env.F1KR_ITEM_SHOTS) for (const [i, js] of process.env.F1KR_ITEM_SHOTS.split(";;").entries()) {
+          const r = await run(js).catch((e) => "error " + e.message);
+          console.log("ITEMSHOT", item, i + 1, typeof r === "string" ? r : JSON.stringify(r));
+          await wait(+process.env.F1KR_SHOT_WAIT || 2500);
+          const b = typeof r === "string" && /^burst:(\d+):(\d+)(?::(\d+))?/.exec(r);
+          if (b) { for (let f = 0; f < +b[1]; f++) { const t0 = Date.now(); fs.writeFileSync(`${tag}_s${i + 1}_f${String(f + 1).padStart(2, "0")}.png`, (await win.webContents.capturePage()).resize({ width: +(b[3] || 960) }).toPNG()); await wait(Math.max(0, +b[2] - (Date.now() - t0))); } }
+          else fs.writeFileSync(`${tag}_s${i + 1}.png`, (await win.webContents.capturePage()).resize({ width: 1600 }).toPNG());
+        }
       }
     } else if (process.env.F1KR_SWEEP) {
       // F1KR_SWEEP="2026:바레인 그랑프리 · 결승,2025:모나코 그랑프리 · 결승" – loads each race, builds the real 3D

@@ -11,7 +11,7 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
-import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, SUPPORT } from "./support.js";
+import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
@@ -2152,50 +2152,62 @@ function updateSupport(src, t) {
   else if (plan.medical?.mode === "parked") med = parkedAt(14);
   placeSupportCar(SP, "med", medId, med, plan.medical?.mode === "following" || plan.medical?.mode === "entering", tsec);
   SP.medShown = !!med;
-  // the rear-of-grid official: behind the last row with a green flag, then off to the side of the track
+  // the rear-of-grid official: behind the last row with a green flag, then off to the side of the track (where: support.js
+  // flagSpot, in the lap line's frame from the grid's rear point – the ground it stands on measured here once per start)
   if (plan.official && SP.gridBack && SP.gridBack.t === start?.t) {
     if (!SP.crew) { SP.crew = crewMeshes(2); SP.group.add(SP.crew.group); SP.flag = makeFlag("green"); SP.group.add(SP.flag.group); }
-    // (Appendix H 2026 2.5.5 g: the marshal "behind a barrier opening located in close proximity to the back of the grid"
-    // – or as far from the track's edge as possible: off the track at its side, never on it; which side's opening isn't
-    // known – the side with more room (per start); a barrier close to the edge: behind it, at an opening – an estimate)
-    const { f } = SP.gridBack, [sn] = world.grid.nearest(SP.gridBack.x, SP.gridBack.z, 3);
-    if (!SP.off || SP.off.t !== start.t) SP.off = { t: start.t, ...officialSide(SP.gridBack, sn) };
-    const { sg, stand } = SP.off, side = { x: f.z * sg, z: -f.x * sg }, edge = sn ? (sg > 0 ? sn.L ?? 7 : -(sn.R ?? -7)) : 7;
-    const out = edge + stand + (plan.official.phase === "leave" ? 2.5 * plan.official.f : 0);
-    const x = SP.gridBack.x + side.x * out, z = SP.gridBack.z + side.z * out, y = groundY(x, z);
-    // (facing the grid while waving – the starter's way –, then turning away)
-    const face = plan.official.phase === "flag" ? f : side, yaw = Math.atan2(face.x, face.z) - Math.PI / 2;
-    const wave = plan.official.phase === "flag" ? Math.sin(tsec * 2 * Math.PI * 1.4) : 0;
-    // (walking off: the feet in step with the 2.5 m walked – walkPhase)
-    const flagging = plan.official.phase === "flag", pose = flagging ? flagPose(wave) : walkPose(walkPhase(2.5 * plan.official.f));
-    const { at: h, axis: ax } = flagHold(pose), c = Math.cos(yaw), sn2 = Math.sin(yaw);
-    SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose, role: "marshal", seed: 1, hands: flagging ? [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]] : null }], [], camera.position);
-    const hx = x + h[0] * c + h[2] * sn2, hz = z - h[0] * sn2 + h[2] * c;
-    SP.flag.group.visible = flagging;
-    if (flagging) SP.flag.pose({ x: hx, y: y + h[1], z: hz }, { x: side.x, z: side.z }, tsec, 1, 0.3, { x: ax[0] * c + ax[2] * sn2, y: ax[1], z: -ax[0] * sn2 + ax[2] * c });
-    SP.officialShown = true; SP.officialAt = { x: +x.toFixed(1), z: +z.toFixed(1), out: +out.toFixed(1), sg, stand };
+    const F = world.frame;
+    // (once per start – again when the pit building or the map's barriers arrive: they decide where it can step off)
+    const offKey = `${start.t}|${!!pitTeams.G}|${!!world.real}`;
+    if (!SP.off || SP.off.key !== offKey) { const o = F.project(SP.gridBack.x, SP.gridBack.z); const ground = o ? flagGround(SP.gridBack, o, rear, medId) : null; SP.off = { key: offKey, s: o?.s, ground, spot: ground ? flagSpot(ground) : null }; }
+    const { s: s0, spot } = SP.off;
+    if (spot) {
+      const p = flagAt(spot, plan.official.phase, plan.official.f), q = [0, 0, 0], D = [0, 1];
+      F.at(s0 + p.u, p.v, q, D);
+      const x = q[0], z = q[2], y = groundY(x, z), sg = Math.sign(spot.exit.v - spot.flag.v) || spot.side, side = { x: -D[1] * sg, z: D[0] * sg };
+      // (facing the grid while waving – the starter's way –, then the way it walks)
+      const face = p.facing === "grid" ? { x: D[0], z: D[1] } : side, yaw = Math.atan2(face.x, face.z) - Math.PI / 2;
+      const flagging = p.facing === "grid", wave = flagging ? Math.sin(tsec * 2 * Math.PI * 1.4) : 0;
+      // (walking off: the feet in step with the metres walked – walkPhase)
+      const pose = flagging ? flagPose(wave) : walkPose(walkPhase(p.walked));
+      const { at: h, axis: ax } = flagHold(pose), c = Math.cos(yaw), sn2 = Math.sin(yaw);
+      SP.crew.place([{ x, y, z, yaw, colour: "#ff6a13", pose, role: "marshal", seed: 1, hands: flagging ? [null, [h[0], h[1], h[2], 1, ax[0], ax[1], ax[2]]] : null }], [], camera.position);
+      const hx = x + h[0] * c + h[2] * sn2, hz = z - h[0] * sn2 + h[2] * c;
+      SP.flag.group.visible = flagging;
+      if (flagging) SP.flag.pose({ x: hx, y: y + h[1], z: hz }, { x: side.x, z: side.z }, tsec, 1, 0.3, { x: ax[0] * c + ax[2] * sn2, y: ax[1], z: -ax[0] * sn2 + ax[2] * c });
+      SP.officialShown = true; SP.officialAt = { x: +x.toFixed(1), z: +z.toFixed(1), u: +p.u.toFixed(2), v: +p.v.toFixed(2), side: spot.side, via: spot.via || null };
+    } else if (SP.officialShown) { SP.crew.place([], [], camera.position); SP.flag.group.visible = false; SP.officialShown = false; }
   } else if (SP.crew && SP.officialShown) { SP.crew.place([], [], camera.position); SP.flag.group.visible = false; SP.officialShown = false; }
   SP.plan = plan; SP.models = models;
   supportNote(plan, models);
 }
 // the last starter's grid place at a start (startplan's carKind)
 function carKindG(src, start, num) { const S = startState(src, start.t), ctx = startCtxAt(S, start.t); return ctx ? carKind(S.hist, ctx, num, start.t)?.g ?? null : null; }
-// Which side of the track the rear-of-grid official goes to, and how far out from the edge: the side with more room
-// before a barrier (the map's or the generated one, a ray from the edge); a barrier within 3.5 m: behind it (+1.2 m, at an
-// opening – where the opening is isn't known), else 2.2 m out, never past 1 m short of it
-function officialSide(gb, sn) {
-  const targets = [world.real?.group.getObjectByName("barriers"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
-  const ray = new THREE.Raycaster(), f = gb.f;
-  const look = (sg) => {
-    const e = sn ? (sg > 0 ? sn.L ?? 7 : -(sn.R ?? -7)) : 7, nx = f.z * sg, nz = -f.x * sg;
-    ray.set(new THREE.Vector3(gb.x + nx * e, (sn?.p.y ?? 0) + 0.6, gb.z + nz * e), new THREE.Vector3(nx, 0, nz)); ray.far = 40;
-    const hit = targets.length ? ray.intersectObjects(targets, true)[0] : null;
-    const [q, dd] = world.grid.nearest(gb.x + nx * (e + 6), gb.z + nz * (e + 6), 2), room = Math.min(hit ? hit.distance : 40, q ? dd : 40);
-    return { sg, room, wall: hit ? hit.distance : null };
+// The ground the rear-of-grid official's place is chosen on (support.js flagSpot), in the lap line's frame from the
+// grid's rear point (o: its place in the frame): the medical car there (rear: its centre; id: its model, for its size),
+// the asphalt's edges along the track, the first barrier past each edge across from in front of the medical car (the
+// map's or the generated one, a level ray; null: none within 40 m) and the pit lane – inside the pit building's lane
+// (garages to the wall's face, pitModelFor) or, off the asphalt, within 8 m of the measured pit path (world.laneZone)
+function flagGround(gb, o, rear, id) {
+  const F = world.frame, q = [0, 0, 0], at = (u, v) => { F.at(o.s + u, v, q); return q; };
+  const spec = SUPPORT_CARS[id] || SUPPORT_CARS.neutralMedical, mp = rear ? F.project(rear.x, rear.z) : null;
+  const med = mp ? { u: mp.s - o.s, v: mp.d, L: spec.L, W: spec.W } : null;
+  const edges = (u) => { const s = F.sampleAt(o.s + u); return { L: edgeOf(s, 1), R: edgeOf(s, -1) }; };
+  const G = pitTeams.G, m = G ? pitModelFor(G) : null;
+  const inPit = (u, v) => {
+    const [x, , z] = at(u, v), e = edges(u);
+    if (G) { const pr = G.project(x, z); if (pr.u >= G.gStart - 20 && pr.u <= G.gEnd + 20 && pr.off >= -0.5 && pr.off <= (m.at(Math.max(G.gStart, Math.min(G.gEnd, pr.u))).wall || 0)) return true; }
+    return (v > e.L || v < e.R) && !!world.laneZone?.(x, z);
   };
-  const a = look(1), b = look(-1), w = a.room >= b.room ? a : b;
-  const stand = w.wall == null ? 2.2 : w.wall < 3.5 ? w.wall + 1.2 : Math.min(2.2, w.wall - 1);
-  return { sg: w.sg, stand };
+  const targets = [world.real?.group.getObjectByName("barriers"), world.group.getObjectByName("syntheticWalls")].filter(Boolean), ray = new THREE.Raycaster();
+  const u0 = med ? med.u + med.L / 2 + FLAG.ahead : 0;
+  const wall = (sg) => {
+    if (!targets.length) return null;
+    const e = edges(u0), [x0, y0, z0] = at(u0, sg > 0 ? e.L : e.R), [x1, , z1] = at(u0, (sg > 0 ? e.L : e.R) + sg), d = Math.hypot(x1 - x0, z1 - z0) || 1;
+    ray.set(new THREE.Vector3(x0, y0 + 0.6, z0), new THREE.Vector3((x1 - x0) / d, 0, (z1 - z0) / d)); ray.far = 40;
+    const h = ray.intersectObjects(targets, true)[0]; return h ? h.distance : null;
+  };
+  return { gbV: o.d, med, edges, wall: { L: wall(1), R: wall(-1) }, inPit };
 }
 function supportNote(plan, models) {
   const parts = [];
@@ -4158,6 +4170,40 @@ window.Map3D = {
   starts() { const src = app().src; if (!src) return "null"; const shown = shownStarts(src, app().t), S = startState(src, app().t); return JSON.stringify({ shown: shown.map((s) => ({ t: s.t, standing: s.standing, from: s.from || null })), launches: [...(S.launches || new Map())].map(([t, f]) => [t, f && { t: f.t, n: f.n, of: f.of }]) }); },
   // development: the support cars and the official as placed this frame
   support() { const SP = world?.support; if (!SP) return "null"; const pos = (k) => { const o = SP.cars[k]?.obj; return o?.visible ? o.position.toArray().map((v) => +v.toFixed(1)) : null; }; return JSON.stringify({ plan: SP.plan, models: SP.models, sc: pos("sc"), med: pos("med"), last: [...SP.starts.values()][0]?.last || null, order: [...SP.starts.values()][0]?.order || null, official: SP.officialShown || false, officialAt: SP.officialAt || null, scLast: SP.scLast || null, medFollows: SP.medFollows || null, lap1: [...SP.starts.values()][0]?.lap1 || null, lane: world.pitLane ? { entry: [laneAt(0).x, laneAt(0).z].map((v) => +v.toFixed(1)), exit: [laneAt(world.pitLane.exitU).x, laneAt(world.pitLane.exitU).z].map((v) => +v.toFixed(1)), len: +world.pitLane.len.toFixed(1), exitU: +world.pitLane.exitU.toFixed(1) } : null, gridBack: SP.gridBack ? { x: +SP.gridBack.x.toFixed(1), z: +SP.gridBack.z.toFixed(1), f: [+SP.gridBack.f.x.toFixed(3), +SP.gridBack.f.z.toFixed(3)] } : null }); },
+  // development: the rear-of-grid official against the track, the pit lane and the medical car this frame (v0.46 §4):
+  // lateral offsets d (+ left) from the lap line's frame, the edges there, the distance to the pit lane's measured path,
+  // inside the pit building's lane (pit model: 0 … wall from the garages) and the gap to the medical car's outline
+  flagDiag() {
+    const SP = world?.support; if (!SP || !world.frame) return "null";
+    const F = world.frame, P = (x, z) => { const pr = F.project(x, z); return pr ? { d: +pr.d.toFixed(2), L: +edgeOf(pr.sample, 1).toFixed(2), R: +edgeOf(pr.sample, -1).toFixed(2), on: pr.d <= edgeOf(pr.sample, 1) && pr.d >= edgeOf(pr.sample, -1) } : null; };
+    const lane = (x, z) => { const L = world.pitLane; if (!L) return null; let b = Infinity; for (let i = 1; i < L.pts.length; i++) { const a = L.pts[i - 1], c = L.pts[i], dx = c.x - a.x, dz = c.z - a.z, l2 = dx * dx + dz * dz, f = l2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0; b = Math.min(b, Math.hypot(a.x + dx * f - x, a.z + dz * f - z)); } return +b.toFixed(2); };
+    const G = pitTeams.G, inPit = (x, z) => { if (!G) return null; const m = pitModelFor(G), pr = G.project(x, z); if (pr.u < G.gStart - 20 || pr.u > G.gEnd + 20) return false; const w = m.at(Math.max(G.gStart, Math.min(G.gEnd, pr.u))).wall; return pr.off >= -0.5 && pr.off <= (w || 0); };
+    const o = SP.officialAt, mo = SP.cars.med?.obj, med = mo?.visible ? { x: mo.position.x, z: mo.position.z, yaw: mo.rotation.y, L: mo.userData.spec?.L || 5.05, W: mo.userData.spec?.W || 1.96 } : null;
+    const gap = (x, z) => { if (!med) return null; const c = Math.cos(med.yaw), s = Math.sin(med.yaw), dx = x - med.x, dz = z - med.z, along = dx * s + dz * c, across = dx * c - dz * s; return +Math.hypot(Math.max(0, Math.abs(along) - med.L / 2), Math.max(0, Math.abs(across) - med.W / 2)).toFixed(2); };
+    const gb = SP.gridBack, laneSide = gb && world.pitLane ? (() => { let b = Infinity, q = null; for (const p of world.pitLane.pts) { const d = Math.hypot(p.x - gb.x, p.z - gb.z); if (d < b) { b = d; q = p; } } const pr = q && F.project(q.x, q.z); return pr ? { d: +pr.d.toFixed(1), dist: +b.toFixed(1) } : null; })() : null;
+    return JSON.stringify({ plan: SP.plan?.official || null, med: SP.plan?.medical?.mode || null, official: o ? { x: o.x, z: o.z, sg: o.sg, stand: o.stand, out: o.out, track: P(o.x, o.z), laneDist: lane(o.x, o.z), inPit: inPit(o.x, o.z), laneZone: !!world.laneZone?.(o.x, o.z), medGap: gap(o.x, o.z) } : null,
+      medCar: med ? { x: +med.x.toFixed(1), z: +med.z.toFixed(1), track: P(med.x, med.z) } : null, gridBack: gb ? { x: +gb.x.toFixed(1), z: +gb.z.toFixed(1), track: P(gb.x, gb.z) } : null, laneAtBack: laneSide, sides: SP.off?.ground?.sides?.map((q) => ({ sg: q.dir, room: +q.room.toFixed(1), wall: q.wall == null ? null : +q.wall.toFixed(1) })) || null });
+  },
+  // development (v0.46 §4): the ground around the back of the grid in the lap line's frame from the grid's rear point (u
+  // along the track, + towards the grid; v across, + left = frame d): the medical car, the asphalt's edges, the first
+  // barrier beyond each edge and where the pit lane is (the pit building's lane: garages to wall face – "pit"; within
+  // 8 m of the measured pit path – "zone"), as intervals of v per u – the test fixture for support.js flagSpot
+  flagGeom() {
+    const SP = world?.support, gb = SP?.gridBack, F = world?.frame; if (!gb || !F) return "null";
+    const o = F.project(gb.x, gb.z); if (!o) return "null";
+    const q = [0, 0, 0], at = (u, v) => { F.at(o.s + u, v, q); return [q[0], q[2]]; }, r1 = (v) => +v.toFixed(2);
+    const G = pitTeams.G, m = G ? pitModelFor(G) : null;
+    const pit = (x, z) => { if (!G) return false; const pr = G.project(x, z); if (pr.u < G.gStart - 20 || pr.u > G.gEnd + 20) return false; const w = m.at(Math.max(G.gStart, Math.min(G.gEnd, pr.u))).wall; return pr.off >= -0.5 && pr.off <= (w || 0); };
+    const zone = (x, z) => !!world.laneZone?.(x, z);
+    const spans = (u, test) => { const out = []; let a = null; for (let v = -40; v <= 40.001; v += 0.25) { const [x, z] = at(u, v), t = test(x, z); if (t && a == null) a = v; if (!t && a != null) { out.push([r1(a), r1(v - 0.25)]); a = null; } } if (a != null) out.push([r1(a), 40]); return out; };
+    const rows = []; for (let u = -24; u <= 6; u += 2) { const [x, z] = at(u, 0), [sm] = world.grid.nearest(x, z, 3); rows.push({ u, L: r1(edgeOf(sm, 1)), R: r1(edgeOf(sm, -1)), pit: spans(u, pit), zone: spans(u, zone) }); }
+    const mo = SP.cars.med?.obj, mp = mo?.visible ? F.project(mo.position.x, mo.position.z) : null;
+    // (the first barrier beyond each edge at the medical car's station: map's or generated, a level ray across the track)
+    const targets = [world.real?.group.getObjectByName("barriers"), world.group.getObjectByName("syntheticWalls")].filter(Boolean), ray = new THREE.Raycaster();
+    const wall = (u, sg) => { const e = edgeOf(F.sampleAt(o.s + u), sg), [x0, z0] = at(u, e), [x1, z1] = at(u, e + sg), d = Math.hypot(x1 - x0, z1 - z0) || 1; ray.set(new THREE.Vector3(x0, groundY(x0, z0) + 0.6, z0), new THREE.Vector3((x1 - x0) / d, 0, (z1 - z0) / d)); ray.far = 40; const h = targets.length ? ray.intersectObjects(targets, true)[0] : null; return h ? r1(h.distance) : null; };
+    const mu = mp ? r1(mp.s - o.s) : -7.5;
+    return JSON.stringify({ loc: app().location?.() || null, gbV: r1(o.d), med: mp ? { u: mu, v: r1(mp.d), L: mo.userData.spec?.L || 5.05, W: mo.userData.spec?.W || 1.96 } : null, wall: { L: wall(mu, 1), R: wall(mu, -1) }, rows, G: !!G });
+  },
   // development: the marshal posts as placed, their flags now
   marshals() { const M = world?.marshals; if (!M) return "null"; return JSON.stringify({ info: M.info, state: M.state, flags: [...M.flags].filter(([, f]) => f.group.visible).length, N: world.samples.length, bounds: M.map?.bounds.map((b) => [b.n, b.i]), mirrors: M.map?.mirrors.map((b) => [b.n, b.i]), logical: M.map?.posts.map((p) => [p.id, p.i, p.sector, p.first ? 1 : 0]), panels: M.panels.map((p) => [p.n, p.sig ?? null, p.cell, +p.x.toFixed(1), +p.z.toFixed(1), p.i]), posts: M.posts.slice(0, 80).map((p) => [p.id, p.sector, +p.x.toFixed(1), +p.z.toFixed(1), +groundY(p.x, p.z).toFixed(1), p.first ? 1 : 0, p.i]) }); },
   // development: the harbour's yachts as laid out (per zone: count, lengths)
