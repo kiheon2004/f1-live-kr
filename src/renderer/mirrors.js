@@ -124,7 +124,11 @@ export function createMirrorPass(three = THREE) {
   const W = { c: new three.Vector3(), n: new three.Vector3(), h: new three.Vector3(), up: new three.Vector3() };
   const frustum = new three.Frustum(), pv = new three.Matrix4(), sphere = new three.Sphere(), eye = new three.Vector3();
   const corners = [new three.Vector3(), new three.Vector3(), new three.Vector3(), new three.Vector3()], buf = new three.Vector2();
-  // (a glass under ~150 px on the screen – a sliver seen edge-on, a far chase – keeps the simple glass: no picture to read)
+  // (a glass under ~150 px² on the screen – a sliver seen edge-on, a tiny window or drawing buffer – gets no pass a frame:
+  // no picture to read. v0.45: but it still showed the live material – a picture frozen when every glass in view was
+  // small, or its half never drawn for this view (another car's or camera's picture) when the other glass was large. Now:
+  // every glass in view small → the simple glass (drawn afresh once large again); one large → the small one's half drawn
+  // once for this view, then kept – test/mirrors45.test.js)
   const MIN_PX = 150;
   function screenArea(renderer, camera, W, hw, hh) {
     for (let j = 0; j < 4; j++) corners[j].copy(W.c).addScaledVector(W.h, (j === 0 || j === 3 ? -1 : 1) * hw).addScaledVector(W.up, (j < 2 ? -1 : 1) * hh).project(camera);
@@ -169,7 +173,7 @@ export function createMirrorPass(three = THREE) {
     if (st.key !== view) { st.key = view; st.drawn = [false, false]; st.last = [-1e9, -1e9]; mesh.material = mesh.userData.glass; seenShare(car, eye, mesh, st.seen); }
     frustum.setFromProjectionMatrix(pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     const mw = car.matrixWorld;
-    let todo = 0;
+    let todo = 0, shown = 0, large = 0;
     for (let i = 0; i < spec.length; i++) {
       const s = spec[i], cam = cams[i];
       cam.userData.go = false;
@@ -177,13 +181,20 @@ export function createMirrorPass(three = THREE) {
       sphere.center.copy(W.c); sphere.radius = Math.hypot(s.hw, s.hh);
       // (under half the glass in sight past the car's own parts – the 2022–25 T-cam's, behind the halo – no pass: what
       // shows of it is a sliver, measured as nothing in the app's frames)
-      if (!(st.seen[i] >= 0.5) || !frustum.intersectsSphere(sphere) || screenArea(renderer, camera, W, s.hw, s.hh) < MIN_PX) { st.stats.skipped++; continue; }
+      if (!(st.seen[i] >= 0.5) || !frustum.intersectsSphere(sphere)) { st.stats.skipped++; continue; }
+      shown++;
+      if (screenArea(renderer, camera, W, s.hw, s.hh) >= MIN_PX) large++;
+      else if (st.drawn[i]) { st.stats.skipped++; continue; }   // (small: this view's picture kept on the sliver)
       const due = !st.drawn[i] || st.frame - st.last[i] >= M.every;
       if (!due) continue;
       // (low: one mirror a frame – the other waits a frame unless it has never been drawn for this view)
       if (M.every > 1 && todo && st.drawn[i]) continue;
       if (!mirrorCamera(cam, eye, W.c, W.n, W.h, W.up, s.hw, s.hh, MIRROR.spread, MIRROR.far)) continue;
       cam.userData.go = true; todo++;
+    }
+    if (shown && !large) {   // (every glass in view small: the simple glass, the picture drawn afresh when one is large again)
+      if (mesh.material === liveMat) { mesh.material = mesh.userData.glass; st.drawn = [false, false]; st.last = [-1e9, -1e9]; }
+      for (const c of cams) c.userData.go = false; st.stats.skipped += todo; return 0;
     }
     if (!todo) return 0;
     // (the renderer as it was – restored whatever happens)
