@@ -30,7 +30,7 @@ import { shapeFor } from "./carshapes.js";
 import { MIRROR } from "./mirrors.js";
 import { aeroSpecFor, hingeOf } from "./aero.js";
 import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R, KIT_ZONE, kitZone } from "./body3d.js";
-import { kitStyle, kitEntry, kitMaterial } from "./kit.js";
+import { kitStyle, kitEntry, kitMaterial, kitReadable, kitMode } from "./kit.js";
 import { harnessGeometry, HARNESS } from "./harness.js";
 import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST } from "./arms.js";
 import { ARM_PLANS } from "./armplans.js";
@@ -1649,7 +1649,7 @@ function frontMorph(T, prim, sec) {
   g.userData.shared = true; M.set(key, g);
   return g;
 }
-export function makeCar({ teamName, teamColour, number, season = null, date = null }) {
+export function makeCar({ teamName, teamColour, number, season = null, date = null, kit = null }) {
   const prof = profileFor(season, teamName, date), t = template(prof), l = liveryFor(teamName, teamColour, prof.season, date);
   const matte = l.finish === "matte";
   // (v0.40 finishes: gloss paint is clear-coated – sharper than 0.28 drew it; matte paint (Red Bull 2025) a satin 0.55;
@@ -1692,7 +1692,11 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const helmetMat = skyLit(new THREE.MeshStandardMaterial({ map: helmetTexture(l), color: hasDom ? 0xffffff : l.top, roughness: 0.18, metalness: 0.1 }));
   // the driver's kit – gloves, the suit's sleeves and torso, the harness – in the team's kit colours per zone (kit.js: one
   // material per kit style, shared by the team's cars; v0.43 drew the gloves in the car's base colour all over)
-  const kitMat = kitMaterial(kitStyle(l, kitEntry(teamName, prof.season, date, number))), gloveMat = kitMat, suitMat = kitMat;
+  // (v0.45: two looks – kit.js: "real", the researched kit; "readable" (default), a restrained readability aid for a dark
+  // glove – both made now (shared, cached per kit and look); the car wears one, setKitMode swaps it)
+  const kitReal = kitStyle(l, kitEntry(teamName, prof.season, date, number)), kitMode0 = kitMode(kit);
+  const kitMats = { real: kitMaterial(kitReal, "real"), readable: kitMaterial(kitReadable(kitReal, l, teamColour), "readable") };
+  const kitMat = kitMats[kitMode0], gloveMat = kitMat, suitMat = kitMat;
   const g = new THREE.Group();
   const add = (geo, m, parent = g, name) => { const mesh = new THREE.Mesh(geo, m); if (name) mesh.name = name; parent.add(mesh); return mesh; };
   add(t.painted, paint, g, "painted"); add(t.carbon, carbon, g, "carbon"); add(t.wing, wingPaint, g, "wing"); add(t.rim, pad, g, "rim");
@@ -1791,9 +1795,21 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   }
   const mounts = { tcam: new THREE.Vector3(...prof.tcam), eye: new THREE.Vector3(...prof.eye) };
   g.userData = { profile: prof, mounts, wheels, spins, corners, fwPivot, rwPivot, bandMat, near, fine, helmet, visor, wheel, arms, armPlan: t.wheel.plan, screen, screenShared: screenMat, lod: "near", compound: null, aero: 0, aeroFront: 0, aeroSpec: spec, aeroJoints: joints,
-    leds, flagLights, gloveFine, gloveLo, cockpit: false, mirrors, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat], kitMat, bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
+    leds, flagLights, gloveFine, gloveLo, cockpit: false, mirrors, bodySkin: [t.body, t.tubIn].filter(Boolean), wheelSpec: t.wheel.spec, paintMats: [paint, wingPaint, fwPaint, helmetMat], kitMat, kitMats, kitMode: kitMode0, bounds: { length: t.box.max.z - t.box.min.z, width: prof.W, height: t.box.max.y } };
   placeArms(g.userData);   // (the hands on the grips from the start)
   return g;
+}
+// v0.45: the car's kit in the other look ("real" | "readable", kit.js) – every mesh on its kit material (gloves fine and
+// light, gauntlets, sleeves, torso with the harness) takes the look's own shared material; no material is written to,
+// so no other car's – no other team's – hands change. A mesh under Map3D.kitDiag keeps its diagnosis and returns to the
+// new look.
+export function setKitMode(car, mode) {
+  const u = car.userData, m = kitMode(mode), next = u.kitMats?.[m];
+  if (!next || u.kitMat === next) return false;
+  const cur = u.kitMat;
+  car.traverse((o) => { if (!o.isMesh) return; if (o.material === cur) o.material = next; else if (o.userData.kitDiag === cur) o.userData.kitDiag = next; });
+  u.kitMat = next; u.kitMode = m;
+  return true;
 }
 // Tyre sidewall colour for the compound on the car now.
 export function setCompound(car, compound) {

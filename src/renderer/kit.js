@@ -138,9 +138,12 @@ export function kitPalette(style) {
 }
 // One material per style, shared by the cars wearing it (MeshPhysicalMaterial for the fabric's sheen; the colour, the
 // roughness and the metalness from the zone textures; the vertex colours white – kept for shading a part might want).
+// (v0.45: keyed by the look too – the real and the readable look of a kit never share a material, even where their
+// colours agree; nothing writes to a kit material once made: a car changes look by taking the other one – setKitMode)
 const KIT_MATS = new Map();
-export function kitMaterial(style) {
-  const key = JSON.stringify(Object.keys(KIT_ZONE).map((k) => style[k]));
+export function kitMaterial(style, mode = "real") {
+  mode = kitMode(mode);
+  const key = mode + "|" + JSON.stringify(Object.keys(KIT_ZONE).map((k) => style[k]));
   let m = KIT_MATS.get(key);
   if (m) return m;
   // (the sheen: a pale grey of the fabric – the knit's fibres catching grazing light; sheenRoughness high, a soft glow
@@ -149,8 +152,53 @@ export function kitMaterial(style) {
   const sheen = new THREE.Color(style.fabric).lerp(new THREE.Color(0xffffff), 0.3);
   m = new THREE.MeshPhysicalMaterial({ map: texel(kitPalette(style), THREE.SRGBColorSpace), roughnessMap: finishTexture(), metalnessMap: finishTexture(), roughness: 1, metalness: 1,
     vertexColors: true, sheen: 0.35, sheenRoughness: 0.8, sheenColor: sheen });
-  m.userData.shared = true; m.userData.kit = key;
+  m.userData.shared = true; m.userData.kit = key; m.userData.kitMode = mode;
   KIT_MATS.set(key, m);
   return m;
 }
 export const kitStats = () => ({ materials: KIT_MATS.size });
+
+// ---------- v0.45: the two looks ----------
+// "real": the kit as researched (KITS / the base rules above). "readable" (the default): a restrained readability aid
+// for the 1st-person view – the user asked that in every team the hands read apart from the dark cockpit, in the team's
+// colour applied with restraint; v0.44 drew the real black / navy gloves as they are, and on a black wheel in a dark tub
+// they vanished (screenshots: v045/reports/gloves.md). It is NOT an exact copy of any real glove: only a dark glove
+// (fabric's relative luminance under KIT_DARK – Red Bull and Alpine navy, McLaren, Aston Martin, Haas black, Ferrari
+// 2025's deep red) changes, and only so far:
+//  - its knit stays a dark knit: the fabric (and the gauntlet, back panel, hem where they are as dark) raised to KNIT_LIFT
+//    relative luminance, inside the 3–6 % reflectance of dyed black aramid knit cited in the header – not brightened past
+//    a black fabric; its hue kept (navy stays navy);
+//  - the wrist band, the knuckle ridge and the finger seams – where they are not already an accent of the real glove –
+//    in the team's signature colour; those zones exist on the fine and the light glove alike (body3d), so the look is
+//    the same at every detail level; the real accents (Alpine's pink panel, Haas' red star panel and white piping) stay;
+//  - the palm print, the suit, the sleeves and the harness untouched; no emissive, no glove light – the scene's light.
+// The signature colour: the first chromatic accent the real glove already has (McLaren papaya, Aston Martin lime, Alpine
+// cyan, Haas red), else the livery's accent (Red Bull red, Ferrari 2025 white – its real glove has a white thumb), else
+// the feed's team colour – the first that stands out from the knit (contrast ≥ SIG_CONTRAST: red or blue on a dark knit reads by its hue as much as its lightness).
+export const KIT_MODES = ["readable", "real"], KIT_MODE_DEFAULT = "readable";
+export const KIT_DARK = 0.1, KNIT_LIFT = 0.045, SIG_CONTRAST = 2;
+export const kitMode = (m) => (KIT_MODES.includes(m) ? m : KIT_MODE_DEFAULT);
+// relative luminance (THREE.Color holds linear components) and the WCAG-style contrast of two colours
+const relLum = (hex) => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
+const contrastOf = (a, b) => { const x = relLum(a), y = relLum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+const chromatic = (hex) => { const h = {}; new THREE.Color(hex).getHSL(h, THREE.SRGBColorSpace); return h.s >= 0.35 && h.l >= 0.2 && h.l <= 0.85; };
+// a dark colour raised to luminance y, its hue and saturation kept (linear scale; a near-black one with grey added)
+function liftTo(hex, y) {
+  const c = new THREE.Color(hex), l = relLum(hex);
+  if (l >= y) return hex;
+  if (l < 1e-4) c.setRGB(y, y, y); else c.multiplyScalar(y / l);
+  return "#" + c.getHexString();
+}
+export function kitReadable(style, livery = null, teamColour = null) {
+  const L = livery || {}, S = { ...style };
+  if (relLum(style.fabric) >= KIT_DARK) return { ...S, src: `readable look = the real kit (a light glove; not an exact copy of the real design) – ${style.src}` };
+  for (const k of ["fabric", "gauntlet", "back", "hem"]) if (relLum(style[k]) < KNIT_LIFT) S[k] = liftTo(style[k], KNIT_LIFT);
+  const stands = (c) => c && /^#[0-9a-f]{6}$/i.test(c) && contrastOf(c, S.fabric) >= SIG_CONTRAST;
+  let sig = ["knuckle", "seam", "back", "band", "hem"].map((k) => style[k]).find((c) => stands(c) && chromatic(c)), from = "an accent the kit already has";
+  if (!sig) { sig = [L.accent, L.nose, L.top, L.side, L.base].find(stands); from = "the livery's accent"; }
+  if (!sig && teamColour) { const t = "#" + String(teamColour).replace(/^#/, ""); if (stands(t)) { sig = t; from = "the feed's team colour"; } }
+  if (!sig) { sig = "#c8cbd0"; from = "a light grey (no team colour stands out)"; }
+  const zones = [];
+  for (const k of ["band", "knuckle", "seam"]) if (contrastOf(style[k], S.fabric) < SIG_CONTRAST) { S[k] = sig; zones.push(k); }
+  return { ...S, signature: sig, src: `readable look – a readability aid, not an exact copy of the real design: ${zones.join(", ") || "no zone"} in ${sig} (${from}), the knit raised to ${KNIT_LIFT * 100} % luminance – real kit: ${style.src}` };
+}
