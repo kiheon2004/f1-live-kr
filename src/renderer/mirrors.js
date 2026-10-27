@@ -84,10 +84,13 @@ export function mirrorCamera(cam, eye, c, n, h, up, hw, hh, spread = 0, far = MI
   return true;
 }
 
-// the glass' material for the rear view: the picture as drawn (already tone-mapped, in the screen's colour space)
+// the glass' material for the rear view: the picture as drawn (already tone-mapped, in the screen's colour space), dimmed
+// by the reflectance in light, not in stored values (v0.45: the sRGB-encoded values × 0.85 gave ~0.68 of the picture's
+// light on the screen – measured in the app, Map3D.mirrorProbe({ colour: true })): decoded (MIRROR_SRGB: the picture is
+// sRGB, the screen's colour space), scaled, encoded again (three's own colorspace_pars functions, in every ShaderMaterial)
 export const MIRROR_SHADER = {
   vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
-  fragmentShader: "uniform sampler2D map; uniform float k; varying vec2 vUv; void main() { gl_FragColor = vec4(texture2D(map, vUv).rgb * k, 1.0); }",
+  fragmentShader: "uniform sampler2D map; uniform float k; varying vec2 vUv; void main() { vec4 c = texture2D(map, vUv);\n#ifdef MIRROR_SRGB\nc = sRGBTransferOETF(vec4(sRGBTransferEOTF(c).rgb * k, 1.0));\n#else\nc = vec4(c.rgb * k, 1.0);\n#endif\ngl_FragColor = vec4(c.rgb, 1.0); }",
 };
 
 // How much of each glass the eye sees past the car's own parts (halo, bodywork, helmet, arms): rays from the eye to 3 × 2
@@ -116,7 +119,7 @@ export function seenShare(car, eye, mesh, out = []) {
 export function createMirrorPass(three = THREE) {
   const cams = [new three.PerspectiveCamera(), new three.PerspectiveCamera()];
   for (const c of cams) c.matrixAutoUpdate = true;
-  const liveMat = new three.ShaderMaterial({ uniforms: { map: { value: null }, k: { value: MIRROR.reflectance } }, ...MIRROR_SHADER, toneMapped: false, fog: false, lights: false });
+  const liveMat = new three.ShaderMaterial({ uniforms: { map: { value: null }, k: { value: MIRROR.reflectance } }, defines: {}, ...MIRROR_SHADER, toneMapped: false, fog: false, lights: false });
   liveMat.userData.shared = true;   // (the pass' own: never freed with a car)
   const W = { c: new three.Vector3(), n: new three.Vector3(), h: new three.Vector3(), up: new three.Vector3() };
   const frustum = new three.Frustum(), pv = new three.Matrix4(), sphere = new three.Sphere(), eye = new three.Vector3();
@@ -130,7 +133,7 @@ export function createMirrorPass(three = THREE) {
     let a = 0; for (let j = 0; j < 4; j++) { const p = corners[j], q = corners[(j + 1) % 4]; a += p.x * sx * q.y * sy - q.x * sx * p.y * sy; }
     return Math.abs(a) / 2;
   }
-  const st = { rt: null, seen: [1, 1], size: null, car: null, key: "", frame: 0, last: [-1e9, -1e9], drawn: [false, false], stats: { renders: 0, calls: 0, tris: 0, ms: 0, skipped: 0 } };
+  const st = { rt: null, seen: [1, 1], size: null, car: null, key: "", failed: null, frame: 0, last: [-1e9, -1e9], drawn: [false, false], stats: { renders: 0, calls: 0, tris: 0, ms: 0, skipped: 0 } };
 
   function target(renderer, M) {
     if (st.rt && st.size === M) return st.rt;
@@ -138,6 +141,8 @@ export function createMirrorPass(three = THREE) {
     const rt = new three.WebGLRenderTarget(M.w, M.h, { samples: M.samples, depthBuffer: true, generateMipmaps: false, minFilter: three.LinearFilter, magFilter: three.LinearFilter });
     rt.texture.colorSpace = renderer.outputColorSpace; rt.texture.internalFormat = "RGBA8"; rt.texture.name = "mirrors";
     rt.isXRRenderTarget = true;   // (three.js: the renderer's tone mapping and the texture's colour space – the screen's programs)
+    const srgb = rt.texture.colorSpace === three.SRGBColorSpace;
+    if (!!liveMat.defines.MIRROR_SRGB !== srgb) { if (srgb) liveMat.defines.MIRROR_SRGB = 1; else delete liveMat.defines.MIRROR_SRGB; liveMat.needsUpdate = true; }
     st.rt = rt; st.size = M; st.drawn = [false, false]; st.last = [-1e9, -1e9];
     liveMat.uniforms.map.value = rt.texture;
     return rt;
@@ -148,7 +153,7 @@ export function createMirrorPass(three = THREE) {
     if (m) { if (m.material === liveMat) m.material = m.userData.glass; m.visible = true; }
     st.car = null; st.key = ""; st.drawn = [false, false]; st.last = [-1e9, -1e9];
   }
-  function dispose() { release(); if (st.rt) st.rt.dispose(); st.rt = null; st.size = null; liveMat.uniforms.map.value = null; }
+  function dispose() { release(); st.failed = null; if (st.rt) st.rt.dispose(); st.rt = null; st.size = null; liveMat.uniforms.map.value = null; }
 
   // renderer, scene, camera (the main one, its matrices up to date), car (the model ridden, its matrixWorld up to date,
   // or null), mode ("full" | "low" | "simple"), view (a key for the camera: mode and car – a change draws afresh),
@@ -160,6 +165,7 @@ export function createMirrorPass(three = THREE) {
     if (st.car !== car) { release(); st.car = car; }
     const rt = target(renderer, M);
     camera.updateMatrixWorld(); eye.setFromMatrixPosition(camera.matrixWorld);
+    if (st.failed) { if (st.failed === view + "|" + mode) return 0; st.failed = null; st.key = ""; }   // (failed in this view and mode: the plain glass – another tries again)
     if (st.key !== view) { st.key = view; st.drawn = [false, false]; st.last = [-1e9, -1e9]; mesh.material = mesh.userData.glass; seenShare(car, eye, mesh, st.seen); }
     frustum.setFromProjectionMatrix(pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     const mw = car.matrixWorld;
@@ -183,6 +189,7 @@ export function createMirrorPass(three = THREE) {
     // (the renderer as it was – restored whatever happens)
     const t0 = performance.now(), prevRT = renderer.getRenderTarget(), prevClear = renderer.autoClear, prevXR = renderer.xr.enabled, prevShadow = renderer.shadowMap.needsUpdate, prevAuto = scene.matrixWorldAutoUpdate;
     const vis = mesh.visible;
+    let failed = null;
     try {
       mesh.visible = false;   // (no mirror in a mirror: the glass samples the picture being drawn)
       aux?.(true);
@@ -197,11 +204,21 @@ export function createMirrorPass(three = THREE) {
         const info = renderer.info?.render; if (info) { st.stats.calls += info.calls; st.stats.tris += info.triangles; }
         st.stats.renders++; st.last[i] = st.frame; st.drawn[i] = true;
       }
-    } finally {
+    } catch (e) { failed = e; } finally {
       scene.matrixWorldAutoUpdate = prevAuto;
       aux?.(false);
       mesh.visible = vis;
       renderer.setRenderTarget(prevRT); renderer.autoClear = prevClear; renderer.xr.enabled = prevXR; renderer.shadowMap.needsUpdate = prevShadow;
+    }
+    // (an error inside the pass – a shader that won't build, a part's own onBeforeRender – stays here: thrown on, it left
+    // map3d's frame() before the next frame was asked for and the whole 3D view stopped (v0.45, an error injected in the
+    // app). The plain glass for this view – a half-drawn picture isn't shown – and no new try until the view or mode changes,
+    // so a lasting fault doesn't cost an error a frame)
+    if (failed) {
+      if (!st.failed) console.warn("side mirrors: the rear view failed, plain glass for this view –", failed);
+      st.failed = view + "|" + mode; mesh.material = mesh.userData.glass; st.drawn = [false, false]; st.last = [-1e9, -1e9];
+      st.stats.ms += performance.now() - t0;
+      return 0;
     }
     // (the rear view on the glass once both halves in sight are drawn: a half never drawn for this view is out of sight)
     if (st.drawn[0] || st.drawn[1]) mesh.material = liveMat;
