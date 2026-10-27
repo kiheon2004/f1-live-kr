@@ -34,7 +34,7 @@ import { tunnelLight } from "./tunnel.js";
 import { disposeGroup, watchShadowDepth, releaseShadowRefs } from "./dispose.js";
 import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./los.js";
 import { venueOf, wallOpeningsFor } from "./venues.js";
-import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, estimateZones, smModeOf } from "./aero.js";
+import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, zoneAt, estimateZones, smModeOf } from "./aero.js";
 import { footing } from "./footing.js";
 import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
@@ -453,7 +453,12 @@ function aeroPose(c, num, st, est, t, src) {
   if (era === "2022") { if (drsAt(src.car?.[num], t, 160, out)) return out; out.open = 0; out.front = 0; out.measured = false; out.estimated = false; out.why = "no DRS data"; return out; }
   if (!world?.samples?.length) { out.open = 0; out.front = 0; out.estimated = true; out.why = "no lap line"; return out; }
   const X = aeroCtx(src, t), I = c.aeroIn || (c.aeroIn = {});
-  I.allowed = X.allowed; I.spans = X.Z.spans; I.L = X.Z.L; I.s = st ? st.s : null; I.speed = c.speed * 3.6; I.tel = src.car?.[num] || null; I.t = t;
+  // (v0.45: the zone's entry from the car's own track coordinates – smooth.js coords – at the moment its place st is for:
+  // live 0.6 s behind the newest data; the telemetry on its own clock (lag), live never past the newest moment t – a
+  // replay reads up to t + lag: the same moment as the place, all of it recorded)
+  const sm = smooth.src === src ? smooth.tr : null;
+  I.allowed = X.allowed; I.spans = X.Z.spans; I.L = X.Z.L; I.s = st ? st.s : null; I.speed = c.speed * 3.6; I.tel = src.car?.[num] || null;
+  I.hist = st && sm?.coords ? sm.coords(num) : null; I.lag = sm?.telLag || 0; I.t = t - (I.hist ? sm.stateLag || 0 : 0); I.now = src.isLive ? t : null;
   I.onTrack = !!st && !est && !c.pit; I.racing = X.t0 == null || t >= X.t0; I.startGate = X.t0; I.mode = X.mode;
   return activeAeroAt(I, out);
 }
@@ -4600,6 +4605,25 @@ window.Map3D = {
     const c = cars.get(num || app().focus || leader()); if (!c) return "no car";
     const Z = world?.aeroZones, u = c.model.userData;
     return JSON.stringify({ num: c.num, ...c.aeroState, open: +(c.aero ?? 0).toFixed(3), spec: u.aeroSpec?.id, conf: u.aeroSpec?.conf, zones: Z ? { official: !!Z.official, src: Z.official?.src || "estimated (long straights)", spans: Z.spans.map((q) => [Math.round(q.a), Math.round(q.b)]), L: Math.round(Z.L) } : null, s: c.st ? Math.round(((c.st.s % (Z?.L || 1)) + (Z?.L || 1)) % (Z?.L || 1)) : null });
+  },
+  // development (v0.45): moments over [t0, t1] (ms) where a car is shut by a brake of this pass of a zone and the v0.44
+  // estimate (entry from the speed now: hist left out) had it open again – the cases the entry from the positions fixes
+  aeroScan(t0, t1, step = 250, max = 40) {
+    const src = app().src, sm = smooth.src === src ? smooth.tr : null; if (!sm?.coords) return "no smooth tracks";
+    const ev = [], st = {}, I = {}, a = {}, b = {}, open = {};
+    for (const num of Object.keys(src.tracks?.cars || {})) {
+      for (let t = t0; t <= t1; t += step) {
+        if (!sm.state(num, t, st)) { open[num] = null; continue; }
+        const X = aeroCtx(src, t);
+        Object.assign(I, { allowed: X.allowed, spans: X.Z.spans, L: X.Z.L, s: st.s, speed: st.vs * 3.6, tel: src.car?.[num] || null, t, now: src.isLive ? t : null, onTrack: true, racing: X.t0 == null || t >= X.t0, startGate: X.t0, mode: X.mode, hist: sm.coords(num), lag: sm.telLag || 0 });
+        activeAeroAt(I, a); I.hist = null; activeAeroAt(I, b);
+        const bad = a.why === "braking" && a.open === 0 && b.open > 0.5;
+        if (bad && !open[num]) { const z = zoneAt(st.s, X.Z.spans, X.Z.L); open[num] = { num, t, rel: Math.round((t - (src.startTime?.() || 0)) / 100) / 10, zone: z ? [Math.round(z.span.a), Math.round(z.span.b), z.span.z?.id || "est"] : null, s: Math.round(((st.s % X.Z.L) + X.Z.L) % X.Z.L), kmh: Math.round(st.vs * 3.6), tEntry: Math.round(a.tEntry), brakeAgo: null, until: t }; ev.push(open[num]); if (ev.length >= max) return JSON.stringify(ev); }
+        else if (bad) { open[num].until = t; open[num].kmhEnd = Math.round(st.vs * 3.6); }
+        else open[num] = null;
+      }
+    }
+    return JSON.stringify(ev);
   },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {

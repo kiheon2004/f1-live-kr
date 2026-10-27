@@ -376,15 +376,18 @@ export function smoothedTracks(src, world, CarTracks) {
   };
   if (!src.isLive) {
     const tr = build(null);
-    return { all: (t, into, vels) => tr.all(t, into, vels), state: (num, t, out) => stateOf(tr, num, t, out), update() {}, lag, frame, snapped };
+    // (coords: a car's track coordinates over time – aero.js finds the zone's entry in them; stateLag: the time state()
+    // is asked for is t − stateLag on these coordinates' clock)
+    return { all: (t, into, vels) => tr.all(t, into, vels), state: (num, t, out) => stateOf(tr, num, t, out), coords: (num) => tr.coords[num] || null, stateLag: 0, telLag: lag, update() {}, lag, frame, snapped };
   }
   // live: redo the last 30 s once a second (drawn 0.6 s behind the newest data)
   let tr = null, last = 0;
   return {
     all(t, into, vels) { return (tr || src.tracks).all(t - 600, into, vels); },
     state(num, t, out) { return stateOf(tr, num, t - 600, out, true); },
+    coords(num) { return tr?.coords?.[num] || null; }, stateLag: 600,   // (live: rebuilt from the data so far – nothing ahead of now)
     update(now) { if (now - last < 1000) return; last = now; const latest = Math.max(0, ...Object.values(src.tracks.cars).map((c) => (c.n ? c.t[c.n - 1] : 0))); tr = build(latest - 30000); },
-    frame, get snapped() { return snapped; },
+    get telLag() { return lag; }, frame, get snapped() { return snapped; },   // (telLag, not lag: the live pit / start placement read sm.lag – undefined live – and keep doing so)
   };
 }
 

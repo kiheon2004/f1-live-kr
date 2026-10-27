@@ -103,24 +103,103 @@ export function estimateZones(pts, cum, L, { maxTurn = 0.12, minLen = 450, start
 //       spans, L, s (the car's place on the lap line, m), speed (km/h now), tel ({ t, v, brk } arrays or null), t (ms),
 //       onTrack (false: the pit lane, a car placed without positions, off the lap line), racing (false: before the
 //       race's start), startGate (the race's lights-out time: Straight Mode only once past Turn 1 – see below), t1 (the
-//       zone end that is Turn 1's braking, s m), mode ("normal" | "low" | "disabled": race control's word, smModeOf) }
+//       zone end that is Turn 1's braking, s m), mode ("normal" | "low" | "disabled": race control's word, smModeOf),
+//       hist (v0.45: the car's position history – smooth.js track coordinates { t, s (m, continuous within a run), run
+//       (0 off the lap line) } – t is a time on ITS clock), lag (the telemetry's stamp minus the positions', ms:
+//       smooth.js telemetryLag), now (live: the newest moment received – no telemetry later than it is read) }
 // Not applied, as nothing citable says so: Safety Car / VSC (B7.1 Issue 07 has no rule for them – the slow speed then
 // keeps most cars under ACTIVE.minSpeed anyway), yellow flags.
-// → { open 0..1, estimated: true, why }. Open from the zone's start while the car is at speed; closed again – over
-// MOVE.close – at the first touch of the brake after the zone's start or at its end, whichever comes first. The time of
-// the zone's start is the car's own: t − (metres into it) / speed; the brake is the telemetry's (CarData channel 5).
+// → { open 0..1, estimated: true, why, tEntry (the zone's entry, ms), entryKnown }. Open from the zone's start while
+// the car is at speed; closed again – over MOVE.close – at the first touch of the brake after the zone's start or at its
+// end, whichever comes first, and then shut for the rest of that pass of the zone (until the next zone's start).
+// The policy, and what it rests on (checked 2026-10-27):
+//   - FIA 2026 F1 Sporting Regulations Section B Issue 07 (2026-06-25) B7.1.1 / B7.1.2: the driver activates, only in
+//     the published Activation Zones, only when the Control Electronics say it is enabled; low grip: partial only.
+//     Nothing there on how it ends or on activating again within a zone.
+//   - Technical Regulations Section C Issue 20 (2026-08-05): "State of Deployment" (C1 definitions) starts on "direct
+//     driver input" and ends when the bodywork is back in Corner Mode "having been disabled by the FIA Standard ECU";
+//     C3.10.10 (w) / C3.11.6: deployed only fully inside an Activation Zone; C8.2.1: the ECU and its software are the
+//     FIA's (FIA-F1-DOC-033 – not public). So the regulations leave the trigger to the ECU's (unpublished) software.
+//   - Press (not the FIA): Corner Mode comes back when the driver brakes (The Race; Red Bull's 2026 explainer;
+//     silverstone.co.uk 2026 "brakes or lifts off the throttle"). No source found says Straight Mode can be activated
+//     again in the same zone after it closed, nor that it can't. 2011–2025 DRS (2025 Sporting Regulations Art. 22.1
+//     (e)): "disabled the first time the driver brakes after activating" – no re-activation in that zone.
+//   So: one activation per pass, ended by the first brake after it in THAT pass (or the zone's end) – confidence M. Not
+//   a timer: the pass is the car's own crossing of the zone's start, from its position history.
+// The entry: the time this pass crossed the zone's start in `hist` (binary search in the current run, bridged over a
+// gap of ≤ ENTRY.bridge ms that split the run). Without a crossing in the data (the data begins in the zone: a replay
+// or a live connection starting there, a car rejoining from the pit exit inside a zone, a longer gap) the entry is not
+// known: the first sample of the history is taken instead (entryKnown false, labelled in `why`) – the brake is looked
+// for from there, nothing earlier is assumed. Without `hist` at all (the old input): t − (metres in) / (speed now) – an
+// approximation kept for callers without positions only.
+// The brake: the telemetry's (CarData channel 5) samples from the entry to t (on the telemetry's clock: + lag), never
+// later than `now`; the corner's braking carried across the zone's start delays the activation to its release
+// (passBrakes) – the first brake after that ends it.
 export const ACTIVE = { minSpeed: 100 };   // km/h – below it the flaps are drawn shut (an estimate: a crawling car, the formation)
-function firstBrake(tel, t0, t1) {
-  if (!tel || !tel.t || !tel.brk) return null;
-  const T = tel.t; let lo = 0, hi = T.length - 1;
-  if (hi < 0 || T[hi] < t0) return null;
+export const ENTRY = { bridge: 15000 };    // ms – a hole in the positions bridged when looking for the entry (4 s and more split a run: smooth.js)
+// This pass's brake samples over [t0, t1] (the telemetry's clock): PB.act – when Straight Mode is taken as activated
+// (t0; or, when the car is braking across the zone's start – the corner's braking still on as it crosses the line,
+// the sample before t0 within 1 s braking too – its first sample off the brake after it; null: still braking from
+// before), PB.brake – the first brake sample after that (null: none). "After activating", as the 2025 DRS rule said
+// (Sporting Regulations 2025 Art. 22.1 (e)): a brake before the driver could activate is not the one that ends it.
+const PB = { act: null, brake: null };
+function passBrakes(tel, t0, t1) {
+  PB.act = t0; PB.brake = null;
+  if (!tel || !tel.t || !tel.brk) return PB;
+  const T = tel.t, B = tel.brk; let lo = 0, hi = T.length - 1;
+  if (hi < 0 || T[hi] < t0) return PB;
   while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] < t0) lo = m + 1; else hi = m; }
-  for (let i = lo; i < T.length && T[i] <= t1; i++) if (tel.brk[i]) return T[i];
-  return null;
+  let i = lo;
+  if (i > 0 && B[i - 1] && i < T.length && B[i] && T[i] - T[i - 1] <= 1000) {
+    while (i < T.length && T[i] <= t1 && B[i]) i++;
+    if (i >= T.length || T[i] > t1) { PB.act = null; return PB; }
+    PB.act = T[i];
+  }
+  for (; i < T.length && T[i] <= t1; i++) if (B[i]) { PB.brake = T[i]; break; }
+  return PB;
+}
+// the history's index at t: the last sample at or before t (−1: none)
+function histIndex(H, t) {
+  const T = H.t, n = T.length; if (!n || T[0] > t) return -1;
+  let lo = 0, hi = n - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (T[m] <= t) lo = m; else hi = m - 1; }
+  return lo;
+}
+// the first index of the run that index i is in – cached per history array and run (a live rebuild makes new arrays,
+// so a stale entry is never used; the same result as the scan, which runs once per run)
+const RUN0 = new WeakMap();
+function runStart(H, i) {
+  let m = RUN0.get(H.run); if (!m) RUN0.set(H.run, (m = new Map()));
+  const r = H.run[i]; let k = m.get(r);
+  if (k == null || k > i || H.run[k] !== r) { k = i; while (k > 0 && H.run[k - 1] === r) k--; m.set(r, k); }
+  return k;
+}
+// When the car passed `target` (m, on run i's s) – at or before t, where it is at sNow (run i's s). Sets CROSS.t (ms)
+// and CROSS.known (false: not in the data – CROSS.t is then the earliest sample searched).
+const CROSS = { t: 0, known: false };
+function crossTime(H, i, t, sNow, target, L) {
+  const T = H.t, S = H.s;
+  let hiT = t, hiS = sNow, shift = 0;
+  for (let hop = 0; hop < 4; hop++) {
+    const lo = runStart(H, i);
+    if (S[lo] + shift <= target) {
+      // the last sample of the run at or below the target (the s of a run goes forward: smooth.js speed-integrated)
+      let a = lo, b = i; while (a < b) { const m = (a + b + 1) >> 1; if (S[m] + shift <= target) a = m; else b = m - 1; }
+      const t0 = T[a], s0 = S[a] + shift, t1 = a < i ? T[a + 1] : hiT, s1 = a < i ? S[a + 1] + shift : hiS;
+      CROSS.t = s1 > s0 ? t0 + ((target - s0) / (s1 - s0)) * (t1 - t0) : t0; CROSS.known = true; return CROSS;
+    }
+    // before this run: across a hole in the positions to the run before, if it's short and that run is on the lap
+    const p = lo - 1;
+    if (p < 0 || !H.run[p] || T[lo] - T[p] > ENTRY.bridge) break;
+    const ds = wrapS(S[lo] - S[p], L); if (ds > L / 2) break;
+    const sh = S[lo] + shift - ds - S[p];   // the earlier run's s → this one's
+    if (S[p] + sh < target) { CROSS.t = T[p] + ((target - S[p] - sh) / ds) * (T[lo] - T[p]); CROSS.known = true; return CROSS; }
+    hiT = T[lo]; hiS = S[p] + sh + ds; shift = sh; i = p;   // (the earlier run's last sample, then the hole up to this run)
+  }
+  CROSS.t = T[runStart(H, i)]; CROSS.known = false; return CROSS;
 }
 const ZTMP = {};
 export function activeAeroAt(inp, out = {}) {
-  out.measured = false; out.estimated = true; out.code = null;
+  out.measured = false; out.estimated = true; out.code = null; out.tEntry = null; out.entryKnown = null;
   const shut = (why) => { out.open = 0; out.front = 0; out.why = why; return out; };
   if (!inp || !inp.allowed) return shut("not allowed");
   if (!inp.onTrack) return shut("off the lap (pit lane / no position)");
@@ -128,21 +207,37 @@ export function activeAeroAt(inp, out = {}) {
   if (inp.mode === "disabled") return shut("disabled by race control");
   if (!inp.spans?.length || !(inp.L > 0) || inp.s == null) return shut("no zone");
   const z = zoneAt(inp.s, inp.spans, inp.L, 400, ZTMP);
-  const v = Math.max(1, (inp.speed || 0) / 3.6), t = inp.t;
+  const v = Math.max(1, (inp.speed || 0) / 3.6), t = inp.t, L = inp.L;
   if (!z) return shut("outside the zones");
   if (inp.mode === "low" && z.span.z?.low === false) return shut("no low-grip zone here");
   const inZone = z.into != null;
-  // the zone's start and (if passed) end in time, from the car's speed now (an approximation over a few seconds)
-  const tStart = t - ((inZone ? z.into : z.span.len + z.after) / v) * 1000, tEnd = inZone ? null : t - (z.after / v) * 1000;
+  let tStart, tEnd, known = true;
+  const H = inp.hist, hi = H && H.t && H.run ? histIndex(H, t) : -1;
+  if (hi >= 0 && H.run[hi]) {
+    // the place on the run's own s (the drawn s, unwrapped next to the history's last sample at or before t – nothing
+    // later is read: live has nothing later)
+    let sNow = H.s[hi] + wrapS(inp.s - H.s[hi], L); if (sNow - H.s[hi] > L / 2) sNow -= L;
+    const c = crossTime(H, hi, t, sNow, sNow - (inZone ? z.into : z.span.len + z.after), L); tStart = c.t; known = c.known;
+    if (!inZone) { const e = crossTime(H, hi, t, sNow, sNow - z.after, L); if (!e.known) return shut("zone end"); tEnd = e.t; }   // (past the zone's end: shut once there)
+  } else {
+    // (no history: from the car's speed now – an approximation, kept for callers without positions)
+    tStart = t - ((inZone ? z.into : z.span.len + z.after) / v) * 1000; tEnd = inZone ? null : t - (z.after / v) * 1000;
+  }
+  out.tEntry = tStart; out.entryKnown = known;
   if (inZone && (inp.speed || 0) < ACTIVE.minSpeed) return shut("slow");
   // (after a standing start Straight Mode is enabled only once past Turn 1 – FIA Race Director's competition notes 2026,
   // e.g. Japanese GP item 9: the zone that ends at T1, entered before or just after lights out, stays shut)
   if (inp.startGate != null && z.span.z?.t1 && tStart < inp.startGate + 20000 && t >= inp.startGate - 60000) return shut("start: not past Turn 1 yet");
-  const tb = firstBrake(inp.tel, tStart, t);
+  // the brake of this pass, on the telemetry's clock (lag) and never past `now`
+  const lag = inp.hist ? inp.lag || 0 : 0, tTo = Math.min(t + lag, inp.now ?? Infinity);
+  const pb = passBrakes(inp.tel, tStart + lag, tTo);
+  if (pb.act == null) return shut("braking (not yet activated)");
+  const tAct = pb.act - lag, tb = pb.brake == null ? null : pb.brake - lag;
+  if (tEnd != null && tAct >= tEnd) return shut("zone end");
   let trigger = tb != null ? tb : tEnd;
   if (tEnd != null && tb != null && tb > tEnd) trigger = tEnd;
-  const k = trigger == null ? ease((t - tStart) / 1000 / MOVE.open) : ease((trigger - tStart) / 1000 / MOVE.open) * (1 - ease((t - trigger) / 1000 / MOVE.close));
-  const why = trigger == null ? "straight mode (estimated)" : tb != null && tb === trigger ? "braking" : "zone end";
+  const k = trigger == null ? ease((t - tAct) / 1000 / MOVE.open) : ease((trigger - tAct) / 1000 / MOVE.open) * (1 - ease((t - trigger) / 1000 / MOVE.close));
+  const why = trigger == null ? (known ? "straight mode (estimated)" : "straight mode (estimated; zone entry not in the data – from its first sample)") : tb != null && tb === trigger ? "braking" : "zone end";
   // (low grip: the front wing alone – B7.1.1 / B7.1.2 (b), Issue 07: "partially activated")
   out.open = inp.mode === "low" ? 0 : k; out.front = k; out.why = why; return out;
 }
