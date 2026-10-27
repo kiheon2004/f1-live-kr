@@ -243,6 +243,8 @@ export function stepTraffic(S, list, env, t) {
       // at Monaco 2025 (v0.45 Map3D.trafficAudit); a car the data has outside the allowance keeps its own place)
       const lo = Math.min(c.lo, c.d), hi = Math.max(c.hi, c.d), x = c.d + m.dOff;
       if (x > hi || x < lo) { const y = x > hi ? hi : lo; m.dOff = y - c.d; m.eD = m.dOff - m.tD; if (m.eDr * (x - y) > 0) { m.dRate -= m.eDr; m.eDr = 0; } }
+      // (and along within S_MAX: the eased offset can overshoot a target at the limit – v0.45, the same 20-car pack)
+      if (Math.abs(m.sOff) > T.S_MAX) { const y = Math.sign(m.sOff) * T.S_MAX; m.eS = y - m.tS; if (m.eSr * m.sOff > 0) { m.sRate -= m.eSr; m.eSr = 0; } m.sOff = y; }
     }
     m.pD = m.tD; m.pS = m.tS;
     // (the along offset never takes a car past the one it follows, eased or not – clamped again on the drawn value)
@@ -250,7 +252,7 @@ export function stepTraffic(S, list, env, t) {
   }
   for (const P of cand) {
     const g = P.du + P.f.m.sOff - P.r.m.sOff;
-    if (g < 0.1 && P.du >= 0.1) { const x = (0.1 - g) / 2; P.r.m.sOff -= x; P.f.m.sOff += x; }
+    if (g < 0.1 && P.du >= 0.1) apart(P.r.m, P.f.m, "sOff", 0.1 - g);
   }
   // what is left: the overlap the drawn offsets leave (as boxes at the drawn poses; without env.pose: along and
   // across the lap line both short of the cars' size), per car
@@ -298,7 +300,15 @@ function solve(cand, list, jump) {
     for (const c of list) c.q = Math.max(-T.S_MAX, Math.min(T.S_MAX, c.q));
   }
   // the order along the lap stays: no car drawn past the one it is behind (with a little margin)
-  for (const P of cand) { const g = P.du + P.f.q - P.r.q; if (g < 0.1 && P.du >= 0.1) { const x = (0.1 - g) / 2; P.r.q -= x; P.f.q += x; } }
+  for (const P of cand) { const g = P.du + P.f.q - P.r.q; if (g < 0.1 && P.du >= 0.1) apart(P.r, P.f, "q", 0.1 - g); }
+}
+// (v0.45: a pair put back in order – x m more apart along – each car moved within S_MAX: half each, what one can't take
+// the other does. Halves without the limit drew a car up to 2.016 m off its place in Monaco 2026's lap-1 pack. Both at
+// their limit is not reached: the data's own places (0, 0) are in order)
+function apart(r, f, k, x) {
+  const mr = r[k] + T.S_MAX, mf = T.S_MAX - f[k];
+  let a = Math.min(x / 2, Math.max(0, mr)), b = Math.min(x - a, Math.max(0, mf)); a = Math.min(x - b, Math.max(0, mr));
+  r[k] -= a; f[k] += b;
 }
 // two cars' boxes at track coordinates (s, d) each: how far they overlap (m, 0 = apart)
 const PA = { x: 0, z: 0, yaw: 0 }, PB = { x: 0, z: 0, yaw: 0 };

@@ -100,3 +100,26 @@ test("timeJump: a seek forward, a rewind and the first frame are jumps; playing 
   assert.ok(timeJump(60000, 59900), "rewind by 0.1 s");
   for (const d of [1000 / 60, 500, 0, -20]) assert.ok(!timeJump(60000, 60000 + d), `a frame ${d} ms on`);
 });
+
+// Found in the app (Monaco 2026 lap 1, Map3D.trafficAudit: car 41 drawn 2.016 m off its place along, S_MAX 2.0) and then
+// by a denser fuzz (packs of 6–20 cars accelerating and braking): the order pass after the along solve and after the
+// easing moves a pair apart without the S_MAX clamp, and the eased along offset can overshoot a target at the limit.
+// The pack below is the fuzz's case (seed 7, trial 547: 20 cars, 3.51 m either side of the lap line).
+test("traffic: no car drawn more than S_MAX off its place along in a 20-car pack (order kept too)", async () => {
+  const T = await import("../src/renderer/traffic.js"), Au = await import("../src/renderer/trafaudit.js");
+  let seed = 7; const R = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const gen = () => {
+    const n = 6 + Math.floor(R() * 15), width = 1.5 + R() * 6, live = R() < 0.3, cars = []; let s = 500;
+    for (let i = 0; i < n; i++) { const v = 15 + R() * 30, a = (R() - 0.5) * 8, d = (R() - 0.5) * 2 * Math.max(0, width - 1.1), s0 = s; cars.push({ num: String(i), f: (t) => s0 + v * t / 1000 + a * (t / 1000) ** 2 / 2, v, d }); s -= R() * 6; }
+    return { n, width, live, cars };
+  };
+  for (let k = 0; k < 547; k++) gen();
+  const { n, width, live, cars } = gen();
+  assert.strictEqual(n, 20); assert.ok(Math.abs(width - 3.51) < 0.01);
+  const E = env(width, Object.fromEntries(cars.map((c) => [c.num, c.f])), live), S = T.makeTraffic(), A = Au.makeAudit();
+  for (let t = 0; t <= 4000; t += 50) { const list = cars.map((c) => ({ num: c.num, s: c.f(t), d: c.d, vs: c.v, y: 0, held: false, ...CAR })); Au.auditFrame(A, list, T.stepTraffic(S, list, E, t), T.TRAFFIC, L, t); }
+  const sum = Au.auditSummary(A);
+  assert.strictEqual(sum.sMax.n, 0, `S_MAX: ${JSON.stringify(sum.sMax)}`);
+  assert.strictEqual(sum.order.n, 0, `order: ${JSON.stringify(sum.order)}`);
+  assert.strictEqual(sum.road.n, 0);
+});
