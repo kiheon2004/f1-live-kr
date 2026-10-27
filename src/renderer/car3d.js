@@ -32,7 +32,8 @@ import { aeroSpecFor, hingeOf } from "./aero.js";
 import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R, KIT_ZONE, kitZone } from "./body3d.js";
 import { kitStyle, kitEntry, kitMaterial } from "./kit.js";
 import { harnessGeometry, HARNESS } from "./harness.js";
-import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST } from "./arms.js";
+import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST, PLAN_MAX, armSwapPose, handPivot } from "./arms.js";
+import { swapState, stepSwap } from "./armswap.js";
 import { ARM_PLANS } from "./armplans.js";
 import { wheelSpec, wheelParts as steeringParts, ledGeometry, teamWheel } from "./wheel3d.js";
 import { paintScreen, screenModel } from "./wheelscreen.js";
@@ -1292,7 +1293,11 @@ function armPlanFor(A) {
   if (ARM_PLANS_MADE.has(A.key)) return ARM_PLANS_MADE.get(A.key);
   const b = ARM_PLANS[A.key], D = Math.PI / 180;
   let plan;
-  if (b) plan = smoothPlan(armGeo(A.base, A.grip, A.glove, b.rho * D), b.rows);
+  if (b) {
+    plan = smoothPlan(armGeo(A.base, A.grip, A.glove, b.rho * D), b.rows);
+    // (v0.45: the lowered hand's other way – the elbow up and across – from the stop to SWAP.min, and the regrip's path)
+    if (b.swap) { plan.swap = smoothPlan(plan.geo, b.swap.rows, 0, -PLAN_MAX, 0); plan.move = b.swap.move; }
+  }
   else { console.warn("arm plan not baked for this cockpit (node tools/arm-plans.js) – made on a coarse grid"); plan = planArmsPath(armGeo(A.base, A.grip, A.glove, 60 * D), { swStep: 10 * D, rlStep: 5 * D }); }
   plan.baked = !!b; ARM_PLANS_MADE.set(A.key, plan);
   return plan;
@@ -1770,7 +1775,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     sk.updateMatrixWorld(true); const skel = new THREE.Skeleton(bones); sk.bind(skel); sk.frustumCulled = false; sk.name = "arm";
     const gl = new THREE.SkinnedMesh(t.wheel.gauntlet, gloveMat); gl.bind(skel, sk.bindMatrix); gl.frustumCulled = false; gl.name = "gauntlet";
     near.add(sk, gl);
-    return { k, mesh: sk, gauntlet: gl, bones, hand: hands[k > 0 ? 0 : 1], pose: armOut() };
+    return { k, mesh: sk, gauntlet: gl, bones, hand: hands[k > 0 ? 0 : 1], pose: armOut(), swap: swapState() };
   });
   // each wheel: its steer group w at the axle (turns about y – the fronts) holding the spin group s (rolls about x: the
   // parts that come off at a stop – tyre, band, rim, cover, nut) and, at the front, the corner mesh (drum, intake,
@@ -1816,13 +1821,15 @@ export function setAero(car, open, front = open) {
 // at a hairpin), no more than ±90°. The steer angle is the caller's estimate from the path (the feed has no steering
 // channel): the hands' movement is a depiction.
 export const STEER_RATIO = 10;
-export function setWheels(car, spin, steer) {
+// t: the session's time (ms) – the lowered hand's regrip goes by it (armswap.js); without it, the hands stay on the grips
+// beside the body (v0.44's plan – a pure function of the angle).
+export function setWheels(car, spin, steer, t = null) {
   const u = car.userData;
   u.wheels.forEach((w, i) => { w.rotation.y = i < 2 ? steer : 0; });
   // (spin: one angle, or [front, rear] – each axle its own radius)
   u.spins.forEach((s, i) => { s.rotation.x = Array.isArray(spin) ? spin[i < 2 ? 0 : 1] : spin; });
   if (u.wheel) u.wheel.rotation.z = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, -steer * STEER_RATIO));
-  if (u.arms && u.near.visible) placeArms(u);
+  if (u.arms && u.near.visible) placeArms(u, t);
 }
 // A wheel off the car at a pit stop (i in userData.wheels' order): only what comes off with a real wheel is hidden – its
 // spin group (tyre, band, rim, cover, nut); the drum, intake, upright, caliper, disc, hub and the 2022–25 fence and
@@ -1879,10 +1886,14 @@ function setBone(b, k, p, x, y) {
   b.quaternion.setFromRotationMatrix(_M.makeBasis(_v1, _v2, _v3));
 }
 const rollAbout = (v, k, a, o) => { const c = Math.cos(a), s = Math.sin(a), d = v[0] * k[0] + v[1] * k[1] + v[2] * k[2]; const x = k[1] * v[2] - k[2] * v[1], y = k[2] * v[0] - k[0] * v[2], z = k[0] * v[1] - k[1] * v[0]; o[0] = v[0] * c + x * s + k[0] * d * (1 - c); o[1] = v[1] * c + y * s + k[1] * d * (1 - c); o[2] = v[2] * c + z * s + k[2] * d * (1 - c); return o; };
-function placeArms(u) {
+// v0.45: the lowered hand's regrip (armswap.js stepSwap, arms.js armSwapPose) – off its grip, the glove's pivot moved
+// with the wrist (handPivot) and put back on the grip after.
+const _hp = [0, 0, 0], _hr = new Array(9).fill(0);
+function placeArms(u, t = null) {
   const plan = u.armPlan, a0 = u.wheel.rotation.z, up = plan.geo.grip.up;
   for (const A of u.arms) {
-    const k = A.k, o = armFromPlan(plan, k * a0, A.pose), [b0, b1, b2, b3, b4] = A.bones, L2 = BODY.farm;
+    const k = A.k, q = plan.swap ? stepSwap(A.swap, (k * a0) / (Math.PI / 180), t) : 0;
+    const o = plan.swap ? armSwapPose(plan, plan.swap, plan.move, k * a0, q, A.pose) : armFromPlan(plan, k * a0, A.pose), [b0, b1, b2, b3, b4] = A.bones, L2 = BODY.farm;
     rollAbout(o.H, o.A, Q90, _bx); setBone(b0, k, o.S, _bx, o.A);                          // upper arm (rolled a quarter turn)
     rollAbout(o.H, o.f, Q90, _bx); setBone(b1, k, o.E, _bx, o.f);                          // forearm at the elbow: the hinge's turn only
     _bp[0] = o.E[0] + o.f[0] * L2 / 2; _bp[1] = o.E[1] + o.f[1] * L2 / 2; _bp[2] = o.E[2] + o.f[2] * L2 / 2;
@@ -1890,6 +1901,14 @@ function placeArms(u) {
     twistedX(o, o.tau, _x2); setBone(b3, k, o.W, _x2, o.f);                                // the forearm's end, turned with the hand
     setBone(b4, k, o.W, o.hx, o.hy);                                                        // the hand
     // the glove on its pivot: the grip's turn in the hand (the right hand's mirrored: about the mirrored axis, the other way)
+    if (o.free) {
+      // (the left arm's pivot in the wheel's frame; the right's mirrored: x negated, the turn M·R·M)
+      handPivot(plan.geo, k * a0, o, _hp, _hr); const R = _hr;
+      _M.set(R[0], k * R[1], k * R[2], 0, k * R[3], R[4], R[5], 0, k * R[6], R[7], R[8], 0, 0, 0, 0, 1);
+      A.hand.quaternion.setFromRotationMatrix(_M); A.hand.position.set(k * _hp[0], _hp[1], _hp[2]); A.freed = true;
+      continue;
+    }
+    if (A.freed) { const c = plan.geo.grip.c; A.hand.position.set(k * c[0], c[1], c[2]); A.freed = false; }
     if (k > 0) _ax.set(up[0], up[1], up[2]); else _ax.set(-up[0], up[1], up[2]);
     A.hand.quaternion.copy(_q.setFromAxisAngle(_ax, k * (o.roll || 0)));
   }
