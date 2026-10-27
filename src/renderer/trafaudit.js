@@ -48,7 +48,7 @@ export function auditSummary(A) {
 // Two pictures of the same moment (per car: x, y, z, yaw and the parts that make them – traffic offsets, separate()'s
 // push), compared: the largest difference per quantity and the car it is on.
 export function diffSnaps(a, b) {
-  const out = { cars: 0, onlyOne: [], pos: { m: 0, num: null }, yaw: { m: 0, num: null }, trafD: { m: 0, num: null }, trafS: { m: 0, num: null }, sep: { m: 0, num: null } };
+  const out = { cars: 0, onlyOne: [], pos: { m: 0, num: null }, yaw: { m: 0, num: null }, trafD: { m: 0, num: null }, trafS: { m: 0, num: null }, sep: { m: 0, num: null }, top: [] };
   for (const [num, p] of Object.entries(a)) {
     const q = b[num]; if (!q) { out.onlyOne.push(num); continue; }
     if (p.vis !== q.vis) out.onlyOne.push(num + (p.vis ? "(vis A)" : "(vis B)"));
@@ -56,11 +56,14 @@ export function diffSnaps(a, b) {
     out.cars++;
     const put = (k, v) => { if (v > out[k].m) { out[k].m = v; out[k].num = num; } };
     put("pos", Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z));
-    put("yaw", Math.abs(((p.yaw - q.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI));
+    const dyaw = Math.abs(Math.atan2(Math.sin(p.yaw - q.yaw), Math.cos(p.yaw - q.yaw)));   // (headings are not wrapped: whole turns apart are the same)
+    put("yaw", dyaw);
+    out.top.push([num, +Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z).toFixed(2), +dyaw.toFixed(2), +(p.trafD - q.trafD).toFixed(2), +(p.trafS - q.trafS).toFixed(2), +Math.hypot(p.sepX - q.sepX, p.sepZ - q.sepZ).toFixed(2), p.tag || "", q.tag || ""]);
     put("trafD", Math.abs(p.trafD - q.trafD)); put("trafS", Math.abs(p.trafS - q.trafS));
     put("sep", Math.hypot(p.sepX - q.sepX, p.sepZ - q.sepZ));
   }
   for (const num of Object.keys(b)) if (!a[num]) out.onlyOne.push(num);
   for (const k of ["pos", "yaw", "trafD", "trafS", "sep"]) out[k].m = +out[k].m.toFixed(3);
+  out.top = out.top.filter((r) => r[1] > 0.05 || r[2] > 0.05).sort((x, y) => y[1] + y[2] * 5 - x[1] - x[2] * 5).slice(0, 6);
   return out;
 }

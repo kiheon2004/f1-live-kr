@@ -63,3 +63,40 @@ test("traffic: the drawn place across stays on the tarmac while the offset eases
   assert.strictEqual(A.road.n, 0, `drawn off the tarmac: ${JSON.stringify(Au.auditSummary(A).road)}`);
   assert.strictEqual(A.order.n, 0); assert.strictEqual(A.sMax.n, 0);
 });
+
+// A seek (or a rewind) has no memory of which side a pair was parted to; chosen afresh it can be the other side from
+// the one playing up to the same moment chose (the next corner turns the other way by then): the car going by is
+// drawn on the left when played, on the right after a seek – Monaco 2025, Map3D.seekCheck: 2.8 m across at +50 min,
+// 2.6 m at +95 min, 1.3 m at +36.5 min. With env.listAt (the cars at an earlier moment, past data only) a seek plays the
+// last few seconds first (traffic.js WARM_MS) and shows what playing shows.
+test("traffic: a seek or a rewind shows the sides playing up to the moment shows (the side was chosen seconds before)", async () => {
+  const T = await import("../src/renderer/traffic.js");
+  const fa = (t) => 1000 + 40 * t / 1000, fb = (t) => 960 + 45 * t / 1000;
+  const list = (t) => [{ num: "A", s: fa(t), d: 0, vs: 40, y: 0, held: false, ...CAR }, { num: "B", s: fb(t), d: 0, vs: 45, y: 0, held: false, ...CAR }];
+  const log = [], E = { ...env(6, { A: fa, B: fb }, false), L: 5000, turnAhead: (s) => (s < 1200 ? 1 : -1), listAt: (t) => { log.push(t); return list(t); } };
+  const S = T.makeTraffic(), play = new Map();
+  for (let t = 0; t <= 12000; t += 1000 / 60) { const o = T.stepTraffic(S, list(t), E, t); for (const k of [6000, 7000]) if (Math.abs(t - k) < 8.4) play.set(k, o.get("B").dOff); }
+  for (const k of [6000, 7000]) {
+    assert.ok(Math.abs(play.get(k)) > 1, "played: parted for the pass");
+    log.length = 0;
+    const seek = T.stepTraffic(T.makeTraffic(), list(k), E, k).get("B").dOff;   // (a fresh state: a seek from far away)
+    assert.ok(Math.abs(seek - play.get(k)) < 0.3, `seek to ${k}: ${seek.toFixed(2)} vs played ${play.get(k).toFixed(2)}`);
+    assert.ok(log.every((x) => x < k), "only earlier moments are looked at");
+    const back = T.stepTraffic(S, list(k), E, k).get("B").dOff;              // (a rewind from 12 s)
+    assert.ok(Math.abs(back - play.get(k)) < 0.3, `rewind to ${k}: ${back.toFixed(2)} vs played ${play.get(k).toFixed(2)}`);
+  }
+});
+
+// A seek or a rewind: what map3d.js eases from frame to frame – a car's heading (updateCars), separate()'s push in the
+// pit lane – was eased from the moment before the seek: Map3D.seekCheck at Monaco 2025 found headings up to 0.72 rad off
+// on the first frame after a seek or rewind and a pit-lane car's push 2.1 m off (sliding back over ~1 s; separate()'s
+// own `dt > 0.5` rule never fired: the frame time is capped at 0.1 s). The rule both now use (traffic.js timeJump):
+test("timeJump: a seek forward, a rewind and the first frame are jumps; playing (up to 30x), a pause and a live resync are not", async () => {
+  const { timeJump, TRAFFIC } = await import("../src/renderer/traffic.js");
+  assert.strictEqual(typeof timeJump, "function", "traffic.js exports timeJump");
+  assert.ok(timeJump(null, 5000), "first frame");
+  assert.ok(timeJump(5000, 5000 + TRAFFIC.JUMP_MS + 1), "seek forward");
+  assert.ok(timeJump(60000, 40000), "rewind");
+  assert.ok(timeJump(60000, 59900), "rewind by 0.1 s");
+  for (const d of [1000 / 60, 500, 0, -20]) assert.ok(!timeJump(60000, 60000 + d), `a frame ${d} ms on`);
+});

@@ -36,7 +36,7 @@ import { chaseFallback, chasePlace, clearAround, firstHit, nearRoom } from "./lo
 import { venueOf, wallOpeningsFor } from "./venues.js";
 import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, estimateZones, smModeOf } from "./aero.js";
 import { footing } from "./footing.js";
-import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, TRAFFIC } from "./traffic.js";
+import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, timeJump, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
 
 const DM = 0.1;               // decimetres → metres
@@ -1286,6 +1286,9 @@ const smoothstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) /
 // between two others and put queues side by side; and that looked 1–3 s ahead live, where smooth.js holds the newest
 // position: the "future" was the latest data, every car standing still)
 const trafSt = {}, trafPk = {}, trafItems = new Map(), trafList = [], trafEdge = { L: 7, R: -7 }, KA2 = [0, 0, 0], KB2 = [0, 0, 0], KD1 = [0, 0], KD2 = [0, 0];
+const trafWarm = [], trafWS = {}, trafWI = new Map();
+// (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already)
+const trafHeld = (c) => { const g = c.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
 const traf = { S: makeTraffic(), sm: null, env: null, lastT: null }, trafCost = { ms: 0, frames: 0 };   // (development: its share of a frame)
 function traffic(sm, F, t, dt, pos) {
   if (traf.sm !== sm) { resetTraffic(traf.S); traf.sm = sm; }   // (another session or circuit: nothing carried over)
@@ -1298,18 +1301,25 @@ function traffic(sm, F, t, dt, pos) {
     peek(num, tt) { const q = traf.sm.state(num, tt, trafPk); return q ? q.s : null; },
     // (where a car at (s, d) is and faces: the path at that offset over ±2 m – the boxes check)
     pose(s, d, o) { traf.F.at(s - 2, d, KA2); traf.F.at(s + 2, d, KB2); o.x = (KA2[0] + KB2[0]) / 2; o.z = (KA2[2] + KB2[2]) / 2; o.yaw = Math.atan2(KB2[0] - KA2[0], KB2[2] - KA2[2]); return o; },
+    // (v0.45: the cars now shown, at an earlier moment – a seek plays the last seconds first, traffic.js WARM_MS)
+    warmAt(tt) { const L = trafWarm; L.length = 0; for (const num of Object.keys(traf.pos)) { const c = cars.get(num), st = c && traf.sm.state(num, tt, trafWS[num] || (trafWS[num] = {})); if (!st) continue; const D = carDims(c), it = trafWI.get(num) || {}; trafWI.set(num, it); it.num = num; it.s = st.s; it.d = st.d; it.vs = st.vs; it.y = traf.F.sampleAt(st.s).p.y; it.held = trafHeld(c); it.front = D.front; it.back = D.back; it.half = D.half; L.push(it); } return L; },
   });
-  traf.F = F; env.L = F.L; env.live = !!app().src?.isLive;
-  if (traf.lastT == null || t < traf.lastT || t - traf.lastT > TRAFFIC.JUMP_MS) sepMemory = {};   // (a seek: separate()'s sides start over too)
+  traf.F = F; traf.pos = pos; env.L = F.L; env.live = !!app().src?.isLive;
+  // (the warm-up reads each car's grid state as it is now: right while the race runs on, stale on a seek from before the
+  // start – every car still "held" in its slot – so then none, as in v0.44: Monza 2025, a seek from the grid to lap 1
+  // warmed up with the pack held chose the other side for a pass, 1.8 m off a second later)
+  let gridHeld = false; for (const c of cars.values()) if (c.grid && c.grid.state !== "free") { gridHeld = true; break; }
+  env.listAt = gridHeld ? null : env.warmAt;
+  // (v0.45: separate()'s sides are no longer forgotten on a seek. They are only asked for when the data has two cars on top
+  // of each other – a queue standing in the pit lane – and a side chosen afresh after a rewind was often the other one:
+  // parked cars 4.6–6.8 m off where playing draws them, Monza 2025 after the flag – Map3D.seekCheck)
   traf.lastT = t;
   const list = trafList; list.length = 0;
-  // (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already)
-  const held = (c) => { const g = c.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
   for (const num of Object.keys(pos)) {
     const c = cars.get(num), st = c && sm.state(num, t, trafSt[num] || (trafSt[num] = {}));
     if (!st) continue;
     const D = carDims(c), it = trafItems.get(num) || {}; trafItems.set(num, it);
-    it.num = num; it.s = st.s; it.d = st.d; it.vs = st.vs; it.y = F.sampleAt(st.s).p.y; it.held = held(c); it.front = D.front; it.back = D.back; it.half = D.half;
+    it.num = num; it.s = st.s; it.d = st.d; it.vs = st.vs; it.y = F.sampleAt(st.s).p.y; it.held = trafHeld(c); it.front = D.front; it.back = D.back; it.half = D.half;
     list.push(it);
   }
   const t0 = performance.now(), out = stepTraffic(traf.S, list, env, t); trafCost.ms += performance.now() - t0; trafCost.frames++;
@@ -1551,6 +1561,9 @@ function updateCars(dt) {
     if (est && !est.pit && !F) continue;
     seen.add(num);
     const c = carFor(num, d);
+    // (v0.45: a seek or a rewind – the moment shown jumping, as the steering's rule below – takes the heading as it is
+    // then; eased from the heading before the seek it was up to 0.7 rad off on the first frames – Map3D.seekCheck)
+    const jumpT = timeJump(c.yawT, A.t); c.yawT = A.t;
     const st = est ? (est.pit ? null : Object.assign(c.st || (c.st = {}), { s: est.s, d: est.d, vs: est.vs, vd: est.vd || 0, as: est.as || 0, run: -1 })) : F ? sm.state(num, A.t, c.st || (c.st = {})) : null;
     c.est = est || null;
     const v = vTmp;
@@ -1578,17 +1591,17 @@ function updateCars(dt) {
       } else pathYaw = Math.atan2(DIR[0], DIR[1]);
       if (devMotion) c.dbg = [Math.atan2(DIR[0], DIR[1]), Math.atan2(dRate, st.vs || 1), st.s, dTot, st.vs, st.d, off, P0[0], P0[2]];
       let yawRate = c.has && dt > 0 && c.pathYaw != null ? wrap(pathYaw - c.pathYaw) / dt : 0;
-      if (Math.abs(yawRate) > 3) yawRate = 0;   // (a seek)
+      if (jumpT || Math.abs(yawRate) > 3) yawRate = 0;   // (a seek)
       // (the turning rate is a difference of headings: it carries a fine ripple where the curve's pieces meet,
       // so it's low-passed before the slip, lean and steering are made from it)
-      c.yawRateF = c.has && c.yawRateF != null ? c.yawRateF + (yawRate - c.yawRateF) * (1 - Math.exp(-dt * 8)) : yawRate;
+      c.yawRateF = c.has && c.yawRateF != null && !jumpT ? c.yawRateF + (yawRate - c.yawRateF) * (1 - Math.exp(-dt * 8)) : yawRate;
       yawRate = c.yawRateF;
       const aLat = speed * yawRate, aLong = st.as;
       // slip: ~1.5° at 5 g; a little more (oversteer) when it's on the power out of a slow corner
       const exitSlide = aLong > 4 && speed < 45 && Math.abs(aLat) > 8 ? Math.min(1, (aLong - 4) / 6) * Math.min(1, (Math.abs(aLat) - 8) / 10) * 0.035 * Math.sign(aLat) : 0;
       const beta = Math.max(-0.035, Math.min(0.035, aLat * 0.0006)) + exitSlide;
       const yaw = pathYaw + beta, dy = wrap(yaw - c.yaw);
-      if (!c.has || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * (1 - Math.exp(-dt * 30));
+      if (!c.has || jumpT || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * (1 - Math.exp(-dt * 30));
       c.pathYaw = pathYaw; c.yawRate = yawRate; c.slide = exitSlide;
       // the road's slope over ±4 m
       F.at(sD + 4, 0, PA); F.at(sD - 4, 0, PB);
@@ -1628,12 +1641,12 @@ function updateCars(dt) {
         else if (!c.has && c.sample) yaw = Math.atan2(c.sample.tan.x, c.sample.tan.z);
       }
       const dy = wrap(yaw - c.yaw);
-      if (!c.has || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * k;   // a big swing is a jump (seek): snap
+      if (!c.has || jumpT || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * k;   // a big swing is a jump (seek): snap
       const yawRate = c.has && dt > 0 ? wrap(c.yaw - (c.prevYaw ?? c.yaw)) / dt : 0;
       c.pathYaw = c.yaw; c.yawRate = yawRate; c.slide = 0;
       const prevSpeed = c.speed;
-      c.speed = c.has ? c.speed + (speed - c.speed) * Math.min(1, dt * 8) : speed;
-      const acc = dt > 0 && c.has ? (c.speed - prevSpeed) / dt : 0;
+      c.speed = c.has && !jumpT ? c.speed + (speed - c.speed) * Math.min(1, dt * 8) : speed;   // (v0.45: a seek – no easing from before it)
+      const acc = dt > 0 && c.has && !jumpT ? (c.speed - prevSpeed) / dt : 0;
       c.acc = (c.acc || 0) + (Math.max(-60, Math.min(25, acc)) - (c.acc || 0)) * Math.min(1, dt * 6);
       let slope = 0;
       if (c.sample) {
@@ -1751,7 +1764,7 @@ function updateCars(dt) {
   }
   // (a car not drawn this frame is drawn afresh when it's back: no easing from where it was before)
   for (const [num, c] of cars) if (!seen.has(num)) { c.obj.visible = false; c.grid = null; c.has = false; c.est = null; c.estAt = null; c.hand = null; c.pit = null; }
-  separate(dt, seen);
+  separate(dt, seen, timeJump(sepT, A.t)); sepT = A.t;
   // (after the cars are kept apart: the crew round a car where it is drawn)
   { const c0 = performance.now(); updateCrews(pitNow); pitCost.ms += performance.now() - c0; }
   // F1's archive sometimes stops publishing car positions part-way through a session (e.g. Monaco 2026):
@@ -2235,8 +2248,12 @@ function updateWheelScreens(src, t) {
 // amount (ReplayKit.separateCars). The correction is eased in and out so nothing jumps, and a car pushed
 // sideways stays on the tarmac.
 let sepMemory = {};
+// (v0.45: a seek sets the push at once, as a seek sets traffic()'s offsets – it was eased from before the seek over
+// ~1 s, the frame time being capped at 0.1 s so `dt > 0.5` never caught a seek: a pit-lane car drawn up to 2 m off
+// where playing up to the same moment draws it, sliding back – Map3D.seekCheck, Monaco 2025)
+let sepT = null;
 const sepSkip = (a, b) => a.track && b.track;
-function separate(dt, seen) {
+function separate(dt, seen, snap = false) {
   const list = [];
   for (const num of seen) {
     const c = cars.get(num);
@@ -2258,7 +2275,7 @@ function separate(dt, seen) {
       if (latRaw <= hi && latRaw >= lo) { const cl = Math.max(lo, Math.min(hi, lat)) - lat; tx += s.nor.x * cl; tz += s.nor.z * cl; }
     }
     // (a spring, ω 6/s: the correction comes and goes without a kink, which at 60 fps read as a shake)
-    if (dt > 0.5) { c.sepX = tx; c.sepZ = tz; c.sepVX = c.sepVZ = 0; } else { spring(c, "sepX", "sepVX", tx, 6, dt); spring(c, "sepZ", "sepVZ", tz, 6, dt); }
+    if (dt > 0.5 || snap) { c.sepX = tx; c.sepZ = tz; c.sepVX = c.sepVZ = 0; } else { spring(c, "sepX", "sepVX", tx, 6, dt); spring(c, "sepZ", "sepVZ", tz, 6, dt); }
     c.pos.set(o.x + c.sepX, c.pos.y, o.z + c.sepZ);
     if (!c.onTrack) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + ROAD_LIFT - 0.02; }   // (on the track the height is right already)
     c.obj.position.copy(c.pos);
@@ -3808,20 +3825,25 @@ window.Map3D = {
   async seekCheck(t, o = {}) {
     const src = app().src; if (!smoothFor(src) || !world) return "no tracks";
     const { diffSnaps } = await import("./trafaudit.js"), real = window.F1KR, fr = 1000 / 60; let fakeT = t;
-    const drive = (a, b) => { for (fakeT = a; fakeT <= b + 1e-6; fakeT += fr) updateCars(fr / 1000); };
+    // (whole frames from a to b, the last exactly at b: a sum of 1/60 s steps drifts by a fraction of a µs past b, and the
+    // pause after it then read as a rewind)
+    const drive = (a, b) => { const n = Math.max(1, Math.round((b - a) / fr)); for (let i = 0; i <= n; i++) { fakeT = a + (b - a) * i / n; updateCars((b - a) / n / 1000); } };
     const one = (tt) => { fakeT = tt; updateCars(fr / 1000); };
-    const snap = () => { const s = {}; for (const [num, c] of cars) s[num] = { vis: !!(c.obj.visible && c.has), x: c.pos.x, y: c.pos.y, z: c.pos.z, yaw: c.yaw, trafD: c.trafD || 0, trafS: c.trafS || 0, sepX: c.sepX || 0, sepZ: c.sepZ || 0 }; return s; };
-    const lead = o.lead ?? 20000, after = o.after ?? 1000, out = {};
+    const snap = () => { const s = {}; for (const [num, c] of cars) s[num] = { vis: !!(c.obj.visible && c.has), x: c.pos.x, y: c.pos.y, z: c.pos.z, yaw: c.yaw, trafD: c.trafD || 0, trafS: c.trafS || 0, sepX: c.sepX || 0, sepZ: c.sepZ || 0, tag: [c.trafMode || "", c.pit ? "pit:" + (c.pit.state?.state || "") : "", c.onTrack ? "" : "off", c.grid && c.grid.state !== "free" ? "grid" : "", c.est ? "est" : "", Math.round(c.speed || 0)].filter((x) => x !== "").join(" ") }; return s; };
+    const lead = o.lead ?? 20000, after = o.after ?? 1000, out = {}, warm0 = TRAFFIC.WARM_MS;
+    // (o.warm: another warm-up length for this check; o.trace: one car's offsets and traffic step per paused frame)
+    if (o.warm != null) TRAFFIC.WARM_MS = o.warm;
+    const tr = o.trace != null && cars.get(String(o.trace)), trace = () => tr && [+(tr.trafD || 0).toFixed(3), +(tr.trafS || 0).toFixed(3), traf.S.lastT, tr.trafMode || ""];
     window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
     try {
-      drive(t - lead, t); const P = snap();
-      for (let i = 0; i < 60; i++) one(t); out.pause = diffSnaps(P, snap());
+      drive(t - lead, t); const P = snap(), T0 = trace(), Tp = [];
+      for (let i = 0; i < 60; i++) { one(t); if (i < 4) Tp.push(trace()); } out.pause = diffSnaps(P, snap()); if (tr) out.trace = { played: T0, paused: Tp, lastDriven: fakeT };
       drive(t - lead, t + after); const P1 = snap();
       drive(t - 600000, t - 598000); one(t); out.seek = diffSnaps(P, snap());
       drive(t + fr, t + after); out.seekAfter = diffSnaps(P1, snap());
       drive(t - lead, t + 10000); one(t); out.rewind = diffSnaps(P, snap());
       drive(t - lead, t + 1500); one(t); out.rewindShort = diffSnaps(P, snap());
-    } finally { window.F1KR = real; }
+    } finally { window.F1KR = real; TRAFFIC.WARM_MS = warm0; }
     return JSON.stringify({ t: +((t - (src.startTime?.() || 0)) / 1000).toFixed(1), ...out });
   },
   trafficState(at = null, mark = null) {

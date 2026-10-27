@@ -134,6 +134,7 @@ export const TRAFFIC = {
   LEVELS: 2.5,     // m of height apart: different levels (a bridge over the track, the pit lane under it) – no interaction
   BOX_ROUNDS: 3, BOX_MAX: 2.5,    // boxes checked: up to 3 more solves, up to 2.5 m more asked for a pair
   JUMP_MS: 2000, ITER: 8, FORGET_MS: 3000,
+  WARM_MS: 4000, WARM_STEP: 200,  // a seek: the last 4 s played first in 0.2 s steps (env.listAt), so the sides chosen are the ones playing chose
 };
 const T = TRAFFIC;
 // (the moments looked at for a pass: the last 3 s; in replays also the next 5 s)
@@ -144,6 +145,10 @@ const wrapTo = (x, L) => ((x % L) + L * 1.5) % L - L / 2;
 // the memory: per car its offsets and their rates, per pair the side chosen; reset by a seek or a new session
 export function makeTraffic() { return { cars: new Map(), pairs: new Map(), lastT: null, cand: [], pool: [], used: 0, busy: new Set(), stats: { pairs: 0, lateral: 0, longitudinal: 0, residual: 0 } }; }
 export function resetTraffic(S) { S.cars.clear(); S.pairs.clear(); S.lastT = null; }
+// (v0.45: the moment shown jumped – a seek or a rewind – between the frame before (prevT, ms) and t: what eases from frame
+// to frame (map3d.js: a car's heading, separate()'s push) is set at once then instead. 50 ms back is still a frame –
+// a live clock resynced by a few ms – not a rewind; forward, the same JUMP_MS as stepTraffic's own memory)
+export const timeJump = (prevT, t) => prevT == null || t < prevT - 50 || t - prevT > T.JUMP_MS;
 
 // a critically damped spring towards `target` at rate w (1/s) with its speed held under vmax, over dt seconds in
 // 10 ms steps (the same path at any frame rate)
@@ -163,9 +168,21 @@ function follow(o, k, kr, target, w, vmax, dt) {
 // Returns S.cars: num → { dOff, dRate, sOff, sRate, tD, tS, res, mode }.
 export function stepTraffic(S, list, env, t) {
   const L = env.L, n = list.length;
-  const dtMs = S.lastT == null ? null : t - S.lastT;
-  const jump = dtMs == null || dtMs < 0 || dtMs > T.JUMP_MS;
+  let dtMs = S.lastT == null ? null : t - S.lastT;
+  let jump = dtMs == null || dtMs < 0 || dtMs > T.JUMP_MS;
   if (jump) S.pairs.clear();
+  // (v0.45: a seek or a rewind has no memory of the side each pair was parted to, and chosen afresh – by the next
+  // corner, the room – it could be the other side from the one playing chose seconds before: a car going by drawn on
+  // the left when played, on the right after a seek: 2.8 m apart at Monaco 2025 +50 min, 2.6 m at +95 min (Map3D.seekCheck;
+  // 0.0 and 0.12 m with this). With env.listAt(t) – the cars at an earlier moment, past data only – the last WARM_MS are
+  // played first, then this step goes on from there. (Lap 1's pack still differs by up to 4.8 m: its sides go back to the
+  // start, further than any warm-up – v0.45 report)
+  if (jump && env.listAt && !S.warming && T.WARM_MS > 0) {
+    S.warming = true;
+    try { S.lastT = null; for (let tt = t - T.WARM_MS; tt < t - 1; tt += T.WARM_STEP) stepTraffic(S, env.listAt(tt), env, tt); }
+    finally { S.warming = false; }
+    dtMs = t - S.lastT; jump = false;
+  }
   S.lastT = t;
   // per car: its place (p across, q along: offsets being solved), the road at its s
   for (const c of list) {
