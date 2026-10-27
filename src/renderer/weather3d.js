@@ -178,7 +178,7 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   const rain = rainMesh(), spray = sprayMesh();
   scene.add(dome, rain, spray);
   const ru = rain.material.uniforms;
-  const S = { log: null, logFor: null, liveKey: null, liveSeen: "", clouds: null, cloudsKey: null, cloudsAsk: 0, coverFor: null, raster: null, coverTex: null,
+  const S = { log: null, logFor: null, liveKey: null, liveSeen: "", clouds: null, cloudsKey: null, cloudsAsk: 0, cloudsGen: 0, coverFor: null, raster: null, coverTex: null,
     camPrev: new THREE.Vector3(), camVel: new THREE.Vector3(), hasPrev: false, north: [0, -1], east: [1, 0], wind: [0, 0], tyresAt: 0, tyres: null,
     forced: null, sprayOn: true, roadFor: null, roadMats: [], roadWet: -1, roadEnv: null, skyMode: "auto", useClouds: true, enabled: true };
   const sc = { sun: scaler(), hemi: scaler(), near: scaler(), far: scaler(), exp: scaler() };
@@ -206,6 +206,17 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   // the hourly cloud cover for this place and session (asked once per session; none until it comes)
   // (asked again only when the session or the place changes – a live one every 15 min; the cover at t worked out once a
   // second, or at once after a jump: nothing of this per frame)
+  // an answer lands only if it is the newest request's (v0.45: the key alone let A's first answer – or its failure – land
+  // after A → B → A had asked again, and an older live refresh replace a newer one); reset() / configure() start a new
+  // generation, so nothing asked before them lands after. The key (session + place) still decides when to ask: the same
+  // session on another source object or a rebuilt world keeps its answer, in flight or arrived – no request per world.
+  // A failed live refresh keeps the last good value of this key: coverAt() uses its hour only within 90 min of the
+  // moment shown, so it turns neutral by itself once stale.
+  function cloudsLand(gen, key, r, live) {
+    if (gen !== S.cloudsGen || key !== S.cloudsKey || !S.useClouds) return;
+    if (r || !live) S.clouds = r;
+    S.coverAt = -Infinity;
+  }
   function clouds(A, world, src, t) {
     if (!S.useClouds || !world?.geoCenter || !window.api?.geo?.clouds || !Number.isFinite(t)) return null;
     const now = performance.now();
@@ -215,8 +226,11 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
       if (key !== S.cloudsKey || src.isLive) {
         const utc = src.utcAt?.(t);
         if (Number.isFinite(utc)) {
-          S.cloudsKey = key; S.cloudsAsk = now; if (!src.isLive) S.clouds = null; S.coverAt = -Infinity;
-          window.api.geo.clouds(world.geoCenter[0], world.geoCenter[1], utc, !!src.isLive).then((r) => { if (S.cloudsKey === key) { S.clouds = r?.ok ? r : null; S.coverAt = -Infinity; } }).catch(() => {});
+          const gen = ++S.cloudsGen;
+          // (a live refresh of the same key keeps the value shown until its answer; anything else starts with none)
+          if (!src.isLive || key !== S.cloudsKey) S.clouds = null;
+          S.cloudsKey = key; S.cloudsAsk = now; S.coverAt = -Infinity;
+          window.api.geo.clouds(world.geoCenter[0], world.geoCenter[1], utc, !!src.isLive).then((r) => cloudsLand(gen, key, r?.ok ? r : null, !!src.isLive), () => cloudsLand(gen, key, null, !!src.isLive));
         }
       }
     }
@@ -330,12 +344,12 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     get info() { return S.info || null; },
     get raster() { return S.raster; },
     // settings: { sky: "auto" | "neutral" | "fair" | "overcast", clouds: true/false }
-    configure(o = {}) { if (o.sky) S.skyMode = o.sky; if ("clouds" in o) { S.useClouds = o.clouds !== false; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; } },
+    configure(o = {}) { if (o.sky) S.skyMode = o.sky; if ("clouds" in o) { S.useClouds = o.clouds !== false; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.cloudsGen++; } },
     // development: a state forced for testing the look (the covers, the wet road) – { rain: 0–1, wet: 0–1, cloud: 0–1 } or null
     force(o) { S.forced = o || null; },
     // spray on / off (settings: 차량 물보라)
     spray(on) { S.sprayOn = on !== false; },
-    reset() { S.log = null; S.logFor = null; S.liveKey = null; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.hasPrev = false; },
+    reset() { S.log = null; S.logFor = null; S.liveKey = null; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.cloudsGen++; S.hasPrev = false; },
     // once a frame, before drawing. A: window.F1KR; world: map3d's world; night: the night look is on.
     // pitFac / teams: map3d's pit building in use and its teams' layer (for the pit lane's tarmac and the pit wall canopies)
     update({ A, world, camera, dt, night, hemi, sun, fog, pitFac = null, teams = null, cars = null, viewH = 0 }) {
