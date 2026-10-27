@@ -847,7 +847,10 @@ function pitBuilding(ctx, p) {
     }
     // (mapped along most of the run: the map's wall is the pit wall – none is drawn over it; the lane's model and the
     // teams' stands use it)
-    const mappedWall = W.length > 3 && W.filter((w) => w.mapped).length >= W.length * 0.6;
+    // (v0.46: from a quarter of the run on – where the map's wall covers only part of it, ours carries it on (below);
+    // at 60 % Monza 2026's wall, mapped along the first 40 % of the longer run, stood through three teams' stands while
+    // ours was drawn at the edge beyond it – run/pitwall)
+    const nMapped = W.filter((w) => w.mapped).length, mappedWall = W.length > 3 && nMapped >= Math.max(4, W.length * 0.25);
     // (where the map's wall has a gap or stops short of the garages' ends – Silverstone 2024–25: the last team's stand had
     // no wall before the tarmac, v0.46 run/pitwall – ours, the same way out from the tarmac as the map's nearest station
     // has it: an estimate, said so in wallFrom)
@@ -917,7 +920,8 @@ function pitBuilding(ctx, p) {
       };
       // (what the wall and its walkway stand on)
       { const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, base + walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]); occupancy.push(strip); }
-      wallFrom = mappedWall ? "the map's wall" + (own ? ` (ours at ${own} of ${W.length} stations where it has none – estimate)` : "") : p.pitWallFrom || "drawn at the track's edge";
+      const nFence = W.filter((w) => w.fence).length;
+      wallFrom = mappedWall ? "the map's wall" + (own ? ` (ours at ${own} of ${W.length} stations where it has none – estimate)` : "") : (p.pitWallFrom || "drawn at the track's edge") + (nFence ? ` (under the map's fence at ${nFence} of ${W.length} stations)` : "");
     }
   }
   // The paddock behind the garages (p.paddock, for the years it was seen): awnings along the garages' back and a row

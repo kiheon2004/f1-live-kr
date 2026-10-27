@@ -153,3 +153,15 @@ test("a mapped fence just short of the tarmac (no wall mapped) is the pit wall's
   const v = standSection(await section(G, r.group, 0, [{ off: 29.4, name: "barrier:fence" }]));
   assert.ok(v.ok, `${v.order} – ${v.problems.join("; ")}`);
 });
+
+test("a mapped pit wall along only part of the run (Monza 2026: 40 %) is the wall there, ours carries it on: no map wall through a stand", async () => {
+  // the map's wall 27.5 m out for x < −45 only (the run −150…150: ~35 %)
+  const barrierRay = (x, z, dx, dz, max, kind = "solid") => { if (kind !== "solid") return Infinity; const s = (z - -57.5) / -dz; return x < -45 && dz < 0 && s > 0 && s <= max ? s : Infinity; };
+  const { r, G } = await build({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 }, barrierRay);
+  const { standSection } = await import("../src/renderer/pitwallcheck.js");
+  for (const u of [-100, 0, 100]) {
+    G.openRail([[u - 3, u + 3]]);
+    const v = standSection(await section(G, r.group, u, u < -45 ? [{ off: 27.5, name: "barrier:wall" }] : []));
+    assert.ok(v.ok, `u ${u}: ${v.order} – ${v.problems.join("; ")}`);
+  }
+});
