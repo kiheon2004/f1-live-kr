@@ -3790,6 +3790,40 @@ window.Map3D = {
   // across and along (drawn and target), the overlap left (res, m) and why (mode); the close pairs and what each
   // needs. `at` (stream ms): driven there first, from 8 s before (like trafficScan). `mark`: a red ring under every
   // car with an overlap left (development only)
+  // development (v0.45 regression): traffic.js's promises checked every frame over [t0, t1] (driven like overlapScan –
+  // trafaudit.js auditFrame: S_MAX per car, the order along the lap, kept on the tarmac), and the data before/after
+  // (the timing lines and the steadied tracks are read, never written)
+  async trafficAudit(t0, t1, step = 100) {
+    const src = app().src, sm = smoothFor(src); if (!sm || !world) return "no tracks";
+    const { makeAudit, auditFrame, auditSummary } = await import("./trafaudit.js"), real = window.F1KR, A = makeAudit(), st0 = src.startTime?.() || 0;
+    const nums = Object.keys(src.state.DriverList || {}), probe = () => JSON.stringify([src.state.TimingData?.Lines, src.state.LapCount, nums.map((n) => [t0, (t0 + t1) / 2, t1].map((tt) => { const q = sm.state(n, tt, {}); return q && [q.s, q.d, q.vs]; }))]);
+    const before = probe(); let fakeT = t0;
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try { for (fakeT = t0; fakeT <= t1; fakeT += step) { updateCars(step / 1000); if (traf.F) auditFrame(A, trafList, traf.S.cars, TRAFFIC, traf.F.L, Math.round((fakeT - st0) / 100) / 10); } }
+    finally { window.F1KR = real; }
+    return JSON.stringify({ ...auditSummary(A), dataSame: probe() === before });
+  },
+  // development (v0.45 regression): the same moment t shown after playing up to it (1/60 s frames) and after a seek
+  // forward, a rewind and a pause – per car the largest difference in place, heading, traffic offsets and separate()'s push
+  async seekCheck(t, o = {}) {
+    const src = app().src; if (!smoothFor(src) || !world) return "no tracks";
+    const { diffSnaps } = await import("./trafaudit.js"), real = window.F1KR, fr = 1000 / 60; let fakeT = t;
+    const drive = (a, b) => { for (fakeT = a; fakeT <= b + 1e-6; fakeT += fr) updateCars(fr / 1000); };
+    const one = (tt) => { fakeT = tt; updateCars(fr / 1000); };
+    const snap = () => { const s = {}; for (const [num, c] of cars) s[num] = { vis: !!(c.obj.visible && c.has), x: c.pos.x, y: c.pos.y, z: c.pos.z, yaw: c.yaw, trafD: c.trafD || 0, trafS: c.trafS || 0, sepX: c.sepX || 0, sepZ: c.sepZ || 0 }; return s; };
+    const lead = o.lead ?? 20000, after = o.after ?? 1000, out = {};
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try {
+      drive(t - lead, t); const P = snap();
+      for (let i = 0; i < 60; i++) one(t); out.pause = diffSnaps(P, snap());
+      drive(t - lead, t + after); const P1 = snap();
+      drive(t - 600000, t - 598000); one(t); out.seek = diffSnaps(P, snap());
+      drive(t + fr, t + after); out.seekAfter = diffSnaps(P1, snap());
+      drive(t - lead, t + 10000); one(t); out.rewind = diffSnaps(P, snap());
+      drive(t - lead, t + 1500); one(t); out.rewindShort = diffSnaps(P, snap());
+    } finally { window.F1KR = real; }
+    return JSON.stringify({ t: +((t - (src.startTime?.() || 0)) / 1000).toFixed(1), ...out });
+  },
   trafficState(at = null, mark = null) {
     if (at != null) { const real = window.F1KR; let fakeT = at - 8000; window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) }); try { for (; fakeT <= at; fakeT += 50) updateCars(0.05); } finally { window.F1KR = real; } }
     if (mark != null) devTrafMark = !!mark;
