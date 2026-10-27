@@ -145,3 +145,13 @@ test("gloves v0.45: one material per kit and look, never shared across looks; sw
   assert.notStrictEqual(late.userData.kitMat, cars[3].userData.kitMats.real);
 });
 
+test("gloves v0.45: the setting – a select next to the other 3D settings, Korean, saying the readable look is not the real design", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../src/renderer/index.html"), "utf8"), js = fs.readFileSync(path.join(__dirname, "../src/renderer/map3d.js"), "utf8");
+  const m = /<label title="([^"]*)">장갑 색 <select id="geoGloves">(.*?)<\/select><\/label>/.exec(html);
+  assert.ok(m, "no 장갑 색 select in the 3D settings");
+  assert.match(m[2], /<option value="readable">[^<]+<\/option><option value="real">[^<]+<\/option>/);
+  assert.match(m[1], /정확한 복제가 아니/, "the tooltip doesn't say the readable look isn't a copy");
+  assert.match(m[1], /발광/, "the tooltip doesn't say it doesn't glow");
+  assert.match(js, /GEO_DEFAULT = \{[^}]*gloves: "readable"/, "default look");
+  assert.match(js, /getElementById\("geoGloves"\)\.addEventListener/, "no change handler");
+});

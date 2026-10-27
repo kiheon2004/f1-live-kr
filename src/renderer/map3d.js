@@ -23,7 +23,8 @@ import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, 
 import { orderedBoxes } from "./pitorder.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
-import { makeCar, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
+import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
+import { kitMode } from "./kit.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
 import { cornerStations, cornerTargets, easeAlpha, cornerScale } from "./corners.js";
@@ -142,6 +143,7 @@ function initGeoSettings() {
     document.getElementById("geoCorners").value = ["near", "all", "off"].includes(o.corners) ? o.corners : "near";
     document.getElementById("geoShift").value = o.shiftLights === "fill" ? "fill" : "team";
     document.getElementById("geoMirrors").value = ["full", "low", "simple"].includes(o.mirrors) ? o.mirrors : "auto";
+    document.getElementById("geoGloves").value = kitMode(o.gloves);
   };
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
@@ -176,6 +178,11 @@ function initGeoSettings() {
   document.getElementById("geoCorners").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), corners: e.target.value }));
   document.getElementById("geoShift").addEventListener("change", (e) => saveGeoSettings({ ...geoSettings(), shiftLights: e.target.value }));
   document.getElementById("geoMirrors").addEventListener("change", (e) => { saveGeoSettings({ ...geoSettings(), mirrors: e.target.value }); mirrorSetting = null; });
+  // (v0.45: the gloves' look – kit.js; every car takes its kit's material for the look, nothing rebuilt. The material it
+  // takes may not have been on any car yet: lit as applyLighting lights every car – by night the light field, the glow
+  // and the environment map, else a night switch drew the hands unlit)
+  document.getElementById("geoGloves").addEventListener("change", (e) => { const m = kitMode(e.target.value); saveGeoSettings({ ...geoSettings(), gloves: m });
+    for (const c of cars.values()) if (setKitMode(c.model, m) && nightNow !== null) { lightCar(c.model, nightNow); setCarEnvironment(c.model, nightNow ? carEnvironment(true) : null, 0.6); } });
   document.getElementById("geoKeySave").addEventListener("click", async () => {
     const m = document.getElementById("geoKeyMsg"), key = document.getElementById("geoKey").value;
     m.textContent = "확인하는 중…"; m.classList.remove("bad");
@@ -1230,7 +1237,7 @@ function carFor(num, d) {
   if (c && c.key === key) return c;
   if (c) { scene.remove(c.obj); disposeGroup(c.obj); releaseShadowRefs(); }
   const obj = new THREE.Group();
-  const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season, date });
+  const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season, date, kit: geoSettings().gloves });
   if (nightNow) setCarEnvironment(model, carEnvironment(true), 0.6);
   { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false }));
     sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; model.add(sh); }
@@ -2578,7 +2585,7 @@ function paintHud() {
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
-const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near", shiftLights: "team", mirrors: "auto" };
+const GEO_DEFAULT = { provider: "eox", buildings: true, trees: true, night: "auto", shadows: true, facilities: true, bigCars: false, quality: "balanced", pitWork: "record", corners: "near", shiftLights: "team", mirrors: "auto", gloves: "readable" };
 function geoSettings() { try { return { ...GEO_DEFAULT, ...JSON.parse(localStorage.getItem("f1kr:geo3d") || "{}") }; } catch { return { ...GEO_DEFAULT }; } }
 function saveGeoSettings(v) { try { localStorage.setItem("f1kr:geo3d", JSON.stringify(v)); } catch {} }
 const ATTR = {
@@ -4312,6 +4319,24 @@ window.Map3D = {
         const S = T.stations[0], loc = T.where(c.pos.x, c.pos.z);
         let best = null; for (const x of S) { const d = (x.x - c.pos.x) ** 2 + (x.z - c.pos.z) ** 2; if (!best || d < best.d) best = { d, s: x.s }; }
         if (best && best.d < 400) out.push([t, Math.round(best.s), loc ? 1 : 0]);
+      }
+    } finally { window.F1KR = real; }
+    return JSON.stringify(out);
+  },
+  // development (v0.45, glove checks): the session times (t0 … t1 every `step` ms) and whether car `num`'s cockpit is in
+  // the sun then – [t, 1 sunlit / 0 shaded by the real map (buildings, terrain, a tunnel's roof)] – a ray from 0.9 m over
+  // the car towards the sun (sunDir as now), the cars stepped as tunnelPass does
+  sunScan(num, t0, t1, step = 1000) {
+    const g = world?.real?.group; if (!g) return "no map";
+    const real = window.F1KR, out = [], ray = new THREE.Raycaster(); let fakeT = t0; ray.far = 400;
+    num = String(num || real.focus || leader());
+    window.F1KR = new Proxy(real, { get: (o, k) => (k === "t" ? fakeT : k === "focus" ? num : Reflect.get(o, k)) });
+    try {
+      for (let t = t0; t <= t1; t += step) {
+        fakeT = t; updateCars(0.05);
+        const c = cars.get(num); if (!c?.obj.visible) continue;
+        ray.set(c.pos.clone().addScaledVector(UP, 0.9), sunDir);
+        out.push([t, ray.intersectObject(g, true).some((h) => { for (let p = h.object; p; p = p.parent) if (!p.visible) return false; return true; }) ? 0 : 1]);
       }
     } finally { window.F1KR = real; }
     return JSON.stringify(out);
