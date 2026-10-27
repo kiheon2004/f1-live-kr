@@ -454,10 +454,11 @@ function aeroPose(c, num, st, est, t, src) {
   if (!world?.samples?.length) { out.open = 0; out.front = 0; out.estimated = true; out.why = "no lap line"; return out; }
   const X = aeroCtx(src, t), I = c.aeroIn || (c.aeroIn = {});
   // (v0.45: the zone's entry from the car's own track coordinates – smooth.js coords – at the moment its place st is for:
-  // live 0.6 s behind the newest data; the telemetry on its own clock (lag), never past the newest moment t)
+  // live 0.6 s behind the newest data; the telemetry on its own clock (lag), live never past the newest moment t – a
+  // replay reads up to t + lag: the same moment as the place, all of it recorded)
   const sm = smooth.src === src ? smooth.tr : null;
   I.allowed = X.allowed; I.spans = X.Z.spans; I.L = X.Z.L; I.s = st ? st.s : null; I.speed = c.speed * 3.6; I.tel = src.car?.[num] || null;
-  I.hist = st && sm?.coords ? sm.coords(num) : null; I.lag = sm?.telLag || 0; I.t = t - (I.hist ? sm.stateLag || 0 : 0); I.now = t;
+  I.hist = st && sm?.coords ? sm.coords(num) : null; I.lag = sm?.telLag || 0; I.t = t - (I.hist ? sm.stateLag || 0 : 0); I.now = src.isLive ? t : null;
   I.onTrack = !!st && !est && !c.pit; I.racing = X.t0 == null || t >= X.t0; I.startGate = X.t0; I.mode = X.mode;
   return activeAeroAt(I, out);
 }
@@ -4614,7 +4615,7 @@ window.Map3D = {
       for (let t = t0; t <= t1; t += step) {
         if (!sm.state(num, t, st)) { open[num] = null; continue; }
         const X = aeroCtx(src, t);
-        Object.assign(I, { allowed: X.allowed, spans: X.Z.spans, L: X.Z.L, s: st.s, speed: st.vs * 3.6, tel: src.car?.[num] || null, t, now: t, onTrack: true, racing: X.t0 == null || t >= X.t0, startGate: X.t0, mode: X.mode, hist: sm.coords(num), lag: sm.telLag || 0 });
+        Object.assign(I, { allowed: X.allowed, spans: X.Z.spans, L: X.Z.L, s: st.s, speed: st.vs * 3.6, tel: src.car?.[num] || null, t, now: src.isLive ? t : null, onTrack: true, racing: X.t0 == null || t >= X.t0, startGate: X.t0, mode: X.mode, hist: sm.coords(num), lag: sm.telLag || 0 });
         activeAeroAt(I, a); I.hist = null; activeAeroAt(I, b);
         const bad = a.why === "braking" && a.open === 0 && b.open > 0.5;
         if (bad && !open[num]) { const z = zoneAt(st.s, X.Z.spans, X.Z.L); open[num] = { num, t, rel: Math.round((t - (src.startTime?.() || 0)) / 100) / 10, zone: z ? [Math.round(z.span.a), Math.round(z.span.b), z.span.z?.id || "est"] : null, s: Math.round(((st.s % X.Z.L) + X.Z.L) % X.Z.L), kmh: Math.round(st.vs * 3.6), tEntry: Math.round(a.tEntry), brakeAgo: null, until: t }; ev.push(open[num]); if (ev.length >= max) return JSON.stringify(ev); }

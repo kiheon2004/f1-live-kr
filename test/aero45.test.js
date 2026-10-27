@@ -196,3 +196,52 @@ test("the corner's braking carried across the zone's start: activated once off t
   // a brake that begins at the zone's start (none just before it) is a brake in the zone
   assert.strictEqual(at(telOf(40000, [10000]), 14000).open, 0);
 });
+
+// through smooth.js itself (the input map3d's aeroPose builds): a car lapping a 1 km circle, speed varying (so the
+// telemetry lag is found), brakes once inside the zone and is faster later in it – replay and live (the data cut at now,
+// rebuilt as LiveSource's would be, the place 0.6 s behind) give the same state, and the old entry from the speed now
+// (no history) would have reopened.
+test("smooth.js coordinates as the history: replay and live (cut at now) agree; the in-zone brake holds", async () => {
+  const { activeAeroAt } = await load();
+  const { smoothedTracks } = await import("../src/renderer/smooth.js");
+  const { CarTracks } = require("../src/renderer/replay.js");
+  const R = 1000 / (2 * Math.PI), n = 1000, samples = [];
+  for (let i = 0; i < n; i++) { const a = (i / n) * 2 * Math.PI; samples.push({ i, p: { x: R * Math.cos(a), y: 0, z: R * Math.sin(a) }, tan: { x: -Math.sin(a), z: Math.cos(a) }, nor: { x: -Math.cos(a), z: -Math.sin(a) }, L: 6, R: -6 }); }
+  const world = { samples, center: { x: 0, y: 0, z: 0 }, grid: { nearest: (x, z) => [samples.reduce((b, q) => ((q.p.x - x) ** 2 + (q.p.z - z) ** 2 < (b.p.x - x) ** 2 + (b.p.z - z) ** 2 ? q : b))] } };
+  // v(t) m/s: 45 ± 15 over a 9 s cycle; positions at 4 Hz for 120 s, telemetry at 4 Hz
+  const v = (t) => 45 + 15 * Math.sin((2 * Math.PI * t) / 9000), dt = 250, N = 481;
+  const pt = new Float64Array(N), px = new Float32Array(N), py = new Float32Array(N), pz = new Float32Array(N), S = [];
+  let s = 0;
+  for (let k = 0; k < N; k++) { const t = k * dt; if (k) s += ((v(t) + v(t - dt)) / 2) * (dt / 1000); S.push(s); const a = ((s % 1000) / n) * 2 * Math.PI; pt[k] = t; px[k] = (R * Math.cos(a)) / 0.1; py[k] = -(R * Math.sin(a)) / 0.1; }
+  const sAt = (t) => { const k = Math.min(N - 2, Math.floor(t / dt)), f = (t - k * dt) / dt; return S[k] + (S[k + 1] - S[k]) * f; };
+  const tAtS = (x) => { let k = 0; while (S[k + 1] < x) k++; return (k + (x - S[k]) / (S[k + 1] - S[k])) * dt; };
+  // the zone 300–800 m; on lap 3 (s 2300–2800) one brake sample 1.5 s after the entry; lap 4 free
+  const tIn3 = tAtS(2300), tOut3 = tAtS(2800), tb = Math.round((tIn3 + 1500) / dt) * dt;
+  const tel = { t: [], v: [], brk: [] }; for (let k = 0; k < N; k++) { tel.t.push(k * dt); tel.v.push(Math.round(v(k * dt) * 3.6)); tel.brk.push(k * dt === tb ? 1 : 0); }
+  const cars = { 1: { t: pt, x: px, y: py, z: pz, n: N } };
+  const rep = smoothedTracks({ isLive: false, car: { 1: tel }, tracks: { cars } }, world, CarTracks);
+  assert.ok(rep?.coords("1"), "replay coords"); assert.strictEqual(rep.stateLag, 0); assert.ok(Math.abs(rep.telLag) <= 100, `lag ${rep.telLag}`);
+  const L = rep.frame.L, spans = [{ a: 300, b: 800, len: 500, z: {} }], st = {};
+  const replayAt = (t, speed) => { rep.state("1", t, st); return activeAeroAt(base({ spans, L, tel, hist: rep.coords("1"), lag: rep.telLag, t, now: null, s: ((st.s % L) + L) % L, speed }), {}); };
+  const liveAt = (now, speed) => {
+    const k = pt.findIndex((x) => x > now), m = k < 0 ? N : k;
+    const lc = { 1: { t: pt.slice(0, m), x: px.slice(0, m), y: py.slice(0, m), z: pz.slice(0, m), n: m } }, lt = { t: tel.t.slice(0, m), v: tel.v.slice(0, m), brk: tel.brk.slice(0, m) };
+    const lv = smoothedTracks({ isLive: true, car: { 1: lt }, tracks: { cars: lc } }, world, CarTracks); lv.update(now);
+    if (!lv.state("1", now, st)) return null;
+    return activeAeroAt(base({ spans, L, tel: lt, hist: lv.coords("1"), lag: lv.telLag, t: now - lv.stateLag, now, s: ((st.s % L) + L) % L, speed }), {});
+  };
+  let checked = 0;
+  for (let t = tIn3 + 2500; t < tOut3 - 300; t += 700) {
+    const r = replayAt(t, 330);
+    assert.strictEqual(r.open, 0, `lap 3 after the brake, replay ${t}: ${r.why}`); assert.ok(Math.abs(r.tEntry - tIn3) < 150, `entry ${r.tEntry} vs ${tIn3}`);
+    const l = liveAt(t + 600, 330); if (!l) continue; checked++;
+    assert.strictEqual(l.open, r.open, `live ${t}`); assert.strictEqual(l.why, r.why); assert.ok(Math.abs(l.tEntry - r.tEntry) < 150, `live entry ${l.tEntry} vs ${r.tEntry}`);
+  }
+  assert.ok(checked >= 3, `live compared ${checked}`);
+  // without the history (v0.44's entry from the speed now): reopened at 330 km/h late in the same pass
+  const late = tOut3 - 400; rep.state("1", late, st);
+  assert.strictEqual(activeAeroAt(base({ spans, L, tel, t: late, s: ((st.s % L) + L) % L, speed: 330 }), {}).open, 1, "(the v0.44 input reopens)");
+  // lap 4: open again from its own entry, replay and live alike
+  const tIn4 = tAtS(3300), t4 = tIn4 + 3000, r4 = replayAt(t4, 250), l4 = liveAt(t4 + 600, 250);
+  assert.strictEqual(r4.open, 1, r4.why); assert.ok(Math.abs(r4.tEntry - tIn4) < 150); assert.strictEqual(l4.open, 1); assert.strictEqual(l4.entryKnown, true);
+});
