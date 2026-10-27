@@ -21,6 +21,7 @@ import { LANES, laneCells, crossSection } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
+import { circuitVerdict } from "./pitwallcheck.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { probeMirrorPass, samePipeline, glassVsPicture, rendererState, flatFill, glassPixels, glassOnScreen } from "./mirrorprobe.js";
@@ -4289,6 +4290,37 @@ window.Map3D = {
       out.push([k, Math.round(s.uc), h ? +(h.distance + 0.5).toFixed(1) : null, h ? name(h.object) : null, +(pitModelFor(G).st[k].cs.wall ?? -1).toFixed(1)]);
     }
     return JSON.stringify(out);
+  },
+  // development (v0.46): the pit wall across at each team's stand – level lines out from the garages' front at its box,
+  // at the seated people's heights over the stand's deck, through the map's barriers, the facility (its wall, fence,
+  // walkway railing) and the generated walls; the stand's footprint (garages.js pitWallStand: its deck 0.85 m to the
+  // lane side of wallAt's point, its console 0.75 m to the track side), the lane's face and the track's edge – judged by
+  // pitwallcheck.js (lane | stand | wall | track)
+  pitWallOrder(detail = false) {
+    const G = pitTeams.G; if (!G || !pitTeams.teams) return JSON.stringify({ ok: false, why: "no garages" });
+    const F = world.frame, rc = new THREE.Raycaster(); rc.camera = camera;
+    const targets = [world.real?.group.getObjectByName("barriers"), world.real?.group.getObjectByName("facilities"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
+    const secs = [];
+    for (const t of pitTeams.teams) {
+      const w = t.box != null && G.wallAt?.(t.box); if (!w) continue;
+      const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p)), out = [-s.inward[0], -s.inward[1]];
+      const at = (d) => [s.front[0] + s.along[0] * (t.box - s.uc) + out[0] * d, s.front[1] + s.along[1] * (t.box - s.uc) + out[1] * d];
+      let edge = null; for (let d = 0; d < 60; d += 0.25) { const [x, z] = at(d), pr = F.project(x, z); if (pr && Math.abs(pr.d) <= (pr.d >= 0 ? edgeOf(pr.sample, 1) : -edgeOf(pr.sample, -1))) { edge = d; break; } }
+      const c = G.project(w.p[0], w.p[2]).off, hits = [];
+      // (at the seated people's heights over the stand's deck; and at 0.6 m over the lane – under a raised stand, for the wall)
+      for (const [y, low] of [[w.p[1] + 0.72, false], [w.p[1] + 1.12, false], [w.p[1] + 1.72, false], [s.floor + 0.6, true]]) {
+        // (both ways: a one-sided face is met only from its front – the wall's faces the track)
+        for (const [o0, dir] of [[0.3, 1], [60, -1]]) {
+          const [x, z] = at(o0); rc.set(new THREE.Vector3(x, y, z), new THREE.Vector3(out[0] * dir, 0, out[1] * dir)); rc.far = 59.7;
+          for (const h of rc.intersectObjects(targets, true)) if (h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh) hits.push({ off: o0 + dir * h.distance, name: h.object.name || h.object.parent?.name || h.object.type, low });
+        }
+      }
+      secs.push({ team: t.team, u: Math.round(t.box), stand: [c - 0.85, c + 0.75], lane: G.wallFace ? G.wallFace(t.box) : null, edge, hits, upper: !!w.upper, standY: +(w.p[1] - s.floor).toFixed(2) });
+    }
+    const v = circuitVerdict(secs);
+    const row = (r, s) => ({ team: r.team, u: s.u, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY });
+    return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, wrong: v.wrong, problems: v.problems,
+      first: v.res[0] && row(v.res[0], secs[0]), wrongOnes: v.res.map((r, i) => [r, secs[i]]).filter(([r]) => !r.ok).slice(0, detail ? 99 : 2).map(([r, s]) => row(r, s)), all: detail ? v.res.map((r, i) => row(r, secs[i])) : undefined });
   },
   // development: the pit lane's per-frame cost (pitFrame: every pit car's state; the crews), average over the frames
   pitCostMs(reset = false) { const r = { avgMs: +(pitCost.ms / Math.max(1, pitCost.frames)).toFixed(3), frames: pitCost.frames }; if (reset) { pitCost.ms = 0; pitCost.frames = 0; } return JSON.stringify(r); },
