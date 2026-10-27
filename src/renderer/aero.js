@@ -124,7 +124,7 @@ export function estimateZones(pts, cum, L, { maxTurn = 0.12, minLen = 450, start
 //     silverstone.co.uk 2026 "brakes or lifts off the throttle"). No source found says Straight Mode can be activated
 //     again in the same zone after it closed, nor that it can't. 2011–2025 DRS (2025 Sporting Regulations Art. 22.1
 //     (e)): "disabled the first time the driver brakes after activating" – no re-activation in that zone.
-//   So: one activation per pass, ended by the first brake sample of THAT pass (or the zone's end) – confidence M. Not
+//   So: one activation per pass, ended by the first brake after it in THAT pass (or the zone's end) – confidence M. Not
 //   a timer: the pass is the car's own crossing of the zone's start, from its position history.
 // The entry: the time this pass crossed the zone's start in `hist` (binary search in the current run, bridged over a
 // gap of ≤ ENTRY.bridge ms that split the run). Without a crossing in the data (the data begins in the zone: a replay
@@ -133,16 +133,30 @@ export function estimateZones(pts, cum, L, { maxTurn = 0.12, minLen = 450, start
 // for from there, nothing earlier is assumed. Without `hist` at all (the old input): t − (metres in) / (speed now) – an
 // approximation kept for callers without positions only.
 // The brake: the telemetry's (CarData channel 5) samples from the entry to t (on the telemetry's clock: + lag), never
-// later than `now`.
+// later than `now`; the corner's braking carried across the zone's start delays the activation to its release
+// (passBrakes) – the first brake after that ends it.
 export const ACTIVE = { minSpeed: 100 };   // km/h – below it the flaps are drawn shut (an estimate: a crawling car, the formation)
 export const ENTRY = { bridge: 15000 };    // ms – a hole in the positions bridged when looking for the entry (4 s and more split a run: smooth.js)
-function firstBrake(tel, t0, t1) {
-  if (!tel || !tel.t || !tel.brk) return null;
-  const T = tel.t; let lo = 0, hi = T.length - 1;
-  if (hi < 0 || T[hi] < t0) return null;
+// This pass's brake samples over [t0, t1] (the telemetry's clock): PB.act – when Straight Mode is taken as activated
+// (t0; or, when the car is braking across the zone's start – the corner's braking still on as it crosses the line,
+// the sample before t0 within 1 s braking too – its first sample off the brake after it; null: still braking from
+// before), PB.brake – the first brake sample after that (null: none). "After activating", as the 2025 DRS rule said
+// (Sporting Regulations 2025 Art. 22.1 (e)): a brake before the driver could activate is not the one that ends it.
+const PB = { act: null, brake: null };
+function passBrakes(tel, t0, t1) {
+  PB.act = t0; PB.brake = null;
+  if (!tel || !tel.t || !tel.brk) return PB;
+  const T = tel.t, B = tel.brk; let lo = 0, hi = T.length - 1;
+  if (hi < 0 || T[hi] < t0) return PB;
   while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] < t0) lo = m + 1; else hi = m; }
-  for (let i = lo; i < T.length && T[i] <= t1; i++) if (tel.brk[i]) return T[i];
-  return null;
+  let i = lo;
+  if (i > 0 && B[i - 1] && i < T.length && B[i] && T[i] - T[i - 1] <= 1000) {
+    while (i < T.length && T[i] <= t1 && B[i]) i++;
+    if (i >= T.length || T[i] > t1) { PB.act = null; return PB; }
+    PB.act = T[i];
+  }
+  for (; i < T.length && T[i] <= t1; i++) if (B[i]) { PB.brake = T[i]; break; }
+  return PB;
 }
 // the history's index at t: the last sample at or before t (−1: none)
 function histIndex(H, t) {
@@ -216,10 +230,13 @@ export function activeAeroAt(inp, out = {}) {
   if (inp.startGate != null && z.span.z?.t1 && tStart < inp.startGate + 20000 && t >= inp.startGate - 60000) return shut("start: not past Turn 1 yet");
   // the brake of this pass, on the telemetry's clock (lag) and never past `now`
   const lag = inp.hist ? inp.lag || 0 : 0, tTo = Math.min(t + lag, inp.now ?? Infinity);
-  const tbTel = firstBrake(inp.tel, tStart + lag, tTo), tb = tbTel == null ? null : tbTel - lag;
+  const pb = passBrakes(inp.tel, tStart + lag, tTo);
+  if (pb.act == null) return shut("braking (not yet activated)");
+  const tAct = pb.act - lag, tb = pb.brake == null ? null : pb.brake - lag;
+  if (tEnd != null && tAct >= tEnd) return shut("zone end");
   let trigger = tb != null ? tb : tEnd;
   if (tEnd != null && tb != null && tb > tEnd) trigger = tEnd;
-  const k = trigger == null ? ease((t - tStart) / 1000 / MOVE.open) : ease((trigger - tStart) / 1000 / MOVE.open) * (1 - ease((t - trigger) / 1000 / MOVE.close));
+  const k = trigger == null ? ease((t - tAct) / 1000 / MOVE.open) : ease((trigger - tAct) / 1000 / MOVE.open) * (1 - ease((t - trigger) / 1000 / MOVE.close));
   const why = trigger == null ? (known ? "straight mode (estimated)" : "straight mode (estimated; zone entry not in the data – from its first sample)") : tb != null && tb === trigger ? "braking" : "zone end";
   // (low grip: the front wing alone – B7.1.1 / B7.1.2 (b), Issue 07: "partially activated")
   out.open = inp.mode === "low" ? 0 : k; out.front = k; out.why = why; return out;

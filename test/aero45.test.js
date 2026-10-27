@@ -181,3 +181,18 @@ test("the telemetry's lag against the positions (smooth.js telemetryLag): a brak
   assert.strictEqual(activeAeroAt(base({ spans, tel, hist: H, t: 15000, s: sOf(H, 15000), speed: 288, lag: 400 })).open, 1);
   assert.strictEqual(activeAeroAt(base({ spans, tel, hist: H, t: 15000, s: sOf(H, 15000), speed: 288, lag: 0 })).open, 0);
 });
+
+test("the corner's braking carried across the zone's start: activated once off the brake; the next brake ends it for the pass", async () => {
+  const { activeAeroAt, MOVE } = await load();
+  const spans = [{ a: 1000, b: 2600, len: 1600, z: {} }];
+  const H = hist([[0, 400], [10000, 1000], [30000, 2600], [40000, 3400]]);
+  const tel = telOf(40000, [9500, 9750, 10000, 10250, 10500]);   // on the brake from 9.5 s to 10.5 s – across the entry (10 s)
+  const at = (tel, t) => activeAeroAt(base({ spans, tel, hist: H, t, s: sOf(H, t), speed: 250 }));
+  assert.strictEqual(at(tel, 10400).open, 0); assert.match(at(tel, 10400).why, /not yet activated/);
+  const r = at(tel, 10750 + MOVE.open * 500); assert.ok(r.open > 0 && r.open < 1, `opening from the release: ${r.open}`);
+  assert.strictEqual(at(tel, 14000).open, 1);
+  const tel2 = telOf(40000, [9500, 9750, 10000, 10250, 10500, 16000]);
+  for (const t of [16500, 20000, 28000]) assert.strictEqual(at(tel2, t).open, 0, `after the brake at 16 s: ${t}`);
+  // a brake that begins at the zone's start (none just before it) is a brake in the zone
+  assert.strictEqual(at(telOf(40000, [10000]), 14000).open, 0);
+});
