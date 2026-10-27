@@ -210,9 +210,12 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
   // after A → B → A had asked again, and an older live refresh replace a newer one); reset() / configure() start a new
   // generation, so nothing asked before them lands after. The key (session + place) still decides when to ask: the same
   // session on another source object or a rebuilt world keeps its answer, in flight or arrived – no request per world.
-  function cloudsLand(gen, key, r) {
+  // A failed live refresh keeps the last good value of this key: coverAt() uses its hour only within 90 min of the
+  // moment shown, so it turns neutral by itself once stale.
+  function cloudsLand(gen, key, r, live) {
     if (gen !== S.cloudsGen || key !== S.cloudsKey || !S.useClouds) return;
-    S.clouds = r; S.coverAt = -Infinity;
+    if (r || !live) S.clouds = r;
+    S.coverAt = -Infinity;
   }
   function clouds(A, world, src, t) {
     if (!S.useClouds || !world?.geoCenter || !window.api?.geo?.clouds || !Number.isFinite(t)) return null;
@@ -224,8 +227,10 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
         const utc = src.utcAt?.(t);
         if (Number.isFinite(utc)) {
           const gen = ++S.cloudsGen;
-          S.cloudsKey = key; S.cloudsAsk = now; if (!src.isLive) S.clouds = null; S.coverAt = -Infinity;
-          window.api.geo.clouds(world.geoCenter[0], world.geoCenter[1], utc, !!src.isLive).then((r) => cloudsLand(gen, key, r?.ok ? r : null), () => cloudsLand(gen, key, null));
+          // (a live refresh of the same key keeps the value shown until its answer; anything else starts with none)
+          if (!src.isLive || key !== S.cloudsKey) S.clouds = null;
+          S.cloudsKey = key; S.cloudsAsk = now; S.coverAt = -Infinity;
+          window.api.geo.clouds(world.geoCenter[0], world.geoCenter[1], utc, !!src.isLive).then((r) => cloudsLand(gen, key, r?.ok ? r : null, !!src.isLive), () => cloudsLand(gen, key, null, !!src.isLive));
         }
       }
     }

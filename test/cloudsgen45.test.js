@@ -96,3 +96,26 @@ test("clouds45 §6: a rebuilt world – the same place keeps its answer (in flig
   assert.strictEqual(R2.shown(), "far");
   R.done(); R2.done();
 });
+
+test("clouds45 §6: live – a failed 15-min refresh keeps the last good value while its hour is still near the moment shown; neutral once stale; a new live session never shows the last one's value", async () => {
+  const R = await rig(), s = R.live(7), w = R.world(), a = R.A(s, "live:7:0");
+  await R.step(a, w); R.asked[0].res(ok("L1")); await R.step(a, w);
+  assert.strictEqual(R.shown(), "L1");
+  for (const fail of [{ ok: false, reason: "HTTP 503" }, "reject"]) {
+    R.tick(16 * 60e3); await R.step(a, w);
+    const q = R.asked.at(-1); if (fail === "reject") q.rej(new Error("ipc")); else q.res(fail);
+    await R.step(a, w);
+    assert.strictEqual(R.shown(), "L1", `the refresh's ${fail === "reject" ? "rejection" : "failure"} keeps the still-valid value`);
+  }
+  // stale: the moment shown is 3 h on – the kept hours (T0 ± 1 h) are more than 90 min away – neutral
+  a.t = 3 * 36e5; await R.step(a, w);
+  assert.strictEqual(R.shown(), null, "a stale value falls back to neutral");
+  // a new live session at the same place (another key; the app keeps the live source object and map3d.js rebuilds the
+  // world when the session changes): the last session's value isn't shown while its own answer is pending, nor after it fails
+  s.state.SessionInfo.Key = 8; const b = R.A(s, "live:8:0"), w2 = R.world(), n = R.asked.length; await R.step(b, w2);
+  assert.strictEqual(R.asked.length, n + 1, "the new session asked");
+  assert.strictEqual(R.shown(), null, "not the last session's value while its own answer is pending");
+  R.asked.at(-1).res({ ok: false, reason: "timeout" }); await R.step(b, w2);
+  assert.strictEqual(R.shown(), null, "nor after its own refresh fails");
+  R.done();
+});
