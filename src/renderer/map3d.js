@@ -2195,7 +2195,7 @@ function officialSide(gb, sn) {
   };
   const a = look(1), b = look(-1), w = a.room >= b.room ? a : b;
   const stand = w.wall == null ? 2.2 : w.wall < 3.5 ? w.wall + 1.2 : Math.min(2.2, w.wall - 1);
-  return { sg: w.sg, stand };
+  return { sg: w.sg, stand, sides: [a, b] };
 }
 function supportNote(plan, models) {
   const parts = [];
@@ -4158,6 +4158,20 @@ window.Map3D = {
   starts() { const src = app().src; if (!src) return "null"; const shown = shownStarts(src, app().t), S = startState(src, app().t); return JSON.stringify({ shown: shown.map((s) => ({ t: s.t, standing: s.standing, from: s.from || null })), launches: [...(S.launches || new Map())].map(([t, f]) => [t, f && { t: f.t, n: f.n, of: f.of }]) }); },
   // development: the support cars and the official as placed this frame
   support() { const SP = world?.support; if (!SP) return "null"; const pos = (k) => { const o = SP.cars[k]?.obj; return o?.visible ? o.position.toArray().map((v) => +v.toFixed(1)) : null; }; return JSON.stringify({ plan: SP.plan, models: SP.models, sc: pos("sc"), med: pos("med"), last: [...SP.starts.values()][0]?.last || null, order: [...SP.starts.values()][0]?.order || null, official: SP.officialShown || false, officialAt: SP.officialAt || null, scLast: SP.scLast || null, medFollows: SP.medFollows || null, lap1: [...SP.starts.values()][0]?.lap1 || null, lane: world.pitLane ? { entry: [laneAt(0).x, laneAt(0).z].map((v) => +v.toFixed(1)), exit: [laneAt(world.pitLane.exitU).x, laneAt(world.pitLane.exitU).z].map((v) => +v.toFixed(1)), len: +world.pitLane.len.toFixed(1), exitU: +world.pitLane.exitU.toFixed(1) } : null, gridBack: SP.gridBack ? { x: +SP.gridBack.x.toFixed(1), z: +SP.gridBack.z.toFixed(1), f: [+SP.gridBack.f.x.toFixed(3), +SP.gridBack.f.z.toFixed(3)] } : null }); },
+  // development: the rear-of-grid official against the track, the pit lane and the medical car this frame (v0.46 §4):
+  // lateral offsets d (+ left) from the lap line's frame, the edges there, the distance to the pit lane's measured path,
+  // inside the pit building's lane (pit model: 0 … wall from the garages) and the gap to the medical car's outline
+  flagDiag() {
+    const SP = world?.support; if (!SP || !world.frame) return "null";
+    const F = world.frame, P = (x, z) => { const pr = F.project(x, z); return pr ? { d: +pr.d.toFixed(2), L: +edgeOf(pr.sample, 1).toFixed(2), R: +edgeOf(pr.sample, -1).toFixed(2), on: pr.d <= edgeOf(pr.sample, 1) && pr.d >= edgeOf(pr.sample, -1) } : null; };
+    const lane = (x, z) => { const L = world.pitLane; if (!L) return null; let b = Infinity; for (let i = 1; i < L.pts.length; i++) { const a = L.pts[i - 1], c = L.pts[i], dx = c.x - a.x, dz = c.z - a.z, l2 = dx * dx + dz * dz, f = l2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0; b = Math.min(b, Math.hypot(a.x + dx * f - x, a.z + dz * f - z)); } return +b.toFixed(2); };
+    const G = pitTeams.G, inPit = (x, z) => { if (!G) return null; const m = pitModelFor(G), pr = G.project(x, z); if (pr.u < G.gStart - 20 || pr.u > G.gEnd + 20) return false; const w = m.at(Math.max(G.gStart, Math.min(G.gEnd, pr.u))).wall; return pr.off >= -0.5 && pr.off <= (w || 0); };
+    const o = SP.officialAt, mo = SP.cars.med?.obj, med = mo?.visible ? { x: mo.position.x, z: mo.position.z, yaw: mo.rotation.y, L: mo.userData.spec?.L || 5.05, W: mo.userData.spec?.W || 1.96 } : null;
+    const gap = (x, z) => { if (!med) return null; const c = Math.cos(med.yaw), s = Math.sin(med.yaw), dx = x - med.x, dz = z - med.z, along = dx * s + dz * c, across = dx * c - dz * s; return +Math.hypot(Math.max(0, Math.abs(along) - med.L / 2), Math.max(0, Math.abs(across) - med.W / 2)).toFixed(2); };
+    const gb = SP.gridBack, laneSide = gb && world.pitLane ? (() => { let b = Infinity, q = null; for (const p of world.pitLane.pts) { const d = Math.hypot(p.x - gb.x, p.z - gb.z); if (d < b) { b = d; q = p; } } const pr = q && F.project(q.x, q.z); return pr ? { d: +pr.d.toFixed(1), dist: +b.toFixed(1) } : null; })() : null;
+    return JSON.stringify({ plan: SP.plan?.official || null, med: SP.plan?.medical?.mode || null, official: o ? { x: o.x, z: o.z, sg: o.sg, stand: o.stand, out: o.out, track: P(o.x, o.z), laneDist: lane(o.x, o.z), inPit: inPit(o.x, o.z), medGap: gap(o.x, o.z) } : null,
+      medCar: med ? { x: +med.x.toFixed(1), z: +med.z.toFixed(1), track: P(med.x, med.z) } : null, gridBack: gb ? { x: +gb.x.toFixed(1), z: +gb.z.toFixed(1), track: P(gb.x, gb.z) } : null, laneAtBack: laneSide, sides: SP.off?.sides?.map((q) => ({ sg: q.sg, room: +q.room.toFixed(1), wall: q.wall == null ? null : +q.wall.toFixed(1) })) || null });
+  },
   // development: the marshal posts as placed, their flags now
   marshals() { const M = world?.marshals; if (!M) return "null"; return JSON.stringify({ info: M.info, state: M.state, flags: [...M.flags].filter(([, f]) => f.group.visible).length, N: world.samples.length, bounds: M.map?.bounds.map((b) => [b.n, b.i]), mirrors: M.map?.mirrors.map((b) => [b.n, b.i]), logical: M.map?.posts.map((p) => [p.id, p.i, p.sector, p.first ? 1 : 0]), panels: M.panels.map((p) => [p.n, p.sig ?? null, p.cell, +p.x.toFixed(1), +p.z.toFixed(1), p.i]), posts: M.posts.slice(0, 80).map((p) => [p.id, p.sector, +p.x.toFixed(1), +p.z.toFixed(1), +groundY(p.x, p.z).toFixed(1), p.first ? 1 : 0, p.i]) }); },
   // development: the harbour's yachts as laid out (per zone: count, lengths)
