@@ -134,3 +134,11 @@ test("the pit lane in front of the garages is kept clear of mapped barriers; the
   assert.strictEqual(inLane(0, -29.5), false, "the garages' front");
   assert.strictEqual(inLane(400, -45), false, "past the garages");
 });
+
+test("the pit wall is looked for only among the map's barrier pieces that are drawn (Silverstone: a piece on the tarmac, cut from the picture, had been taken for it)", async () => {
+  const { solidBarrierSegs } = await import("../src/renderer/pitwallcheck.js");
+  const lines = [{ k: "barrier", sub: "guard_rail", pts: [[0, 0], [10, 0], [20, 0], [30, 0]] }, { k: "barrier", sub: "fence", pts: [[0, 5], [30, 5]] }, { k: "road", pts: [[0, 9], [9, 9]] }];
+  const onTarmac = (x) => x > 15;   // (the points at x 20 and 30 lie on the tarmac: cut from the drawn barrier)
+  assert.deepStrictEqual(solidBarrierSegs(lines, (p) => p, onTarmac), [[0, 0, 10, 0]]);
+  assert.strictEqual(solidBarrierSegs(lines, (p) => p).length, 3, "all pieces where none is on the tarmac; never a fence");
+});

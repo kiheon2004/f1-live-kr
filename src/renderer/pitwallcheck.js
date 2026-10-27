@@ -65,3 +65,16 @@ export function pitLaneOf(G, margin = 0.3) {
   if (!G?.wallFace || !G.project) return null;
   return (x, z) => { const p = G.project(x, z); return p.u > G.gStart && p.u < G.gEnd && p.off > 0.3 && p.off < G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, p.u))) - margin; };
 }
+
+// The map's solid barriers (walls, jersey barriers, retaining walls, guard rails – not fences) as segments [ax, az, bx,
+// bz] in scene metres – only pieces that are drawn: scenery.js barriersMesh cuts a line's points on the tarmac
+// (onTarmac(x, z)), and a piece found but not drawn had been taken for the pit wall (v0.46: Silverstone 2024's end – no
+// wall before the last teams' stands; run/pitwall)
+export function solidBarrierSegs(lines, xz, onTarmac = () => false) {
+  const out = [];
+  for (const l of lines) if (l.k === "barrier" && /^(wall|retaining_wall|jersey_barrier|guard_rail)$/.test(l.sub || "")) {
+    const q = l.pts.map(xz), on = q.map(([x, z]) => onTarmac(x, z));
+    for (let i = 1; i < q.length; i++) if (!on[i - 1] && !on[i]) out.push([q[i - 1][0], q[i - 1][1], q[i][0], q[i][1]]);
+  }
+  return out;
+}

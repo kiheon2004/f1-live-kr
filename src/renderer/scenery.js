@@ -22,7 +22,7 @@ import { pathFrame } from "./pitlane.js";
 import { planTunnels, buildTunnels } from "./tunnel.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
-import { pitLaneOf } from "./pitwallcheck.js";
+import { pitLaneOf, solidBarrierSegs } from "./pitwallcheck.js";
 import { otherSection, joinHeight, roadProbes, clearRoads, skirtStrips, shoreCap } from "./roadground.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
@@ -957,7 +957,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const barrierSegs = [];
     // (only what is drawn – barriersMesh below cuts a piece's points on the tarmac: v0.46, Silverstone 2024's mapped wall
     // was found there, none was drawn, and the last teams' stands had no wall before the tarmac – run/pitwall)
-    for (const l of scene.lines) if (l.k === "barrier" && /^(wall|retaining_wall|jersey_barrier|guard_rail)$/.test(l.sub || "")) { const q = l.pts.map(gf.xz), on = q.map(([x, z]) => corridor.on(x, z, -0.3)); for (let i = 1; i < q.length; i++) if (!on[i - 1] && !on[i]) barrierSegs.push([q[i - 1][0], q[i - 1][1], q[i][0], q[i][1]]); }
+    barrierSegs.push(...solidBarrierSegs(scene.lines, gf.xz, (x, z) => corridor.on(x, z, -0.3)));
     const barrierRay = (x, z, dx, dz, max = 60) => {
       let best = Infinity;
       for (const [ax, az, bx, bz] of barrierSegs) {
