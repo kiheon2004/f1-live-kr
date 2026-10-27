@@ -126,6 +126,25 @@ export function medicalLap1({ L, order, pos, inLane, nearEntry, dataEnd = Infini
   return { t: null, final: true };
 }
 
+// Where the rear-of-grid official stands, in the lap line's frame at the back of the grid (u m along the track, + towards
+// the grid; v m across, + left): the side with more room before a barrier (map3d.js measures it: sides, in the order it
+// looked – dir +1 left / −1 right, room, wall m from the edge or null, edge: the half-width it used); a barrier within
+// 3.5 m: behind it (+1.2 m, at an opening – where the opening is isn't known), else 2.2 m out, never past 1 m short of
+// it – out from the grid's rear point (gbV across); the walk-off 2.5 m on out.
+//   → { flag: { u, v }, exit: { u, v }, side }
+export function flagSpot(g) {
+  const [a, b] = g.sides, w = a.room >= b.room ? a : b;
+  const stand = w.wall == null ? 2.2 : w.wall < 3.5 ? w.wall + 1.2 : Math.min(2.2, w.wall - 1), v = g.gbV + w.dir * (w.edge + stand);
+  return { flag: { u: 0, v }, exit: { u: 0, v: v + w.dir * 2.5 }, side: w.dir };
+}
+// The official at a moment of the plan (supportPlan's official): waving at the flag spot, facing the grid; then walking
+// from it to the exit (walked: m so far – the feet in step)
+export function flagAt(spot, phase, f) {
+  if (phase === "flag") return { u: spot.flag.u, v: spot.flag.v, walked: 0, facing: "grid" };
+  const du = spot.exit.u - spot.flag.u, dv = spot.exit.v - spot.flag.v, k = Math.max(0, Math.min(1, f));
+  return { u: spot.flag.u + du * k, v: spot.flag.v + dv * k, walked: Math.hypot(du, dv) * k, facing: "walk" };
+}
+
 // The support cars' models by season and event – what a source shows (docs/research/support_cars_start.md); null where
 // the maker isn't known for that event (2025's rotation was never published race by race: only Saudi Arabia, Spain and
 // the Netherlands are sourced) – then a neutral car, said so, never another year's or event's model.
