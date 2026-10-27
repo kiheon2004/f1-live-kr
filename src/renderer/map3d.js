@@ -11,7 +11,7 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
-import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, SUPPORT } from "./support.js";
+import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
@@ -2157,7 +2157,9 @@ function updateSupport(src, t) {
   if (plan.official && SP.gridBack && SP.gridBack.t === start?.t) {
     if (!SP.crew) { SP.crew = crewMeshes(2); SP.group.add(SP.crew.group); SP.flag = makeFlag("green"); SP.group.add(SP.flag.group); }
     const F = world.frame;
-    if (!SP.off || SP.off.t !== start.t) { const o = F.project(SP.gridBack.x, SP.gridBack.z); const ground = o ? flagGround(SP.gridBack, o) : null; SP.off = { t: start.t, s: o?.s, ground, spot: ground ? flagSpot(ground) : null }; }
+    // (once per start – again when the pit building or the map's barriers arrive: they decide where it can step off)
+    const offKey = `${start.t}|${!!pitTeams.G}|${!!world.real}`;
+    if (!SP.off || SP.off.key !== offKey) { const o = F.project(SP.gridBack.x, SP.gridBack.z); const ground = o ? flagGround(SP.gridBack, o, rear, medId) : null; SP.off = { key: offKey, s: o?.s, ground, spot: ground ? flagSpot(ground) : null }; }
     const { s: s0, spot } = SP.off;
     if (spot) {
       const p = flagAt(spot, plan.official.phase, plan.official.f), q = [0, 0, 0], D = [0, 1];
@@ -2181,20 +2183,31 @@ function updateSupport(src, t) {
 }
 // the last starter's grid place at a start (startplan's carKind)
 function carKindG(src, start, num) { const S = startState(src, start.t), ctx = startCtxAt(S, start.t); return ctx ? carKind(S.hist, ctx, num, start.t)?.g ?? null : null; }
-// The ground the rear-of-grid official's place is chosen on (support.js flagSpot): each side's room before a barrier
-// (the map's or the generated one, a ray from the edge at the grid's rear point; its distance – null: none within 40 m)
-// and the half-width there. gb: the grid's rear point with the grid's direction f; o: its place in the lap line's frame
-function flagGround(gb, o) {
-  const targets = [world.real?.group.getObjectByName("barriers"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
-  const ray = new THREE.Raycaster(), f = gb.f, sn = o.sample;
-  const look = (sg) => {
-    const e = sn ? (sg > 0 ? sn.L ?? 7 : -(sn.R ?? -7)) : 7, nx = f.z * sg, nz = -f.x * sg;
-    ray.set(new THREE.Vector3(gb.x + nx * e, (sn?.p.y ?? 0) + 0.6, gb.z + nz * e), new THREE.Vector3(nx, 0, nz)); ray.far = 40;
-    const hit = targets.length ? ray.intersectObjects(targets, true)[0] : null;
-    const [q, dd] = world.grid.nearest(gb.x + nx * (e + 6), gb.z + nz * (e + 6), 2), room = Math.min(hit ? hit.distance : 40, q ? dd : 40);
-    return { dir: Math.sign(nx * sn.nor.x + nz * sn.nor.z) || sg, room, wall: hit ? hit.distance : null, edge: e };
+// The ground the rear-of-grid official's place is chosen on (support.js flagSpot), in the lap line's frame from the
+// grid's rear point (o: its place in the frame): the medical car there (rear: its centre; id: its model, for its size),
+// the asphalt's edges along the track, the first barrier past each edge across from in front of the medical car (the
+// map's or the generated one, a level ray; null: none within 40 m) and the pit lane – inside the pit building's lane
+// (garages to the wall's face, pitModelFor) or, off the asphalt, within 8 m of the measured pit path (world.laneZone)
+function flagGround(gb, o, rear, id) {
+  const F = world.frame, q = [0, 0, 0], at = (u, v) => { F.at(o.s + u, v, q); return q; };
+  const spec = SUPPORT_CARS[id] || SUPPORT_CARS.neutralMedical, mp = rear ? F.project(rear.x, rear.z) : null;
+  const med = mp ? { u: mp.s - o.s, v: mp.d, L: spec.L, W: spec.W } : null;
+  const edges = (u) => { const s = F.sampleAt(o.s + u); return { L: edgeOf(s, 1), R: edgeOf(s, -1) }; };
+  const G = pitTeams.G, m = G ? pitModelFor(G) : null;
+  const inPit = (u, v) => {
+    const [x, , z] = at(u, v), e = edges(u);
+    if (G) { const pr = G.project(x, z); if (pr.u >= G.gStart - 20 && pr.u <= G.gEnd + 20 && pr.off >= -0.5 && pr.off <= (m.at(Math.max(G.gStart, Math.min(G.gEnd, pr.u))).wall || 0)) return true; }
+    return (v > e.L || v < e.R) && !!world.laneZone?.(x, z);
   };
-  return { gbV: o.d, sides: [look(1), look(-1)] };
+  const targets = [world.real?.group.getObjectByName("barriers"), world.group.getObjectByName("syntheticWalls")].filter(Boolean), ray = new THREE.Raycaster();
+  const u0 = med ? med.u + med.L / 2 + FLAG.ahead : 0;
+  const wall = (sg) => {
+    if (!targets.length) return null;
+    const e = edges(u0), [x0, y0, z0] = at(u0, sg > 0 ? e.L : e.R), [x1, , z1] = at(u0, (sg > 0 ? e.L : e.R) + sg), d = Math.hypot(x1 - x0, z1 - z0) || 1;
+    ray.set(new THREE.Vector3(x0, y0 + 0.6, z0), new THREE.Vector3((x1 - x0) / d, 0, (z1 - z0) / d)); ray.far = 40;
+    const h = ray.intersectObjects(targets, true)[0]; return h ? h.distance : null;
+  };
+  return { gbV: o.d, med, edges, wall: { L: wall(1), R: wall(-1) }, inPit };
 }
 function supportNote(plan, models) {
   const parts = [];

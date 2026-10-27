@@ -11,10 +11,12 @@
 // the start following the last car on the road round the first lap (followTarget), through the pit lane from its entry
 // at the lap's end (medicalLap1 – found in the positions; live: provisional until they have it), parked at the pit exit
 // after. No lap end in the data: not followed past 150 s and not parked on a guess – not shown until lap 3.
-// The rear-of-grid official (FIA Appendix H 2026 2.5.5 g): once the field stands, a marshal at the back of the grid –
-// behind a barrier opening near it, or as far from the track's edge as possible – waves the green flag to tell the
-// starter all cars are stationary; then steps back before the lights. No time in the data: a reproduction of the order
-// only, ahead of the lights' own estimate; it never moves the start.
+// The rear-of-grid official: once the field stands, a marshal at the back of the grid – on the track, on the medical
+// car's side, by the medical car behind the last row (the user's observation of F1 starts; flagSpot) – waves the green
+// flag to tell the starter all cars are stationary; then steps off the track before the lights (never into the pit
+// lane). FIA Appendix H 2026 2.5.5 g has the marshal behind a barrier opening or far from the edge: kept for the step
+// off only (flagSpot). No time in the data: a reproduction of the order only, ahead of the lights' own estimate; it
+// never moves the start.
 // None of them is a competitor: not in the standings, lap counts, grid or driver counts (they never enter those paths).
 
 export const SUPPORT = {
@@ -127,15 +129,49 @@ export function medicalLap1({ L, order, pos, inLane, nearEntry, dataEnd = Infini
 }
 
 // Where the rear-of-grid official stands, in the lap line's frame at the back of the grid (u m along the track, + towards
-// the grid; v m across, + left): the side with more room before a barrier (map3d.js measures it: sides, in the order it
-// looked – dir +1 left / −1 right, room, wall m from the edge or null, edge: the half-width it used); a barrier within
-// 3.5 m: behind it (+1.2 m, at an opening – where the opening is isn't known), else 2.2 m out, never past 1 m short of
-// it – out from the grid's rear point (gbV across); the walk-off 2.5 m on out.
-//   → { flag: { u, v }, exit: { u, v }, side }
-export function flagSpot(g) {
-  const [a, b] = g.sides, w = a.room >= b.room ? a : b;
-  const stand = w.wall == null ? 2.2 : w.wall < 3.5 ? w.wall + 1.2 : Math.min(2.2, w.wall - 1), v = g.gbV + w.dir * (w.edge + stand);
-  return { flag: { u: 0, v }, exit: { u: 0, v: v + w.dir * 2.5 }, side: w.dir };
+// the grid; v m across, + left). Sources (docs/research/support_cars_start.md): the user's observation of the start
+// (v0.46): on the track, on the medical car's side, by the medical car behind the last row – waving, then stepping away
+// before the lights; Kym Illman, 31 Mar 2025 ("with the medical car positioned at the rear, a marshal waves a green
+// flag"); Red Bull's flag guide (a marshal behind the grid crosses the track with it). FIA Appendix H 2026 2.5.5 g (FIA
+// Safety Bulletin 56, "2026 Regulatory Changes": "behind a barrier opening at the back of the grid, if available … if
+// no barrier is present, as far from the track edge as possible") puts the waving itself off the track – that differs
+// from what the user sees at F1 starts, so the waving follows the user; the barrier opening is kept only for the step
+// off: a barrier right at the edge on that side is passed at an opening, never one that has the pit lane behind it.
+//   g: { med: { u, v, L, W } (the medical car's centre and size) | null, gbV (the grid's rear point across), edges(u) →
+//   { L, R } (the asphalt's edges, R < 0), wall: { L, R } (the first barrier past that edge, m; null: none within 40 m),
+//   inPit(u, v) → in the pit lane (its building's lane or near its measured path, off the asphalt) }
+//   → { flag: { u, v }, exit: { u, v }, side (the medical car's: +1 left, −1 right), via: "edge" | "opening" (its own
+//     side) | "across …" (the other side: none to stand on by the medical car) | "none" (no side: stays at the edge) }
+export const FLAG = {
+  ahead: 1.2,        // m in front of the medical car's nose (close by, clear of it – estimate, L)
+  beside: 0.6,       // m out past the line of its side, towards its own edge (estimate, L)
+  inside: 0.8,       // m inside the asphalt's edge at least while waving (on the track)
+  out: 2.0,          // m past the edge it walks to (off the asphalt – estimate, L)
+  min: 0.8,          // m past the edge at least for a place off the track to count
+  barrierBack: 0.8,  // m short of a barrier past the edge
+  near: 1.6,         // a barrier this close to the edge (a street circuit's walls: 1.4 m) – no room to stand in front:
+                     // stepped through at an opening (Appendix H 2026 2.5.5 g; where the opening is isn't known) …
+  opening: 1.2,      // … to this far behind it
+  pitClear: 1.5,     // m short of the pit lane at least
+  look: 14,          // m past the edge searched for the pit lane
+};
+export function flagSpot(g, F = FLAG) {
+  const m = g.med, ms = Math.sign(m ? m.v : g.gbV) || 1;
+  const u = m ? m.u + m.L / 2 + F.ahead : 0, e = g.edges(u);
+  const v = Math.max(e.R + F.inside, Math.min(e.L - F.inside, m ? m.v + ms * (m.W / 2 + F.beside) : g.gbV));
+  // (a way off on side sg: how far past the edge – short of a barrier and the pit lane, or behind a barrier at the edge)
+  const off = (sg) => {
+    const E = sg > 0 ? e.L : e.R, w = g.wall?.[sg > 0 ? "L" : "R"] ?? null;
+    let pit = Infinity; for (let k = 0; k <= F.look; k += 0.25) if (g.inPit(u, E + sg * k)) { pit = k; break; }
+    if (w != null && w <= F.near) { const d = w + F.opening; return pit >= d + F.pitClear ? { d, via: "opening" } : null; }
+    const d = Math.min(F.out, w != null ? w - F.barrierBack : Infinity, pit - F.pitClear);
+    return d >= F.min ? { d, via: "edge" } : null;
+  };
+  for (const sg of [ms, -ms]) {
+    const r = off(sg); if (!r) continue;
+    return { flag: { u, v }, exit: { u, v: (sg > 0 ? e.L : e.R) + sg * r.d }, side: ms, via: sg === ms ? r.via : "across " + r.via };
+  }
+  return { flag: { u, v }, exit: { u, v: ms > 0 ? e.L : e.R }, side: ms, via: "none" };
 }
 // The official at a moment of the plan (supportPlan's official): waving at the flag spot, facing the grid; then walking
 // from it to the exit (walked: m so far – the feet in step)
