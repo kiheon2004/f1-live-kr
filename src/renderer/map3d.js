@@ -4021,6 +4021,21 @@ window.Map3D = {
     }));
   },
   // development: look at a team's pit wall stand from the pit lane (side: + towards its garage) – dist m away, h up
+  // development (v0.46): the pit wall at a team's box (a name, or the k-th team with a box along the lane), from a camera
+  // placed by the garages and the track's edge alone – not by the wall or the stand, so before and after a change to
+  // them it stands in the same place: "above" – 9 m over the lane, 22 m back along it, looking down the wall; "lane" –
+  // 1.7 m up in the pit lane 9 m short of the edge's line, 12 m back, looking along the wall
+  viewPitWall(team = 0, mode = "above", fov = 55) {
+    const G = pitTeams.G, ts = (pitTeams.teams || []).filter((t) => t.box != null).sort((a, b) => a.box - b.box);
+    const t = typeof team === "number" ? ts[Math.max(0, Math.min(ts.length - 1, team))] : ts.find((q) => q.team.toLowerCase().includes(String(team).toLowerCase()));
+    if (!G || !t) return "no team";
+    const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p)), out = [-s.inward[0], -s.inward[1]], F = world.frame;
+    const at = (a, d) => [s.front[0] + s.along[0] * (t.box - s.uc + a) + out[0] * d, s.front[1] + s.along[1] * (t.box - s.uc + a) + out[1] * d];
+    let edge = null; for (let d = 0; d < 60; d += 0.25) { const [x, z] = at(0, d), pr = F.project(x, z); if (pr && Math.abs(pr.d) <= (pr.d >= 0 ? edgeOf(pr.sample, 1) : -edgeOf(pr.sample, -1))) { edge = d; break; } }
+    if (edge == null) return "no edge";
+    const y = s.floor, [tx, tz] = at(0, edge - 3), [px, pz] = mode === "lane" ? at(-12, edge - 9) : at(-22, edge - 10), [qx, qz] = mode === "lane" ? at(2, edge - 3) : [tx, tz];
+    return this.look(px, y + (mode === "lane" ? 1.7 : 9), pz, qx, y + 1, qz, fov) + ` ${t.team} box ${Math.round(t.box)} edge ${edge}`;
+  },
   viewWallStand(team, dist = 6, h = 1.8, along = 0, fov = 55) {
     const tm = pitTeams.teams?.find((q) => q.team.toLowerCase().includes(String(team).toLowerCase())); const w = tm && pitTeams.G?.wallAt?.(tm.box);
     if (!w) return "no stand";
