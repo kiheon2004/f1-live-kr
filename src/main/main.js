@@ -63,7 +63,18 @@ app.whenReady().then(() => {
   scenes = new Scenes(cacheDir);
   google = new GoogleTiles(data);
   // (cloud cover for the 3D sky – clouds.js: Open-Meteo, anonymous; kept in the app's own data folder)
-  const clouds = new Clouds(path.join(data, "weather"));
+  // (development only: F1KR_CLOUDS_FETCH=fail | http:503 | delay:<ms> | garbage – the cloud requests fail, are refused,
+  // answer late or answer nonsense, for checking the neutral sky's fallback in the real app; not packaged)
+  const cf = !app.isPackaged && process.env.F1KR_CLOUDS_FETCH, cm = cf && /^(fail|http:(\d+)|delay:(\d+)|garbage)$/.exec(cf);
+  const cloudFetch = !cm ? undefined : async (...a) => {
+    console.log("[F1KR_CLOUDS_FETCH]", cf, String(a[0]).replace(/\?.*/, ""));
+    if (cm[1] === "fail") throw new TypeError("fetch failed (F1KR_CLOUDS_FETCH)");
+    if (cm[2]) return { ok: false, status: +cm[2], json: async () => ({}) };
+    if (cm[1] === "garbage") return { ok: true, status: 200, json: async () => ({ hourly: { time: ["x"], cloud_cover_low: [-999], cloud_cover_mid: [120], cloud_cover_high: [null] } }) };
+    await new Promise((r) => setTimeout(r, +cm[3]));
+    return fetch(...a);
+  };
+  const clouds = new Clouds(path.join(data, "weather"), cloudFetch);
   // After sleep the socket is usually dead without noticing; reconnect straight away.
   powerMonitor.on("resume", () => { if (!live.stopped) { live.retry = 0; live.connect(); } });
   live.on("snapshot", (snap) => send("live:snapshot", snap));

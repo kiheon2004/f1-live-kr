@@ -61,34 +61,64 @@ export function evolveWet(w, rain, dt) {
 export const INTENSITY = 0.6, RAMP = 40e3;
 // clouds linger after the rain stops (presentation; nothing in the feed): the overcast look fades over CLOUD_TAU
 export const CLOUD_TAU = 15 * 60e3;
+// Under a roof (a tunnel) no rain falls, but the cars carry water in on their tyres and bodies: the covered road is drawn
+// at this share of the open road's wetness (v0.45; an estimate, nothing measures it – L). It follows the open road's
+// wetness, so it wets and dries with it, gradually; at a tunnel's mouths it blends over the light mask's ~9 m spill
+// (wetroad.js).
+export const COVERED_WET = 0.3;
 
 // The session's records in time order: rain state, wetness at each record (computed once, from the records before it),
-// when the current rain state began and when the last rain ended. push() appends (live: as records arrive; replay: the
-// whole recording once) – a record older than the last is ignored, one at the same moment replaces it.
+// when the current rain state began and when the last rain ended. push() appends (live: as records are applied; replay:
+// the whole recording once).
+// Order (v0.45, checked 2026-10-21): every cached recording (54 sessions, 7730 WeatherData records) is in time order
+// with no two records at one moment, and a replay sorts its events anyway; a live feed's records are logged in the
+// order they are applied (LiveSource: receive order through the delay queue, its times made monotone there). So a
+// record older than the last is refused (push → false, counted in `refused`), never re-sorted per push; only
+// fromEvents sorts – a copy, once – a list it finds out of order.
+// Several partial updates at one moment (a feed may split a record): merged into that moment's record – the last value
+// given for a field wins, the fields not given keep theirs, a Rainfall given but unreadable is an explicit unknown
+// (missing ≠ unknown) – and its derived state (wetness, rain start / end) worked out again from the record before it
+// (the wetness integrated once, from the previous moment). The input objects are never changed; a merged record is a
+// new object (one handed out before stays as it was).
+// The road before the first record is unknown (a live feed joined mid-session; a recording that starts in rain – 2025
+// Australian Race, 2025 Miami Sprint): the wetness is kept as a lower bound `wet` (from the recorded rain alone, from a
+// dry start) plus `span`, how much of an unknown starting wetness (0–1) could still be on the road – the model is linear
+// in the starting value, so span decays as the model does (rain: e^−dt/TAU_WET, dry: e^−dt/TAU_DRY, unknown: held).
+// Nothing is invented: what is drawn is the lower bound (and the tyres' evidence over it), and span says how sure that is.
+const FIELDS = ["AirTemp", "Humidity", "Pressure", "TrackTemp", "WindDirection", "WindSpeed"];
+const spanAt = (log, k, t) => spanAfter(log.span[k], log.rain[k], t - log.ms[k]);
+function spanAfter(s, rain, dt) {
+  if (!(dt > 0) || !s) return s;
+  if (rain === 1) return s * Math.exp(-dt / TAU_WET);
+  if (rain === 0) return s * Math.exp(-dt / TAU_DRY);
+  return s;
+}
 export class WeatherLog {
-  constructor() { this.reset(); }
-  reset() { this.ms = []; this.rain = []; this.wet = []; this.since = []; this.rainEnd = []; this.recs = []; this.cur = {}; }
+  // opts.start: "unknown" (default: the road before the first record isn't known) or "dry" (known dry: span 0)
+  constructor(opts = {}) { this.start = opts.start === "dry" ? "dry" : "unknown"; this.reset(); }
+  reset() { this.ms = []; this.rain = []; this.wet = []; this.span = []; this.since = []; this.rainEnd = []; this.recs = []; this.refused = 0; }
   get size() { return this.ms.length; }
   // data: a WeatherData message (full or partial: fields it lacks keep their last value, as the app's merged state does;
   // a Rainfall that is there but unreadable is unknown)
   push(ms, data) {
     if (!Number.isFinite(ms) || !data || typeof data !== "object") return false;
-    const n = this.ms.length;
-    if (n && ms < this.ms[n - 1]) return false;
-    if (n && ms === this.ms[n - 1]) { this.pop(); return this.push(ms, data); }
-    const rec = { ...this.cur };
-    for (const k of ["AirTemp", "Humidity", "Pressure", "TrackTemp", "WindDirection", "WindSpeed"]) if (k in data) rec[k] = numOf(data[k]);
+    const n = this.ms.length, same = n > 0 && ms === this.ms[n - 1];
+    if (n && ms < this.ms[n - 1]) { this.refused++; return false; }
+    // the raw record: the one at this moment so far (a merge) or the last one carried over (a new moment)
+    const rec = { ...(n ? this.recs[n - 1] : null) };
+    for (const k of FIELDS) if (k in data) rec[k] = numOf(data[k]);
     if ("Rainfall" in data) rec.rain = rainOf(data.Rainfall); else if (!("rain" in rec)) rec.rain = null;
-    const k = n - 1, rain = rec.rain;
-    const wet = n ? evolveWet(this.wet[k], this.rain[k], ms - this.ms[k]) : 0;
-    const since = n && this.rain[k] === rain ? this.since[k] : ms;
+    // the derived state, from the record before this moment (k: its index, −1 for the first)
+    const k = same ? n - 2 : n - 1, rain = rec.rain;
+    const wet = k >= 0 ? evolveWet(this.wet[k], this.rain[k], ms - this.ms[k]) : 0;
+    const span = k >= 0 ? spanAfter(this.span[k], this.rain[k], ms - this.ms[k]) : this.start === "dry" ? 0 : 1;
+    const since = k >= 0 && this.rain[k] === rain ? this.since[k] : ms;
     // (the moment the last rain ended: this record's when it stops the rain)
-    const rainEnd = n && this.rain[k] === 1 && rain !== 1 ? ms : n ? this.rainEnd[k] : null;
-    this.ms.push(ms); this.rain.push(rain); this.wet.push(wet); this.since.push(since); this.rainEnd.push(rainEnd); this.recs.push(rec);
-    this.cur = rec;
+    const rainEnd = k >= 0 && this.rain[k] === 1 && rain !== 1 ? ms : k >= 0 ? this.rainEnd[k] : null;
+    const i = same ? n - 1 : n;
+    this.ms[i] = ms; this.rain[i] = rain; this.wet[i] = wet; this.span[i] = span; this.since[i] = since; this.rainEnd[i] = rainEnd; this.recs[i] = rec;
     return true;
   }
-  pop() { this.ms.pop(); this.rain.pop(); this.wet.pop(); this.since.pop(); this.rainEnd.pop(); this.recs.pop(); this.cur = this.recs[this.recs.length - 1] || {}; }
   // index of the last record at or before t (−1: none yet)
   indexAt(t) {
     let lo = 0, hi = this.ms.length - 1, r = -1;
@@ -96,13 +126,17 @@ export class WeatherLog {
     return r;
   }
   rainAt(t) { const k = this.indexAt(t); return k < 0 ? null : this.rain[k]; }
-  // the estimated wetness at t (0–1), or null before the first record
+  // the estimated wetness at t (0–1; the lower bound – see above), or null before the first record
   wetAt(t) { const k = this.indexAt(t); return k < 0 ? null : evolveWet(this.wet[k], this.rain[k], t - this.ms[k]); }
+  // how much of the unknown start could still be on the road at t (0: none; null before the first record)
+  spanAt(t) { const k = this.indexAt(t); return k < 0 ? null : spanAfter(this.span[k], this.rain[k], t - this.ms[k]); }
   recordAt(t) { const k = this.indexAt(t); return k < 0 ? null : this.recs[k]; }
-  // A replay's whole recording: its WeatherData events ({ ms, topic, data }, in time order).
-  static fromEvents(events) {
-    const log = new WeatherLog();
-    for (const e of events || []) if (e.topic === "WeatherData") log.push(e.ms, e.data);
+  // A replay's whole recording: its WeatherData events ({ ms, topic, data }, in time order – sorted here, a copy, if not).
+  static fromEvents(events, opts) {
+    const log = new WeatherLog(opts);
+    let list = (events || []).filter((e) => e?.topic === "WeatherData");
+    for (let i = 1; i < list.length; i++) if (list[i].ms < list[i - 1].ms) { list = list.slice().sort((a, b) => a.ms - b.ms); break; }
+    for (const e of list) log.push(e.ms, e.data);
     return log;
   }
 }
@@ -135,7 +169,7 @@ export const cloudLook = (c) => Math.max(0, Math.min(1, (c - 0.2) / 0.75));
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 export function newEnvironment() {
-  return { t: null, known: false, raining: null, rainAmt: 0, wet: 0, wetModel: null, wetTyres: null, wetSrc: "none", cloud: NEUTRAL_CLOUD, cloudSrc: "neutral",
+  return { t: null, known: false, raining: null, rainAmt: 0, wet: 0, wetModel: null, wetSpan: null, wetStart: null, wetTyres: null, wetSrc: "none", wetCovered: 0, cloud: NEUTRAL_CLOUD, cloudSrc: "neutral",
     airTemp: null, trackTemp: null, humidity: null, windSpeed: null, windDir: null, forced: false };
 }
 // Fills `out` (reused: no garbage per frame). opts: { tyres (wetTyreEvidence at t, or null), cover (0–1 hourly cloud
@@ -152,12 +186,20 @@ export function environmentAt(log, t, opts = {}, out = newEnvironment()) {
   if (out.raining === 1) out.rainAmt = I * clamp01((t - log.since[k]) / RAMP);
   else if (k >= 0 && log.rainEnd[k] != null && log.since[k] === log.rainEnd[k]) out.rainAmt = I * clamp01(1 - (t - log.rainEnd[k]) / RAMP);
   else out.rainAmt = 0;
-  // wetness: the model, the tyres as a floor under it
+  // wetness: the model (its lower bound: the recorded rain alone), the tyres as a floor under it. wetSrc says what it
+  // rests on: "rain" – the rain record's estimate; "tyres" – the cars' tyres raise it; "unknown" – the record has no rain
+  // of its own yet, nothing else says, and the road before the record began isn't known (wetSpan: how much of that
+  // unknown start could still be there – what's drawn is the lower bound, no rain is invented); "none" – no data.
   out.wetModel = k >= 0 ? evolveWet(log.wet[k], log.rain[k], t - log.ms[k]) : null;
+  out.wetSpan = k >= 0 && log.span ? spanAt(log, k, t) : null;
+  out.wetStart = log?.start ?? null;
   out.wetTyres = opts.tyres ?? null;
   const a = out.wetModel ?? 0, b = out.wetTyres ?? 0;
   out.wet = Math.max(a, b);
-  out.wetSrc = out.wetModel == null && out.wetTyres == null ? "none" : b > a ? "tyres" : "rain";
+  out.wetSrc = out.wetModel == null && out.wetTyres == null ? "none" : b > a ? "tyres"
+    : out.wetTyres == null && a < 0.03 && (out.wetSpan ?? 0) >= 0.05 ? "unknown" : "rain";
+  // under a roof (Monaco's tunnel): only the water the cars carry in – a share of the open road's (an estimate, L)
+  out.wetCovered = out.wet * COVERED_WET;
   // the sky: what the setting / the cloud data says, overcast while it rains (faded in over 2 min) and for a while after
   const sky = opts.sky || "auto";
   let base, src;

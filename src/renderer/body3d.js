@@ -261,7 +261,10 @@ export function driverGlove(handleR = 0.0235, fine = 1) {
       // the pad – the half facing the grip – in the darker print: a thin capsule pressed onto that side (close up only)
       const mid = joints[i].clone().lerp(joints[i + 1], 0.5), toAxis = new THREE.Vector3(0, G - mid.y, -mid.z).normalize();
       if (fine) parts.push(capsule(joints[i].clone().addScaledVector(toAxis, r * 0.25), joints[i + 1].clone().addScaledVector(toAxis, r * 0.25), r * 0.72, KIT_ZONE.palm));
-      if (fine && i < 2) { const s = new THREE.TorusGeometry(r * 1.01, 0.0011, 4, seg); s.lookAt(new THREE.Vector3().subVectors(joints[i + 1], joints[i])); s.translate(joints[i + 1].x, joints[i + 1].y, joints[i + 1].z); parts.push(shade(s, KIT_ZONE.seam)); }
+      // (the seam rings on the light glove too – v0.45: v0.44 drew them on the fine one only, so a colour only the seams
+      // carry (Haas' white piping, the readable look's team colour) vanished whenever the light pair showed; there one
+      // coarse ring a finger, at its first joint – 36 triangles: the car's 60k budget, test/car.test.js)
+      if (fine ? i < 2 : i === 0) { const s = new THREE.TorusGeometry(r * 1.01, 0.0011, fine ? 4 : 3, fine ? seg : 6); s.lookAt(new THREE.Vector3().subVectors(joints[i + 1], joints[i])); s.translate(joints[i + 1].x, joints[i + 1].y, joints[i + 1].z); parts.push(shade(s, KIT_ZONE.seam)); }
     }
     tips.push(joints[3]);
   }
