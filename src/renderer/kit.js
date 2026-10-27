@@ -103,9 +103,11 @@ export function kitEntry(teamName, season = null, date = null, number = null) {
   return null;
 }
 // a dark colour raised to the fabric's albedo floor; others as they are
+// (v0.45: in sRGB, as the colours are written – v0.44 took the lightness of the linear colour, so a black suit's glove
+// came out #6a6e77, a mid grey, and only the palette's double decoding (kitPalette) drew it dark)
 function floorBlack(c) {
-  const v = new THREE.Color(c), hsl = {}; v.getHSL(hsl);
-  return hsl.l < 0.16 ? "#" + new THREE.Color().setHSL(hsl.h, Math.min(hsl.s, 0.12), 0.165).getHexString() : c;
+  const v = new THREE.Color(c), hsl = {}; v.getHSL(hsl, THREE.SRGBColorSpace);
+  return hsl.l < 0.16 ? "#" + new THREE.Color().setHSL(hsl.h, Math.min(hsl.s, 0.12), 0.165, THREE.SRGBColorSpace).getHexString() : c;
 }
 const shade = (c, k) => "#" + new THREE.Color(c).multiplyScalar(k).getHexString();
 
@@ -126,10 +128,12 @@ function texel(a, space) {
   t.colorSpace = space; t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
   t.userData.shared = true; return t;
 }
-// the style's palette (sRGB colours per zone)
+// the style's palette (sRGB colours per zone: the texture is marked sRGB, the GPU decodes it once)
+// (v0.45: v0.44 wrote THREE.Color's linear components here – decoded a second time on the GPU, "#2a2c30" black knit drew
+// as #060608 and papaya #ff8000 as #ff3700: every kit far darker than its research; test/gloves45)
 export function kitPalette(style) {
-  const a = new Uint8Array(KIT_TEXELS * 4), c = new THREE.Color();
-  for (const [k, z] of Object.entries(KIT_ZONE)) { c.set(style[k] || "#808080"); a.set([Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255), 255], z * 4); }
+  const a = new Uint8Array(KIT_TEXELS * 4), c = new THREE.Color(), o = { r: 0, g: 0, b: 0 };
+  for (const [k, z] of Object.entries(KIT_ZONE)) { c.set(style[k] || "#808080").getRGB(o, THREE.SRGBColorSpace); a.set([Math.round(o.r * 255), Math.round(o.g * 255), Math.round(o.b * 255), 255], z * 4); }
   return a;
 }
 // One material per style, shared by the cars wearing it (MeshPhysicalMaterial for the fabric's sheen; the colour, the
