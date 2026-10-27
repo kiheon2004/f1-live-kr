@@ -75,7 +75,15 @@ export function solidBarrierSegs(lines, xz, onTarmac = () => false, kinds = /^(w
   const out = [];
   for (const l of lines) if (l.k === "barrier" && kinds.test(l.sub || "")) {
     const q = l.pts.map(xz), on = q.map(([x, z]) => onTarmac(x, z));
-    for (let i = 1; i < q.length; i++) if (!on[i - 1] && !on[i]) out.push([q[i - 1][0], q[i - 1][1], q[i][0], q[i][1]]);
+    for (let i = 1; i < q.length; i++) {
+      const [ax, az] = q[i - 1], [bx, bz] = q[i];
+      if (!on[i - 1] && !on[i]) { out.push([ax, az, bx, bz]); continue; }
+      // (an end on the tarmac: in 2 m pieces, the ones off it – as drawn: scenery.js cuts a line near the pits in 2 m
+      // points. Whole, the piece was drawn but not found – Monza 2026: the map's wall stood through three stands, ours at
+      // the edge behind it; run/pitwall)
+      const m = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2)), pt = (k) => [ax + ((bx - ax) * k) / m, az + ((bz - az) * k) / m];
+      for (let k = 0; k < m; k++) { const a = pt(k), b = pt(k + 1); if (!onTarmac(...a) && !onTarmac(...b)) out.push([...a, ...b]); }
+    }
   }
   return out;
 }

@@ -139,7 +139,8 @@ test("the pit wall is looked for only among the map's barrier pieces that are dr
   const { solidBarrierSegs } = await import("../src/renderer/pitwallcheck.js");
   const lines = [{ k: "barrier", sub: "guard_rail", pts: [[0, 0], [10, 0], [20, 0], [30, 0]] }, { k: "barrier", sub: "fence", pts: [[0, 5], [30, 5]] }, { k: "road", pts: [[0, 9], [9, 9]] }];
   const onTarmac = (x) => x > 15;   // (the points at x 20 and 30 lie on the tarmac: cut from the drawn barrier)
-  assert.deepStrictEqual(solidBarrierSegs(lines, (p) => p, onTarmac), [[0, 0, 10, 0]]);
+  // (the piece reaching the tarmac in its 2 m pieces off it, as drawn – v0.46 Monza 2026)
+  assert.deepStrictEqual(solidBarrierSegs(lines, (p) => p, onTarmac), [[0, 0, 10, 0], [10, 0, 12, 0], [12, 0, 14, 0]]);
   assert.strictEqual(solidBarrierSegs(lines, (p) => p).length, 3, "all pieces where none is on the tarmac; never a fence");
 });
 
@@ -164,4 +165,41 @@ test("a mapped pit wall along only part of the run (Monza 2026: 40 %) is the wal
     const v = standSection(await section(G, r.group, u, u < -45 ? [{ off: 27.5, name: "barrier:wall" }] : []));
     assert.ok(v.ok, `u ${u}: ${v.order} – ${v.problems.join("; ")}`);
   }
+});
+
+test("a mapped pit wall along a short part of the run (Monza 2026: ~13 %) is the wall there and ours carries it on: no map wall through a stand", async () => {
+  // the map's wall 27.5 m out for x < −112 only (the run −150…150: ~13 %)
+  const barrierRay = (x, z, dx, dz, max, kind = "solid") => { if (kind !== "solid") return Infinity; const s = (z - -57.5) / -dz; return x < -112 && dz < 0 && s > 0 && s <= max ? s : Infinity; };
+  const { r, G } = await build({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 }, barrierRay);
+  const { standSection } = await import("../src/renderer/pitwallcheck.js");
+  for (const u of [-130, 0, 100]) {
+    G.openRail([[u - 3, u + 3]]);
+    const v = standSection(await section(G, r.group, u, u < -112 ? [{ off: 27.5, name: "barrier:wall" }] : []));
+    assert.ok(v.ok, `u ${u}: ${v.order} – ${v.problems.join("; ")}`);
+  }
+});
+
+test("an opening in the mapped pit wall narrower than the 3 m between stations (Mexico City 2025, at a stand): ours across it", async () => {
+  // where the stations are: a first build with the wall everywhere
+  const solid = (open) => (x, z, dx, dz, max, kind = "solid") => { if (kind !== "solid" || (open && x > open[0] && x < open[1])) return Infinity; const s = (z - -57.5) / -dz; return dz < 0 && s > 0 && s <= max ? s : Infinity; };
+  const first = await build({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 }, solid(null));
+  // a 2 m opening between two stations (x = u here: the building centred on x = 0, along +x – checked)
+  const u0 = first.G.gStart + 3 * 50 + 0.5, [px] = [u0], c = first.G.project(px, -45).u;
+  assert.ok(Math.abs(c - u0) < 0.01, `u is x (${c} vs ${u0})`);
+  const { r, G } = await build({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 }, solid([u0, u0 + 2]));
+  const { standSection } = await import("../src/renderer/pitwallcheck.js");
+  G.openRail([[u0 - 2, u0 + 4]]);
+  // (the map's wall drawn either side of the opening, not in it: no hit for it at the opening's middle)
+  const v = standSection(await section(G, r.group, u0 + 1));
+  assert.ok(v.ok, `${v.order} – ${v.problems.join("; ")}`);
+  assert.match(r.info[0].wallFrom, /opening/);
+});
+
+test("a mapped wall piece with an end on the tarmac is found where it is drawn (Monza 2026: drawn in 2 m pieces near the pits, not found whole)", async () => {
+  const { solidBarrierSegs } = await import("../src/renderer/pitwallcheck.js");
+  // one straight piece from x 0 to 40, its last point on the tarmac (x > 35)
+  const segs = solidBarrierSegs([{ k: "barrier", sub: "wall", pts: [[0, 0], [40, 0]] }], (p) => p, (x) => x > 35);
+  const len = segs.reduce((a, [ax, az, bx, bz]) => a + Math.hypot(bx - ax, bz - az), 0);
+  assert.ok(len >= 34 && len <= 36, `the off-tarmac part found (${len.toFixed(1)} m of it)`);
+  assert.ok(segs.every(([ax, , bx]) => ax <= 35 && bx <= 35), "none of it on the tarmac");
 });
