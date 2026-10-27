@@ -4169,8 +4169,28 @@ window.Map3D = {
     const o = SP.officialAt, mo = SP.cars.med?.obj, med = mo?.visible ? { x: mo.position.x, z: mo.position.z, yaw: mo.rotation.y, L: mo.userData.spec?.L || 5.05, W: mo.userData.spec?.W || 1.96 } : null;
     const gap = (x, z) => { if (!med) return null; const c = Math.cos(med.yaw), s = Math.sin(med.yaw), dx = x - med.x, dz = z - med.z, along = dx * s + dz * c, across = dx * c - dz * s; return +Math.hypot(Math.max(0, Math.abs(along) - med.L / 2), Math.max(0, Math.abs(across) - med.W / 2)).toFixed(2); };
     const gb = SP.gridBack, laneSide = gb && world.pitLane ? (() => { let b = Infinity, q = null; for (const p of world.pitLane.pts) { const d = Math.hypot(p.x - gb.x, p.z - gb.z); if (d < b) { b = d; q = p; } } const pr = q && F.project(q.x, q.z); return pr ? { d: +pr.d.toFixed(1), dist: +b.toFixed(1) } : null; })() : null;
-    return JSON.stringify({ plan: SP.plan?.official || null, med: SP.plan?.medical?.mode || null, official: o ? { x: o.x, z: o.z, sg: o.sg, stand: o.stand, out: o.out, track: P(o.x, o.z), laneDist: lane(o.x, o.z), inPit: inPit(o.x, o.z), medGap: gap(o.x, o.z) } : null,
+    return JSON.stringify({ plan: SP.plan?.official || null, med: SP.plan?.medical?.mode || null, official: o ? { x: o.x, z: o.z, sg: o.sg, stand: o.stand, out: o.out, track: P(o.x, o.z), laneDist: lane(o.x, o.z), inPit: inPit(o.x, o.z), laneZone: !!world.laneZone?.(o.x, o.z), medGap: gap(o.x, o.z) } : null,
       medCar: med ? { x: +med.x.toFixed(1), z: +med.z.toFixed(1), track: P(med.x, med.z) } : null, gridBack: gb ? { x: +gb.x.toFixed(1), z: +gb.z.toFixed(1), track: P(gb.x, gb.z) } : null, laneAtBack: laneSide, sides: SP.off?.sides?.map((q) => ({ sg: q.sg, room: +q.room.toFixed(1), wall: q.wall == null ? null : +q.wall.toFixed(1) })) || null });
+  },
+  // development (v0.46 §4): the ground around the back of the grid in the lap line's frame from the grid's rear point (u
+  // along the track, + towards the grid; v across, + left = frame d): the medical car, the asphalt's edges, the first
+  // barrier beyond each edge and where the pit lane is (the pit building's lane: garages to wall face – "pit"; within
+  // 8 m of the measured pit path – "zone"), as intervals of v per u – the test fixture for support.js flagSpot
+  flagGeom() {
+    const SP = world?.support, gb = SP?.gridBack, F = world?.frame; if (!gb || !F) return "null";
+    const o = F.project(gb.x, gb.z); if (!o) return "null";
+    const q = [0, 0, 0], at = (u, v) => { F.at(o.s + u, v, q); return [q[0], q[2]]; }, r1 = (v) => +v.toFixed(2);
+    const G = pitTeams.G, m = G ? pitModelFor(G) : null;
+    const pit = (x, z) => { if (!G) return false; const pr = G.project(x, z); if (pr.u < G.gStart - 20 || pr.u > G.gEnd + 20) return false; const w = m.at(Math.max(G.gStart, Math.min(G.gEnd, pr.u))).wall; return pr.off >= -0.5 && pr.off <= (w || 0); };
+    const zone = (x, z) => !!world.laneZone?.(x, z);
+    const spans = (u, test) => { const out = []; let a = null; for (let v = -40; v <= 40.001; v += 0.25) { const [x, z] = at(u, v), t = test(x, z); if (t && a == null) a = v; if (!t && a != null) { out.push([r1(a), r1(v - 0.25)]); a = null; } } if (a != null) out.push([r1(a), 40]); return out; };
+    const rows = []; for (let u = -24; u <= 6; u += 2) { const [x, z] = at(u, 0), [sm] = world.grid.nearest(x, z, 3); rows.push({ u, L: r1(edgeOf(sm, 1)), R: r1(edgeOf(sm, -1)), pit: spans(u, pit), zone: spans(u, zone) }); }
+    const mo = SP.cars.med?.obj, mp = mo?.visible ? F.project(mo.position.x, mo.position.z) : null;
+    // (the first barrier beyond each edge at the medical car's station: map's or generated, a level ray across the track)
+    const targets = [world.real?.group.getObjectByName("barriers"), world.group.getObjectByName("syntheticWalls")].filter(Boolean), ray = new THREE.Raycaster();
+    const wall = (u, sg) => { const e = edgeOf(F.sampleAt(o.s + u), sg), [x0, z0] = at(u, e), [x1, z1] = at(u, e + sg), d = Math.hypot(x1 - x0, z1 - z0) || 1; ray.set(new THREE.Vector3(x0, groundY(x0, z0) + 0.6, z0), new THREE.Vector3((x1 - x0) / d, 0, (z1 - z0) / d)); ray.far = 40; const h = targets.length ? ray.intersectObjects(targets, true)[0] : null; return h ? r1(h.distance) : null; };
+    const mu = mp ? r1(mp.s - o.s) : -7.5;
+    return JSON.stringify({ loc: app().location?.() || null, gbV: r1(o.d), med: mp ? { u: mu, v: r1(mp.d), L: mo.userData.spec?.L || 5.05, W: mo.userData.spec?.W || 1.96 } : null, wall: { L: wall(mu, 1), R: wall(mu, -1) }, rows, G: !!G });
   },
   // development: the marshal posts as placed, their flags now
   marshals() { const M = world?.marshals; if (!M) return "null"; return JSON.stringify({ info: M.info, state: M.state, flags: [...M.flags].filter(([, f]) => f.group.visible).length, N: world.samples.length, bounds: M.map?.bounds.map((b) => [b.n, b.i]), mirrors: M.map?.mirrors.map((b) => [b.n, b.i]), logical: M.map?.posts.map((p) => [p.id, p.i, p.sector, p.first ? 1 : 0]), panels: M.panels.map((p) => [p.n, p.sig ?? null, p.cell, +p.x.toFixed(1), +p.z.toFixed(1), p.i]), posts: M.posts.slice(0, 80).map((p) => [p.id, p.sector, +p.x.toFixed(1), +p.z.toFixed(1), +groundY(p.x, p.z).toFixed(1), p.first ? 1 : 0, p.i]) }); },
