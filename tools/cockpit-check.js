@@ -6,9 +6,7 @@
 // straight up/down one beside it), every vertex (step 1), and the triangles' crossings between the vertices
 // (surfaceCrossings: an edge of one through a face of the other). Slow (several minutes): a development check, the
 // unit tests run a few cases.
-// v0.45: each angle held in the session's time (the app's pose: past ±50° the lowered hand holds its grip the other way),
-// and the regrip measured through a turn into the stop and out (regripMm, regripWrist).
-//   node tools/cockpit-check.js [out.json] [--quick]   (--quick: 15° steps, the light gloves only, no crossings, no regrip)
+//   node tools/cockpit-check.js [out.json] [--quick]   (--quick: 15° steps, the light gloves only, no crossings)
 const path = require("path"), fs = require("fs");
 (async () => {
   const R = (f) => import(path.join(__dirname, "../src/renderer", f));
@@ -24,31 +22,14 @@ const path = require("path"), fs = require("fs");
     for (const fine of quick ? [false] : [false, true]) {
       C.setCockpit(car, fine);
       const worst = {}, vertical = {}, inner = {}, lock = {}; let wristWorst = { flex: 0, rad: 0, pron: 0 };
-      let T = 0;
       for (let deg = -90; deg <= 90; deg += quick ? 15 : 5) {
-        // (v0.45: held at the angle in the session's time – the pose the app shows there; the lowered hand's regrip is
-        // checked below)
-        C.setWheels(car, 0, -(deg * Math.PI / 180) / C.STEER_RATIO, (T += 10000)); car.updateMatrixWorld(true);
+        C.setWheels(car, 0, -(deg * Math.PI / 180) / C.STEER_RATIO); car.updateMatrixWorld(true);
         const near = K.cockpitClash(car, solids, 1, { nearest: true, edges: !quick }), vert = K.cockpitClash(car, solids, 1);
         for (const [k, d] of Object.entries(near)) { worst[k] = Math.max(worst[k] || 0, d); (Math.abs(deg) <= 55 ? inner : lock)[k] = Math.max((Math.abs(deg) <= 55 ? inner : lock)[k] || 0, d); }
         for (const [k, d] of Object.entries(vert)) vertical[k] = Math.max(vertical[k] || 0, d);
         for (const a of u.arms) { const o = a.pose; for (const q of ["flex", "rad", "pron"]) if (Math.abs(o[q]) > Math.abs(wristWorst[q])) wristWorst[q] = +o[q].toFixed(1); }
       }
-      // v0.45: the regrip – into the stop and out again at 90°/s both ways, every 50 ms of the session's time (the hand off
-      // its grip: armswap.js / arms.js armSwapPose)
-      const regrip = {}; let regripWrist = { flex: 0, rad: 0, pron: 0 };
-      if (!quick) for (const side of [-1, 1]) {
-        const at = (t) => side * (t < 300 ? 0 : t < 1300 ? 90 * (t - 300) / 1000 : t < 2800 ? 90 : t < 3800 ? 90 - 90 * (t - 2800) / 1000 : 0);
-        T += 10000;
-        for (let t = 0; t <= 4400; t += 1000 / 60) {
-          C.setWheels(car, 0, -(at(t) * Math.PI / 180) / C.STEER_RATIO, T + t);
-          if (Math.round(t) % 50 >= 17) continue;
-          car.updateMatrixWorld(true);
-          for (const [k, d] of Object.entries(K.cockpitClash(car, solids, 1, { nearest: true }))) regrip[k] = Math.max(regrip[k] || 0, d);
-          for (const a of u.arms) { const o = a.pose; for (const q of ["flex", "rad", "pron"]) if (Math.abs(o[q]) > Math.abs(regripWrist[q])) regripWrist[q] = +o[q].toFixed(1); }
-        }
-      }
-      row[fine ? "fine" : "light"] = { nearestMm: mm(worst), within55: mm(inner), beyond55: mm(lock), verticalMm: mm(vertical), wristWorst, regripMm: mm(regrip), regripWrist };
+      row[fine ? "fine" : "light"] = { nearestMm: mm(worst), within55: mm(inner), beyond55: mm(lock), verticalMm: mm(vertical), wristWorst };
     }
     rows.push(row); console.log(JSON.stringify(row));
   }
