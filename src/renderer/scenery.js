@@ -958,9 +958,11 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // (only what is drawn – barriersMesh below cuts a piece's points on the tarmac: v0.46, Silverstone 2024's mapped wall
     // was found there, none was drawn, and the last teams' stands had no wall before the tarmac – run/pitwall)
     barrierSegs.push(...solidBarrierSegs(scene.lines, gf.xz, (x, z) => corridor.on(x, z, -0.3)));
-    const barrierRay = (x, z, dx, dz, max = 60) => {
+    // (kind "fence": the mapped fences – the pit wall's debris fence where the map has no wall: facilities.js)
+    const fenceSegs = solidBarrierSegs(scene.lines, gf.xz, (x, z) => corridor.on(x, z, -0.3), /^fence$/);
+    const barrierRay = (x, z, dx, dz, max = 60, kind = "solid") => {
       let best = Infinity;
-      for (const [ax, az, bx, bz] of barrierSegs) {
+      for (const [ax, az, bx, bz] of kind === "fence" ? fenceSegs : barrierSegs) {
         if (Math.min(ax, bx) > x + max || Math.max(ax, bx) < x - max || Math.min(az, bz) > z + max || Math.max(az, bz) < z - max) continue;
         const ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex; if (Math.abs(den) < 1e-9) continue;
         const sx = ((ax - x) * ez - (az - z) * ex) / den, tx = ((ax - x) * dz - (az - z) * dx) / den;

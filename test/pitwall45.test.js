@@ -142,3 +142,14 @@ test("the pit wall is looked for only among the map's barrier pieces that are dr
   assert.deepStrictEqual(solidBarrierSegs(lines, (p) => p, onTarmac), [[0, 0, 10, 0]]);
   assert.strictEqual(solidBarrierSegs(lines, (p) => p).length, 3, "all pieces where none is on the tarmac; never a fence");
 });
+
+test("a mapped fence just short of the tarmac (no wall mapped) is the pit wall's debris fence: our wall under it, the stands clear of it (Interlagos)", async () => {
+  // a fence 29.4 m out from the garages (scene z −59.4), the tarmac's edge at 30; walls: none mapped
+  const barrierRay = (x, z, dx, dz, max, kind = "solid") => { if (kind !== "fence") return Infinity; const s = (z - -59.4) / -dz; return dz < 0 && s > 0 && s <= max ? s : Infinity; };
+  const { r, G } = await build({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 }, barrierRay);
+  const { standSection } = await import("../src/renderer/pitwallcheck.js");
+  assert.ok(Math.abs(G.wallOut(0) - 29.35) < 0.2, `the wall's track face under the fence (${G.wallOut(0)})`);
+  G.openRail([[-3, 3]]);
+  const v = standSection(await section(G, r.group, 0, [{ off: 29.4, name: "barrier:fence" }]));
+  assert.ok(v.ok, `${v.order} – ${v.problems.join("; ")}`);
+});

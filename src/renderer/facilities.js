@@ -838,7 +838,12 @@ function pitBuilding(ctx, p) {
       if (pw.at) d = pw.at;
       else { while (d < 60) { const [x, z] = P(uu, frontV(uu) + vTrack * d); if (ctx.trackEdge(x, z) <= 0.3) break; d += 0.5; } if (d >= 60) continue; }
       const [x0, z0] = P(uu, frontV(uu)), [x1, z1] = P(uu, frontV(uu) + vTrack), db = ctx.barrierRay && !pw.at ? ctx.barrierRay(x0, z0, x1 - x0, z1 - z0, d) : Infinity;
-      W.push(db > 5 && db < d - 0.5 ? { u: uu, d: db - pw.thick / 2, mapped: true, edge: d } : { u: uu, d, edge: d });
+      // (no wall mapped, but a fence just short of the tarmac – within 2 m: the pit wall's debris fence, which stands on
+      // the wall (Autosport 2024-03-19: the stands "against the fence between the pitlane and the main straight"): our
+      // wall's track face under it. v0.46: Interlagos' mapped fence ran 0.5–0.8 m short of the wall drawn at the edge,
+      // through the stands' consoles – run/pitwall)
+      const df = ctx.barrierRay && !pw.at && !(db > 5 && db < d - 0.5) ? ctx.barrierRay(x0, z0, x1 - x0, z1 - z0, d, "fence") : Infinity;
+      W.push(db > 5 && db < d - 0.5 ? { u: uu, d: db - pw.thick / 2, mapped: true, edge: d } : df >= d - 2 && df < d - 0.2 ? { u: uu, d: df - 0.05, edge: d, fence: true } : { u: uu, d, edge: d });
     }
     // (mapped along most of the run: the map's wall is the pit wall – none is drawn over it; the lane's model and the
     // teams' stands use it)
