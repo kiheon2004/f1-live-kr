@@ -65,6 +65,8 @@ const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
 // The picture vs the same mirror camera drawn straight to the screen (the screen's own colour pipeline). Call between the
 // pass and the main render (the main render clears the canvas after). i: the mirror (0, 1) – its half of the picture.
+// fresh: that half drawn in this frame's pass (else it is an earlier frame's and its camera where it was then: a
+// difference there is the time between, not the pipeline)
 export function samePipeline(renderer, scene, pass, i, hide) {
   const rt = pass.state.rt, cam = pass.cams[i], spec = pass.state.car?.userData?.mirrors?.userData.spec;
   if (!rt || !spec || !pass.state.drawn[i]) return null;
@@ -86,7 +88,7 @@ export function samePipeline(renderer, scene, pass, i, hide) {
     d += Math.abs(pic[p] - scr[q]) + Math.abs(pic[p + 1] - scr[q + 1]) + Math.abs(pic[p + 2] - scr[q + 2]);
     lp += luma(pic[p], pic[p + 1], pic[p + 2]); ls += luma(scr[q], scr[q + 1], scr[q + 2]); n++;
   }
-  return { mirror: i, px: [half, H], meanAbsDiff: +(d / n / 3).toFixed(2), lumaPicture: +(lp / n).toFixed(1), lumaScreen: +(ls / n).toFixed(1) };
+  return { mirror: i, fresh: !!cam.userData.go, px: [half, H], meanAbsDiff: +(d / n / 3).toFixed(2), lumaPicture: +(lp / n).toFixed(1), lumaScreen: +(ls / n).toFixed(1) };
 }
 // The glass on the screen vs the picture's texels at the same places (call right after the main render): an inner grid of
 // the glass (a along it, b up it), each point's screen pixel against the texel its UV shows. Ratios of the mean, both as
@@ -113,4 +115,44 @@ export function glassVsPicture(renderer, camera, pass) {
     if (n) out.push({ mirror: i, points: n, lumaScreen: +(sS / n).toFixed(1), lumaPicture: +(sT / n).toFixed(1), ratioEncoded: +(sS / sT).toFixed(3), ratioLinear: +(lS / lT).toFixed(3) });
   });
   return out;
+}
+
+// A known picture: the target cleared to one sRGB-encoded grey v (0..1) after the pass – only for a target drawn
+// without multisampling (low mode: the texture itself is the colour buffer). Then, after the main render, glassPixels()
+// reads the screen at each drawn glass' centre: the glass' own output for that one input (it is unlit, no fog).
+export function flatFill(renderer, pass, v) {
+  const rt = pass.state.rt; if (!rt || rt.samples) return false;
+  const gl = renderer.getContext(), prev = renderer.getRenderTarget(), cc = gl.getParameter(gl.COLOR_CLEAR_VALUE);
+  renderer.setRenderTarget(rt); gl.disable(gl.SCISSOR_TEST); gl.clearColor(v, v, v, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.clearColor(cc[0], cc[1], cc[2], cc[3]); if (rt.scissorTest) gl.enable(gl.SCISSOR_TEST);   // (three's cached GL state as it was)
+  renderer.setRenderTarget(prev);
+  return true;
+}
+export function glassPixels(renderer, camera, pass) {
+  const mesh = pass.state.car?.userData?.mirrors, spec = mesh?.userData.spec; if (!spec || mesh.material !== pass.material) return null;
+  const gl = renderer.getContext(), size = new THREE.Vector2(), P = new THREE.Vector3(), px = new Uint8Array(4), out = [];
+  renderer.getDrawingBufferSize(size);
+  spec.forEach((s, i) => {
+    P.set(...s.c).applyMatrix4(mesh.matrixWorld).project(camera);
+    if (Math.abs(P.x) > 1 || Math.abs(P.y) > 1 || P.z > 1) return;
+    gl.readPixels(Math.floor((P.x + 1) / 2 * size.x), Math.floor((P.y + 1) / 2 * size.y), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    out.push({ mirror: i, drawn: pass.state.drawn[i], rgb: [px[0], px[1], px[2]] });
+  });
+  return out;
+}
+
+// Each glass on the screen as the pass judges it (mirrors.js update: in the frustum, its projected area in drawing-buffer
+// pixels against MIN_PX) with whether its half is drawn for this view and whether the glass shows the live picture.
+export function glassOnScreen(renderer, camera, pass) {
+  const mesh = pass.state.car?.userData?.mirrors, spec = mesh?.userData.spec; if (!spec) return null;
+  const size = new THREE.Vector2(), fr = new THREE.Frustum(), m = new THREE.Matrix4(), sp = new THREE.Sphere(), P = new THREE.Vector3();
+  renderer.getDrawingBufferSize(size); camera.updateMatrixWorld();
+  fr.setFromProjectionMatrix(m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  return spec.map((s, i) => {
+    const pt = (a, b) => P.set(s.c[0] + s.h[0] * a * s.hw + s.up[0] * b * s.hh, s.c[1] + s.h[1] * a * s.hw + s.up[1] * b * s.hh, s.c[2] + s.h[2] * a * s.hw + s.up[2] * b * s.hh).applyMatrix4(mesh.matrixWorld);
+    sp.center.copy(pt(0, 0)); sp.radius = Math.hypot(s.hw, s.hh);
+    const q = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => pt(a, b).project(camera).clone());
+    let A = 0; for (let j = 0; j < 4; j++) { const p = q[j], r = q[(j + 1) % 4]; A += (p.x * r.y - r.x * p.y) * size.x * size.y / 4; }
+    return { mirror: i, inFrustum: fr.intersectsSphere(sp), px: Math.round(Math.abs(A) / 2), drawn: pass.state.drawn[i], live: mesh.material === pass.material, buffer: size.toArray() };
+  });
 }
