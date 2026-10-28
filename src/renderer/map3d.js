@@ -4326,7 +4326,7 @@ window.Map3D = {
     for (const t of pitTeams.teams) {
       const w = t.box != null && G.wallAt?.(t.box); if (!w) continue;
       const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p)), out = [-s.inward[0], -s.inward[1]];
-      const c = G.project(w.p[0], w.p[2]).off, L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, across = [];
+      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, across = [];
       // (across the stand's length every 0.5 m, from 0.25 m in at either end – not one line at its middle: a line through
       // the joint of two map pieces misses both, a v0.46 false "no wall" at Mexico City's Mercedes stand; an opening
       // 0.5 m wide or more anywhere behind or in front of a stand is met)
@@ -4342,7 +4342,11 @@ window.Map3D = {
             for (const h of rc.intersectObjects(targets, true)) if (h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh) hits.push({ off: o0 + dir * h.distance, name: h.object.name || h.object.parent?.name || h.object.type, low });
           }
         }
-        across.push({ a: +a.toFixed(2), stand: [c - 0.85, c + 0.75], lane: G.wallFace ? G.wallFace(t.box + a) : null, edge, hits, upper: !!w.upper });
+        // (all in the garages' frame there – G.project: metres out from that garage's front; the fronts step in and out
+        // from one garage to the next, the lines above run from the box's garage's front line, the stand is straight)
+        const [x0, z0] = at(0), dl = G.project(x0, z0).off, cl = G.project(w.p[0] + w.along[0] * a, w.p[2] + w.along[1] * a).off;
+        for (const h of hits) h.off += dl;
+        across.push({ a: +a.toFixed(2), stand: [cl - 0.85, cl + 0.75], lane: G.wallFace ? G.wallFace(t.box + a) : null, edge: edge == null ? null : edge + dl, hits, upper: !!w.upper });
       }
       secs.push({ team: t.team, u: Math.round(t.box), across, standY: +(w.p[1] - s.floor).toFixed(2) });
     }
