@@ -32,7 +32,8 @@ import { aeroSpecFor, hingeOf } from "./aero.js";
 import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, limbGeometry, JOINT_R, KIT_ZONE, kitZone } from "./body3d.js";
 import { kitStyle, kitEntry, kitMaterial, kitReadable, kitMode } from "./kit.js";
 import { harnessGeometry, HARNESS } from "./harness.js";
-import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST } from "./arms.js";
+import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST, PLAN_MAX, LOCK_MAX, BIG, armSwapPose } from "./arms.js";
+import { swapState, stepSwap } from "./armswap.js";
 import { ARM_PLANS } from "./armplans.js";
 import { wheelSpec, wheelParts as steeringParts, ledGeometry, teamWheel } from "./wheel3d.js";
 import { paintScreen, screenModel } from "./wheelscreen.js";
@@ -1292,7 +1293,12 @@ function armPlanFor(A) {
   if (ARM_PLANS_MADE.has(A.key)) return ARM_PLANS_MADE.get(A.key);
   const b = ARM_PLANS[A.key], D = Math.PI / 180;
   let plan;
-  if (b) plan = smoothPlan(armGeo(A.base, A.grip, A.glove, b.rho * D), b.rows);
+  if (b) {
+    // (v0.46: the plan's −90…90 rows and the rising arm's on to the 180° lock – one table, the twist unwrapped from straight
+    // ahead; the lowered arm's other way – the elbow up and across – from the lock in to SWAP.min, and the swing's path)
+    plan = smoothPlan(armGeo(A.base, A.grip, A.glove, b.rho * D), b.rise ? [...b.rows, ...b.rise] : b.rows, 0, -PLAN_MAX, (b.rows.length - 1) / 2, null);
+    if (b.across) { plan.swap = smoothPlan(plan.geo, b.across, 0, -LOCK_MAX, 0, BIG); plan.move = b.swing; }
+  }
   else { console.warn("arm plan not baked for this cockpit (node tools/arm-plans.js) – made on a coarse grid"); plan = planArmsPath(armGeo(A.base, A.grip, A.glove, 60 * D), { swStep: 10 * D, rlStep: 5 * D }); }
   plan.baked = !!b; ARM_PLANS_MADE.set(A.key, plan);
   return plan;
@@ -1774,7 +1780,7 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     sk.updateMatrixWorld(true); const skel = new THREE.Skeleton(bones); sk.bind(skel); sk.frustumCulled = false; sk.name = "arm";
     const gl = new THREE.SkinnedMesh(t.wheel.gauntlet, gloveMat); gl.bind(skel, sk.bindMatrix); gl.frustumCulled = false; gl.name = "gauntlet";
     near.add(sk, gl);
-    return { k, mesh: sk, gauntlet: gl, bones, hand: hands[k > 0 ? 0 : 1], pose: armOut() };
+    return { k, mesh: sk, gauntlet: gl, bones, hand: hands[k > 0 ? 0 : 1], pose: armOut(), swap: swapState() };
   });
   // each wheel: its steer group w at the axle (turns about y – the fronts) holding the spin group s (rolls about x: the
   // parts that come off at a stop – tyre, band, rim, cover, nut) and, at the front, the corner mesh (drum, intake,
@@ -1828,17 +1834,33 @@ export function setAero(car, open, front = open) {
   for (const j of u.aeroJoints) { if (j.morph) j.morph.morphTargetInfluences[0] = j.front ? front : open; else j.pv.quaternion.setFromAxisAngle(j.pv.userData.axis, j.angle * (j.front ? front : open)); }
 }
 // Wheels: roll angle (rad) and the front wheels' steer angle (rad, + = left); the steering wheel turns with them at
-// a fixed ratio (STEER_RATIO, an estimate: 10:1 – about 50° of the wheel through a 130 km/h corner, the ±90° stop
-// at a hairpin), no more than ±90°. The steer angle is the caller's estimate from the path (the feed has no steering
-// channel): the hands' movement is a depiction.
+// a fixed ratio (STEER_RATIO, an estimate: 10:1 – about 50° of the wheel through a 130 km/h corner), no more than
+// lockFor(speed). The steer angle is the caller's estimate from the path (the feed has no steering channel): the hands'
+// movement is a depiction.
 export const STEER_RATIO = 10;
-export function setWheels(car, spin, steer) {
+// v0.46: the wheel's lock. Up to v0.45 it stopped at ±90° in every corner – at Monaco's Fairmont hairpin too, where the
+// wheel turns ~180° and the arms cross (Mercedes-AMG F1, "Explained: driver workload", ~2021: the hairpin "requires
+// 180-degrees of steering lock", M; Autosport 2019-05-23: it "requires full steering lock", H; v044 research/regrip.md).
+// No 2022–26 steering ratio or wheel rotation is published (v044 research: none found); 10:1 is kept (an estimate, L):
+// with it 180° of the wheel is 18° of front-wheel steer – inside the ~17° standard / ~21° Monaco lock reported (F1.com
+// 2015, Motorsport.com: M–L). The lock is LOCK_MAX = 140° (14° at the front wheels), not 180°: past ~140° the drawn arms
+// can't stay clear of each other and the torso (arms.js) – a model limit, stated in reports v046 arms.md. The ±90° stays above
+// LOCK.fast m/s; below LOCK.slow the lock is LOCK_MAX, between it eases (an estimate, L: the hairpin is taken at
+// ~13 m/s – the slowest corner of the year, ~48 km/h; the path's curvature is noisier at speed, where no F1 wheel turns
+// past ~90°: R. Smedley, F1.com 2019-06-01, "at most tracks, the driver turns his steering wheel 90 degrees", M). Within
+// ±90° the wheel is where it was at any speed.
+export const LOCK = { slow: 15, fast: 25 };
+export const lockFor = (speed) => (speed == null ? Math.PI / 2 : (90 + (LOCK_MAX - 90) * Math.max(0, Math.min(1, (LOCK.fast - speed) / (LOCK.fast - LOCK.slow)))) * Math.PI / 180);
+// t: the session's time (ms) – the lowered arm's swing across goes by it (armswap.js); without it, the hands stay on the
+// grips beside the body (the plan – a pure function of the angle). speed (m/s): the car's – the lock (lockFor); without
+// it ±90° as before v0.46.
+export function setWheels(car, spin, steer, t = null, speed = null) {
   const u = car.userData;
   u.wheels.forEach((w, i) => { w.rotation.y = i < 2 ? steer : 0; });
   // (spin: one angle, or [front, rear] – each axle its own radius)
   u.spins.forEach((s, i) => { s.rotation.x = Array.isArray(spin) ? spin[i < 2 ? 0 : 1] : spin; });
-  if (u.wheel) u.wheel.rotation.z = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, -steer * STEER_RATIO));
-  if (u.arms && u.near.visible) placeArms(u);
+  if (u.wheel) { const L = lockFor(speed); u.wheel.rotation.z = Math.max(-L, Math.min(L, -steer * STEER_RATIO)); }
+  if (u.arms && u.near.visible) placeArms(u, t);
 }
 // A wheel off the car at a pit stop (i in userData.wheels' order): only what comes off with a real wheel is hidden – its
 // spin group (tyre, band, rim, cover, nut); the drum, intake, upright, caliper, disc, hub and the 2022–25 fence and
@@ -1895,10 +1917,13 @@ function setBone(b, k, p, x, y) {
   b.quaternion.setFromRotationMatrix(_M.makeBasis(_v1, _v2, _v3));
 }
 const rollAbout = (v, k, a, o) => { const c = Math.cos(a), s = Math.sin(a), d = v[0] * k[0] + v[1] * k[1] + v[2] * k[2]; const x = k[1] * v[2] - k[2] * v[1], y = k[2] * v[0] - k[0] * v[2], z = k[0] * v[1] - k[1] * v[0]; o[0] = v[0] * c + x * s + k[0] * d * (1 - c); o[1] = v[1] * c + y * s + k[1] * d * (1 - c); o[2] = v[2] * c + z * s + k[2] * d * (1 - c); return o; };
-function placeArms(u) {
+// v0.46: past ±SWAP.on the lowered arm's elbow swings across in front of the chest (armswap.js stepSwap, arms.js
+// armSwapPose), the hand on its grip all the way.
+function placeArms(u, t = null) {
   const plan = u.armPlan, a0 = u.wheel.rotation.z, up = plan.geo.grip.up;
   for (const A of u.arms) {
-    const k = A.k, o = armFromPlan(plan, k * a0, A.pose), [b0, b1, b2, b3, b4] = A.bones, L2 = BODY.farm;
+    const k = A.k, q = plan.swap ? stepSwap(A.swap, (k * a0) / (Math.PI / 180), t) : 0;
+    const o = plan.swap ? armSwapPose(plan, plan.swap, plan.move, k * a0, q, A.pose) : armFromPlan(plan, k * a0, A.pose), [b0, b1, b2, b3, b4] = A.bones, L2 = BODY.farm;
     rollAbout(o.H, o.A, Q90, _bx); setBone(b0, k, o.S, _bx, o.A);                          // upper arm (rolled a quarter turn)
     rollAbout(o.H, o.f, Q90, _bx); setBone(b1, k, o.E, _bx, o.f);                          // forearm at the elbow: the hinge's turn only
     _bp[0] = o.E[0] + o.f[0] * L2 / 2; _bp[1] = o.E[1] + o.f[1] * L2 / 2; _bp[2] = o.E[2] + o.f[2] * L2 / 2;
