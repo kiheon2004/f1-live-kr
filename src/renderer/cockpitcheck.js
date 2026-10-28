@@ -147,3 +147,42 @@ export function cockpitClash(car, solids, step = 3, opt = {}) {
   }
   return worst;
 }
+// v0.46: the two arms against each other – crossed at a big lock (the rising forearm over the wheel's face, the lowered
+// one up and across in front of the chest) one must never pass through the other. Each arm as drawn – its skinned
+// sleeve, its gauntlet and its glove on the grip; every vertex of one arm against the other's surface: inside when it
+// lies behind the other's nearest triangle (its outward normal; the meshes are open tubes and a hand – no inside for
+// the ray count or the winding number: a first try with the winding number called the left glove 209 mm "in" the right
+// arm where the planner's capsules had them apart). A point behind a triangle more than 6 cm off is not inside: no part
+// of an arm is 12 cm thick – its nearest surface in the cells looked at is another side's. Returns the deepest { depth (m), what }.
+export function armsOverlap(car, step = 1) {
+  car.updateMatrixWorld(true);
+  const inv = car.matrixWorld.clone().invert(), u = car.userData, v = new THREE.Vector3(), parts = [];
+  for (const a of u.arms || []) {
+    const tris = [], pts = [];
+    const take = (mm, tag, skinned) => {
+      const P = mm.geometry.attributes.position, I = mm.geometry.index, n = I ? I.count : P.count, at = (i) => { if (skinned) mm.getVertexPosition(i, v); else v.fromBufferAttribute(P, i); return v.applyMatrix4(mm.matrixWorld).applyMatrix4(inv); };
+      for (let i = 0; i + 2 < n; i += 3) { const t = []; for (let j = 0; j < 3; j++) { at(I ? I.getX(i + j) : i + j); t.push(v.x, v.y, v.z); } tris.push(t); }
+      for (let i = 0; i < P.count; i += step) { at(i); pts.push([v.x, v.y, v.z, tag]); }
+    };
+    take(a.mesh, "sleeve", true); take(a.gauntlet, "gauntlet", true);
+    a.hand.traverse((o) => { if (o.isMesh && shown(o, a.hand)) take(o, "glove", false); });
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; for (const t of tris) for (let j = 0; j < 9; j++) { lo[j % 3] = Math.min(lo[j % 3], t[j]); hi[j % 3] = Math.max(hi[j % 3], t[j]); }
+    parts.push({ k: a.k, S: solidOf(`arm ${a.k}`, tris, 0.03), pts, lo, hi });
+  }
+  let depth = 0, what = "";
+  const q = new THREE.Vector3(), tri = new THREE.Triangle(), p = new THREE.Vector3(), nrm = new THREE.Vector3();
+  for (const A of parts) for (const B of parts) {
+    if (A === B) continue;
+    for (const [x, y, z, tag] of A.pts) {
+      if (x < B.lo[0] || x > B.hi[0] || y < B.lo[1] || y > B.hi[1] || z < B.lo[2] || z > B.hi[2]) continue;
+      // (the nearest of B's triangles in the 3 × 3 cells round the point – 3 cm cells, nothing deeper than that is missed
+      // that a 9 cm neighbourhood holds)
+      p.set(x, y, z); let best = Infinity, side = 1; const i0 = Math.floor(x / B.S.cell), j0 = Math.floor(z / B.S.cell), seen = new Set();
+      for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const ids = B.S.grid.get(B.S.key(i, j)); if (!ids) continue;
+        for (const k of ids) { if (seen.has(k)) continue; seen.add(k); const t = B.S.tris[k]; tri.a.set(t[0], t[1], t[2]); tri.b.set(t[3], t[4], t[5]); tri.c.set(t[6], t[7], t[8]);
+          tri.closestPointToPoint(p, q); const d = q.distanceTo(p); if (d < best) { best = d; tri.getNormal(nrm); side = nrm.dot(p.clone().sub(q)); } } }
+      if (best < 0.06 && side < 0 && best > depth) { depth = best; what = `${A.k > 0 ? "left" : "right"} ${tag} in the ${B.k > 0 ? "left" : "right"} arm`; }
+    }
+  }
+  return { depth, what };
+}

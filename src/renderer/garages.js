@@ -567,6 +567,7 @@ const textOn = (hex) => { const n = parseInt(hex.slice(1), 16), l = 0.299 * (n >
 export function teamLayer(garages, teams, drivers, season = null) {
   const S = shared(), group = new THREE.Group(); group.name = "pitTeams";
   group.userData.covers = [];   // (the pit wall stands' canopies: no rain under them – weather3d.js)
+  group.userData.standSpans = [];   // (along the garages, each stand with its step: the walkway's railing opens there – facilities.js openRail)
   if (!teams.length) return group;
   const bySlot = new Map(garages.slots.map((s) => [s.k, s]));
   // frame of a slot: a point d m inside from the front, w m along from the opening's centre, y over the floor
@@ -648,6 +649,7 @@ export function teamLayer(garages, teams, drivers, season = null) {
     boxQ(panels, at(L / 2 + 0.25, 0.4, 0.06), A, up, O, 0.5, 0.12, 0.7, steel);
     // an enclosure against the weather where the team's stand has one (Haas: a source says so)
     if (seat.enclosed) for (const a of [-L / 2 - 0.02, L / 2 + 0.02]) boxQ(panels, at(a, 0.05, deck + 1.5), A, up, O, 0.03, 2.4, 1.7, dark, 12);
+    if (!w.upper) { const uc = garages.project(p.x, p.z).u; group.userData.standSpans.push([uc - L / 2 - 0.3, uc + L / 2 + 0.6]); }
     t.wallStand = { seats: N, from: seat.from };
   };
   const inst = { tyres: [], cabinet: [], jack: [], bench: [], screens: [], boom: [], trolley: [], gun: [], monitor: [] }, boards = [];
@@ -776,7 +778,8 @@ export function teamLayer(garages, teams, drivers, season = null) {
       const c = c0.clone().addScaledVector(along, da).addScaledVector(out, dw);
       quad(marks, c, along.clone().multiplyScalar(la), out.clone().multiplyScalar(lw), up, null, yellow);
     }
-    const w = garages.wallAt?.(t.box);
+    // (with the stand's half length: it lies along the walkway over its whole length – facilities.js wallAt)
+    const w = garages.wallAt?.(t.box, (pitWallSeats(t.team, season).seats * 0.8 + 0.6) / 2);
     if (w) pitWallStand(w, t, season);
   }
   const mesh = (store, mat, name) => {
