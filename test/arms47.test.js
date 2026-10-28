@@ -133,3 +133,53 @@ test("arms v0.47: armswap gridMemo – the steering history's samples kept by th
   m(74 * STEP); assert.strictEqual(m(10 * STEP), (10 * STEP) / 1000); assert.strictEqual(calls, 6, "a ring: the slot taken by a later step");
   m.key("a"); m(20 * STEP); m.key("a"); m(20 * STEP); assert.strictEqual(calls, 7, "the same key: kept"); m.key("b"); m(20 * STEP); assert.strictEqual(calls, 8, "a new key: cleared");
 });
+
+// The app's path (v0.47: the swing from the history) through v0.46's hairpin sweep – the same mesh checks and limits as
+// arms46.test.js's (both hands on their grips, the wrists in range, the torso, the pads and the other arm), so the new
+// timing of the swing keeps what v0.46 measured. No geometry or plan changed (arms.js, the baked plans untouched).
+test("arms v0.47: through the hairpin to the 140° lock and back with the swing read from the history – v0.46's checks: hands on the grips, wrists in range, torso / pads / the other arm within v0.46's limits", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js"), K = await import("../src/renderer/cockpitcheck.js"), A = await import("../src/renderer/arms.js"), { BODY } = await import("../src/renderer/body3d.js");
+  const WRIST_DAILY = { flex: [-60, 54], rad: [-40, 17], pron: 80 }, WRIST_ACTIVE = { flex: [-72, 66], rad: [-42, 20], pron: [-87, 82] };
+  const TORSO_LOCK = 0.010, TORSO_SWING = 0.080, SWING_PADS = 0.025, ARMS_MM = 0.004;
+  const wristOk = (m, deg, swing) => (Math.abs(deg) <= 55 && !swing ? m.flex > WRIST_DAILY.flex[0] && m.flex < WRIST_DAILY.flex[1] && m.rad > WRIST_DAILY.rad[0] && m.rad < WRIST_DAILY.rad[1] && Math.abs(m.pron) < WRIST_DAILY.pron
+    : m.flex > WRIST_ACTIVE.flex[0] && m.flex < WRIST_ACTIVE.flex[1] && m.rad > WRIST_ACTIVE.rad[0] && m.rad < WRIST_ACTIVE.rad[1] && m.pron > WRIST_ACTIVE.pron[0] && m.pron < WRIST_ACTIVE.pron[1]);
+  const sweep = (s) => (t) => s * (t < 300 ? 0 : t < 1800 ? 140 * (t - 300) / 1500 : t < 3300 ? 140 : t < 4800 ? 140 - 140 * (t - 3300) / 1500 : 0);
+  const all = []; let failed = false;
+  for (const [season, team, side] of [[2025, "Mercedes", -1], [2025, "Mercedes", 1], [2026, "Ferrari", -1], [2022, "Red Bull Racing", -1]]) {
+    const R = await rig(season, team), car = R.car, u = R.u, solids = K.cockpitSolids(car, ["chassis", "rim", "headrest"]), torso = K.cockpitSolids(car, ["torso"]), bad = [];
+    const V = () => new THREE.Vector3(), wp = (o) => o.getWorldPosition(V());
+    const arm = (a) => {
+      const k = a.k, [b0, b1, , b3] = a.bones, S = wp(b0), E = wp(b1), W = wp(b3), G = u.armPlan.geo, m = new THREE.Matrix3().setFromMatrix4(a.hand.matrixWorld);
+      const ax = (v) => new THREE.Vector3(v[0] * k, v[1], v[2]).applyMatrix3(m).normalize(), L = (v) => [v.x * k, v.y, v.z];
+      const hx = ax(G.hand[0]), hy = ax(G.hand[1]), hz = ax(G.hand[2]), f = W.clone().sub(E).normalize(), up = E.clone().sub(S).normalize(), bend = A.wristBend(L(f), L(hx), L(hy), L(hz));
+      const H = L(new THREE.Vector3().crossVectors(up, f).normalize().multiplyScalar(k)), pron = ((A.twistOf(H, L(f), L(hx)) - 90 + 540) % 360) - 180;
+      const gw = new THREE.Vector3(G.wrist[0] - G.grip.c[0], G.wrist[1] - G.grip.c[1], G.wrist[2] - G.grip.c[2]); gw.x *= k; gw.applyMatrix4(a.hand.matrixWorld);
+      const pv = a.hand.position, gc = G.grip.c;
+      return { S, E, W, flex: bend.flex, rad: bend.rad, pron, gw, onGrip: Math.hypot(pv.x - k * gc[0], pv.y - gc[1], pv.z - gc[2]) };
+    };
+    const torsoMm = () => Object.entries(K.cockpitClash(car, torso, 1, { nearest: true, dense: 0.006 })).filter(([k]) => / in /.test(k)).reduce((m, [, v]) => Math.max(m, v), 0);
+    let maxDeg = 0, worstT = 0, worstA = 0, worstS = 0, swung = 0;
+    for (let t = 0; t <= 5400; t += 1000 / 60) {
+      R.at(sweep(side), t); car.updateMatrixWorld(true); const deg = u.wheel.rotation.z / D; maxDeg = Math.max(maxDeg, Math.abs(deg));
+      for (const a of u.arms) {
+        const m = arm(a);
+        if (a.pose.free || m.onGrip > 1e-6 || m.gw.distanceTo(m.W) > 1e-4) bad.push(`${t.toFixed(0)} ms ${deg.toFixed(0)}° arm ${a.k}: the hand off its grip`);
+        if (Math.abs(m.S.distanceTo(m.E) - BODY.uarm) > 1e-4 || Math.abs(m.E.distanceTo(m.W) - BODY.farm) > 1e-4) bad.push(`${t.toFixed(0)} ms: a bone's length`);
+        if (!wristOk(m, deg, a.pose.swing)) bad.push(`${t.toFixed(0)} ms ${deg.toFixed(0)}° arm ${a.k}: wrist ${m.flex.toFixed(0)} / ${m.rad.toFixed(0)} / forearm ${m.pron.toFixed(0)}`);
+      }
+      const swinging = u.arms.some((a) => a.pose.swing); if (swinging) swung++;
+      if (Math.round(t) % 200 < 17 || swinging) {
+        const tm = torsoMm(), lim = Math.abs(deg) <= 55 && !swinging ? 0.006 : swinging ? TORSO_SWING : TORSO_LOCK;
+        worstT = Math.max(worstT, tm); if (swinging) worstS = Math.max(worstS, tm); if (tm > lim) bad.push(`${t.toFixed(0)} ms ${deg.toFixed(0)}°${swinging ? " (swing)" : ""}: ${(tm * 1000).toFixed(1)} mm into the torso`);
+        for (const [k, d] of Object.entries(K.cockpitClash(car, solids, 2, { nearest: true }))) if (/ in /.test(k) && d > (/^(sleeve|gauntlet)/.test(k) ? (swinging && /headrest/.test(k) ? SWING_PADS : 0.01) : 0.002)) bad.push(`${t.toFixed(0)} ms ${deg.toFixed(0)}°: ${k} ${(d * 1000).toFixed(1)} mm`);
+        const am = K.armsOverlap(car); worstA = Math.max(worstA, am.depth); if (am.depth > ARMS_MM) bad.push(`${t.toFixed(0)} ms ${deg.toFixed(0)}°: the arms ${(am.depth * 1000).toFixed(1)} mm into each other (${am.what})`);
+      }
+    }
+    if (!(maxDeg > 139.9)) bad.unshift(`the wheel reached only ${maxDeg.toFixed(1)}°`);
+    if (!swung) bad.unshift("no swing seen");
+    all.push(`${season} ${team} side ${side}: torso worst ${(worstT * 1000).toFixed(1)} mm (swing ${(worstS * 1000).toFixed(1)}, ${swung} frames in the swing), arms ${(worstA * 1000).toFixed(1)} mm, ${bad.length} faults`, ...bad.slice(0, 12));
+    if (bad.length) failed = true;
+  }
+  console.log(all.join("\n"));
+  assert.ok(!failed, all.join("\n"));
+});
