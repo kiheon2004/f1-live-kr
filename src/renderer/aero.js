@@ -138,24 +138,36 @@ export function estimateZones(pts, cum, L, { maxTurn = 0.12, minLen = 450, start
 export const ACTIVE = { minSpeed: 100 };   // km/h – below it the flaps are drawn shut (an estimate: a crawling car, the formation)
 export const ENTRY = { bridge: 15000 };    // ms – a hole in the positions bridged when looking for the entry (4 s and more split a run: smooth.js)
 // This pass's brake samples over [t0, t1] (the telemetry's clock): PB.act – when Straight Mode is taken as activated
-// (t0; or, when the car is braking across the zone's start – the corner's braking still on as it crosses the line,
-// the sample before t0 within 1 s braking too – its first sample off the brake after it; null: still braking from
-// before), PB.brake – the first brake sample after that (null: none). "After activating", as the 2025 DRS rule said
-// (Sporting Regulations 2025 Art. 22.1 (e)): a brake before the driver could activate is not the one that ends it.
+// (t0; or, when the car is braking across the zone's start – the corner's braking still on as it crosses the line –
+// when that brake is seen released; null: still braking), PB.brake – the first brake sample after that (null: none).
+// "After activating", as the 2025 DRS rule said (Sporting Regulations 2025 Art. 22.1 (e)): a brake before the driver
+// could activate is not the one that ends it.
+// Nothing after t1 is read – not for the state at the entry nor its continuity either (v0.47, review of v0.46.0 §1: the
+// first sample at or after t0 was read even when it was later than t1, so a future brake value decided whether the
+// brake carried across the entry – t = now = 750, entry 500, braking at 0: open 0.68 or 0 by the 1000 ms sample).
+// The telemetry's gaps (CarData ~4 Hz, holes of seconds in a weak feed): a sample's brake state is taken to hold until
+// the next sample or HOLD ms after it, whichever is first – past that nothing is known and the brake is taken as off
+// (no evidence of braking; estimate, L: no published rate for the channel). So the carried brake: the last sample
+// before t0 braking and t0 within HOLD of it; it lasts through braking samples ≤ t1 each within HOLD of the one before;
+// released at the first sample off the brake, or HOLD after the last braking one where a gap (or the present) follows
+// it – never earlier than seen, so a newer sample never moves the activation back in time (seek = play, live = replay).
+export const HOLD = 1000;   // ms
 const PB = { act: null, brake: null };
 function passBrakes(tel, t0, t1) {
   PB.act = t0; PB.brake = null;
   if (!tel || !tel.t || !tel.brk) return PB;
-  const T = tel.t, B = tel.brk; let lo = 0, hi = T.length - 1;
-  if (hi < 0 || T[hi] < t0) return PB;
-  while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] < t0) lo = m + 1; else hi = m; }
+  const T = tel.t, B = tel.brk, n = T.length;
+  // the first sample at or after t0 (n: none) – only samples ≤ t1 are read from it on
+  let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] < t0) lo = m + 1; else hi = m; }
   let i = lo;
-  if (i > 0 && B[i - 1] && i < T.length && B[i] && T[i] - T[i - 1] <= 1000) {
-    while (i < T.length && T[i] <= t1 && B[i]) i++;
-    if (i >= T.length || T[i] > t1) { PB.act = null; return PB; }
-    PB.act = T[i];
+  if (i > 0 && B[i - 1] && t0 - T[i - 1] <= HOLD) {
+    let last = T[i - 1];
+    while (i < n && T[i] <= t1 && B[i] && T[i] - last <= HOLD) last = T[i++];
+    const rel = i < n && T[i] <= t1 && T[i] - last <= HOLD ? T[i] : last + HOLD;
+    if (rel > t1) { PB.act = null; return PB; }
+    PB.act = Math.max(t0, rel);
   }
-  for (; i < T.length && T[i] <= t1; i++) if (B[i] && realBrake(tel, i, t1)) { PB.brake = T[i]; break; }
+  for (; i < n && T[i] <= t1; i++) if (B[i] && realBrake(tel, i, t1)) { PB.brake = T[i]; break; }
   return PB;
 }
 // A brake sample that counts: the next sample braking too, or the speed falling ≥ BRAKE.fall km/h within BRAKE.ms after
