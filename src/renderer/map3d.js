@@ -4370,14 +4370,14 @@ window.Map3D = {
     const targets = [world.real?.group.getObjectByName("barriers"), world.real?.group.getObjectByName("facilities"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
     const secs = [];
     for (const t of pitTeams.teams) {
-      const w = t.box != null && G.wallAt?.(t.box); if (!w) continue;
-      const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p)), out = [-s.inward[0], -s.inward[1]];
-      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, across = [];
+      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
+      // (where the stand is – it may stand a little along the wall from its box: facilities.js wallAt)
+      const uc = G.project(w.p[0], w.p[2]).u, s = G.slots.reduce((p, q) => (Math.abs(q.uc - uc) < Math.abs(p.uc - uc) ? q : p)), out = [-s.inward[0], -s.inward[1]], across = [];
       // (across the stand's length every 0.5 m, from 0.25 m in at either end – not one line at its middle: a line through
       // the joint of two map pieces misses both, a v0.46 false "no wall" at Mexico City's Mercedes stand; an opening
       // 0.5 m wide or more anywhere behind or in front of a stand is met)
       for (let a = -L / 2 + 0.25; a <= L / 2 - 0.25 + 1e-6; a += 0.5) {
-        const at = (d) => [s.front[0] + s.along[0] * (t.box + a - s.uc) + out[0] * d, s.front[1] + s.along[1] * (t.box + a - s.uc) + out[1] * d];
+        const at = (d) => [s.front[0] + s.along[0] * (uc + a - s.uc) + out[0] * d, s.front[1] + s.along[1] * (uc + a - s.uc) + out[1] * d];
         let edge = null; for (let d = 0; d < 60; d += 0.25) { const [x, z] = at(d), pr = F.project(x, z); if (pr && Math.abs(pr.d) <= (pr.d >= 0 ? edgeOf(pr.sample, 1) : -edgeOf(pr.sample, -1))) { edge = d; break; } }
         const hits = [];
         // (at the seated people's heights over the stand's deck; and at 0.6 m over the lane – under a raised stand, for the wall)
@@ -4392,12 +4392,12 @@ window.Map3D = {
         // from one garage to the next, the lines above run from the box's garage's front line, the stand is straight)
         const [x0, z0] = at(0), dl = G.project(x0, z0).off, cl = G.project(w.p[0] + w.along[0] * a, w.p[2] + w.along[1] * a).off;
         for (const h of hits) h.off += dl;
-        across.push({ a: +a.toFixed(2), stand: [cl - 0.85, cl + 0.75], lane: G.wallFace ? G.wallFace(t.box + a) : null, edge: edge == null ? null : edge + dl, hits, upper: !!w.upper });
+        across.push({ a: +a.toFixed(2), stand: [cl - 0.85, cl + 0.75], lane: G.wallFace ? G.wallFace(uc + a) : null, edge: edge == null ? null : edge + dl, hits, upper: !!w.upper });
       }
-      secs.push({ team: t.team, u: Math.round(t.box), across, standY: +(w.p[1] - s.floor).toFixed(2) });
+      secs.push({ team: t.team, u: Math.round(t.box), at: Math.round(uc), across, standY: +(w.p[1] - s.floor).toFixed(2) });
     }
     const v = circuitVerdict(secs);
-    const row = (r, s) => ({ team: r.team, u: s.u, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY, ...(r.worst ? { worst: r.worst } : {}) });
+    const row = (r, s) => ({ team: r.team, u: s.u, standAt: s.at, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY, ...(r.worst ? { worst: r.worst } : {}) });
     return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, wrong: v.wrong, problems: v.problems,
       first: v.res[0] && row(v.res[0], secs[0]), wrongOnes: v.res.map((r, i) => [r, secs[i]]).filter(([r]) => !r.ok).slice(0, detail ? 99 : 2).map(([r, s]) => row(r, s)), all: detail ? v.res.map((r, i) => row(r, secs[i])) : undefined });
   },
