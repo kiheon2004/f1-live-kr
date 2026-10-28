@@ -4401,6 +4401,9 @@ window.Map3D = {
     return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, wrong: v.wrong, problems: v.problems,
       first: v.res[0] && row(v.res[0], secs[0]), wrongOnes: v.res.map((r, i) => [r, secs[i]]).filter(([r]) => !r.ok).slice(0, detail ? 99 : 2).map(([r, s]) => row(r, s)), all: detail ? v.res.map((r, i) => row(r, secs[i])) : undefined });
   },
+  // development (v0.47): the map's walls at both stages (mapwalls.js – the candidates barrierRay searched, the final ones
+  // drawn): lines, segments, how many crossed the road / pit lane in their middle, test points cut by the road and the lane
+  mapWalls() { return JSON.stringify(world?.real?.mapWalls || null); },
   // development: the pit lane's per-frame cost (pitFrame: every pit car's state; the crews), average over the frames
   pitCostMs(reset = false) { const r = { avgMs: +(pitCost.ms / Math.max(1, pitCost.frames)).toFixed(3), frames: pitCost.frames }; if (reset) { pitCost.ms = 0; pitCost.frames = 0; } return JSON.stringify(r); },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
