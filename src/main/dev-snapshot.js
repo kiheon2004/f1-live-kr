@@ -18,6 +18,7 @@
 //   F1KR_YEAR=2025   (replay) season to pick the session from
 //   F1KR_DELAY=30    (live) broadcast delay in seconds before connecting
 //   F1KR_SWEEP=…     runs the 3D occlusion check on a list of races (see below)
+//   F1KR_GRIDSWEEP=… loads each race at its grid (see below); F1KR_ITEM_JS / F1KR_ITEM_SHOTS run on each
 //   F1KR_LIVE=1      instead connects in live mode and captures after a few seconds
 //   F1KR_HOME=1      stays on the season globe home screen (shown at launch): waits until its list is usable, logs
 //                    HOMEREADY with its timings, then runs F1KR_SHOTS there (every other mode leaves the home screen first)
