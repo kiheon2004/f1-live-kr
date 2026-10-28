@@ -4401,6 +4401,37 @@ window.Map3D = {
     return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, wrong: v.wrong, problems: v.problems,
       first: v.res[0] && row(v.res[0], secs[0]), wrongOnes: v.res.map((r, i) => [r, secs[i]]).filter(([r]) => !r.ok).slice(0, detail ? 99 : 2).map(([r, s]) => row(r, s)), all: detail ? v.res.map((r, i) => row(r, secs[i])) : undefined });
   },
+  // development (v0.47): the teams' stands against each other – overlaps, order, the walkway's ends, the railing opened
+  // in front of them, the lane and the cars' path (standcheck.js judges; each stand as garages.js built it). dump: the
+  // plain input too (a test fixture)
+  async standCheck(detail = false, dump = false) {
+    const G = pitTeams.G; if (!G || !pitTeams.teams) return JSON.stringify({ ok: false, why: "no garages" });
+    const { checkStands, PARTS } = await import("./standcheck.js"), { CREW_ROOM } = await import("./pitlane.js");
+    const u0 = G.project(0, 0).u, ux = G.project(1, 0).u - u0, uz = G.project(0, 1).u - u0, axis = { o: [-u0 * ux, -u0 * uz], u: [ux, uz] };
+    const m = pitModelFor(G), lane = world.pitLane, r3 = (x) => +x.toFixed(3);
+    const feedOff = (u) => { if (!lane) return null; let best = 6, off = null; for (const q of lane.pts) { const pr = G.project(q.x, q.z), d = Math.abs(pr.u - u); if (d < best) { best = d; off = pr.off; } } return off; };
+    // (the stands as the layer built them – pitTeams.teams is re-derived on every update, the layer only when the allocation changes)
+    const built = pitTeams.group?.userData.wallStands || [], boxes = built.map((t) => [t.box - 2.87, t.box + 2.87, t.boxOff + 1.17]);
+    const stands = [];
+    for (const w of built) {
+      const t = w;
+      const parts = PARTS(w.L, w.enclosed).filter((q) => q.low), across = [];
+      // (across its length every 0.25 m, the step's end included: the lane side of what stands there – deck, step, posts)
+      if (!w.upper) for (let a = -w.L / 2 - 0.05; a <= w.L / 2 + 0.55; a += 0.25) {
+        const o = Math.max(...parts.filter((q) => Math.abs(a - q.a) <= q.la / 2 + 1e-6).map((q) => q.o + q.lo / 2)); if (!Number.isFinite(o)) continue;
+        const x = w.p[0] + w.along[0] * a + w.out[0] * o, z = w.p[1] + w.along[1] * a + w.out[1] * o, pr = G.project(x, z), u = pr.u, uu = Math.max(G.gStart, Math.min(G.gEnd, u));
+        const cs = m.at(uu), f = feedOff(u), car = laneOffsetOf({ lane: "fast", w: 0 }, cs, f ?? cs.fastC, u, G.gStart, G.gEnd), bx = boxes.filter((b) => u >= b[0] && u <= b[1]);
+        across.push({ a: r3(a), u: r3(u), standLane: r3(pr.off), laneFace: G.wallFace ? r3(G.wallFace(uu)) : null, carEdge: r3(car + CREW_ROOM.carHalf), boxEdge: bx.length ? r3(Math.max(...bx.map((b) => b[2]))) : null, feedEdge: f == null ? null : r3(f + CREW_ROOM.carHalf) });
+      }
+      stands.push({ team: t.team, box: r3(t.box), L: w.L, p: w.p.map(r3), along: w.along.map((x) => +x.toFixed(5)), out: w.out.map((x) => +x.toFixed(5)), enclosed: w.enclosed, upper: w.upper, across });
+    }
+    const input = { axis: { o: axis.o.map(r3), u: axis.u.map((x) => +x.toFixed(6)) }, wall: G.railU?.length ? [r3(G.railU[0][0]), r3(G.railU[G.railU.length - 1][1])] : null, run: [r3(G.gStart), r3(G.gEnd)],
+      rail: (G.railU || []).map(([a, b]) => [r3(a), r3(b)]), spans: (pitTeams.group?.userData.standSpans || []).map(([a, b]) => [r3(a), r3(b)]), stands };
+    const v = checkStands(input);
+    return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, bad: v.problems.length, problems: v.problems, nMoved: v.nMoved, maxMove: v.maxMove, minGap: v.minGap, minCarGap: v.minCarGap,
+      rail: v.rail && { segments: v.rail.segments, open: v.rail.open, openM: v.rail.openM, maxBeyond: v.rail.maxBeyond, beyond: detail ? v.rail.beyond : undefined, through: v.rail.through },
+      tight: v.tight, overlaps: v.overlaps, order: v.order, ends: v.ends, moved: detail ? v.moved : v.moved.filter((q) => Math.abs(q.du) > 0.25), gaps: detail ? v.gaps : undefined, lane: detail ? v.lane : undefined, ...(dump ? { input, model: { pitch: r3(G.pitch), slots: m.st.map((x) => [r3(x.s.uc), x.cs.wall == null ? null : r3(x.cs.wall), x.cs.fastC == null ? null : r3(x.cs.fastC)]) } } : {}) });
+  },
   // development: the pit lane's per-frame cost (pitFrame: every pit car's state; the crews), average over the frames
   pitCostMs(reset = false) { const r = { avgMs: +(pitCost.ms / Math.max(1, pitCost.frames)).toFixed(3), frames: pitCost.frames }; if (reset) { pitCost.ms = 0; pitCost.frames = 0; } return JSON.stringify(r); },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)
