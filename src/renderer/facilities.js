@@ -870,6 +870,15 @@ function pitBuilding(ctx, p) {
         if (!(Math.abs(db - want) <= 1)) { a.openAfter = true; openings++; break; }
       }
     }
+    // (the map's wall stands on the ground by the track – scenery.js barriersMesh: 0.9–1.4 m high from the track's
+    // height (surfaceAt) –, the lane is laid level at the garages' floor: where the map's wall's top would be under
+    // 0.9 m over the lane, ours on top of the lane's level along it. Mexico City 2025: at the Mercedes stand the track
+    // lies so far under the lane that nothing stood between the seated people and the tarmac – run/pitwall)
+    let low = 0;
+    if (mappedWall && ctx.surfaceAt) for (const w of W) if (w.mapped) {
+      const [x, z] = P(w.u, frontV(w.u) + vTrack * (w.d + pw.thick / 2)), top = ctx.surfaceAt(x, z) + 0.9;
+      if (Number.isFinite(top) && top < floorAt(w.u) + 0.9) { w.low = true; low++; }
+    }
     // (the walkway behind a mapped wall – the stands' platform – is the plain one: the map gives the wall, not what is
     // behind it. v0.45 drew none there and put the stands on the wall's track side, between it and the tarmac, the
     // wall between them and the pit lane – Silverstone, Suzuka, Melbourne…: v0.46 run/pitwall)
@@ -888,7 +897,7 @@ function pitBuilding(ctx, p) {
         const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
         // wall (track face, top, pit face), fence above it – none over the map's own (a mapped station's d is its wall's
         // pit face: ours, where the map has none, stands out from there)
-        if (!mappedWall || W[i].own || W[i + 1].own || W[i].openAfter) {
+        if (!mappedWall || W[i].own || W[i + 1].own || W[i].openAfter || W[i].low || W[i + 1].low) {
           const t0 = mappedWall ? -pw.thick : 0;
           F.poly("pitWall", [ptAt(i, t0, 0), ptAt(i + 1, t0, 0), ptAt(i + 1, t0, pw.height), ptAt(i, t0, pw.height)], null, o);
           F.poly("pitWall", [ptAt(i, t0, pw.height), ptAt(i + 1, t0, pw.height), ptAt(i + 1, t0 + pw.thick, pw.height), ptAt(i, t0 + pw.thick, pw.height)], null, [0, 1, 0]);
@@ -932,7 +941,7 @@ function pitBuilding(ctx, p) {
       // (what the wall and its walkway stand on)
       { const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, base + walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]); occupancy.push(strip); }
       const nFence = W.filter((w) => w.fence).length;
-      wallFrom = mappedWall ? "the map's wall" + (own ? ` (ours at ${own} of ${W.length} stations where it has none – estimate)` : "") + (openings ? ` (ours across ${openings} opening${openings > 1 ? "s" : ""} in it)` : "") : (p.pitWallFrom || "drawn at the track's edge") + (nFence ? ` (under the map's fence at ${nFence} of ${W.length} stations)` : "");
+      wallFrom = mappedWall ? "the map's wall" + (own ? ` (ours at ${own} of ${W.length} stations where it has none – estimate)` : "") + (openings ? ` (ours across ${openings} opening${openings > 1 ? "s" : ""} in it)` : "") + (low ? ` (ours over it at ${low} stations where it stands low under the lane)` : "") : (p.pitWallFrom || "drawn at the track's edge") + (nFence ? ` (under the map's fence at ${nFence} of ${W.length} stations)` : "");
     }
   }
   // The paddock behind the garages (p.paddock, for the years it was seen): awnings along the garages' back and a row

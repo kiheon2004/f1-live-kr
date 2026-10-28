@@ -214,3 +214,18 @@ test("pit wall check across a stand's length: one line through a joint of two ma
   assert.strictEqual(open.wrong, 1);
   assert.deepStrictEqual(open.res[0].problems, ["no wall between the stand and the track (at 0.25 m along)"]);
 });
+
+test("a mapped pit wall standing low under the lane's level (Mexico City 2025, Mercedes): ours over it at the lane's level", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  const { standSection } = await import("../src/renderer/pitwallcheck.js");
+  const barrierRay = (x, z, dx, dz, max, kind = "solid") => { if (kind !== "solid") return Infinity; const s = (z - -57.5) / -dz; return dz < 0 && s > 0 && s <= max ? s : Infinity; };
+  // the track's surface 1.5 m under the lane's from 50 m out (the map's wall 27.5 m out from the garages – scene z −57.5 –
+  // stands on it: its top ~0.6 m under the lane)
+  const surfaceAt = (x, z) => (z < -50 ? -1.5 : 0);
+  const r = await F.buildFacilities({ scene: scene(), gf, groundAt: () => 0, surfaceAt, trackEdge, barrierRay, location: "T", year: 2025, toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 })] });
+  const G = r.group.children[0].userData.garages;
+  G.openRail([[-3, 3]]);
+  // (the map's wall, too low, not met at the seated heights nor 0.6 m over the lane: no hit for it)
+  const v = standSection(await section(G, r.group, 0));
+  assert.ok(v.ok, `${v.order} – ${v.problems.join("; ")}`);
+});
