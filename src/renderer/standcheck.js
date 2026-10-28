@@ -66,7 +66,8 @@ export const TOL = {
   gapTight: 0.3,    // neighbours closer than this are listed as tight (not wrong: real stands stand nearly end to end)
   end: 0.05,        // a stand's part this far past the walkway's end stands off it
   rail: 0.05,       // the railing left in place over a stand's deck or step by more than this – it runs through it
-  railSlack: 0.5,   // the railing open more than this beyond a stand's deck and step (nothing in front of the opening)
+  railSlack: 0.8,   // the railing open more than this beyond a stand's deck and step (nothing in front of the opening): the
+                    // 0.3 m garages.js opens before the deck (standSpans) and one 0.5 m piece of railing (facilities.js)
   lane: 0.2,        // a stand this far over the lane's face stands in the pit lane (as pitwallcheck.js)
   car: 0,           // the cars' wall side within this of a stand's deck / step / posts – in their way
 };
