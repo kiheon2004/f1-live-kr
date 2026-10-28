@@ -4845,6 +4845,29 @@ window.Map3D = {
     }
     return JSON.stringify(ev);
   },
+  // development (v0.47): the wings never read ahead – over [t0, t1] every car's pose with the whole telemetry and with
+  // the telemetry cut at the query's limit (t + lag, or now) must be the same; returns the counts and the first misses
+  aeroPrefix(t0, t1, step = 250, max = 20) {
+    const src = app().src, sm = smooth.src === src ? smooth.tr : null; if (!sm?.coords) return "no smooth tracks";
+    const st = {}, I = {}, a = {}, b = {}, miss = []; let n = 0, inZone = 0, open = 0, braking = 0;
+    for (const num of Object.keys(src.tracks?.cars || {})) {
+      const tel = src.car?.[num]; if (!tel?.t?.length) continue;
+      for (let t = t0; t <= t1; t += step) {
+        if (!sm.state(num, t, st)) continue;
+        const X = aeroCtx(src, t), lim = src.isLive ? t : t + (sm.telLag || 0);
+        Object.assign(I, { allowed: X.allowed, spans: X.Z.spans, L: X.Z.L, s: st.s, speed: st.vs * 3.6, tel, t, now: src.isLive ? t : null, onTrack: true, racing: X.t0 == null || t >= X.t0, startGate: X.t0, mode: X.mode, hist: sm.coords(num), lag: sm.telLag || 0 });
+        activeAeroAt(I, a);
+        let lo = 0, hi = tel.t.length; while (lo < hi) { const m = (lo + hi) >> 1; if (tel.t[m] <= lim) lo = m + 1; else hi = m; }
+        const cut = (x) => x && (x.subarray ? x.subarray(0, lo) : x.slice(0, lo));
+        I.tel = { t: cut(tel.t), brk: cut(tel.brk), v: cut(tel.v) };
+        activeAeroAt(I, b); n++;
+        if (a.why !== "outside the zones" && a.why !== "no zone") inZone++;
+        if (a.open > 0) open++; if (/braking/.test(a.why)) braking++;
+        if (a.open !== b.open || a.why !== b.why) { if (miss.length < max) miss.push({ num, rel: Math.round((t - (src.startTime?.() || 0)) / 100) / 10, full: [+a.open.toFixed(3), a.why], cut: [+b.open.toFixed(3), b.why] }); else miss.n = (miss.n || max) + 1; }
+      }
+    }
+    return JSON.stringify({ n, inZone, open, braking, misses: miss.n || miss.length, first: miss });
+  },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {
     const c = cars.get(app().focus || leader()); if (!c) return "no car";
