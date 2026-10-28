@@ -17,7 +17,7 @@ import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
-import { LANES, laneCells, crossSection } from "./pitlane.js";
+import { LANES, laneCells, crossSection, laneStationAt } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
@@ -291,8 +291,10 @@ function pitModelFor(G) {
     const wall = G.wallFace ? G.wallFace(s.uc) : null;
     return { s, cs: crossSection({ wall, edge }), edge, floor: s.floor };
   });
+  // (between the garages either side of u by their centres – laneStationAt: a run's garages can have a gap, Madrid 2026)
+  const us = st.map((x) => x.s.uc);
   const at = (u) => {
-    const f = Math.max(0, Math.min(st.length - 1, (u - G.gStart) / G.pitch - 0.5)), i = Math.min(st.length - 2, Math.floor(f)), t = st.length > 1 ? f - Math.max(0, i) : 0;
+    const { i, t } = laneStationAt(us, u);
     const a = st[Math.max(0, i)], b = st[Math.min(st.length - 1, Math.max(0, i) + 1)], L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
     return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor: a.floor + (b.floor - a.floor) * t, slot: t < 0.5 ? a.s : b.s };
   };
@@ -4421,7 +4423,8 @@ window.Map3D = {
         const o = Math.max(...parts.filter((q) => Math.abs(a - q.a) <= q.la / 2 + 1e-6).map((q) => q.o + q.lo / 2)); if (!Number.isFinite(o)) continue;
         const x = w.p[0] + w.along[0] * a + w.out[0] * o, z = w.p[1] + w.along[1] * a + w.out[1] * o, pr = G.project(x, z), u = pr.u, uu = Math.max(G.gStart, Math.min(G.gEnd, u));
         const cs = m.at(uu), f = feedOff(u), car = laneOffsetOf({ lane: "fast", w: 0 }, cs, f ?? cs.fastC, u, G.gStart, G.gEnd), bx = boxes.filter((b) => u >= b[0] && u <= b[1]);
-        across.push({ a: r3(a), u: r3(u), standLane: r3(pr.off), laneFace: G.wallFace ? r3(G.wallFace(uu)) : null, carEdge: r3(car + CREW_ROOM.carHalf), boxEdge: bx.length ? r3(Math.max(...bx.map((b) => b[2]))) : null, feedEdge: f == null ? null : r3(f + CREW_ROOM.carHalf) });
+        const dk = Math.abs(a) <= w.L / 2 - 0.25 + 1e-6 ? G.project(w.p[0] + w.along[0] * a + w.out[0] * 0.85, w.p[1] + w.along[1] * a + w.out[1] * 0.85).off : null;
+        across.push({ a: r3(a), u: r3(u), standLane: r3(pr.off), deckLane: dk == null ? null : r3(dk), laneFace: G.wallFace ? r3(G.wallFace(uu)) : null, carEdge: r3(car + CREW_ROOM.carHalf), boxEdge: bx.length ? r3(Math.max(...bx.map((b) => b[2]))) : null, feedEdge: f == null ? null : r3(f + CREW_ROOM.carHalf) });
       }
       stands.push({ team: t.team, box: r3(t.box), L: w.L, p: w.p.map(r3), along: w.along.map((x) => +x.toFixed(5)), out: w.out.map((x) => +x.toFixed(5)), enclosed: w.enclosed, upper: w.upper, across });
     }

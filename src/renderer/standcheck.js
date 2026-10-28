@@ -77,7 +77,8 @@ export const TOL = {
 //   rail: [[u0, u1]] – the railing's segments (facilities.js railU) or null (none: Monaco's upstairs stands),
 //   spans: [[u0, u1]] – what was opened (garages.js standSpans),
 //   stands: [{ team, box (u), L, p: [x, z], along, out, enclosed, upper,
-//              across: [{ a, u, standLane (m out from the garages: the deck's / step's / posts' lane side), laneFace
+//              across: [{ a, u, standLane (m out from the garages: the deck's / step's / posts' lane side), deckLane (the
+//              deck's lane side, from 0.25 m in at either end – as Map3D.pitWallOrder measures), laneFace
 //              (facilities.js wallFace), carEdge (the wall side of a car in the fast lane there: pitstate.js
 //              laneOffsetOf + the car's half width), boxEdge (the box's painted outline's lane side, if here), feedEdge
 //              (the feed's own pit line + a car's half width – shown, not judged: the feed's line wanders a metre or
@@ -134,14 +135,17 @@ export function checkStands(input, tol = TOL) {
   const lane = [], cars = [];
   for (const s of st) {
     if (s.upper || !s.across?.length) continue;
-    let inLane = -Infinity, carGap = Infinity, boxGap = Infinity, feedGap = Infinity;
+    let inLane = -Infinity, inAll = -Infinity, carGap = Infinity, boxGap = Infinity, feedGap = Infinity;
     for (const x of s.across) {
       if (x.feedEdge != null) feedGap = Math.min(feedGap, x.standLane - x.feedEdge);
-      if (x.laneFace != null) inLane = Math.max(inLane, x.laneFace - x.standLane);
+      // (in the lane: the deck's lane side, as pitwallcheck.js judges it – from 0.25 m in at either end, deckLane; the
+      // whole length with the posts and the step in overLaneAll, shown)
+      if (x.laneFace != null && x.deckLane != null) inLane = Math.max(inLane, x.laneFace - x.deckLane);
+      if (x.laneFace != null) inAll = Math.max(inAll, x.laneFace - x.standLane);
       if (x.carEdge != null) carGap = Math.min(carGap, x.standLane - x.carEdge);
       if (x.boxEdge != null) boxGap = Math.min(boxGap, x.standLane - x.boxEdge);
     }
-    lane.push({ team: s.team, overLane: r2(inLane), carGap: Number.isFinite(carGap) ? r2(carGap) : null, boxGap: Number.isFinite(boxGap) ? r2(boxGap) : null, feedGap: Number.isFinite(feedGap) ? r2(feedGap) : null });
+    lane.push({ team: s.team, overLane: Number.isFinite(inLane) ? r2(inLane) : null, overLaneAll: Number.isFinite(inAll) ? r2(inAll) : null, carGap: Number.isFinite(carGap) ? r2(carGap) : null, boxGap: Number.isFinite(boxGap) ? r2(boxGap) : null, feedGap: Number.isFinite(feedGap) ? r2(feedGap) : null });
     if (inLane > T.lane) problems.push(`${s.team} stands ${r2(inLane)} m in the pit lane`);
     if (carGap < T.car) { cars.push(s.team); problems.push(`${s.team}: the fast lane's cars ${r2(-carGap)} m into its deck/step`); }
     if (boxGap < T.car) problems.push(`${s.team}: a box's outline ${r2(-boxGap)} m under its deck/step`);

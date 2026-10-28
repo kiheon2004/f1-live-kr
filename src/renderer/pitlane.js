@@ -189,3 +189,17 @@ export function crossSection(st, R = CREW_ROOM) {
   const boxC = narrow ? inner / 2 : Math.max(lo, Math.min(hi, inner / 2));
   return { ok: !narrow, wall, wallFrom, fast: [inner, wall], fastC: inner + fastW / 2, inner, boxC, narrow, lane: wall };
 }
+
+// Between which two garages' cross sections a place u along the run lies, by the garages' own centres (us: ascending) –
+// → { i, t }: station i, t of the way to i + 1 (clamped at the run's ends). Not by u's distance from the run's start in
+// garage pitches: a run's garages aren't always evenly spaced – Madrid 2026 has a 116 m gap between two blocks, and
+// counting pitches from the start put every place past it 9½ garages too far on, on the last garage's section (the
+// track turning away there: its wall 17.3 m out against 10.7 m at Haas) – the fast lane's cars were drawn 5 m beyond the
+// pit wall, through the stands (v0.47, run/stands). Evenly spaced garages: the same as counting pitches.
+export function laneStationAt(us, u) {
+  const n = us.length; if (n < 2) return { i: 0, t: 0 };
+  if (u <= us[0]) return { i: 0, t: 0 };
+  if (u >= us[n - 1]) return { i: n - 2, t: 1 };
+  let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (us[m] <= u) lo = m; else hi = m; }
+  return { i: lo, t: (u - us[lo]) / (us[lo + 1] - us[lo] || 1) };
+}

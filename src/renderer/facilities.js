@@ -907,8 +907,15 @@ function pitBuilding(ctx, p) {
         const w0 = base, w1 = base + walk;
         F.poly("walkway", [ptAt(i, w0, deckH), ptAt(i + 1, w0, deckH), ptAt(i + 1, w1, deckH), ptAt(i, w1, deckH)], null, [0, 1, 0]);
         F.poly("pitWall", [ptAt(i, w1, 0), ptAt(i + 1, w1, 0), ptAt(i + 1, w1, deckH), ptAt(i, w1, deckH)], null, io);
-        F.poly("rail", [ptAt(i, w1, deckH), ptAt(i + 1, w1, deckH), ptAt(i + 1, w1, deckH + 1.1), ptAt(i, w1, deckH + 1.1)], [[0, 0], [1, 0], [1, 1], [0, 1]], io);
-        railU.push([W[i].u, W[i + 1].u]);
+        // (in pieces of 0.5 m at most, each its share of the segment's texture: openRail leaves out whole pieces, and whole
+        // 3 m segments had left the railing open up to 3.1 m past a stand's end with nothing in front – v0.47, Madrid
+        // 2026, run/stands)
+        const nR = Math.max(1, Math.ceil((W[i + 1].u - W[i].u) / 0.5)), a0 = ptAt(i, w1, deckH), a1 = ptAt(i + 1, w1, deckH), lerp = (f, y) => [a0[0] + (a1[0] - a0[0]) * f, a0[1] + (a1[1] - a0[1]) * f + y, a0[2] + (a1[2] - a0[2]) * f];
+        for (let j = 0; j < nR; j++) {
+          const f0 = j / nR, f1 = (j + 1) / nR;
+          F.poly("rail", [lerp(f0, 0), lerp(f1, 0), lerp(f1, 1.1), lerp(f0, 1.1)], [[f0, 0], [f1, 0], [f1, 1], [f0, 1]], io);
+          railU.push([W[i].u + (W[i + 1].u - W[i].u) * f0, W[i].u + (W[i + 1].u - W[i].u) * f1]);
+        }
       }
       // the walkway's centre at u (for the teams' stands): [x, y, z], facing the pit lane – between two samples, between
       // their points (a team's box is anywhere along the wall, not only every 3 m)
