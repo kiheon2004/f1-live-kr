@@ -4326,18 +4326,25 @@ window.Map3D = {
     for (const t of pitTeams.teams) {
       const w = t.box != null && G.wallAt?.(t.box); if (!w) continue;
       const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p)), out = [-s.inward[0], -s.inward[1]];
-      const at = (d) => [s.front[0] + s.along[0] * (t.box - s.uc) + out[0] * d, s.front[1] + s.along[1] * (t.box - s.uc) + out[1] * d];
-      let edge = null; for (let d = 0; d < 60; d += 0.25) { const [x, z] = at(d), pr = F.project(x, z); if (pr && Math.abs(pr.d) <= (pr.d >= 0 ? edgeOf(pr.sample, 1) : -edgeOf(pr.sample, -1))) { edge = d; break; } }
-      const c = G.project(w.p[0], w.p[2]).off, hits = [];
-      // (at the seated people's heights over the stand's deck; and at 0.6 m over the lane – under a raised stand, for the wall)
-      for (const [y, low] of [[w.p[1] + 0.72, false], [w.p[1] + 1.12, false], [w.p[1] + 1.72, false], [s.floor + 0.6, true]]) {
-        // (both ways: a one-sided face is met only from its front – the wall's faces the track)
-        for (const [o0, dir] of [[0.3, 1], [60, -1]]) {
-          const [x, z] = at(o0); rc.set(new THREE.Vector3(x, y, z), new THREE.Vector3(out[0] * dir, 0, out[1] * dir)); rc.far = 59.7;
-          for (const h of rc.intersectObjects(targets, true)) if (h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh) hits.push({ off: o0 + dir * h.distance, name: h.object.name || h.object.parent?.name || h.object.type, low });
+      const c = G.project(w.p[0], w.p[2]).off, L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, across = [];
+      // (across the stand's length every 0.5 m, from 0.25 m in at either end – not one line at its middle: a line through
+      // the joint of two map pieces misses both, a v0.46 false "no wall" at Mexico City's Mercedes stand; an opening
+      // 0.5 m wide or more anywhere behind or in front of a stand is met)
+      for (let a = -L / 2 + 0.25; a <= L / 2 - 0.25 + 1e-6; a += 0.5) {
+        const at = (d) => [s.front[0] + s.along[0] * (t.box + a - s.uc) + out[0] * d, s.front[1] + s.along[1] * (t.box + a - s.uc) + out[1] * d];
+        let edge = null; for (let d = 0; d < 60; d += 0.25) { const [x, z] = at(d), pr = F.project(x, z); if (pr && Math.abs(pr.d) <= (pr.d >= 0 ? edgeOf(pr.sample, 1) : -edgeOf(pr.sample, -1))) { edge = d; break; } }
+        const hits = [];
+        // (at the seated people's heights over the stand's deck; and at 0.6 m over the lane – under a raised stand, for the wall)
+        for (const [y, low] of [[w.p[1] + 0.72, false], [w.p[1] + 1.12, false], [w.p[1] + 1.72, false], [s.floor + 0.6, true]]) {
+          // (both ways: a one-sided face is met only from its front – the wall's faces the track)
+          for (const [o0, dir] of [[0.3, 1], [60, -1]]) {
+            const [x, z] = at(o0); rc.set(new THREE.Vector3(x, y, z), new THREE.Vector3(out[0] * dir, 0, out[1] * dir)); rc.far = 59.7;
+            for (const h of rc.intersectObjects(targets, true)) if (h.object.visible !== false && !h.object.isSprite && !h.object.isInstancedMesh) hits.push({ off: o0 + dir * h.distance, name: h.object.name || h.object.parent?.name || h.object.type, low });
+          }
         }
+        across.push({ a: +a.toFixed(2), stand: [c - 0.85, c + 0.75], lane: G.wallFace ? G.wallFace(t.box + a) : null, edge, hits, upper: !!w.upper });
       }
-      secs.push({ team: t.team, u: Math.round(t.box), stand: [c - 0.85, c + 0.75], lane: G.wallFace ? G.wallFace(t.box) : null, edge, hits, upper: !!w.upper, standY: +(w.p[1] - s.floor).toFixed(2) });
+      secs.push({ team: t.team, u: Math.round(t.box), across, standY: +(w.p[1] - s.floor).toFixed(2) });
     }
     const v = circuitVerdict(secs);
     const row = (r, s) => ({ team: r.team, u: s.u, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY });

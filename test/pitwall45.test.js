@@ -203,3 +203,14 @@ test("a mapped wall piece with an end on the tarmac is found where it is drawn (
   assert.ok(len >= 34 && len <= 36, `the off-tarmac part found (${len.toFixed(1)} m of it)`);
   assert.ok(segs.every(([ax, , bx]) => ax <= 35 && bx <= 35), "none of it on the tarmac");
 });
+
+test("pit wall check across a stand's length: one line through a joint of two map pieces is no opening; an opening 0.5 m wide behind the stand is", async () => {
+  const { circuitVerdict } = await import("../src/renderer/pitwallcheck.js");
+  const at = (a, wall) => ({ a, stand: [27.9, 29.5], lane: 28, edge: 30, hits: wall ? [{ off: 29.6, name: "barrier:wall" }] : [] });
+  // (Mexico City 2025: the middle line alone – the joint – met nothing; every 0.5 m across it the wall is there)
+  const joint = circuitVerdict([{ team: "M", across: [-2.25, -1.75, -1.25, -0.75, -0.25, 0.25, 0.75, 1.25, 1.75, 2.25].map((a) => at(a, true)) }]);
+  assert.strictEqual(joint.wrong, 0, joint.problems.join("; "));
+  const open = circuitVerdict([{ team: "M", across: [-0.75, -0.25, 0.25, 0.75].map((a) => at(a, a !== 0.25)) }]);
+  assert.strictEqual(open.wrong, 1);
+  assert.deepStrictEqual(open.res[0].problems, ["no wall between the stand and the track (at 0.25 m along)"]);
+});

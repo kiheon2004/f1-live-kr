@@ -44,9 +44,19 @@ export function standSection(sec, tol = TOL) {
 }
 
 // a whole circuit: every stand's section → { stands, wrong (how many), problems (distinct, with how often) }
+// (a section with `across`: the stand's sections along its length – it is right where every one is; its order the
+// middle one's, its problems each with where along the stand)
+export function standAcross(sec) {
+  if (!sec.across) return standSection(sec);
+  const rs = sec.across.map((x) => ({ a: x.a, ...standSection(x) })), mid = rs[Math.floor(rs.length / 2)], problems = [];
+  const seen = new Set();
+  for (const r of rs) for (const p of r.problems) { const k = p.replace(/[-\d.]+/g, "…"); if (!seen.has(k)) { seen.add(k); problems.push(`${p} (at ${r.a} m along)`); } }
+  return { ok: rs.every((r) => r.ok), order: mid.order, problems, trackWall: mid.trackWall, between: rs.flatMap((r) => r.between), along: rs.length };
+}
+
 export function circuitVerdict(sections) {
-  const res = sections.map((s) => ({ team: s.team, ...standSection(s) })), count = new Map();
-  for (const r of res) for (const p of r.problems) { const k = p.replace(/[-\d.]+( m|\))/g, "…$1").replace(/\(\S+ > edge \S+\)/, ""); count.set(k, (count.get(k) || 0) + 1); }
+  const res = sections.map((s) => ({ team: s.team, ...standAcross(s) })), count = new Map();
+  for (const r of res) for (const p of r.problems) { const k = p.replace(/ \(at [-\d.]+ m along\)/, "").replace(/[-\d.]+( m|\))/g, "…$1").replace(/\(\S+ > edge \S+\)/, ""); count.set(k, (count.get(k) || 0) + 1); }
   return { stands: res.length, wrong: res.filter((r) => !r.ok).length, problems: [...count].map(([p, n]) => `${n}× ${p}`), res };
 }
 
