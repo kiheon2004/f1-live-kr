@@ -269,3 +269,24 @@ test("a stand where the pit wall bends (Imola's run's end): along the wall there
     assert.strictEqual(v.wrong, 0, `u ${u}: ${v.problems.join("; ")}`);
   }
 });
+
+test("a stand where the pit wall kinks at the run's end (Madrid 2026, Cadillac: the track turning away): straight, it fits the walkway across its whole length", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  const { circuitVerdict } = await import("../src/renderer/pitwallcheck.js");
+  // the tarmac's edge straight to x 100, then turning away (0.5 m out per metre along)
+  const kink = (x, z) => z + 60 + (x > 100 ? (x - 100) * 0.5 : 0);
+  const r = await F.buildFacilities({ scene: scene(), gf, groundAt: () => 0, trackEdge: kink, location: "T", year: 2026, toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 })] });
+  const G = r.group.children[0].userData.garages;
+  for (const u of [99, 102, 104, 107]) {
+    // (the railing opened where the stand is – garages.js standSpans: it may have moved along the wall off the kink)
+    const w = G.wallAt(u, 2.7), across = [], pu = G.project(w.p[0], w.p[2]).u;
+    assert.ok(Math.abs(pu - u) <= 6.01, `stays near its box (${pu.toFixed(1)} for ${u})`);
+    G.openRail([[pu - 3, pu + 3]]);
+    for (let a = -2.45; a <= 2.46; a += 0.5) {
+      const x = w.p[0] + w.along[0] * a, z = w.p[2] + w.along[1] * a, pr = G.project(x, z), c = pr.off, sec = await section(G, r.group, pr.u);
+      across.push({ a: +a.toFixed(2), stand: [c - 0.85, c + 0.75], lane: G.wallFace(pr.u), edge: sec.edge + (pr.u > 100 ? (pr.u - 100) * 0.5 : 0), hits: sec.hits });
+    }
+    const v = circuitVerdict([{ team: "T", across }]);
+    assert.strictEqual(v.wrong, 0, `u ${u}: ${v.problems.join("; ")}`);
+  }
+});

@@ -4324,9 +4324,8 @@ window.Map3D = {
     const targets = [world.real?.group.getObjectByName("barriers"), world.real?.group.getObjectByName("facilities"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
     const secs = [];
     for (const t of pitTeams.teams) {
-      const w = t.box != null && G.wallAt?.(t.box); if (!w) continue;
-      const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p)), out = [-s.inward[0], -s.inward[1]];
-      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, across = [];
+      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
+      const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p)), out = [-s.inward[0], -s.inward[1]], across = [];
       // (across the stand's length every 0.5 m, from 0.25 m in at either end – not one line at its middle: a line through
       // the joint of two map pieces misses both, a v0.46 false "no wall" at Mexico City's Mercedes stand; an opening
       // 0.5 m wide or more anywhere behind or in front of a stand is met)

@@ -778,7 +778,8 @@ export function teamLayer(garages, teams, drivers, season = null) {
       const c = c0.clone().addScaledVector(along, da).addScaledVector(out, dw);
       quad(marks, c, along.clone().multiplyScalar(la), out.clone().multiplyScalar(lw), up, null, yellow);
     }
-    const w = garages.wallAt?.(t.box);
+    // (with the stand's half length: it lies along the walkway over its whole length – facilities.js wallAt)
+    const w = garages.wallAt?.(t.box, (pitWallSeats(t.team, season).seats * 0.8 + 0.6) / 2);
     if (w) pitWallStand(w, t, season);
   }
   const mesh = (store, mat, name) => {

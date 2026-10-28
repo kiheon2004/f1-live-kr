@@ -932,16 +932,29 @@ function pitBuilding(ctx, p) {
         // the lane – Monaco)
         const [x, z] = P(uu, frontV(uu) + vTrack * 0.9);
         return { p: [x, floorAt(uu) + 3.4, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]], upper: true };
-      } : (uu) => {
-        let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
+      } : (uu, half = 0) => {
         // (on the walkway, the pit lane's side of the wall – a mapped one too: v0.45 put it on that wall's track side,
         // between it and the tarmac, where 2.4 m were left, else none)
         const back = base + walk / 2;
-        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, back, deckH), b = ptAt(i + 1, back, deckH);
-        // (along the wall there – the line between the two stations –, not the building's axis: where the wall bends, a
-        // straight stand on the axis stood 0.2–0.4 m into the lane at one end – Imola's run's end, v0.46 run/pitwall)
-        const dx = b[0] - a[0], dz = b[2] - a[2], len = Math.hypot(dx, dz) || 1, al = [dx / len, dz / len], o0 = [-v[0] * vTrack, -v[1] * vTrack], sg = Math.sign(-al[1] * o0[0] + al[0] * o0[1]) || 1;
-        return { p: a.map((x, k) => x + (b[k] - x) * f), out: [-al[1] * sg, al[0] * sg], along: al };
+        const walkAt = (q) => { let i = 0; while (i + 2 < W.length && W[i + 1].u < q) i++; const f = Math.max(0, Math.min(1, (q - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, back, deckH), b = ptAt(i + 1, back, deckH); return { p: a.map((x, k) => x + (b[k] - x) * f), d: [b[0] - a[0], b[2] - a[2]] }; };
+        const o0 = [-v[0] * vTrack, -v[1] * vTrack], C = walkAt(uu);
+        // (along the wall there, not the building's axis: where the wall bends, a straight stand on the axis stood 0.2–0.4 m
+        // into the lane at one end – Imola's run's end. With its half length: along the walkway's chord over its length,
+        // halfway between that chord and the walkway's middle – where the wall kinks a stand along the line between two
+        // stations still stood 0.38 m into the lane at one end: Madrid 2026, Cadillac, the track turning away at the run's
+        // end; v0.46 run/pitwall)
+        let p = C.p, d = C.d;
+        if (half > 0) {
+          // (how far the walkway's middle strays from the chord over [q − half, q + half]: a straight stand fits where it's
+          // small. Where it doesn't – a kink sharper than a 1.6 m deck on a 1.5 m walkway can take – the stand moves along
+          // the wall, up to 6 m, to the nearest place it fits: still opposite its box, give or take a garage; Madrid 2026)
+          const stray = (q) => { const A = walkAt(q - half).p, B = walkAt(q + half).p, dx = B[0] - A[0], dz = B[2] - A[2], L = Math.hypot(dx, dz) || 1; let m = 0; for (let t = -half; t <= half + 1e-6; t += 0.5) { const P0 = walkAt(q + t).p; m = Math.max(m, Math.abs(((P0[0] - A[0]) * dz - (P0[2] - A[2]) * dx) / L)); } return m; };
+          let q = uu, best = stray(uu);
+          if (best > 0.1) for (let k = 1; k <= 12 && best > 0.1; k++) for (const sgn of [-1, 1]) { const qq = uu + sgn * k * 0.5, m = stray(qq); if (m < best - 1e-6) { best = m; q = qq; } if (best <= 0.1) break; }
+          const A = walkAt(q - half).p, B = walkAt(q + half).p, m = A.map((x, k) => (x + B[k]) / 2), Cq = walkAt(q).p; d = [B[0] - A[0], B[2] - A[2]]; p = [(m[0] + Cq[0]) / 2, Cq[1], (m[2] + Cq[2]) / 2];
+        }
+        const len = Math.hypot(d[0], d[1]) || 1, al = [d[0] / len, d[1] / len], sg = Math.sign(-al[1] * o0[0] + al[0] * o0[1]) || 1;
+        return { p, out: [-al[1] * sg, al[0] * sg], along: al };
       };
       // (what the wall and its walkway stand on)
       { const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, base + walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]); occupancy.push(strip); }
