@@ -8,6 +8,7 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
+import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
@@ -25,7 +26,7 @@ import { circuitVerdict, pitsUpToWall } from "./pitwallcheck.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { probeMirrorPass, samePipeline, glassVsPicture, rendererState, flatFill, glassPixels, glassOnScreen } from "./mirrorprobe.js";
-import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
+import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO, lockFor } from "./car3d.js";
 import { kitMode } from "./kit.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
@@ -1478,6 +1479,31 @@ let devTrafMark = false;   // (development: red rings under cars with an overlap
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
 const KA = [0, 0, 0], KB = [0, 0, 0], KC = [0, 0, 0];   // (the steering's curvature: three points of the path)
+// On the track: the front wheels' steer (rad) from the path's curvature where the car is (st: its track coordinates) –
+// the frame's own steering (updateCars) and its history (wheelHistOf) by the one rule
+function pathSteer(F, st, speed) {
+  const fwd = st.vs >= 0 ? 1 : -1, h = Math.max(4, Math.min(12, Math.abs(st.vs) * 0.15));
+  F.at(st.s - fwd * h, st.d, KA); F.at(st.s, st.d, KB); F.at(st.s + fwd * h, st.d, KC);
+  const kappa = wrap(Math.atan2(KC[0] - KB[0], KC[2] - KB[2]) - Math.atan2(KB[0] - KA[0], KB[2] - KA[2])) / h;
+  return Math.max(-0.4, Math.min(0.4, Math.atan(3.4 * kappa) + (0.01 * speed * speed * kappa) / 9.81));
+}
+// v0.47 (request §2): the steering wheel's turn (rad, as car3d's wheel.rotation.z) at any moment of the session – the
+// lowered arm's swing is read from its history (car3d setWheels' hist, armswap.js swapAt), so continuous play at any
+// frame rate or replay speed, a pause, the car out of close-up and a direct seek show the same arms at the same moment.
+// From the smoothed track's state at that moment (a function of the moment, smooth.js) by pathSteer, at the track's own
+// speed (the frame's adds the queue's small traffic.js rates – the drawn wheel may differ from it by a hair; the swing
+// is timed by this one); standing (≤ 3 m/s) 0, the eased frame steering's aim. null where there is no state (no
+// smoothed track yet, a pit-lane starter's estimated path): there setWheels keeps the frame-to-frame stepSwap – that
+// steering is eased frame to frame and snapped on a seek (a known limit, kept). Kept per car on armswap's grid.
+const histSt = {};
+function wheelHistOf(c, num, sm) {
+  c.histSm = sm;   // (the tracks this frame's cars are posed from – smoothFor; a new one clears the kept samples)
+  return (c.wheelHist || (c.wheelHist = gridMemo((ms) => {
+    const sm = c.histSm, st = sm?.frame ? sm.state(num, ms, histSt) : null; if (!st) return null;
+    const speed = Math.hypot(st.vs, st.vd), L = lockFor(speed);
+    return Math.max(-L, Math.min(L, -(speed > 3 ? pathSteer(sm.frame, st, speed) : 0) * STEER_RATIO));
+  }))).key(sm);
+}
 // development: the focused driver's arm axes drawn over the car (Map3D.armDiag) – shoulder → elbow → wrist (white),
 // the hand's axes at the wrist (x to the little finger red, y to the knuckles green, z out of the palm blue), the
 // forearm's twisted x at the wrist (magenta), each grip's axis (yellow); never in the app's own views
@@ -1735,10 +1761,7 @@ function updateCars(dt) {
     // lane, an estimated path) from the turning rate as before, eased – snapped after a jump of the session's time.
     let steer;
     if (st && c.speed > 3) {
-      const fwd = st.vs >= 0 ? 1 : -1, h = Math.max(4, Math.min(12, Math.abs(st.vs) * 0.15));
-      F.at(st.s - fwd * h, st.d, KA); F.at(st.s, st.d, KB); F.at(st.s + fwd * h, st.d, KC);
-      const kappa = wrap(Math.atan2(KC[0] - KB[0], KC[2] - KB[2]) - Math.atan2(KB[0] - KA[0], KB[2] - KA[2])) / h;
-      steer = Math.max(-0.4, Math.min(0.4, Math.atan(3.4 * kappa) + (0.01 * c.speed * c.speed * kappa) / 9.81));
+      steer = pathSteer(F, st, c.speed);
       c.steer = steer;
     } else {
       steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;
@@ -1748,7 +1771,7 @@ function updateCars(dt) {
     }
     c.steerT = A.t;
     if (devSteer != null && num === focusNum) c.steer = devSteerNow();
-    setWheels(c.model, devSpin != null && num === focusNum ? (performance.now() / 1000) * devSpin * 2 * Math.PI : c.spinW, c.steer, devSteer != null && num === focusNum ? performance.now() : A.t, devSteer != null && num === focusNum ? 0 : c.speed);   // (v0.45: the session's time – the lowered arm's swing goes by it, armswap.js; v0.46: the speed – past ±90° only at a slow corner, car3d lockFor)
+    setWheels(c.model, devSpin != null && num === focusNum ? (performance.now() / 1000) * devSpin * 2 * Math.PI : c.spinW, c.steer, devSteer != null && num === focusNum ? performance.now() : A.t, devSteer != null && num === focusNum ? 0 : c.speed, devSteer != null && num === focusNum ? null : wheelHistOf(c, num, sm));   // (v0.45: the session's time – the lowered arm's swing goes by it, armswap.js; v0.46: the speed – past ±90° only at a slow corner, car3d lockFor; v0.47: the steering's history – the swing read from it)
     if (devArmDiag && num === focusNum) drawArmDiag(c.model);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
@@ -4817,6 +4840,9 @@ window.Map3D = {
   },
   partVis(name, on) { const c = cars.get(app().focus || leader()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
   // development: the focused driver's arm axes on/off (drawArmDiag)
+  // v0.47: the focused car's arms' swing now – q per arm (0 beside the body, 1 across; armswap.js), the wheel drawn and
+  // the steering history's at this moment (deg), and whether the swing came from the history (swapAt) or frame to frame
+  armQ(num) { const A = app(), c = cars.get(num || A.focus || leader()), u = c?.model.userData; if (!u?.arms) return null; const h = u.hist && u.armT != null ? u.hist(u.armT) : null; return { num: num || A.focus || leader(), t: u.armT, q: u.arms.map((a) => a.q), wheelDeg: +(u.wheel.rotation.z * 57.29578).toFixed(2), histDeg: h == null ? null : +(h * 57.29578).toFixed(2), from: h == null ? "frames" : "history", lod: u.lod, near: u.near.visible }; },
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones
   // development: hold the focused car's wings at a fraction (0 shut … 1 open; null: back to the estimate / data)
