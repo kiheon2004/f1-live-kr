@@ -938,7 +938,10 @@ function pitBuilding(ctx, p) {
         // between it and the tarmac, where 2.4 m were left, else none)
         const back = base + walk / 2;
         const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), a = ptAt(i, back, deckH), b = ptAt(i + 1, back, deckH);
-        return { p: a.map((x, k) => x + (b[k] - x) * f), out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]] };
+        // (along the wall there – the line between the two stations –, not the building's axis: where the wall bends, a
+        // straight stand on the axis stood 0.2–0.4 m into the lane at one end – Imola's run's end, v0.46 run/pitwall)
+        const dx = b[0] - a[0], dz = b[2] - a[2], len = Math.hypot(dx, dz) || 1, al = [dx / len, dz / len], o0 = [-v[0] * vTrack, -v[1] * vTrack], sg = Math.sign(-al[1] * o0[0] + al[0] * o0[1]) || 1;
+        return { p: a.map((x, k) => x + (b[k] - x) * f), out: [-al[1] * sg, al[0] * sg], along: al };
       };
       // (what the wall and its walkway stand on)
       { const strip = [...W.map((_, i) => ptAt(i, -0.3, 0)), ...W.map((_, i) => ptAt(i, base + walk + 0.3, 0)).reverse()].map(([x, , z]) => [x, z]); occupancy.push(strip); }
