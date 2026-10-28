@@ -4351,7 +4351,7 @@ window.Map3D = {
       secs.push({ team: t.team, u: Math.round(t.box), across, standY: +(w.p[1] - s.floor).toFixed(2) });
     }
     const v = circuitVerdict(secs);
-    const row = (r, s) => ({ team: r.team, u: s.u, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY });
+    const row = (r, s) => ({ team: r.team, u: s.u, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY, ...(r.worst ? { worst: r.worst } : {}) });
     return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, wrong: v.wrong, problems: v.problems,
       first: v.res[0] && row(v.res[0], secs[0]), wrongOnes: v.res.map((r, i) => [r, secs[i]]).filter(([r]) => !r.ok).slice(0, detail ? 99 : 2).map(([r, s]) => row(r, s)), all: detail ? v.res.map((r, i) => row(r, secs[i])) : undefined });
   },

@@ -51,7 +51,8 @@ export function standAcross(sec) {
   const rs = sec.across.map((x) => ({ a: x.a, ...standSection(x) })), mid = rs[Math.floor(rs.length / 2)], problems = [];
   const seen = new Set();
   for (const r of rs) for (const p of r.problems) { const k = p.replace(/[-\d.]+/g, "…"); if (!seen.has(k)) { seen.add(k); problems.push(`${p} (at ${r.a} m along)`); } }
-  return { ok: rs.every((r) => r.ok), order: mid.order, problems, trackWall: mid.trackWall, between: rs.flatMap((r) => r.between), along: rs.length };
+  const bad = rs.find((r) => !r.ok);
+  return { ok: !bad, order: mid.order, problems, trackWall: mid.trackWall, between: rs.flatMap((r) => r.between), along: rs.length, ...(bad ? { worst: `${bad.a} m along: ${bad.order}` } : {}) };
 }
 
 export function circuitVerdict(sections) {

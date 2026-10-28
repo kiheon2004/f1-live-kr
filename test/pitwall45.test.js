@@ -229,3 +229,23 @@ test("a mapped pit wall standing low under the lane's level (Mexico City 2025, M
   const v = standSection(await section(G, r.group, 0));
   assert.ok(v.ok, `${v.order} – ${v.problems.join("; ")}`);
 });
+
+test("the lane's end and the wall's face between two stations where the garages' front steps: from the wall's line, not the fronts' (Silverstone 2025, Red Bull: the lane's end read 2 m off at a step)", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  // the garages' front 2 m further out for x < 0 (F1 y 32 there, 30 beyond)
+  const sc = { location: "T", buildings: [{ name: "Pits", kind: "block", cls: "yes", est: 1, pts: [[-150, 0], [150, 0], [150, 30], [0, 30], [0, 32], [-150, 32]], min: 0, h: 8 }] };
+  const r = await F.buildFacilities({ scene: sc, gf, groundAt: () => 0, trackEdge, location: "T", year: 2025, toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec({ height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 })] });
+  const G = r.group.children[0].userData.garages;
+  r.group.updateMatrixWorld(true);
+  const rc = new THREE.Raycaster(), wall = r.group.getObjectByName("pitWall");
+  let worst = 0, at = null;
+  for (let x = -6; x <= 6; x += 0.25) {
+    // the wall's track face where it is (a line in from the track), in the garages' frame there
+    rc.set(new THREE.Vector3(x, 0.6, -80), new THREE.Vector3(0, 0, 1)); rc.far = 60;
+    const h = rc.intersectObject(wall)[0]; if (!h) continue;
+    const off = G.project(x, h.point.z).off, e = Math.abs(G.wallOut(G.project(x, h.point.z).u) - off);
+    if (e > worst) { worst = e; at = x; }
+  }
+  assert.ok(worst < 0.15, `wallOut ${worst.toFixed(2)} m off the wall at x ${at}`);
+});

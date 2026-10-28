@@ -915,15 +915,17 @@ function pitBuilding(ctx, p) {
       // (the face to the pit lane: thick + walk in from the track side; a mapped wall: the walkway in from its pit face)
       wallFace = (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
-        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - vTrack * (base + walk) - frontV(W[k].u)) * vTrack;
-        return at(i) + (at(i + 1) - at(i)) * f;
+        // (the line interpolated, then measured from the front here: the fronts step from one garage to the next, the
+        // wall doesn't – v0.46, between two stations either side of a step the lane's end read up to 2 m off: Silverstone)
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => vS[k] - vTrack * (base + walk);
+        return (at(i) + (at(i + 1) - at(i)) * f - frontV(uu)) * vTrack;
       };
       // (its face to the track – the map's wall: its pit face –, the same way: nothing generated stands between the
       // garages and it – map3d.js, the generated walls)
       wallOut = (uu) => {
         let i = 0; while (i + 2 < W.length && W[i + 1].u < uu) i++;
-        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u))), at = (k) => (vS[k] - frontV(W[k].u)) * vTrack;
-        return at(i) + (at(i + 1) - at(i)) * f;
+        const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u)));
+        return (vS[i] + (vS[i + 1] - vS[i]) * f - frontV(uu)) * vTrack;
       };
       wallAt = pw.stands === "upper" ? (uu) => {
         // (the teams' stands upstairs: a gantry on the first floor over the garages, out over the boxes, its people facing
