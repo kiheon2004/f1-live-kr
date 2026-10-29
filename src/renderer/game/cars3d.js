@@ -1,0 +1,161 @@
+// The game mode's cars, crews and screens in the 3D view (DESIGN §13, request §17): every car posed from the engine's
+// snapshot only (adapter3d.js frameCars – interpolated between the last two by render time), with map3d's own car
+// models, wheels, wings, compounds and pit crews. Nothing of the live path is used here: no smoothed tracks, no traffic
+// separation, no grid placement, no pit inference, no telemetry. K: the small kit map3d hands over in game mode (its
+// world, cars, camera and a few of its drawing helpers – map3d.js `gameKit`).
+import { setCompound, setAero, setWheels, setCockpit, setSmear, setFlagLights, wheelParts, TYRE_COLOURS, lockFor, STEER_RATIO } from "../car3d.js";
+import { rollAngle, smearOf } from "../wheelspin.js";
+import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, stopSeed, CHANGE } from "../crew.js";
+
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
+const ss = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+// the phases in which the car is at (or pulling into / out of) its own box – drawn across the lane into it
+const AT_BOX = new Set(["approach", "penalty", "work", "release"]);
+
+// a point of the engine's pit path at u (m): scene x, z, the path's heading as a scene yaw, and the lap s it lies by
+function pitPoint(P, u, c0) {
+  const C = P.columns, f = Math.max(0, Math.min(P.n - 1, u / P.ds)), i = Math.min(P.n - 2, Math.floor(f)), w = f - i;
+  const X = C.x[i] + (C.x[i + 1] - C.x[i]) * w, Y = C.y[i] + (C.y[i + 1] - C.y[i]) * w;
+  const h = C.hdg[i] + wrap(C.hdg[i + 1] - C.hdg[i]) * w;
+  // (F1 frame heading atan2(dy, dx) → the scene's yaw atan2(dx, dz) with z = −y)
+  return { x: X - c0.x, z: -(Y - c0.z), yaw: Math.atan2(Math.cos(h), -Math.sin(h)) };
+}
+
+export function updateGameCars(K, A, dt) {
+  const fr = A.frameCars(), world = K.world(), F = world?.frame, map = A.map;
+  const seen = new Set();
+  if (!fr || !F || !map) { for (const c of K.cars.values()) c.obj.visible = false; return null; }
+  const P = A.scenario.track.pit, focusNum = K.focus(), cam = K.camMode(), kBody = 1 - Math.exp(-dt * 12), kYaw = 1 - Math.exp(-dt * 30);
+  // (the cars' flag lights from the engine's flag: red for a red flag, amber under yellow / SC / VSC – race control's, the game's)
+  const fl = fr.snap.flag, flagCol = fl === "red" ? "#ff2414" : fl === "yellow" || fl === "sc" || fl === "vsc" ? "#ffb21a" : null;
+  const jumped = A.lastT != null && (fr.t < A.lastT - 50 || fr.t - A.lastT > 5000); A.lastT = fr.t;
+  for (const g of fr.cars) {
+    const d = A.driverOf(g.num); if (!d) continue;
+    if (g.status === "dnf" && g.where !== "pit" && g.s == null) continue;
+    const c = K.carFor(g.num, d); seen.add(g.num);
+    c.game = g;
+    const v = c.pos;
+    let yaw, slope = 0, aLat = 0, onTrack = g.where === "lap" && g.s != null;
+    if (onTrack) {
+      const w = map.sd(g.s, g.d);
+      F.at(w.s, w.d, P0, DIR);
+      const ds = Math.max(3, Math.min(10, Math.abs(g.v) * 0.1));
+      F.at(w.s - ds, w.d, PA); F.at(w.s + ds, w.d, PB);
+      yaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
+      slope = -Math.atan2(PB[1] - PA[1], 2 * ds);
+      v.set(P0[0], P0[1] + K.ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (g.v / 90) ** 2), P0[2]);
+      c.sample = F.sampleAt(w.s);
+      c.worldS = w.s;
+    } else if (g.where === "pit" && P && g.u != null) {
+      const q = pitPoint(P, g.u, world.center);
+      let x = q.x, z = q.z, y = K.groundAt(x, z) + K.ROAD_LIFT - 0.02;
+      yaw = q.yaw;
+      // into the team's box while at it (the pit building's lane model: the box's offset from the garages), eased over the
+      // last / first metres; the engine's u is along its path, so the car stops where the engine stops it
+      const ph = g.pit?.phase, box = P.boxes?.[g.teamKey];
+      if (AT_BOX.has(ph) && box != null) {
+        const k = ph === "release" ? 1 - ss(0, 14, g.u - box) : ss(-22, -2, g.u - box);
+        const m = K.pitAcross(x, z, k);
+        if (m) { x = m.x; z = m.z; y = y + (m.y - y) * m.inRun; yaw = wrap(yaw + m.turn * (ph === "release" ? -1 : 1) * Math.min(k, 1 - k) * 2); }
+      } else { const m = K.pitAcross(x, z, 0); if (m) y = y + (m.y - y) * m.inRun; }
+      v.set(x, y, z);
+      c.sample = null; c.worldS = null;
+    } else { c.obj.visible = false; continue; }
+    // heading, pitch and roll (the snapshot's acceleration: nose down under braking; lean with the turning rate)
+    const dy = wrap(yaw - c.yaw);
+    if (!c.has || jumped || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * kYaw;
+    const yawRate = c.has && dt > 0 && !jumped ? wrap(yaw - (c.pathYaw ?? yaw)) / dt : 0;
+    c.pathYaw = yaw; c.yawRate = yawRate; aLat = g.v * yawRate;
+    const pitchT = slope + Math.max(-0.006, Math.min(0.02, -(g.a || 0) * 0.00032)), rollT = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));
+    if (!c.has || jumped) { c.pitch = pitchT; c.roll = rollT; }
+    c.pitch += (pitchT - c.pitch) * kBody; c.roll += (rollT - c.roll) * kBody;
+    c.speed = Math.abs(g.v); c.acc = g.a || 0; c.onTrack = onTrack; c.slide = 0; c.onKerb = false; c.bump = 0; c.est = null; c.grid = null; c.pit = null;
+    c.obj.position.copy(v); c.has = true; c.obj.visible = true;
+    const ride = (cam === "onboard" || cam === "eye") && g.num === focusNum;
+    if (ride) {
+      const k = c.stab ? 1 - Math.exp(-dt * 2.5) : 1, ky = c.stab ? 1 - Math.exp(-dt * 5) : 1, S = c.stab || (c.stab = { p: 0, r: 0, y: v.y });
+      S.p += (c.pitch - S.p) * k; S.r += (c.roll - S.r) * k; S.y += (v.y - S.y) * ky;
+      c.obj.position.y = S.y; c.model.rotation.set(S.p, c.yaw, S.r, "YXZ");
+    } else { c.stab = null; c.model.rotation.set(c.pitch, c.yaw, c.roll, "YXZ"); }
+    // wheels: rolled the engine's own distance over each axle's radius (wheelspin.js rollAngle) – a pause, any speed, a
+    // camera change: the same angle at the same sim moment; steering: the engine's front-wheel angle (rad, + left)
+    const Pf = c.model.userData.profile;
+    c.spinW = c.spinW || [0, 0]; c.spinW[0] = rollAngle(g.wheelDist || 0, Pf.FR); c.spinW[1] = rollAngle(g.wheelDist || 0, Pf.RR);
+    const L = lockFor(c.speed);
+    c.steer = Math.max(-0.4, Math.min(0.4, g.steer || 0)); if (Math.abs(c.steer * STEER_RATIO) > L) c.steer = Math.sign(c.steer) * L / STEER_RATIO;
+    setWheels(c.model, c.spinW, c.steer, fr.t, c.speed, null);
+    setSmear(c.model, smearOf(c.speed / Pf.RR, A.ctx.rate, jumped));
+    // wings: the game's own DRS / active aero state (game data, not telemetry)
+    c.aero = g.aero?.open ?? 0; c.aeroState = { open: c.aero, front: g.aero?.front ?? 0, estimated: false, measured: false, why: "game state" };
+    setAero(c.model, c.aero, g.aero?.front ?? c.aero);
+    if (!c.lifted) setCompound(c.model, g.tyre?.compound || null);
+    setFlagLights(c.model, flagCol);
+    const inCockpit = (cam === "onboard" || cam === "eye") && g.num === focusNum;
+    setCockpit(c.model, (inCockpit && cam === "eye") || (cam === "inspect" && g.num === focusNum));
+    c.model.userData.helmet.visible = !(cam === "eye" && g.num === focusNum);
+    c.label.sp.userData.own = inCockpit;
+    K.paintLabel(c.label, `${g.pos || ""} ${d.Tla}`.trim(), "#" + (d.TeamColour || "888"), g.num === focusNum);
+    c.label.sp.material.opacity = g.status === "dnf" || g.status === "fin" ? 0.5 : 1;
+  }
+  for (const [num, c] of K.cars) if (!seen.has(num)) { c.obj.visible = false; c.has = false; }
+  K.scaleForView();
+  updateGameCrews(K, A, fr);
+  return fr;
+}
+
+// The crews (crew.js) driven by the engine's pit phases and its work times – the engine decides when the work starts and
+// ends (pit.workT0 / workT1, sim ms); the animation is fitted to them (crew.js stopClock: a stop shorter than the usual
+// 2.3 s plays faster, never under 0.6×; a longer one waits with the jacks up until just before the release) and never
+// decides anything. Per team: work (its car at the box, workT0 ≤ t), ready (a car of the team coming down the lane to the
+// box, or standing there before the work starts – a time penalty or the box being readied), back (walking back for 8 s
+// after the release); else in the garage.
+export function updateGameCrews(K, A, fr) {
+  const G = K.pitG(), world = K.world(), teams = K.pitTeams();
+  const was = K.lifted, now = new Set();
+  const done = () => { for (const num of was) if (!now.has(num)) { const c = K.cars.get(num); if (c) K.restoreCar(c); } was.clear(); for (const n of now) was.add(n); };
+  if (!G || !world || !teams) { world?.crews?.clear(); done(); return; }
+  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
+  const m = K.pitModelFor(G), list = [], loose = [], t = fr.t, byTeam = new Map(), P = A.scenario.track.pit;
+  for (const g of fr.cars) { const ph = g.pit?.phase; if (!ph || ph === "none" || ph === "called" || ph === "committed") continue; const a = byTeam.get(g.team) || []; a.push(g); byTeam.set(g.team, a); }
+  for (const [team, cs] of byTeam) {
+    const tm = teams.find((q) => q.team === team); if (tm?.box == null) continue;
+    const box = P?.boxes?.[cs[0].teamKey];
+    const work = cs.find((g) => g.pit.phase === "work" && g.pit.workT0 != null && t >= g.pit.workT0);
+    const hold = !work && cs.find((g) => ["work", "penalty"].includes(g.pit.phase) || (g.pit.phase === "approach" && box != null && g.u != null && box - g.u < 60) || g.pit.phase === "queue" || (["entry", "lane"].includes(g.pit.phase) && box != null && g.u != null && box - g.u < 160));
+    const back = !work && !hold && cs.find((g) => ["release", "laneOut", "exit"].includes(g.pit.phase) && g.pit.workT1 != null && t - g.pit.workT1 < 8000);
+    let phase = work ? "work" : hold ? "ready" : back ? "back" : null; if (!phase) continue;
+    const who = work || hold || back, car = K.cars.get(who.num);
+    // the box where the ENGINE stops this team's cars (its pit path at the team's box u → the pit building's frame), so the
+    // crew waits where the car will stand; the painted box (the garages' allocation, garages.js) may sit a few metres off
+    // it – K.boxDiag records by how much
+    let bu = tm.box;
+    if (P && box != null) { const pp = pitPoint(P, box, world.center), pr = G.project(pp.x, pp.z); if (pr && Number.isFinite(pr.u)) { bu = pr.u; (K.boxDiag || (K.boxDiag = {}))[team] = { engine: +pr.u.toFixed(2), painted: +tm.box.toFixed(2), off: +pr.off.toFixed(2) }; } }
+    const at = m.at(bu), s = at.slot;
+    const bx = s.front[0] + s.along[0] * (bu - s.uc) - s.inward[0] * at.boxC, bz = s.front[1] + s.along[1] * (bu - s.uc) - s.inward[1] * at.boxC;
+    const inBox = phase === "work" && car?.obj.visible;
+    // (the box's frame: the car's own while it is there, else facing the way the cars go – the engine's pit path heading)
+    const yaw = inBox ? car.yaw : (P ? pitPointYaw(P, box ?? 0) : Math.atan2(s.along[0], s.along[1]));
+    const where = inBox ? { x: car.pos.x, y: at.floor + 0.004, z: car.pos.z, yaw } : { x: bx, y: at.floor + 0.004, z: bz, yaw };
+    const left = Math.sign(Math.cos(yaw) * s.inward[0] - Math.sin(yaw) * s.inward[1]) || 1;
+    const dims = wheelParts(A.ctx.sessionYear(), team);
+    world.crews.wheels(dims);
+    const oldC = who.tyre?.compound || null, newC = who.pit.compound || null;
+    let L;
+    if (phase === "work") {
+      const D = Math.max(0.1, (who.pit.workT1 - who.pit.workT0) / 1000);
+      const plan = { kind: "tyres", from: "game", D, wait: 0, compound: newC, seed: stopSeed(who.num, who.pit.workT0) };
+      L = stopChoreo(plan, (t - who.pit.workT0) / 1000, dims, left);
+      if (car && inBox) { K.applyLift(car, L.car, dims); now.add(who.num); }
+    } else {
+      const f = phase === "back" ? 1 - ss(0, 8, (t - who.pit.workT1) / 1000) : 1;
+      L = changeWalk(phase, f, dims, at.boxC, left);
+    }
+    list.push(...crewAt(where, L.figures, "#" + (A.driverOf(who.num)?.TeamColour || "9aa0a6")));
+    loose.push(...kitAt(where, L.kits, { old: TYRE_COLOURS[oldC] || null, new: TYRE_COLOURS[newC] || null }));
+  }
+  world.crews.place(list, loose, K.camera.position);
+  done();
+}
+const pitPointYaw = (P, u) => pitPoint(P, u, { x: 0, z: 0 }).yaw;
+export { CHANGE };

@@ -11,7 +11,7 @@
 // material's uniforms. Nothing is allocated per frame.
 import * as THREE from "./vendor/three.module.js";
 import { wetRoad, WR } from "./wetroad.js";
-import { COVERED_WET, WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, roofAt, INTENSITY } from "./weather.js";
+import { NEUTRAL_CLOUD as NEUTRAL_CLOUD_LOOK, COVERED_WET, WeatherLog, environmentAt, newEnvironment, wetTyreEvidence, coverRaster, tunnelCovers, coverAt, windVector, roofAt, INTENSITY } from "./weather.js";
 
 // ---------- the overcast sky (equirectangular, as the fair one in map3d.js) ----------
 // A grey deck of stratus / stratocumulus: brighter towards the zenith's diffuse light, darker lumps underneath, a pale
@@ -169,6 +169,20 @@ function tinter() {
   return (col, to, a) => { if (!has || !col.equals(w)) base.copy(col); col.copy(base).lerp(to, a); w.copy(col); has = true; };
 }
 
+// The game's environment (no record: the engine's truth at the moment drawn, mapped by the adapter) into the same shape
+// environmentAt fills – the sky setting still decides a fixed sky; otherwise overcast while it rains, else neutral
+export function gameEnvironment(g, sky, out) {
+  out.t = null; out.forced = false; out.known = true;
+  out.raining = g.rain > 0 ? 1 : 0; out.rainAmt = INTENSITY * Math.max(0, Math.min(1, g.rainShare || 0));
+  out.wet = Math.max(0, Math.min(1, g.wet || 0)); out.wetModel = out.wet; out.wetSpan = null; out.wetStart = null; out.wetTyres = null; out.wetSrc = "game";
+  out.wetCovered = out.wet * COVERED_WET;
+  out.airTemp = g.airT ?? null; out.trackTemp = g.trackT ?? null; out.humidity = null; out.windSpeed = g.wind ?? null; out.windDir = null;
+  if (sky === "fair") { out.cloud = 0; out.cloudSrc = "setting"; }
+  else if (sky === "overcast") { out.cloud = 1; out.cloudSrc = "setting"; }
+  else if (g.cloud != null) { out.cloud = g.cloud; out.cloudSrc = "game"; }
+  else { out.cloud = NEUTRAL_CLOUD_LOOK; out.cloudSrc = "neutral"; }
+  return out;
+}
 export function createWeather({ scene, renderer, daySky, fairEnv }) {
   const env = newEnvironment();
   const dome = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.ShaderMaterial({ vertexShader: SKY_VS, fragmentShader: SKY_FS, side: THREE.BackSide, depthTest: false, depthWrite: false, fog: false, toneMapped: false,   // (as three.js draws an sRGB background: not tone-mapped)
@@ -356,14 +370,18 @@ export function createWeather({ scene, renderer, daySky, fairEnv }) {
     reset() { S.log = null; S.logFor = null; S.liveList = null; S.clouds = null; S.cloudsKey = null; S.cloudSrc = null; S.cloudsGen++; S.hasPrev = false; },
     // once a frame, before drawing. A: window.F1KR; world: map3d's world; night: the night look is on.
     // pitFac / teams: map3d's pit building in use and its teams' layer (for the pit lane's tarmac and the pit wall canopies)
-    update({ A, world, camera, dt, night, hemi, sun, fog, pitFac = null, teams = null, cars = null, viewH = 0 }) {
-      const src = A?.src || null, log = logFor(src), t = A?.t;
+    // gameEnv (the strategy game's mode, map3d Map3D.game): the engine's weather truth now, already mapped for the look
+    // (game/adapter3d.js weather: { rainShare 0–1, wet 0–1, cloud 0–1 | null, airT, trackT, wind }) – used instead of
+    // any session record, so the rain drawn is the rain the engine races in
+    update({ A, world, camera, dt, night, hemi, sun, fog, pitFac = null, teams = null, cars = null, viewH = 0, gameEnv = undefined }) {
+      const src = gameEnv ? null : A?.src || null, log = logFor(src), t = A?.t;
       covers(world, teams);
       // supporting evidence: the tyres at t (re-read every 2 s; a seek re-reads at once)
       const now = performance.now();
       if (src && (now - S.tyresAt > 2000 || Math.abs((t ?? 0) - (S.tyresT ?? 0)) > 5000)) { S.tyresAt = now; S.tyresT = t; S.tyres = wetTyreEvidence(src.state?.TimingAppData?.Lines); }
       const cover = src ? clouds(A, world, src, t) : null;
-      environmentAt(log, Number.isFinite(t) ? t : -Infinity, { tyres: src ? S.tyres : null, cover, sky: S.skyMode }, env);
+      if (gameEnv) gameEnvironment(gameEnv, S.skyMode, env);
+      else environmentAt(log, Number.isFinite(t) ? t : -Infinity, { tyres: src ? S.tyres : null, cover, sky: S.skyMode }, env);
       env.cloudData = cover != null ? S.clouds?.source || null : null;
       if (S.forced) { const f = S.forced; env.forced = true; if (f.rain != null) { env.rainAmt = f.rain; env.raining = f.rain > 0 ? 1 : 0; } if (f.wet != null) { env.wet = f.wet; env.wetCovered = f.wet * COVERED_WET; } if (f.cloud != null) env.cloud = f.cloud; }
       const day = !night, m = env.cloud, rp = Math.min(1, env.rainAmt / INTENSITY);
