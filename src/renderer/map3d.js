@@ -42,6 +42,7 @@ import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, zoneAt, estimateZon
 import { footing } from "./footing.js";
 import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, timeJump, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
+import { updateGameCars, paintGameHud, pitPoint } from "./game/cars3d.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -52,7 +53,11 @@ const CIRCUIT_STYLE = {
   "Jeddah": { w: 12, street: true }, "Montréal": { w: 11, street: true }, "Montreal": { w: 11, street: true },
   "Madrid": { w: 13, street: true }, "Melbourne": { w: 13 }, "Miami": { w: 13 }, "Miami Gardens": { w: 13 },
 };
-const app = () => window.F1KR;
+// The strategy game's explicit mode (Map3D.game.attach / detach – game/adapter3d.js): while a game adapter is attached the
+// view reads the circuit's identity and the moment drawn from the adapter's ctx (no source: ctx.src is null, so none of
+// the live paths run) and poses the cars from engine snapshots only (game/cars3d.js). Detached: window.F1KR as always.
+let game = null;
+const app = () => game?.ctx || window.F1KR;
 
 let renderer, scene, camera, controls, host, canvas, hemi, sun, daySky, nightSky;
 let wx = null;                // the session's weather in the view (weather3d.js)
@@ -203,7 +208,9 @@ function initGeoSettings() {
 // happened by the moment shown (no future: seeking back takes places away again); a live feed gathers standstills
 // as they come (it keeps only minutes of positions) and keeps places stable (PitInference). Neutral where the
 // evidence isn't enough. Checked every 2 s (live: 15 s).
-let pitTeams = { key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null, frame: null };
+const newPitTeams = () => ({ key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null, frame: null });
+// (the game's mode works on its own record – the live one, with what a live feed has gathered, is kept aside untouched)
+let pitTeams = newPitTeams(), livePitTeams = null;
 function clearPitTeams() {
   if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); pitTeams.facility?.userData?.garages?.openRail?.([]); }
   pitTeams.group = null; pitTeams.key = null;
@@ -211,6 +218,7 @@ function clearPitTeams() {
 // (the layer went with the world or the real map it was in: nothing of it is freed again, the next check rebuilds it)
 function forgetPitTeams() { pitTeams.group = null; pitTeams.key = null; pitTeams.facility = null; pitTeams.last = 0; }
 function updatePitTeams(force = false) {
+  if (game) return gamePitTeams(force);
   const now = performance.now(), A = app(), src = A?.src;
   if (!force && now - pitTeams.last < (src?.isLive ? 15000 : 2000)) return;
   pitTeams.last = now;
@@ -1232,6 +1240,7 @@ function paintLabel(l, text, color, strong) {
 // The session's local date (the track's day, YYYY-MM-DD): its archive path's session folder ("…/2026-06-14_Race/"), or
 // its SessionInfo StartDate (local track time) – null when neither has come (a live feed early on)
 function sessionDate() {
+  if (game) return game.scenario.meta?.date || null;
   const si = app().src?.state.SessionInfo || {};
   const m = /\/(\d{4}-\d\d-\d\d)_[^/]*\/?$/.exec(si.Path || "") || /^(\d{4}-\d\d-\d\d)/.exec(si.StartDate || "");
   return m ? m[1] : null;
@@ -2333,6 +2342,7 @@ function separate(dt, seen, snap = false) {
 }
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 function leader() {
+  if (game) return game.leader();
   const lines = app().src?.state.TimingData?.Lines || {};
   return Object.keys(lines).find((n) => lines[n].Position === "1") || null;
 }
@@ -2360,9 +2370,10 @@ function scaleForView() {
   declutterLabels();
 }
 function declutterLabels() {
-  const lines = app().src?.state.TimingData?.Lines || {}, W = hostW, H = hostH, taken = [];
+  const lines = app().src?.state.TimingData?.Lines || {}, W = hostW, H = hostH, taken = [], go = game ? game.order() : null;
+  const posOf = (n) => (go ? go.indexOf(n) + 1 || 99 : +lines[n]?.Position || 99);
   const list = [...cars.values()].filter((c) => c.label.sp.visible)
-    .sort((a, b) => (a.num === app().focus ? -1 : b.num === app().focus ? 1 : (+lines[a.num]?.Position || 99) - (+lines[b.num]?.Position || 99)));
+    .sort((a, b) => (a.num === app().focus ? -1 : b.num === app().focus ? 1 : posOf(a.num) - posOf(b.num)));
   for (const c of list) {
     tmp2.copy(c.obj.position).project(camera);
     if (tmp2.z > 1) { c.label.sp.visible = false; continue; }
@@ -2579,7 +2590,7 @@ function paintCamButtons() {
 }
 function cycleCar(dir) {
   const lines = app().src?.state.TimingData?.Lines || {};
-  const order = Object.keys(lines).filter((n) => cars.get(n)?.obj.visible).sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
+  const order = game ? game.order().filter((n) => cars.get(n)?.obj.visible) : Object.keys(lines).filter((n) => cars.get(n)?.obj.visible).sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
   if (!order.length) return;
   const cur = order.indexOf(app().focus || leader());
   app().setFocus(order[(cur + dir + order.length) % order.length]);
@@ -2623,6 +2634,7 @@ function frameCircuit() {
 function paintHud() {
   const hud = document.getElementById("hud3d");
   if (camMode === "heli") { hud.hidden = true; return; }
+  if (game) return gameHud(hud);
   const A = app(), num = A.focus || leader();
   const d = A.src?.state.DriverList?.[num], l = A.src?.state.TimingData?.Lines?.[num];
   if (!d || !l) { hud.hidden = true; return; }
@@ -2932,6 +2944,7 @@ function warmShaders() {
 function trackPoints() { try { return app().trackPoints(); } catch { return []; } }
 // (Re)build the circuit when the session changes; checked once a second.
 function ensureWorld(now) {
+  if (game) return gameEnsureWorld(now);
   const A = app();
   if (!A?.src) { showNote(A?.mode === "live" ? "실시간에 연결하면 서킷이 나타나요." : "세션을 불러오면 3D 서킷이 나타나요."); return; }
   if (now - lastBuildCheck < 1000) return;
@@ -2951,6 +2964,22 @@ function ensureWorld(now) {
   world = buildWorld(pts);
   if (world) { world.sourceKey = key; world.pts = pts.length; cornerMarks(); addGrid(); addPitLane(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
   note.hidden = !!world;
+}
+// game mode: the circuit from the scenario's own lap (the same buildWorld, the same real surroundings), built once per
+// game; the adapter is then bound to it (engine s → world s, game/adapter3d.js buildMapping)
+function gameEnsureWorld(now) {
+  const key = app().sourceKey();
+  if (world && world.sourceKey === key) return;
+  if (now - lastBuildCheck < 300) return;
+  lastBuildCheck = now;
+  disposeWorld(); geoJob++;
+  sepMemory = {};
+  world = buildWorld(app().trackPoints());
+  if (!world) { showNote("게임 시나리오의 랩 형상으로 3D 서킷을 만들 수 없어요."); return; }
+  world.sourceKey = key; world.game = true; world.pts = app().trackPoints().length;
+  cornerMarks(); addGrid(); addPitLane(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows();
+  game.bind(world, world.frame);
+  document.getElementById("note3d").hidden = true;
 }
 function showNote(text) { const n = document.getElementById("note3d"); n.textContent = text; n.hidden = false; }
 // (disposeGroup, dispose.js: geometries, materials, their textures, instanced meshes' own buffers – each once, shared
@@ -3406,7 +3435,8 @@ function frame(now) {
   ensureWorld(now);
   cornerMarks();
   const A = app();
-  if (world && A?.src) updateCars(dt);
+  if (world && game) gameCars(dt);
+  else if (world && A?.src) updateCars(dt);
   if (world) updateCamera(dt);
   if (world) updateCorners(dt);
   if (devRec) devRec(now, dt);
@@ -3414,7 +3444,7 @@ function frame(now) {
   // redraws the static shadow map)
   if (peopleLod(camera.position)) refreshShadows();
   updateSun(now);
-  wx?.update({ A, world, camera, dt, night: !!nightNow, hemi, sun, fog: scene.fog, pitFac: pitTeams.facility, teams: pitTeams.group, cars, viewH: renderer.getDrawingBufferSize(tmpV2).y });
+  wx?.update({ A, world, camera, dt, night: !!nightNow, hemi, sun, fog: scene.fog, pitFac: pitTeams.facility, teams: pitTeams.group, cars, viewH: renderer.getDrawingBufferSize(tmpV2).y, gameEnv: game ? game.weather() || { rain: 0, rainShare: 0, wet: 0, cloud: null } : undefined });
   thinFarTrees();
   world?.real?.stands?.update(camera.position, camMode === "heli" || camMode === "inspect" ? 520 : 300);
   realPart("buildings")?.userData.update?.(camera.position);
@@ -3614,7 +3644,126 @@ function floodTest() {
   return { land, wet, dry, dryShare: +(dry / Math.max(1, land)).toFixed(4), sea: R.seaLevel, top: [...cells].sort((a, c) => c[1] - a[1]).slice(0, 5) };
 }
 
+// ---------- the strategy game's mode (Map3D.game; game/adapter3d.js, game/cars3d.js) ----------
+// What cars3d.js may use of this view: its world, cars, camera and a few drawing helpers – nothing of the live paths.
+const gameLifted = new Set();
+const gameKit = {
+  THREE, get camera() { return camera; }, cars, lifted: gameLifted, ROAD_LIFT,
+  world: () => world, camMode: () => camMode, focus: () => app().focus || leader(),
+  carFor, paintLabel, scaleForView, applyLift, restoreCar, pitModelFor,
+  pitG: () => pitTeams.G || null, pitTeams: () => pitTeams.teams || null,
+  groundAt: (x, z) => { const R = world?.real; const g = R?.groundAt ? R.groundAt(x, z) : null; return Number.isFinite(g) ? g : groundY(x, z); },
+  // a point on the pit lane moved across into the box (k 0 → 1: the lane's line → the box's offset from the garages), on
+  // the lane's floor inside the garages' run – the pit building's own lane model (pitlane.js, as pitDraw does live)
+  pitAcross(x, z, k) {
+    const G = pitTeams.G; if (!G || !world) return null;
+    const pr = G.project(x, z); if (!(pr.off > -3 && pr.off < 40) || pr.u < G.gStart - PIT.ends || pr.u > G.gEnd + PIT.ends) return null;
+    const at = pitModelFor(G).at(pr.u), sl = at.slot, d = ((at.boxC ?? pr.off) - pr.off) * k;
+    const inRun = Math.min(ss01((pr.u - (G.gStart - PIT.ends)) / PIT.ends), ss01(((G.gEnd + PIT.ends) - pr.u) / PIT.ends));
+    return { x: x - sl.inward[0] * d, z: z - sl.inward[1] * d, y: at.floor + 0.004, inRun, turn: Math.atan2((at.boxC ?? pr.off) - pr.off, 12) };
+  },
+};
+function gameCars(dt) {
+  const fr = updateGameCars(gameKit, game, dt);
+  // the safety car where the engine has it (snapshot.sc: on the engine's lap, mapped like the cars)
+  const sc = fr?.snap?.sc, SP = supportCtx(game, 0);
+  if (SP) {
+    let where = null;
+    if (sc && game.map) { const w = game.map.sd(sc.s, sc.d || 0), q = [0, 0, 0], q2 = [0, 0, 0]; world.frame.at(w.s, w.d, q); world.frame.at(w.s + 3, w.d, q2); where = { x: q[0], z: q[2], dx: q2[0] - q[0], dz: q2[2] - q[2] }; }
+    const A = app(), models = supportModels(A.sessionYear?.() || 0, venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key ?? null, sessionDate());
+    placeSupportCar(SP, "sc", models.sc || "neutralSc", where, !!where, (fr?.t || 0) / 1000);
+  }
+  gameNote(fr);
+}
+function gameNote(fr) {
+  const note = document.getElementById("note3d");
+  const msg = !fr ? "게임 스냅샷을 기다리는 중…" : !game.map ? "게임 서킷 준비 중…" : fr.snap?.dev ? `${fr.snap.dev.label} · 3D 개발 확인용` : "";
+  if (msg) { if (note.textContent !== msg) note.textContent = msg; note.hidden = false; }
+  else if (note.dataset.game) note.hidden = true;
+  note.dataset.game = msg ? "1" : "";
+}
+// the chase / onboard bar: the focused car's game state (game/cars3d.js paintGameHud – labelled game data, no telemetry)
+function gameHud(hud) { paintGameHud(hud, game, app().focus || leader()); }
+// The teams at their boxes in game mode: the boxes as allocated (pitorder.js – the previous season's constructors' order
+// along the lane, the circuit's measured boxes), for the scenario's own entry list; no inference from positions. The pit
+// wall's screens show the game's tower, marked as the game's.
+function gamePitTeams(force) {
+  const now = performance.now();
+  if (!force && now - pitTeams.last < 1000) return;
+  pitTeams.last = now;
+  let fac = null;
+  world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!fac && o.userData?.garages) fac = o; });
+  const A = app(), session = A.sourceKey();
+  if (session !== pitTeams.session) { pitTeams.session = session; pitTeams.inf.reset(); clearPitTeams(); }
+  if (!fac || !world?.pitLane) { if (pitTeams.group) clearPitTeams(); pitTeams.facility = fac; pitTeams.G = null; pitTeams.teams = null; pitTeamNote(null); return; }
+  if (fac !== pitTeams.facility) { clearPitTeams(); pitTeams.facility = fac; pitTeams.teams = null; pitTeams.G = null; if (!fac.getObjectByName("pitLaneSurface")) fac.add(pitLaneMeshes(pitModelFor(fac.userData.garages))); }
+  const G = fac.userData.garages, drivers = game.drivers();
+  { const snap = game.snapshot(), rows = (snap?.cars || []).slice().sort((a, b) => a.pos - b.pos).slice(0, 10).map((c) => [String(c.pos), drivers[c.num]?.Tla || c.num, "", "#" + (drivers[c.num]?.TeamColour || "888888")]);
+    paintPitScreens(rows, snap ? `GAME LAP ${snap.leaderLap}${snap.totalLaps ? "/" + snap.totalLaps : ""}` : null); }
+  const pub = orderedBoxes(A.circuitKey?.(), A.sessionYear?.(), Object.values(drivers).map((d) => d?.TeamName).filter(Boolean)) || [];
+  // each team's box where the ENGINE stops its cars (the scenario's pit path at its box u), not re-centred on the garages
+  // (published: false) – so the painted box, the crew and the stopped car are one place; the published order only for a
+  // team the scenario has no box for (v0.48 garage audit A2)
+  const P = game.scenario?.track?.pit, ent = new Map((game.scenario?.entries || []).map((e) => [e.team, e.teamKey]));
+  const o = {}, places = pub.map((b) => {
+    const bu = P?.boxes?.[ent.get(b.team)];
+    if (bu != null && world) { const pp = pitPoint(P, bu, world.center || { x: 0, z: 0 }), pr = G.project(pp.x, pp.z); if (pr && Number.isFinite(pr.u)) return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: false, how: "engine box (scenario pit path)", season: b.season }; }
+    pitLaneAt(b.u, o); const pr = G.project(o.x, o.z); return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: true, how: b.how, season: b.season };
+  });
+  const plan = planOverrides(G, drivers);
+  const teams = allocatePlaces(G.slots, G.pitch, drivers, places, plan.length ? plan : overridesFor(G.facility, A.sessionYear?.() || null, session));
+  { const pm = pitModelFor(G); for (const t of teams) if (t.box != null) t.boxOff = pm.at(t.box).boxC; }
+  pitTeams.teams = teams; pitTeams.G = G; pitTeams.order = pub; pitTeams.info = { evidence: "game: published box order", live: false };
+  pitTeamNote(teams.length ? "게임: 팀 박스는 전년도 컨스트럭터 순위 배정(실측 박스 위치) · 차고 칸 수는 추정" : null);
+  const key = allocationKey(teams);
+  if (key === pitTeams.key) return;
+  clearPitTeams(); pitTeams.key = key;
+  if (!teams.length) return;
+  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null);
+  pitTeams.group.traverse((x) => { for (const m of [].concat(x.material || [])) nightLit(m); });
+  fac.add(pitTeams.group);
+  G.openRail?.(pitTeams.group.userData.standSpans || []);
+  warmShaders();
+}
+// enter / leave the game's mode. attach: the live circuit and cars are let go and the game's circuit is built on the next
+// frame; detach: the game's world is let go and the live / replay view is built again from window.F1KR as it is.
+function gameAttach(adapter) {
+  if (game === adapter) return "same";
+  if (game) gameDetach();
+  disposeWorld(); geoJob++; lastBuildCheck = 0; wx?.reset(); gameLifted.clear();
+  livePitTeams = pitTeams; pitTeams = newPitTeams();
+  // (the live view's notes about its own data – the start, the support cars, the crews' work, the teams' places – are put
+  // away; each live update sets them again from its data after detach)
+  for (const id of ["supportNote", "startLightNote", "pitWorkNote", "pitTeamNote", "camNote3d"]) { const el = document.getElementById(id); if (el) el.hidden = true; }
+  camNote = "";
+  game = adapter;
+  for (const x of cars.values()) x.stab = null;
+  chase.init = false; camInit = false; camFor = { num: null, world: null };
+  return "attached";
+}
+function gameDetach() {
+  if (!game) return "not attached";
+  game.unbind?.();
+  disposeWorld(); geoJob++; lastBuildCheck = 0; wx?.reset(); gameLifted.clear();
+  game = null;
+  if (livePitTeams) { pitTeams = livePitTeams; livePitTeams = null; forgetPitTeams(); }
+  chase.init = false; camInit = false; camFor = { num: null, world: null };
+  const n = document.getElementById("note3d"); if (n) { n.hidden = true; n.dataset.game = ""; }
+  return "detached";
+}
+
 window.Map3D = {
+  game: {
+    attach: gameAttach,
+    detach: gameDetach,
+    get on() { return !!game; },
+    // development: where the engine's lap lands on the world's (adapter3d.js buildMapping) and the cars as drawn
+    mapping: () => JSON.stringify(game?.mappingInfo || null),
+    state: () => JSON.stringify({ on: !!game, key: world?.sourceKey || null, game: !!world?.game, real: !!world?.real, pitLane: !!world?.pitLane, G: !!pitTeams.G, teams: (pitTeams.teams || []).length,
+      cars: [...cars.values()].filter((c) => c.obj.visible).map((c) => ({ num: c.num, x: +c.pos.x.toFixed(2), y: +c.pos.y.toFixed(2), z: +c.pos.z.toFixed(2), yaw: +c.yaw.toFixed(3), s: c.worldS != null ? +c.worldS.toFixed(1) : null, where: c.game?.where, phase: c.game?.pit?.phase, lifted: !!c.lifted, cmp: c.game?.tyre?.compound })),
+      crews: world?.crews ? true : false, boxes: gameKit.boxDiag || null, cam: camMode, focus: app().focus || null, t: app().t }),
+    setCam: (m) => setCam(m),
+  },
   floodTest,
   // development: look at a support car ("sc" | "med") from `dist` m at bearing `ang` (rad, 0 = from behind), `h` m up
   viewSupport(key = "sc", dist = 7, h = 1.6, ang = 0.6, fov = 40) {
@@ -4638,7 +4787,7 @@ window.Map3D = {
   // in the label atlas, the layer's distance LOD, which way it faces, what stands between it and the camera, its size
   // on screen). → { facility, plan, layer, drivers: [{ num, code, team, status, reason, slot, px, hit }] }
   boardsDiag() { updatePitTeams(true); return JSON.stringify(boardsDiag()); },
-  pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: pitTeams.info?.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
+  pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: !Array.isArray(pitTeams.info?.evidence) ? pitTeams.info?.evidence ?? null : pitTeams.info.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
   facilityState() {
     const g = world?.real?.group; let n = 0; g?.traverse((o) => { if (o.userData?.facility) n++; });
     return JSON.stringify({ facilities: n, info: world?.real?.info?.facilities, mem: renderer?.info.memory, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles });

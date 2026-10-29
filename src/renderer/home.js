@@ -420,6 +420,8 @@ $("home").addEventListener("click", (e) => {
   else if (b.hasAttribute("data-live-stop")) A().stopLive();
   else if (b.hasAttribute("data-live-open")) A().setHome(false);
 });
+// (the strategy game's screens cover the home screen: the globe stops while they are up, and comes back after – game/gamehome.js)
+addEventListener("f1kr-game", (e) => { if (!A().homeOn) return; if (e.detail.on) { globeHide(); closePick(); } else globeShow(); });
 addEventListener("f1kr-home", (e) => {
   if (e.detail.on) { globeShow(); render(); probeSelected(); }
   else { globeHide(); closePick(); clearInterval(liveTimer); liveTimer = null; }

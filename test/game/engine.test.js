@@ -1,0 +1,151 @@
+// The integrated engine on a real scenario (Hungary 2025 fixture): determinism, save/restore, pause, any split of sim
+// time into frames, order idempotency, pit call → stop → new tyres – request §4, §16, §19.
+const test = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs"), path = require("node:path");
+const SC = JSON.parse(fs.readFileSync(path.join(__dirname, "../fixtures/game/2025-08-03_Hungarian_Grand_Prix_2025-08-03_Race.scenario.json"), "utf8"));
+const load = () => import("../../src/game/engine/engine.js");
+const clk = () => import("../../src/game/engine/clock.js");
+const fingerprint = (race) => JSON.stringify({ t: race.state.t, cars: race.state.cars.map((c) => [c.num, c.s.toFixed(6), c.v.toFixed(6), c.lap, c.tyre.wear.toFixed(9), c.tyre.Ts.toFixed(6), c.energy.fuel.toFixed(6), c.energy.soc.toFixed(3), c.pit.phase]), order: race.state.order });
+
+test("same scenario + seed → identical race; another seed differs (the driver variation)", async () => {
+  const E = await load();
+  const run = (seed) => { const r = E.createRace({ scenario: SC, seed }); for (let i = 0; i < 6000; i++) E.step(r); return fingerprint(r); };
+  assert.strictEqual(run(3), run(3));
+  assert.notStrictEqual(run(3), run(4));
+});
+
+test("frames: 1× vs 30× vs uneven frames reach the same state at the same sim time; paused → nothing changes", async () => {
+  const E = await load(), { advanceTo, Runner } = await clk();
+  const a = E.createRace({ scenario: SC, seed: 9 }); advanceTo(a, E.step, 240000);
+  const b = E.createRace({ scenario: SC, seed: 9 }); let t = 0, i = 0; while (t < 240000) { t = Math.min(240000, t + [16.7, 250, 33, 1000][i++ % 4] * (i % 2 ? 30 : 1)); advanceTo(b, E.step, t); }
+  assert.strictEqual(fingerprint(a), fingerprint(b));
+  let wall = 0; const run = new Runner(b, E.step, { now: () => wall, budgetMs: 1e9 });
+  const before = fingerprint(b); for (let k = 0; k < 50; k++) { wall += 16; run.frame(); }
+  assert.strictEqual(fingerprint(b), before, "paused: unchanged");
+});
+
+test("save at 3 min → load → continue: the same race as never saved (RNG, tyres, energy, envelopes, pit state)", async () => {
+  const E = await load();
+  const a = E.createRace({ scenario: SC, seed: 5 });
+  E.command(a, { id: "p1", type: "pit", car: "16", args: { compound: "HARD" }, by: "player" });
+  for (let i = 0; i < 3600; i++) E.step(a);
+  const saved = E.saveRace(a);
+  for (let i = 0; i < 3600; i++) E.step(a);
+  const b = E.loadRace(saved, SC); for (let i = 0; i < 3600; i++) E.step(b);
+  assert.strictEqual(fingerprint(b), fingerprint(a));
+  assert.deepStrictEqual(b.state.log.slice(-5), a.state.log.slice(-5));
+});
+
+test("save/restore with the team AI on: AI state (estimates, tendencies, pending events) and its orders continue exactly", async () => {
+  const E = await load();
+  const a = E.createRace({ scenario: SC, seed: 6, ai: true });
+  for (let i = 0; i < 4000; i++) E.step(a);
+  const saved = E.saveRace(a);
+  for (let i = 0; i < 5000; i++) E.step(a);
+  const b = E.loadRace(saved, SC); for (let i = 0; i < 5000; i++) E.step(b);
+  assert.strictEqual(fingerprint(b), fingerprint(a));
+  assert.deepStrictEqual(b.state.ai, a.state.ai);
+  assert.deepStrictEqual(b.state.commands.log, a.state.commands.log);
+  assert.ok(a.state.commands.log.some((c) => c.by.startsWith("ai:")), "the AI gave orders");
+});
+
+test("orders: the same id twice acts once; a pit call stops the car and fits the new tyres only at the end of the work; a player can't order another team's car", async () => {
+  const E = await load();
+  const r = E.createRace({ scenario: SC, seed: 2, userTeam: "Ferrari" });
+  assert.ok(E.command(r, { id: "x", type: "pit", car: "16", args: { compound: "HARD" }, by: "player" }).ok);
+  assert.ok(!E.command(r, { id: "x", type: "pit", car: "16", args: { compound: "HARD" }, by: "player" }).ok);
+  E.command(r, { id: "y", type: "pace", car: "4", args: { mode: "attack" }, by: "player" });
+  let fitted = null, workEnd = null;
+  for (let i = 0; i < 4 * 60 * 20 && !fitted; i++) {
+    E.step(r); const c = r.state.cars.find((x) => x.num === "16");
+    if (c.pit.phase === "work") workEnd = c.pit.workEnd;
+    if (c.tyre.name === "HARD") fitted = r.state.t;
+    if (c.pit.phase === "work") assert.notStrictEqual(c.tyre.name, "HARD", "not before the work ends");
+  }
+  assert.ok(fitted && workEnd && fitted >= workEnd, `fitted ${fitted} work end ${workEnd}`);
+  for (let i = 0; i < 60 * 20; i++) E.step(r);   // (out of the lane)
+  const refused = r.state.commands.log.find((c) => c.id === "y"); assert.ok(refused && !refused.ok && /not your car/.test(refused.why));
+  const pitLog = r.state.log.filter((e) => e.car === "16" && /pit/.test(e.type)).map((e) => e.type);
+  assert.ok(pitLog.includes("pitEntry") && pitLog.includes("pit:work") && pitLog.includes("pitExit"), pitLog.join(","));
+});
+
+test("ranges after 10 min: speeds, tyre wear/temperatures, fuel, energy all finite and physical; cars move forward", async () => {
+  const E = await load();
+  const r = E.createRace({ scenario: SC, seed: 11 });
+  const dist0 = new Map(r.state.cars.map((c) => [c.num, c.dist]));
+  for (let i = 0; i < 12000; i++) E.step(r);
+  for (const c of r.state.cars) {
+    assert.ok(c.v >= 0 && c.v < 100, `v ${c.v}`); assert.ok(c.tyre.wear >= 0 && c.tyre.wear <= 1);
+    assert.ok(c.tyre.Ts > 0 && c.tyre.Ts < 200 && c.tyre.Tc > 0 && c.tyre.Tc < 200);
+    assert.ok(c.energy.fuel >= 0 && c.energy.soc >= 0);
+    assert.ok(c.dist > dist0.get(c.num) + 4000, `car ${c.num} moved ${c.dist - dist0.get(c.num)} m`);
+  }
+});
+
+test("a pit-lane starter (Hungary 2025: car 22) starts from the pit lane behind the field, not ahead of it", async () => {
+  const E = await load();
+  const r = E.createRace({ scenario: SC, seed: 1 });
+  const tsu = () => r.state.cars.find((c) => c.num === "22");
+  assert.strictEqual(tsu().pitStart, true);
+  for (let i = 0; i < 20 * 40; i++) E.step(r);   // 40 s
+  assert.strictEqual(r.state.order[r.state.order.length - 1], "22", `last after 40 s: ${r.state.order.join(",")}`);
+});
+
+test("a stop's loss is measured, part by part: lane time minus the free time over the same stretch; queue + stationary + rest = loss", async () => {
+  const E = await load();
+  const r = E.createRace({ scenario: SC, seed: 4 });
+  E.command(r, { id: "a", type: "pit", car: "4", args: { compound: "HARD" }, by: "ai" });
+  E.command(r, { id: "b", type: "pit", car: "81", args: { compound: "HARD" }, by: "ai" });   // the teammate the same lap: a queue
+  for (let i = 0; i < 20 * 300; i++) E.step(r);
+  for (const n of ["4", "81"]) {
+    const c = r.state.cars.find((x) => x.num === n), p = c.acct.pitParts?.[0];
+    assert.ok(p, `car ${n} stopped`);
+    assert.ok(Math.abs(p.queue + p.stationary + p.rest - p.loss) < 0.02);
+    assert.ok(p.loss > 10 && p.loss < 40, `loss ${p.loss}`);
+  }
+  // one box per team: the second car's work starts only after the first car's ended (with race control's start the two
+  // arrive < 1 s apart, so the wait shows as a queue or as a slower approach – the box itself is never shared)
+  const at = (n, ty) => r.state.log.find((e) => e.car === n && e.type === ty)?.t;
+  const [a, b] = ["4", "81"].sort((x, y) => at(x, "pit:work") - at(y, "pit:work"));
+  assert.ok(at(b, "pit:work") >= at(a, "pit:workDone"), `box shared: ${a} done ${at(a, "pit:workDone")}, ${b} work ${at(b, "pit:work")}`);
+});
+
+// race control wired into the engine (control.js / rules.js / incidents.js): the start, an SC with a queue, save/restore
+// in the middle of it, the classification at the end
+const ctl = () => import("../../src/game/engine/control.js");
+test("race control: lights then reactions (nobody moves before the lights go out unless it jumps the start); an SC queues the field, nobody passes behind it; save/restore mid-SC continues exactly", async () => {
+  const E = await load(), C = await ctl();
+  const r = E.createRace({ scenario: SC, seed: 3 });
+  for (let i = 0; i < 20; i++) E.step(r);
+  assert.ok(r.state.cars.every((c) => c.v === 0 || c.where === "pit"), "standing on the grid while the lights come on");
+  for (let i = 0; i < 20 * 600; i++) E.step(r);   // 10 min
+  assert.strictEqual(r.state.phase, "racing");
+  assert.ok(r.state.log.some((e) => e.type === "lightsOut"));
+  const res = C.neutralise(r, r.cache.T, "sc", { clearMs: 240000, cause: "test" });
+  assert.ok(res.ok && r.state.control.flag === "sc");
+  for (let i = 0; i < 20 * 120; i++) E.step(r);   // SC out and the field caught up
+  const saved = E.saveRace(r);
+  // behind the SC: the running order among cars on the lap does not change (pit stops aside)
+  const lapOrder = () => r.state.order.filter((n) => { const c = r.state.cars.find((x) => x.num === n); return c.status === "run" && c.where === "lap" && c.pit.phase === "none"; });
+  const o0 = lapOrder(); let swaps = 0;
+  for (let i = 0; i < 20 * 60; i++) { E.step(r); const o1 = lapOrder(); const common = o0.filter((n) => o1.includes(n)), now = o1.filter((n) => common.includes(n)); if (r.state.control.flag === "sc" && common.join() !== now.join()) swaps++; }
+  assert.strictEqual(swaps, 0, "no overtaking behind the safety car");
+  const b = E.loadRace(saved, SC); for (let i = 0; i < 20 * 60; i++) E.step(b);
+  assert.strictEqual(fingerprint(b), fingerprint(r));
+  assert.deepStrictEqual(b.state.control, r.state.control);
+});
+
+test("the end: race control's chequered flag, every car classified by rules.js (laps, crossing order, penalties, points)", async () => {
+  const E = await load();
+  const short = { ...SC, race: { ...SC.race, laps: 4 } };
+  const r = E.createRace({ scenario: short, seed: 2 });
+  while (!r.state.finished && r.state.t < 30 * 60000) E.step(r);
+  assert.ok(r.state.finished, "finished");
+  const R = E.results(r);
+  assert.strictEqual(R.by, "rules.classify");
+  assert.strictEqual(R.rows[0].pos, 1); assert.strictEqual(R.rows[0].laps, 4);
+  assert.ok(R.rows[0].points >= 25, "the winner scores");
+  for (const row of R.rows.filter((x) => x.classified)) assert.ok(row.laps >= R.minLaps);
+  assert.ok(r.state.log.some((e) => e.type === "chequered"));
+});
