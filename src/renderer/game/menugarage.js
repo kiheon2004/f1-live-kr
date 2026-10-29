@@ -52,6 +52,10 @@ const MG = { gen: 0, on: false, host: null, canvas: null, renderer: null, world:
   motion: readMotion(), safeLeft: 0.32, frames: 0, ms: [], last: 0, t0: 0, stale: 0, built: 0, leases: new Map(), err: null, req: null };
 
 function readMotion() { try { const v = localStorage.getItem(MOTION_KEY); return ["on", "off", "auto"].includes(v) ? v : "auto"; } catch { return "auto"; } }
+// Resolution: a still picture is drawn once per change – at up to 1.5× (sharp edges on the car's curves); while the
+// camera drifts every frame is drawn, at 1× (measured, 2400×1302 at 1.5×: ~40 ms of GPU per frame on this M3 – the room's
+// environment map ~10 ms, the side / door lamps ~13 ms, the shadow ~3 ms – a menu doesn't need that every frame).
+const pixelRatio = (move) => Math.min(move ? 1 : 1.5, (typeof devicePixelRatio === "number" && devicePixelRatio) || 1);
 const reducedPref = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
 const moving = () => (MG.motion === "on" ? true : MG.motion === "off" ? false : !reducedPref());
 const hexc = (c) => { const s = String(c ?? "").replace(/^#/, ""); return /^[0-9a-f]{6}$/i.test(s) ? "#" + s : "#888888"; };
@@ -63,7 +67,7 @@ function ensureRenderer(host) {
   Object.assign(c.style, { position: "absolute", inset: "0", width: "100%", height: "100%", display: "block" });
   (host || document.body).prepend(c);
   const r = new THREE.WebGLRenderer({ canvas: c, antialias: true, powerPreference: "high-performance" });
-  r.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));   // (a 3200-wide canvas cost ~4× a 1600 one for a picture that hardly changes)
+  r.setPixelRatio(pixelRatio(false));
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.95; r.outputColorSpace = THREE.SRGBColorSpace;
   r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; r.shadowMap.autoUpdate = false;   // (redrawn when the scene changes: render())
   MG.canvas = c; MG.renderer = r; MG.host = host;
@@ -218,6 +222,7 @@ function mgFrame(t) {
   MG.raf = 0;
   const W = MG.world, r = MG.renderer; if (!MG.on || !W || !r) return;
   const move = moving();
+  if (r.getPixelRatio() !== pixelRatio(move)) { r.setPixelRatio(pixelRatio(move)); resize(); MG.dirty = true; }
   if (move || MG.dirty) {
     aim(W, t - MG.t0);
     const a = performance.now(), sky = CAR_SKY.value;
@@ -263,7 +268,10 @@ export function show(o = {}) {
     W.compileMs = Math.round(performance.now() - t0);
     const old = MG.world; MG.world = W; MG.built++;
     if (old) disposeWorld(old);
-    resize(); MG.t0 = performance.now(); MG.ms = []; kick();
+    resize(); MG.t0 = performance.now(); MG.ms = [];
+    // (the first picture drawn before the promise resolves: it uploads the textures and builds the shadow pass's programs –
+    // the caller can keep its "loading" label up until then instead of showing an empty canvas)
+    stopLoop(); MG.dirty = true; mgFrame(performance.now());
     return state();
   });
 }
