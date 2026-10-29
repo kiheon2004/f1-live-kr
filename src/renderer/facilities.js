@@ -963,6 +963,10 @@ function pitBuilding(ctx, p) {
           const stray = (q) => { const A = walkAt(q - half).p, B = walkAt(q + half).p, dx = B[0] - A[0], dz = B[2] - A[2], L = Math.hypot(dx, dz) || 1; let m = 0; for (let t = -half; t <= half + 1e-6; t += 0.5) { const P0 = walkAt(q + t).p; m = Math.max(m, Math.abs(((P0[0] - A[0]) * dz - (P0[2] - A[2]) * dx) / L)); } return m; };
           let q = uu, best = stray(uu);
           if (best > 0.1) for (let k = 1; k <= 12 && best > 0.1; k++) for (const sgn of [-1, 1]) { const qq = uu + sgn * k * 0.5, m = stray(qq); if (m < best - 1e-6) { best = m; q = qq; } if (best <= 0.1) break; }
+          // (on the walkway end to end – its roof 0.15 m past either end of the deck, its step 0.5 m past the +u end: garages.js
+          // pitWallStand: a box by the run's end had the stand off the walkway's last station – Zandvoort 2026 Cadillac, the
+          // step 0.07 m past it; v0.47 run/stands)
+          const qLo = W[0].u + half + 0.15, qHi = W[W.length - 1].u - half - 0.55; if (qLo <= qHi) q = Math.max(qLo, Math.min(qHi, q));
           const A = walkAt(q - half).p, B = walkAt(q + half).p, m = A.map((x, k) => (x + B[k]) / 2), Cq = walkAt(q).p; d = [B[0] - A[0], B[2] - A[2]]; p = [(m[0] + Cq[0]) / 2, Cq[1], (m[2] + Cq[2]) / 2];
         }
         const len = Math.hypot(d[0], d[1]) || 1, al = [d[0] / len, d[1] / len], sg = Math.sign(-al[1] * o0[0] + al[0] * o0[1]) || 1;

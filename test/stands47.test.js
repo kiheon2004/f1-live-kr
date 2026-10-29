@@ -165,3 +165,16 @@ test("the railing opened in front of a stand where the building has balconies wi
   G.openRail([]);
   assert.deepStrictEqual(railOpen(G, rail), []);
 });
+
+test("a stand at the run's end stays on the walkway – its step too (Zandvoort 2026 Cadillac: the step 0.07 m past the walkway's last station)", async () => {
+  const { G } = await plainWall();
+  const { checkStands } = await import("../src/renderer/standcheck.js");
+  const w0 = G.railU[0][0], w1 = G.railU[G.railU.length - 1][1], L = 5.4;
+  for (const box of [w1 - 1, w1 - 3.1, w0 + 1, w0 + 2.8]) {
+    const w = G.wallAt(box, L / 2), p = [w.p[0], w.p[2]];
+    const u0 = G.project(0, 0).u, ux = G.project(1, 0).u - u0, uz = G.project(0, 1).u - u0;
+    const v = checkStands({ axis: { o: [-u0 * ux, -u0 * uz], u: [ux, uz] }, wall: [w0, w1], run: [G.gStart, G.gEnd], rail: null, spans: [], stands: [{ team: "T", box, L, p, along: w.along, out: w.out }] });
+    assert.deepStrictEqual(v.ends, [], `box ${box.toFixed(2)} (walkway ${w0.toFixed(2)}–${w1.toFixed(2)}): ${v.ends.join("; ")}`);
+    assert.ok(Math.abs(G.project(...p).u - box) <= 3.5, "still by its box");
+  }
+});
