@@ -42,8 +42,10 @@ test("utilisation ≤ 1 always; pace modes order it attack > balanced > manage; 
   assert.ok(hA > D.tyreHeatFactor(z));
 });
 
-// the trade-off over a stint (C3, generic 4.6 km track, 60 kg fuel, the same conditions for each mode)
-const stint = (laps, pace, o = {}) => X.solo.runSolo({ track: X.lapline.genericTrack(), car: X.carsBase.carBase(2025), compound: "C3", laps, pace, v0: 60, fuel: 60, ...o });
+// the trade-off over a stint (C3, generic 4.6 km track, 60 kg fuel, the same conditions for each mode;
+// the long stint at abrasion 2: the generic track works the tyres less than the real ones, so a plain C3 there would not
+// reach the wear cliff in 32 laps)
+const stint = (laps, pace, o = {}) => X.solo.runSolo({ track: X.lapline.genericTrack(), car: { ...X.carsBase.carBase(2025), C_tyre_heat: 1.35 }, compound: "C3", laps, pace, v0: 60, fuel: 60, ...o });
 
 test("attack vs manage over a stint: attack wins a short stint, loses a long one; manage is never free", () => {
   const short = Object.fromEntries(["attack", "balanced", "manage"].map((m) => [m, stint(5, m)]));
@@ -51,8 +53,8 @@ test("attack vs manage over a stint: attack wins a short stint, loses a long one
     `5 laps: attack ${short.attack.total.toFixed(2)} balanced ${short.balanced.total.toFixed(2)} manage ${short.manage.total.toFixed(2)}`);
   // costs of attack: hotter, more wear
   assert.ok(short.attack.tyre.wear > short.balanced.tyre.wear && short.balanced.tyre.wear > short.manage.tyre.wear);
-  const long = Object.fromEntries(["attack", "balanced", "manage"].map((m) => [m, stint(32, m)]));
-  console.log(`# stint totals – 5 laps: A ${short.attack.total.toFixed(2)} B ${short.balanced.total.toFixed(2)} M ${short.manage.total.toFixed(2)} | 32 laps: A ${long.attack.total.toFixed(2)} B ${long.balanced.total.toFixed(2)} M ${long.manage.total.toFixed(2)} (wear ${long.attack.tyre.wear.toFixed(2)}/${long.balanced.tyre.wear.toFixed(2)}/${long.manage.tyre.wear.toFixed(2)})`);
+  const long = Object.fromEntries(["attack", "balanced", "manage"].map((m) => [m, stint(32, m, { abrasion: 1.7 })]));
+  console.log(`# stint totals – 5 laps: A ${short.attack.total.toFixed(2)} B ${short.balanced.total.toFixed(2)} M ${short.manage.total.toFixed(2)} | 32 laps (abrasion 1.7): A ${long.attack.total.toFixed(2)} B ${long.balanced.total.toFixed(2)} M ${long.manage.total.toFixed(2)} (wear ${long.attack.tyre.wear.toFixed(2)}/${long.balanced.tyre.wear.toFixed(2)}/${long.manage.tyre.wear.toFixed(2)})`);
   assert.ok(long.attack.total > long.balanced.total, "over 32 laps attack is not best (it reached the wear cliff)");
   assert.ok(long.attack.total > long.manage.total, "and manage beats it");
   // manage is not free: each of its early laps is slower than balanced
