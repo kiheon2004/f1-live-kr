@@ -85,10 +85,21 @@ export function createPitKit(opts) {
   // the near teams' own bays (lod by zone kind), their checks against the car spots (garagecheck.js checkCar)
   function buildNear(near) {
     const nz = zones.filter((z) => near.has(z.team));
-    const r = buildTeamBays(nz, opts.G, { lib, colourOf, season: opts.season, lodOf: opts.lodNear || ((z) => (z.kind === "car" ? 0 : 1)) });
-    r.group.name = "garageKitNear";
-    r.group.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.userData.kit = "near"; } });
-    return r;
+    const r = buildTeamBays(nz, opts.G, { lib, colourOf, season: opts.season, shareTeam: true, lodOf: opts.lodNear || ((z) => (z.kind === "car" ? 0 : 1)) });
+    // (the near teams' bays merged per material: a team's bays share its materials – ~25 draws for the team instead of
+    // ~25 per bay; the merged meshes are in the world frame)
+    const byMat = new Map();
+    r.group.updateMatrixWorld(true);
+    r.group.traverse((o) => { if (o.isMesh) (byMat.get(o.material) || byMat.set(o.material, []).get(o.material)).push(o); });
+    const g = new THREE.Group(); g.name = "garageKitNear";
+    for (const [mat, list] of byMat) {
+      const geos = list.map((m) => { const c = m.geometry.clone(); c.applyMatrix4(m.matrixWorld); return c; });
+      const geo = geos.length === 1 ? geos[0] : mergeGeometries(geos, false); if (geos.length > 1) for (const x of geos) x.dispose();
+      geo.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geo, mat); mesh.name = list[0].name; mesh.castShadow = false; mesh.receiveShadow = list[0].receiveShadow; mesh.renderOrder = list[0].renderOrder; mesh.userData.kit = "near"; g.add(mesh);
+    }
+    for (const b of r.bays) b.group.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+    return { group: g, report: r.report };
   }
   // the near teams' bays: built for a team set, kept for the last two sets (switching the focus back is free)
   const nearCache = new Map();
@@ -106,12 +117,12 @@ export function createPitKit(opts) {
   }
   // the one key light (no shadow), pointed at the focused car's work space while the camera is near it
   const key = new THREE.SpotLight(0xfff4e8, 0, 14, 0.95, 0.85, 1.6); key.name = "garageKitKey"; key.castShadow = false;
-  group.add(key, key.target);
+  if (opts.light !== false) group.add(key, key.target);
   K.keyLight = key;
   function aimKey(cam, focus) {
     const z = zones.find((x) => x.kind === "car" && String(x.num) === String(focus)) || null;
     K.keyBay = z ? z.slot : null;
-    if (!z || !cam) { key.intensity = 0; return; }
+    if (!z || !cam || !key.parent) { key.intensity = 0; return; }
     const n = normZone(z), p = K.plans.get(z), d = p?.car ? p.car.z0 + p.car.length / 2 : n.depth / 2;
     const at = (x, y, zz) => [n.door[0] + n.x[0] * x + n.inward[0] * zz, n.floorY + y, n.door[1] + n.x[1] * x + n.inward[1] * zz];
     const L = at(0.4, n.ceilingH - 0.4, d - 0.6), T = at(0, 0, d + 0.2), door = at(0, 1.5, 0);

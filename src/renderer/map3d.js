@@ -215,7 +215,7 @@ const newPitTeams = () => ({ key: null, group: null, facility: null, session: nu
 let pitTeams = newPitTeams(), livePitTeams = null;
 // v0.49: the garage interior kit in the team bays (garagekit/pitkit.js) – made with the teams' layer, freed with it.
 // garageKitOn: Map3D.garageKit(false) draws the layer's own simple equipment instead (before / after comparisons).
-let pitKit = null, garageKitOn = true;
+let pitKit = null, garageKitOn = true, garageKitLight = true;
 // the teams the kit draws in full: the focused car's and, in the game, the pit camera's subject's
 const kitNearSet = new Set();
 function kitNear() {
@@ -228,7 +228,7 @@ function kitNear() {
 function attachPitKit(G, teams, season) {
   pitKit = null;
   if (!garageKitOn || !pitTeams.group || !pitTeams.zones?.length) return;
-  try { pitKit = createPitKit({ G, zones: pitTeams.zones, teams, season, near: new Set(kitNear()), onMaterial: nightLit }); pitTeams.group.add(pitKit.group); }
+  try { pitKit = createPitKit({ G, zones: pitTeams.zones, teams, season, near: new Set(kitNear()), onMaterial: nightLit, light: garageKitLight }); pitTeams.group.add(pitKit.group); }
   catch (e) { pitKit = null; console.warn("garage kit:", e); }
 }
 function clearPitTeams() {
@@ -4520,8 +4520,9 @@ window.Map3D = {
   },
   // development (v0.49): the garage interior kit in the team bays – on / off (off: the teams' layer draws its own simple
   // equipment, as before the kit: before / after pictures at the same camera); returns the kit's state
-  garageKit(on) {
-    if (on != null && !!on !== garageKitOn) { garageKitOn = !!on; clearPitTeams(); updatePitTeams(true); }
+  garageKit(on, o = {}) {
+    const light = o.light ?? garageKitLight;
+    if ((on != null && !!on !== garageKitOn) || !!light !== garageKitLight) { if (on != null) garageKitOn = !!on; garageKitLight = !!light; clearPitTeams(); updatePitTeams(true); }
     return JSON.stringify({ on: garageKitOn, kit: pitKit ? pitKit.state() : null });
   },
   // development: every bay of the pit building as built – its width, depth, back area, the building's depth behind it

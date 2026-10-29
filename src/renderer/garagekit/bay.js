@@ -31,7 +31,8 @@ export function buildBayInterior(zone, style, opts = {}) {
   const lod = Math.max(0, Math.min(2, opts.lod ?? 0)), plan = planBay(n, style, { car: opts.car, carZ0: opts.carZ0, noCar: opts.noCar, keep: opts.keep });
   const W = n.width, D = n.depth, H = n.ceilingH, shell = opts.shell === true ? { floor: true, walls: ["left", "right", "back"], ceiling: true, header: true } : opts.shell || null;
   const signs = opts.signs === false ? [] : [{ slot: "sign", text: style.name, sub: opts.signSub || "" }];
-  const TM = teamMaterials(lib, style, { floor: shell?.floor ? { w: W, d: D, car: plan.car } : null, signs, wall: !!shell });
+  // (opts.tm: the team's materials made once for all its bays – circuit.js – so its bays can be merged per material)
+  const TM = opts.tm || teamMaterials(lib, style, { floor: shell?.floor ? { w: W, d: D, car: plan.car } : null, signs, wall: !!shell });
   const P = new Parts(), fixtures = [];
   // the equipment, each module's pieces (shared, per lod) cloned into place
   for (const it of plan.items) {
