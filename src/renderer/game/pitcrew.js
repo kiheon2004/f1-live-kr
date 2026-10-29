@@ -113,12 +113,7 @@ export function updateGameCrews(K, A, fr) {
     const tmem = mem[team] || (mem[team] = {});
     const plan = crewPlan(cs, T, boxU, tmem); if (!plan) continue;
     const who = cs.find((g) => g.num === plan.num) || fr.cars.find((g) => g.num === plan.num), car = K.cars.get(plan.num);
-    // the box where the ENGINE stops this team's cars (its pit path at the box u → the pit building's frame)
-    let bu = tm.box;
-    if (P && boxU != null) { const pp = pitPointOf(P, boxU, world.center), pr = G.project(pp.x, pp.z); if (pr && Number.isFinite(pr.u)) { bu = pr.u; (K.boxDiag || (K.boxDiag = {}))[team] = { engine: +pr.u.toFixed(2), painted: +tm.box.toFixed(2), off: +pr.off.toFixed(2) }; } }
-    const at = m.at(bu), s = at.slot;
-    const bx = s.front[0] + s.along[0] * (bu - s.uc) - s.inward[0] * at.boxC, bz = s.front[1] + s.along[1] * (bu - s.uc) - s.inward[1] * at.boxC;
-    const boxYaw = P && boxU != null ? pitPointOf(P, boxU, { x: 0, z: 0 }).yaw : Math.atan2(s.along[0], s.along[1]);
+    const B = teamBox(K, A, tm, boxU), { at, s } = B, bx = B.x, bz = B.z, boxYaw = B.yaw;
     // the frame: the car's own while it stands in the box (the guns meet its hubs), kept from then until the crew is back
     // in the garage (the car has gone); the box's before the car stands
     const inBox = car?.obj.visible && who && BOX.has(who.pit?.phase) && plan.s != null && plan.s >= 0;
@@ -138,6 +133,21 @@ export function updateGameCrews(K, A, fr) {
   }
   K.crewDrawn = world.crews.place(list, loose, K.camera.position);
   done();
+}
+
+// A team's box in the world: where the ENGINE stops its cars (its pit path at the box u → the pit building's frame; the
+// painted box – garages.js – may sit a few metres off it: K.boxDiag records by how much). tm: the team's row of
+// K.pitTeams(); boxU: its box on the engine's pit path. { x, z, y (the floor), yaw (the way the cars go), left (+1: the
+// garages on the car's left), boxC, at, s (the pit model's slot) }
+export function teamBox(K, A, tm, boxU) {
+  const G = K.pitG(), world = K.world(), P = A.scenario.track.pit, m = K.pitModelFor(G);
+  let bu = tm.box;
+  if (P && boxU != null) { const pp = pitPointOf(P, boxU, world.center), pr = G.project(pp.x, pp.z); if (pr && Number.isFinite(pr.u)) { bu = pr.u; (K.boxDiag || (K.boxDiag = {}))[tm.team] = { engine: +pr.u.toFixed(2), painted: +tm.box.toFixed(2), off: +pr.off.toFixed(2) }; } }
+  const at = m.at(bu), s = at.slot;
+  const x = s.front[0] + s.along[0] * (bu - s.uc) - s.inward[0] * at.boxC, z = s.front[1] + s.along[1] * (bu - s.uc) - s.inward[1] * at.boxC;
+  const yaw = P && boxU != null ? pitPointOf(P, boxU, { x: 0, z: 0 }).yaw : Math.atan2(s.along[0], s.along[1]);
+  const left = Math.sign(Math.cos(yaw) * s.inward[0] - Math.sin(yaw) * s.inward[1]) || 1;
+  return { x, z, y: at.floor + 0.004, yaw, left, boxC: at.boxC, at, s };
 }
 
 // The figures, the kit and the car's lift / wheels for a crew plan (crewPlan) – in the box's frame (crew.js: a along the
