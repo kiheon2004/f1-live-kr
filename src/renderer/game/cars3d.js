@@ -33,8 +33,19 @@ export function updateGameCars(K, A, dt) {
   const jumped = A.lastT != null && (fr.t < A.lastT - 50 || fr.t - A.lastT > 5000); A.lastT = fr.t;
   for (const g of fr.cars) {
     const d = A.driverOf(g.num); if (!d) continue;
-    if ((g.status === "dnf" || g.status === "fin") && g.where !== "pit" && g.s == null) continue;   // (out of the race / past the flag: not drawn)
+    // (retired into its garage – the engine's where: "garage", s null: off the track –, drawn parked at its own work space's
+    // car spot, facing out, on the garage's floor (garages.js garageZones); v0.48 hid it. Only a placement: the engine
+    // says the car is in the garage, not how it got there – no move is drawn. No work space: not drawn, as before.)
+    const spot = g.where === "garage" ? K.pitZones?.()?.find((z) => z.kind === "car" && z.num === g.num)?.carSpot : null;
+    if ((g.status === "dnf" || g.status === "fin") && g.where !== "pit" && g.s == null && !spot) continue;   // (out of the race / past the flag: not drawn)
     const c = K.carFor(g.num, d); seen.add(g.num);
+    if (spot) {
+      c.game = g; c.pos.set(spot.x, spot.y, spot.z); c.yaw = spot.yaw; c.pathYaw = spot.yaw; c.pitch = 0; c.roll = 0; c.speed = 0; c.acc = 0; c.onTrack = false; c.sample = null; c.worldS = null; c.pit = null; c.est = null; c.grid = null;
+      c.obj.position.copy(c.pos); c.model.rotation.set(0, spot.yaw, 0, "YXZ"); c.has = true; c.obj.visible = true; c.stab = null;
+      setAero(c.model, 0, 0); setFlagLights(c.model, null);
+      K.paintLabel(c.label, `${d.Tla}`, "#" + (d.TeamColour || "888"), g.num === focusNum); c.label.sp.material.opacity = 0.5;
+      continue;
+    }
     c.game = g;
     const v = c.pos;
     let yaw, slope = 0, aLat = 0, onTrack = g.where === "lap" && g.s != null;
