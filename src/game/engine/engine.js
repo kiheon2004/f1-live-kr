@@ -14,7 +14,11 @@
 //      the envelope when its inputs moved; the speed caps (the car ahead, the pit entry);
 //   4. move: on the lap the car model (car.js), in the pit lane the pit model (pit.js); then tyres and energy from what
 //      the car actually did; line crossings (laps, sectors), the pit entry/exit;
-//   5. the order, race phase (start / finish), the log.
+//   5. race control (control.js: the line / sector / SC-line crossings of this move, the SC car, flags, start, finish), the
+//      stewards (rules.js), the incidents with causes (incidents.js: driver errors, failures – traffic reports contacts);
+//   6. the order, the classification when race control ends the race (rules.js), the team AI.
+// Race control's per-car outputs (speed cap, grip-use factor, start launch, pit-lane holds) are read at the step start from
+// the state the previous step left – like the traffic decisions, never from a half-moved field.
 // Interactions between cars (following, the wake, DRS / Active Aero / Overtake, passing, blue flags, team orders, the pit
 // entry side and the pit-exit merge, the lateral position d) are traffic.js's: trafficPre before the moves (decisions from
 // the step-start field), trafficEnv per car into the car model, trafficPost after all moves (lateral moves, detection
@@ -22,7 +26,7 @@
 import { loadTrack } from "./track.js";
 import { computeProfile, makeProfile, needsReprofile, REPROFILE } from "./profile.js";
 import { stepCar } from "./car.js";
-import { createTyre, tyreGrip, stepTyre, tyreLap, fitTemp } from "./tyre.js";
+import { createTyre, tyreGrip, stepTyre, tyreLap, fitTemp, windowFactor, windowTemp, compoundParams } from "./tyre.js";
 import { createEnergy, iceCap, ersCap, splitPower, stepEnergy, energyLap, socFrac } from "./energy.js";
 import { createDriver, setPaceMode, stepDriver, utilisation, tyreHeatFactor } from "./driver.js";
 import { newPitState, newBoxes, pitCall, pitCancel, pitOnLap, pitStep, lapCapForPit, IN_LANE } from "./pit.js";
@@ -32,6 +36,11 @@ import { DT_MS, DT } from "./clock.js";
 import * as CMD from "./commands.js";
 import { newTraffic, trafficSetup, trafficPre, trafficEnv, trafficPost, trafficAccount, trafficEnd, pathFactor, mergeClear, onPitExit, gridLateral, snapTraffic } from "./traffic.js";
 import { newAiState, aiPrePlans, aiStep } from "./ai.js";
+import * as CTL from "./control.js";
+import * as RULES from "./rules.js";
+import * as INC from "./incidents.js";
+import R2025 from "../data/rules/2025.js";
+import { INCIDENTS } from "../data/params/incidents.js";
 import { carBase } from "../data/params/cars-base.js";
 import { energyParams } from "../data/params/energy.js";
 import { airDensity } from "../data/params/physics.js";
@@ -92,6 +101,11 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
     car.dist = car.armed ? car.s : car.s - T.L;
     state.cars.push(car);
   }
+  // race control places the grid (the scenario's measured slots) and the pit-lane starters (in the lane, held at its end
+  // until the field has passed the pit exit), and schedules the start: the lights, each driver's reaction and launch
+  INC.newIncidents(race);
+  CTL.newControl(race, T);
+  for (const c of state.cars) if (c.where === "pit") { c.s = T.pit.pitToLap(c.pit.u); c.armed = T.ahead(0, c.s) < T.L / 2; c.dist = c.armed ? c.s : c.s - T.L; }
   gridLateral(race);
   sortOrder(race);
   log(race, { type: "start", cause: "scenario", effect: `${state.cars.length} cars, ${state.totalLaps} laps, seed ${state.seed}` });
@@ -121,6 +135,10 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   if (!race.state.surface) race.state.surface = saveSurface(newSurface(T));
   race.cache.surface = loadSurface(race.state.surface);
   race.cache.carById = null;
+  // what traffic asks race control (overtaking permission, DRS / Active Aero / Overtake availability) and where it reports
+  // contacts (functions: never saved, set again on load)
+  race.hooks = { control: { mayOvertake: CTL.mayOvertake, drsAllowed: CTL.drsAllowed, activeAeroAllowed: CTL.activeAeroAllowed, overtakeModeAllowed: CTL.overtakeModeAllowed }, incidents: { contact: INC.contact },
+    traffic: { yielding: (c, f) => c.traffic?.role === "yield" && c.traffic.with === f.num } };
   trafficSetup(race);
 }
 
@@ -139,8 +157,10 @@ function weatherRecord(W) {
 // a plain team plan when none is given: one stop near half distance, MEDIUM → HARD – the two harder of the event's three
 // nominated dry compounds (known before the race; NOT the compounds the real race happened to use – scenario.tyres.
 // compoundsSeen comes from the race's own stints and is never an engine input, DESIGN §0.6). ai.js replaces it.
+// Where the season's rules ask for more sets (2025 Monaco: three, SR 30.5m) two stops at thirds, MEDIUM → HARD → HARD.
 export function defaultPlan(sc, num) {
-  const L = sc.race.laps;
+  const L = sc.race.laps, M = sc.meta.season === 2025 && /monaco/i.test(`${sc.meta.event || ""} ${sc.meta.id || ""}`) ? R2025.mandatoryDryCompounds?.value?.monaco : null;
+  if (M && M.minSetsAnySpec >= 3) return { stints: [{ compound: "MEDIUM", toLap: Math.round(L / 3) }, { compound: "HARD", toLap: Math.round((2 * L) / 3) }, { compound: "HARD", toLap: L }], by: "default" };
   return { stints: [{ compound: "MEDIUM", toLap: Math.round(L * 0.45) }, { compound: "HARD", toLap: L }], by: "default" };
 }
 
@@ -150,8 +170,7 @@ export function step(race) {
   const S = race.state, C = race.cache, T = C.T;
   if (S.finished) return;
   const t = S.t + DT_MS;
-  // race start: lights out at t = 0 + one step (the grid formed; formation lap not simulated – tyres preset, est)
-  if (S.phase === "grid") { S.phase = "racing"; for (const car of S.cars) if (car.status === "grid") { car.status = car.pitStart ? "pitstart" : "run"; car.lapT0 = t; } log(race, { t, type: "lightsOut", cause: "start", effect: "race started" }); }
+  // (the start is race control's: lights, reactions, launches – the formation lap is not simulated: tyres preset, est)
   // 1. orders
   for (const c of CMD.due(S.commands, t)) CMD.record(S.commands, c, t, applyOrder(race, c, t));
   // 2. weather (once a second, on the second)
@@ -160,31 +179,95 @@ export function step(race) {
   // 3. traffic decisions from the field as it is now (step start)
   trafficPre(race, t);
   const s0 = new Map(); for (const c of S.cars) if (c.status === "run" && c.where === "lap") s0.set(c.num, c.s);
-  // pit-lane starters: released from the field as it is at the step start (not half-moved by the loop below)
-  for (const c of S.cars.filter((x) => x.status === "pitstart")) pitStartWait(race, c, t);
+  // race control's caps / pit-lane inputs for every car from the step-start state (before anything moves)
+  const caps = new Map(); for (const c of S.cars) if (c.status === "run") caps.set(c.num, c.where === "pit" ? pitInputs(race, c) : CTL.caps(race, T, c));
   // 4. move
   for (const car of S.cars) {
-    if (car.status === "fin" || car.status === "dnf") { car.v = 0; continue; }
-    if (car.status === "pitstart") continue;
+    if (car.status !== "run") { car.v = 0; continue; }   // (grid: waiting for its go; fin / dnf: out of the running)
     if (car.traffic.released === t) { car.traffic.released = null; continue; }   // (joined this step at the pit exit: moves from the next)
     const dr = car.driver; stepDriver(dr, race.rng.get("driver:" + car.num), DT);
-    if (car.where === "pit") movePit(race, car, t);
-    else moveLap(race, car, t);
+    if (car.where === "pit") movePit(race, car, t, caps.get(car.num));
+    else moveLap(race, car, t, caps.get(car.num));
   }
   S.t = t; S.step++;
   // lateral moves, detection lines, passes (after every car moved)
   for (const c of S.cars) if (!(c.status === "run" && c.where === "lap")) s0.delete(c.num);
   trafficPost(race, t, s0);
-  // 5. order, finish
+  // 5. race control: this move's crossings, the SC, flags, start / finish; then the stewards and the incidents
+  const flag0 = S.control.flag, phase0 = S.control.phase, water = avg(C.surface.hLine);
+  CTL.controlStep(race, T, { wet: water > 0.15 || (C.w.rain || 0) > 0.5, lowGrip: water > 1.0 });
+  RULES.stewardsStep(race, T);
+  for (const car of S.cars) incidentsFor(race, car);
+  controlEvents(race, flag0, phase0);
+  // 6. order, the end
   sortOrder(race);
-  finishCheck(race, t);
-  // 6. the team AI (only orders – applied from the next step, like the player's)
+  if (S.finished && !S.results) finishRace(race, t);
+  // 7. the team AI (only orders – applied from the next step, like the player's)
   if (S.ai) aiStep(race);
+}
+
+// the pit lane: race control's holds (red-flag queue, exit light, pit-lane start) ⊕ the stewards' penalty to serve
+function pitInputs(race, car) {
+  const a = CTL.pitCtx(race, race.cache.T, car), b = RULES.pitCtx(race, car);
+  return { noBox: a.noBox || b.noBox, holdU: a.holdU, penaltyS: b.penaltyS, noWork: b.noWork };
+}
+
+// the incidents with causes, from what the car did this step (incidents.js; each hazard 0 without its cause)
+function incidentsFor(race, car) {
+  const x = car.incIn; car.incIn = null;
+  if (!x || car.status !== "run") return;
+  const T = race.cache.T;
+  INC.driverError(race, T, car, x);
+  if (car.status === "run") INC.mechanical(race, T, car, { reliab: 1, attack: car.mode.pace === "attack" ? 1 : 0, push: car.mode.energy === "push" ? 1 : 0, airT: race.cache.w.airT, braking: x.braking });
+  if (car.status === "dnf") { car.v = 0; trafficEnd(race, car); }
+}
+
+// flag / phase changes as engine events (the screens' auto-slow and the log read these types)
+function controlEvents(race, flag0, phase0) {
+  const S = race.state, ctl = S.control;
+  S.phase = ctl.phase;
+  if (ctl.flag !== flag0) log(race, { type: ctl.flag === "green" ? "green" : ctl.flag, cause: ctl.msgs.at(-1)?.text || "race control", effect: `${flag0} → ${ctl.flag}` });
+  if (ctl.phase !== phase0) {
+    if (ctl.phase === "racing" && phase0 === "grid") { for (const c of S.cars) if (!c.armed) c.lapT0 = ctl.t0 ?? S.t; log(race, { type: "lightsOut", cause: "start", effect: "lights out" }); }
+    if (ctl.phase === "chequered") { S.chequeredAt = ctl.fin.flagT; log(race, { t: ctl.fin.flagT, type: "chequered", cause: ctl.fin.reason || "distance", effect: "chequered flag" }); }
+  }
+  for (const c of S.cars) if (c.status === "fin" && c.finT == null) { c.finT = c.fin?.t ?? S.t; c.v = 0; trafficEnd(race, c); }
+}
+
+function finishRace(race, t) {
+  const S = race.state;
+  S.phase = "finished";
+  for (const c of S.cars) if (c.status === "fin" && c.finT == null) c.finT = c.fin?.t ?? t;
+  RULES.classify(race, race.cache.T);
+  S.results = resultRows(race, S.results);
+  log(race, { t, type: "finished", cause: S.control.fin.reason || "race control", effect: `winner ${S.results.rows[0]?.tla}` });
+}
+// rules.classify's rows with the fields the screens and tools read (gap in s or laps down, stops, time accounts)
+function resultRows(race, R) {
+  const byNum = new Map(race.state.cars.map((c) => [c.num, c]));
+  for (const r of R.rows) {
+    const c = byNum.get(r.num);
+    r.gap = r.pos === 1 ? 0 : r.gap?.s ?? null; r.lapsDown = r.pos == null ? null : (R.rows[0].laps - r.laps);
+    r.time = Number.isFinite(r.totalMs) ? r.totalMs : null; r.stops = c.pit.stops; r.acct = { ...c.acct };
+  }
+  R.by = "rules.classify";
+  return R;
+}
+
+// the car's coefficients with its damage (incidents.js car.dmg: aero – a share of the downforce lost –, power – the share
+// left): a new damage state forces an envelope refresh (car.dmgKey is saved, so a restored race doesn't refresh again)
+function carOf(race, car) {
+  const C = race.cache, cp = C.cars[car.num], d = car.dmg;
+  if (!d || (!d.aero && d.power === 1)) return cp;
+  const key = `${d.aero}|${d.power}`, m = C.dmgCars || (C.dmgCars = {});
+  if (car.dmgKey !== key) { car.dmgKey = key; C.profiles[car.num].at = -1e9; }
+  if (!m[car.num] || m[car.num].key !== key) m[car.num] = { key, cp: { ...cp, ClA: cp.ClA * (1 - d.aero), P_ice: cp.P_ice * d.power } };
+  return m[car.num].cp;
 }
 
 // tv: traffic's energy scene (mode incl. ":scene", 2026 Overtake active) – the free reference power (P0) is the team mode's
 function envFor(race, car, tv = null) {
-  const C = race.cache, T = C.T, w = C.w, cp = C.cars[car.num];
+  const C = race.cache, T = C.T, w = C.w, cp = carOf(race, car);
   const water = waterAt(C.surface, car.s), rubber = rubberAt(C.surface, car.s);
   const mode = tv?.mode || car.mode.energy, ep = C.ep;
   const pIce = iceCap(car.energy, cp.P_ice, ep), pErs = ersCap(car.energy, ep, mode, car.v, !!tv?.ot);
@@ -192,8 +275,14 @@ function envFor(race, car, tv = null) {
   return { water, rubber: rubber * C.tau, m: cp.m_min + car.energy.fuel, pIce, pErs, P: pIce + pErs, P0: pIce + p0, rho: airDensity(w.airT ?? 25), muTyre: tyreGrip(car.tyre, water), util: utilisation(car.driver, water) };
 }
 
-function moveLap(race, car, t) {
-  const S = race.state, C = race.cache, T = C.T, cp = C.cars[car.num], tv = trafficEnv(race, car), E = envFor(race, car, tv);
+function moveLap(race, car, t, cap = null) {
+  const S = race.state, C = race.cache, T = C.T, cp = carOf(race, car), tv = trafficEnv(race, car), E = envFor(race, car, tv);
+  // race control: a grip-use factor (yellow, a moment), the launch (reaction is in the go time; launch quality scales the
+  // traction-limited power below the MGU-K's speed – est), and a speed cap (VSC delta, SC queue, an incident)
+  if (cap) {
+    if (cap.util !== 1) E.util *= cap.util;
+    if (cap.launch && car.v < cap.launch.mguKFromKmh / 3.6) { E.P *= cap.launch.quality; E.pIce *= cap.launch.quality; E.pErs *= cap.launch.quality; }
+  }
   // the envelope when its inputs moved (μ 0.3 %, mass 5 kg) – at most every 0.5 s – or every 2 s
   const pr = C.profiles[car.num], mu = cp.mu_mech * E.muTyre * E.rubber * E.util;
   if ((t - pr.at >= 500 && needsReprofile(pr.prof, mu, E.m)) || t - pr.at >= REPROFILE.everyMs) {
@@ -203,7 +292,7 @@ function moveLap(race, car, t) {
     pr.at = pr.at < -1e8 ? t - pr.phase : t;
   }
   // (off the line the s-progress is v/pf: the traffic caps – set in s terms – scale with pf for the path speed)
-  const pf0 = pathFactor(race, car), vCap = Math.min(tv.vCap * pf0, lapCapForPit(car, T));
+  const pf0 = pathFactor(race, car), vCap = Math.min(tv.vCap * pf0, lapCapForPit(car, T), cap ? cap.v : Infinity);
   const cs = { s: car.s, v: car.v, lap: 0, aLong: 0, aLat: 0, pDrive: 0, pBrake: 0, crossed: false, tCross: 0, limited: false, over: 0 };
   const s0 = car.s;
   stepCar(cs, C.PT, pr.prof, cp, { m: E.m, P: E.P, rho: E.rho, mu: pr.prof.mu, vCap, capArr: tv.capArr, cdaMul: tv.cdaMul, claMul: tv.claMul, aLift: tv.aLift }, DT);
@@ -213,6 +302,12 @@ function moveLap(race, car, t) {
   const pf = pathFactor(race, car);
   if (pf !== 1) { const ms = moved / pf, raw = s0 + ms; cs.crossed = raw >= T.L; cs.s = T.wrap(raw); if (cs.crossed) cs.tCross = Math.min(DT, cs.tCross * pf); moved = ms; }
   car.aLong = cs.aLong; car.aLat = cs.aLat; car.v = cs.v; car.s = cs.s;
+  // the incidents' inputs (evaluated after every car moved): u from the grip the driver uses ÷ the grip there now, above
+  // his own balanced level (params errGain) – only while the car is on its envelope (limited); the envelope was built with
+  // the grip of its last refresh, so a tyre that cooled or a wetter patch since then adds to it
+  const muNow = cp.mu_mech * E.muTyre * E.rubber, wf = windowFactor(compoundParams(car.tyre.compound), windowTemp(car.tyre));
+  const over = pr.prof.mu / Math.max(1e-6, muNow) - car.driver.p.pace, IP = INCIDENTS;
+  car.incIn = { u: cs.limited ? Math.min(1 + 0.5 * (1 - IP.errU0.v), IP.errU0.v + IP.errGain.v * over) : 0, tyreOut: Math.min(1, (1 - wf) / 0.5), water: E.water, compound: car.tyre.name, braking: cs.aLong < -10 };
   // tyres and energy from what the car did
   const [pi, pe] = splitPower(cs.pDrive, E.pIce, E.pErs);
   stepTyre(car.tyre, { v: car.v, aLat: car.aLat, aLong: car.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver) * tv.heatMul, Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
@@ -221,7 +316,13 @@ function moveLap(race, car, t) {
   const sg0 = segOf(C.surface, s0), sg1 = segOf(C.surface, car.s); if (sg0 !== sg1) C.surface.passes[sg1] += 1;
   // the pit: commit / entry
   const pev = pitOnLap(car, T, s0, car.s, t);
-  if (pev === "entry") { car.where = "pit"; trafficEnd(race, car); car.pit.refS = pitReference(race, car); log(race, { t, car: car.num, type: "pitEntry", cause: car.pit.call?.by || "call", effect: `box for ${car.pit.call?.compound || "same"}` }); }
+  if (pev === "entry") {
+    car.where = "pit"; trafficEnd(race, car); car.pit.refS = pitReference(race, car);
+    log(race, { t, car: car.num, type: "pitEntry", cause: car.pit.call?.by || "call", effect: `box for ${car.pit.call?.compound || "same"}` });
+    RULES.onPitEntry(race, T, car);
+    // (retired in the garage: out of the lane – a stopped car left in the fast lane would block every car behind it)
+    if (INC.pitEntry(race, T, car)) { car.where = "garage"; car.pit.phase = "none"; car.v = 0; log(race, { t, car: car.num, type: "retired", cause: car.out.cause, effect: "retired in the garage" }); }
+  }
   if (pev === "committed") log(race, { t, car: car.num, type: "pitCommitted", cause: "call", effect: "past the commit point" });
   // line crossing
   lineCrossing(race, car, s0, car.s, cs.crossed, t - DT_MS + Math.round(cs.tCross * 1000));
@@ -240,7 +341,7 @@ function ghostModels(E) {
   return {
     start(race, car, gh) { gh.tyre = JSON.parse(JSON.stringify(car.tyre)); gh.energy = JSON.parse(JSON.stringify(car.energy)); gh.energy.events = []; gh.pat = -1e9; },
     env(race, car, gh, t) {
-      const C = race.cache, T = C.T, cp = C.cars[car.num], gp = C.ghostProf[car.num] || (C.ghostProf[car.num] = { prof: makeProfile(T.n), pat: null });
+      const C = race.cache, T = C.T, cp = carOf(race, car), gp = C.ghostProf[car.num] || (C.ghostProf[car.num] = { prof: makeProfile(T.n), pat: null });
       const muTyre = tyreGrip(gh.tyre, E.water), m = cp.m_min + gh.energy.fuel;
       // (rebuild the cached envelope if it isn't this ghost's – a restored race – then the car's own refresh rule)
       if (gh.pin && (gp.pat !== gh.pat || gp.num !== car.num)) { computeProfile(C.PT, cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = gh.pat; gp.num = car.num; }
@@ -253,7 +354,7 @@ function ghostModels(E) {
       return { prof: gp.prof, env: { m, P: pIce + pErs, rho: E.rho, mu: gp.prof.mu, vCap: lapCapForPit(car, T) }, pIce, pErs };
     },
     after(race, car, gh, gs, ge, t) {
-      const C = race.cache, cp = C.cars[car.num], [pi, pe] = splitPower(gs.pDrive, ge.pIce, ge.pErs);
+      const C = race.cache, cp = carOf(race, car), [pi, pe] = splitPower(gs.pDrive, ge.pIce, ge.pErs);
       stepTyre(gh.tyre, { v: gs.v, aLat: gs.aLat, aLong: gs.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver), Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
       stepEnergy(gh.energy, C.ep, { pIce: pi, pErs: pe, pBrake: gs.pBrake, iceFull: pi >= ge.pIce * 0.999 && ge.pIce > 0 }, DT, t);
       if (gs.crossed) { tyreLap(gh.tyre); energyLap(gh.energy); }
@@ -261,12 +362,12 @@ function ghostModels(E) {
   };
 }
 
-function movePit(race, car, t) {
+function movePit(race, car, t, ctx = {}) {
   const S = race.state, C = race.cache, T = C.T;
   const others = S.cars.filter((o) => o.where === "pit").map((o) => ({ num: o.num, team: o.teamKey, phase: o.pit.phase, u: o.pit.u, v: o.pit.v }));
   const sPrev = T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * T.ahead(T.pit.sIn, T.pit.sOut));
-  const pen = car.pen.pendingS;
-  let ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others, penaltyS: pen,
+  let ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others,
+    penaltyS: ctx.penaltyS || 0, noBox: !!ctx.noBox, holdU: ctx.holdU ?? null, noWork: !!ctx.noWork,
     stack: S.cars.some((o) => o !== car && o.teamKey === car.teamKey && o.pit.times?.release && t - o.pit.times.release < 30000),
     onWorkDone: (cc, cmp) => { cc.tyre = newTyre(race, cmp, C.w.airT ?? 25); C.profiles[cc.num].at = -1e9; } }, undefined);
   // the merge: the car waits at the end of the exit road while joining would force a car on the lap to brake or move
@@ -275,14 +376,17 @@ function movePit(race, car, t) {
     if (!p.mergeHeld) { p.mergeHeld = true; log(race, { t, car: car.num, type: "pitExitHold", cause: "traffic on the lap", effect: "waits at the blend line" }); }
   }
   if (car.where === "pit") car.v = car.pit.v;
-  if (ev === "work" && pen > 0 && car.pit.served >= pen) car.pen.pendingS = 0;
+  if (ev === "unsafeRelease") RULES.onUnsafeRelease(race, T, car);
   if (ev) log(race, { t, car: car.num, type: "pit:" + ev, cause: ev === "work" && car.pit.err ? car.pit.err.causes.join(", ") || "crew" : "pit", effect: ev === "work" ? `stationary ${car.pit.workS?.toFixed(2)} s${car.pit.err ? ` (slow wheel +${car.pit.err.add.toFixed(1)} s)` : ""}` : ev });
   // tyres cool in the lane (slow, no load), energy: the limiter (no deploy)
   stepTyre(car.tyre, { v: car.v, aLat: 0, aLong: 0, heat: 0, Tair: C.w.airT, Ttrack: C.w.trackT, water: 0, abrasion: 1 }, DT);
   car.wheelDist += car.v * DT;
   if (car.pit.phase === "none" && ev === "exit") {
     car.where = "lap"; car.pit.mergeHeld = false; onPitExit(race, car);
+    RULES.onPitExit(race, T, car);
     const tm = car.pit.times, lane = (tm.exit - tm.entry) / 1000;
+    if (tm.entry == null) { car.pit.times = {}; log(race, { t, car: car.num, type: "pitLaneStart", cause: "start", effect: "joined from the pit exit" }); }
+    else {
     // the stop's loss: time from the branch to the merge minus the time the car would have taken on the lap over the same
     // stretch at its free reference pace (forward pass of its envelope at entry) – the parts: queue, stationary (penalty +
     // work), the rest (braking to the limiter, the lane, the launch). Approximate: the reference is a free lap's pace.
@@ -291,6 +395,7 @@ function movePit(race, car, t) {
     car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2) });
     log(race, { t, car: car.num, type: "pitExit", cause: "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s − free ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
     car.pit.times = {};
+    }
   }
   // the timing line inside the pit lane; the lap position of a pit car runs from the branch to the merge in proportion to
   // the path (pitToLap is clamped near the ends – a distance that stalled there let a car seem behind the car that left
@@ -311,14 +416,6 @@ function pitReference(race, car) {
   return tt;
 }
 
-// a pit-lane starter waits at the pit exit until the field has passed it (simple rule; control.js refines)
-function pitStartWait(race, car, t) {
-  const S = race.state, T = race.cache.T;
-  const exitDist = T.pit.sOut < T.L / 2 ? T.pit.sOut : T.pit.sOut - T.L;   // the pit exit's place on the first lap
-  const passed = S.cars.filter((o) => o.status === "run").every((o) => o.dist > exitDist + 30);
-  if (t > 3000 && passed && mergeClear(race, car)) { car.status = "run"; car.where = "lap"; car.s = T.pit.sOut; car.armed = true; car.dist = car.s; car.lapT0 = t; onPitExit(race, car); car.traffic.released = t; log(race, { t, car: car.num, type: "pitLaneStart", cause: "start", effect: "released from the pit exit" }); }
-}
-
 function lineCrossing(race, car, s0, s1, crossed, tCross) {
   const S = race.state, T = race.cache.T;
   if (!crossed) return;
@@ -329,9 +426,7 @@ function lineCrossing(race, car, s0, s1, crossed, tCross) {
   car.laps.push({ n: car.lap, t: +lapT.toFixed(3), compound: car.tyre.name, wear: +car.tyre.wear.toFixed(4), fuel: +car.energy.fuel.toFixed(2), soc: +socFrac(car.energy, race.cache.ep).toFixed(3), pit: inLap, mode: car.mode.pace });
   tyreLap(car.tyre); energyLap(car.energy);
   if (car.lap > S.leaderLap) S.leaderLap = car.lap;
-  // the chequered flag: the leader completing the race distance; every car after it finishes at its next crossing
-  if (S.chequeredAt == null && car.lap >= S.totalLaps) { S.chequeredAt = tCross; S.phase = "chequered"; log(race, { t: tCross, car: car.num, type: "chequered", cause: "race distance", effect: `${car.tla} wins on the road` }); }
-  if (S.chequeredAt != null) { car.status = "fin"; car.finT = tCross; car.v = 0; }
+  // (the chequered flag and each car's finish are race control's: control.js onLine)
 }
 
 function planCall(race, car, t) {
@@ -346,33 +441,21 @@ function planCall(race, car, t) {
   log(race, { t, car: car.num, type: "pitCall", cause: `plan (${p.by || "team"})`, effect: r.ok ? `box for ${next.compound}: ${r.why}` : `refused: ${r.why}` });
 }
 
-function finishCheck(race, t) {
-  const S = race.state;
-  if (S.chequeredAt == null) return;
-  // every running car has crossed after the leader, or 10 min passed (a car stopped somewhere can't hold the race open)
-  const running = S.cars.filter((c) => c.status === "run" || (c.where === "pit" && c.status !== "fin" && c.status !== "dnf"));
-  if (!running.length || t - S.chequeredAt > 600000) {
-    S.finished = true; S.phase = "finished";
-    for (const c of running) if (c.status !== "fin") { c.status = "fin"; c.finT = c.finT ?? t; }
-    S.results = classify(race);
-    log(race, { t, type: "finished", cause: "all cars in", effect: `winner ${S.results.rows[0]?.tla}` });
-  }
-}
-
 function sortOrder(race) {
   const S = race.state;
   const key = (c) => (c.status === "dnf" ? -1e12 + c.dist : c.status === "fin" ? 1e12 - (c.finT || 0) + c.lap * 1e9 : c.dist);
   S.order = S.cars.slice().sort((a, b) => key(b) - key(a)).map((c) => c.num);
 }
 
-// classification (basic: laps then time; rules.js adds the 90 % rule, penalties, points per season)
+// the running order as a provisional classification (laps then time) – while the race runs; at the end race control's
+// rules.classify (90 % rule, penalties, the tyre rule, points) replaces it
 export function classify(race) {
   const S = race.state, T = race.cache.T;
   const rows = S.cars.map((c) => ({ num: c.num, tla: c.tla, team: c.team, teamKey: c.teamKey, laps: c.lap, time: c.finT != null ? (c.finT + c.pen.finalS * 1000) : null, status: c.status, stops: c.pit.stops, acct: { ...c.acct } }));
   rows.sort((a, b) => b.laps - a.laps || (a.time ?? Infinity) - (b.time ?? Infinity));
   const w = rows[0];
   rows.forEach((r, i) => { r.pos = i + 1; r.gap = r.laps === w.laps && r.time != null ? +((r.time - w.time) / 1000).toFixed(3) : null; r.lapsDown = w.laps - r.laps; });
-  return { rows, by: "engine.classify (basic)" };
+  return { rows, by: "engine.classify (provisional)" };
 }
 
 // ---------- orders ----------
@@ -388,7 +471,10 @@ function applyOrder(race, c, t) {
   switch (c.type) {
     case "pace": if (!CMD.PACE.includes(c.args.mode)) return { ok: false, why: "unknown pace mode" }; setPaceMode(car.driver, c.args.mode); car.mode.pace = c.args.mode; return { ok: true };
     case "energy": if (!CMD.ENERGY.includes(c.args.mode)) return { ok: false, why: "unknown energy mode" }; car.mode.energy = c.args.mode; return { ok: true };
-    case "pit": { const r = pitCall(car, race.cache.T, { compound: c.args.compound, t }); if (r.ok && car.pit.call) car.pit.call.by = c.by; log(race, { t, car: car.num, type: "pitCall", cause: c.by, effect: r.ok ? `box for ${c.args.compound}: ${r.why}` : `refused: ${r.why}` }); return r; }
+    case "pit": {
+      // suspended (red flag) and stopped in the lane: the free tyre change (SR 57.4b / B5.14.4a), not a stop
+      if (S.control?.flag === "red" && car.where === "pit") { const r = CTL.redTyreChange(race, race.cache.T, car, c.args.compound, (cc, cmp) => { cc.tyre = newTyre(race, cmp, race.cache.w.airT ?? 25); cc.redSets = (cc.redSets || 0) + 1; race.cache.profiles[cc.num].at = -1e9; }); log(race, { t, car: car.num, type: "redTyreChange", cause: c.by, effect: r.ok ? c.args.compound : `refused: ${r.why}` }); return r; }
+      const r = pitCall(car, race.cache.T, { compound: c.args.compound, t }); if (r.ok && car.pit.call) car.pit.call.by = c.by; log(race, { t, car: car.num, type: "pitCall", cause: c.by, effect: r.ok ? `box for ${c.args.compound}: ${r.why}` : `refused: ${r.why}` }); return r; }
     case "pitCancel": { const r = pitCancel(car); log(race, { t, car: car.num, type: "pitCancel", cause: c.by, effect: r.ok ? "cancelled" : `refused: ${r.why}` }); return r; }
     case "plan": if (!Array.isArray(c.args.stints) || !c.args.stints.length) return { ok: false, why: "no stints" }; car.plan = { stints: c.args.stints.map((x) => ({ compound: x.compound, toLap: x.toLap | 0 })), by: c.by }; car.planCalled = null; return { ok: true };
     case "teamOrder": if (!CMD.TEAM_ORDER.includes(c.args.policy)) return { ok: false, why: "unknown policy" }; S.teamOrders[c.team || car?.teamKey] = { policy: c.args.policy, ...c.args }; return { ok: true };
@@ -405,10 +491,12 @@ export function forecast(race) { return forecastAt(race.cache.truth, race.state.
 
 export function snapshot(race) {
   const S = race.state, C = race.cache, T = C.T, w = C.w, order = S.order, pos = new Map(order.map((n, i) => [n, i + 1]));
-  const lead = S.cars.find((c) => c.num === order[0]);
-  return { t: S.t, scenarioId: S.scenarioId, totalLaps: S.totalLaps, leaderLap: S.leaderLap, flag: S.phase === "chequered" || S.phase === "finished" ? "chequered" : S.phase === "grid" ? "grid" : "green", sc: null,
+  const lead = S.cars.find((c) => c.num === order[0]), cs = CTL.controlSnapshot(race, T);
+  return { t: S.t, scenarioId: S.scenarioId, totalLaps: S.control.fin.target, leaderLap: S.leaderLap, flag: cs.flag, sc: cs.sc,
+    control: { phase: cs.phase, drs: cs.drs, overtake: cs.overtake, yellows: cs.yellows, msgs: cs.msgs },
     weather: { rain: w.rain ?? 0, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, water: avg(C.surface.hLine), est: !!w.est },
-    cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.status === "pitstart" ? "grid" : c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
+    cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
+      pen: { pendingS: c.pen.pendingS ?? 0, open: (c.pen.serve || []).filter((x) => !x.served).map((x) => x.kind) }, inc: c.inc && c.inc.until > S.t ? c.inc.kind : null, dmg: c.dmg || null, out: c.out || null, vscDelta: CTL.vscDelta(race, T, c),
       where: c.where, s: c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
       ...snapTraffic(c),
       tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: 0 }, fuel: c.energy.fuel,
@@ -438,12 +526,13 @@ export function loadRace(json, scenario, opts = {}) {
     const at = o.cacheMeta.profilesAt[car.num]; race.cache.profiles[car.num].at = -1e9;
     if (at > -1e8 && car.where === "lap" && car.status === "run") { const saveT = race.state.t; reprofileAt(race, car, at); race.state.t = saveT; }
   }
+  CTL.refreshControlCache(race, race.cache.T);
   return race;
 }
 // recompute a car's envelope for its present inputs and mark it computed at `at` (load: the same envelope the saved run
 // had, since its inputs then are its stored state now – the profile depends only on state saved with the car)
 function reprofileAt(race, car, at) {
-  const C = race.cache, cp = C.cars[car.num], pr = C.profiles[car.num];
+  const C = race.cache, cp = carOf(race, car), pr = C.profiles[car.num];
   const st = car.profIn; if (!st) return;
   computeProfile(C.PT, cp, { ...st, forward: false }, pr.prof); pr.at = at;
 }

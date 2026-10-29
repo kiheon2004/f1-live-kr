@@ -104,6 +104,48 @@ test("a stop's loss is measured, part by part: lane time minus the free time ove
     assert.ok(Math.abs(p.queue + p.stationary + p.rest - p.loss) < 0.02);
     assert.ok(p.loss > 10 && p.loss < 40, `loss ${p.loss}`);
   }
-  const q = ["4", "81"].map((n) => r.state.cars.find((x) => x.num === n).acct.pitParts[0].queue);
-  assert.ok(Math.max(...q) > 0.3, `one of the two queued: ${q}`);
+  // one box per team: the second car's work starts only after the first car's ended (with race control's start the two
+  // arrive < 1 s apart, so the wait shows as a queue or as a slower approach – the box itself is never shared)
+  const at = (n, ty) => r.state.log.find((e) => e.car === n && e.type === ty)?.t;
+  const [a, b] = ["4", "81"].sort((x, y) => at(x, "pit:work") - at(y, "pit:work"));
+  assert.ok(at(b, "pit:work") >= at(a, "pit:workDone"), `box shared: ${a} done ${at(a, "pit:workDone")}, ${b} work ${at(b, "pit:work")}`);
+});
+
+// race control wired into the engine (control.js / rules.js / incidents.js): the start, an SC with a queue, save/restore
+// in the middle of it, the classification at the end
+const ctl = () => import("../../src/game/engine/control.js");
+test("race control: lights then reactions (nobody moves before the lights go out unless it jumps the start); an SC queues the field, nobody passes behind it; save/restore mid-SC continues exactly", async () => {
+  const E = await load(), C = await ctl();
+  const r = E.createRace({ scenario: SC, seed: 3 });
+  for (let i = 0; i < 20; i++) E.step(r);
+  assert.ok(r.state.cars.every((c) => c.v === 0 || c.where === "pit"), "standing on the grid while the lights come on");
+  for (let i = 0; i < 20 * 600; i++) E.step(r);   // 10 min
+  assert.strictEqual(r.state.phase, "racing");
+  assert.ok(r.state.log.some((e) => e.type === "lightsOut"));
+  const res = C.neutralise(r, r.cache.T, "sc", { clearMs: 240000, cause: "test" });
+  assert.ok(res.ok && r.state.control.flag === "sc");
+  for (let i = 0; i < 20 * 120; i++) E.step(r);   // SC out and the field caught up
+  const saved = E.saveRace(r);
+  // behind the SC: the running order among cars on the lap does not change (pit stops aside)
+  const lapOrder = () => r.state.order.filter((n) => { const c = r.state.cars.find((x) => x.num === n); return c.status === "run" && c.where === "lap" && c.pit.phase === "none"; });
+  const o0 = lapOrder(); let swaps = 0;
+  for (let i = 0; i < 20 * 60; i++) { E.step(r); const o1 = lapOrder(); const common = o0.filter((n) => o1.includes(n)), now = o1.filter((n) => common.includes(n)); if (r.state.control.flag === "sc" && common.join() !== now.join()) swaps++; }
+  assert.strictEqual(swaps, 0, "no overtaking behind the safety car");
+  const b = E.loadRace(saved, SC); for (let i = 0; i < 20 * 60; i++) E.step(b);
+  assert.strictEqual(fingerprint(b), fingerprint(r));
+  assert.deepStrictEqual(b.state.control, r.state.control);
+});
+
+test("the end: race control's chequered flag, every car classified by rules.js (laps, crossing order, penalties, points)", async () => {
+  const E = await load();
+  const short = { ...SC, race: { ...SC.race, laps: 4 } };
+  const r = E.createRace({ scenario: short, seed: 2 });
+  while (!r.state.finished && r.state.t < 30 * 60000) E.step(r);
+  assert.ok(r.state.finished, "finished");
+  const R = E.results(r);
+  assert.strictEqual(R.by, "rules.classify");
+  assert.strictEqual(R.rows[0].pos, 1); assert.strictEqual(R.rows[0].laps, 4);
+  assert.ok(R.rows[0].points >= 25, "the winner scores");
+  for (const row of R.rows.filter((x) => x.classified)) assert.ok(row.laps >= R.minLaps);
+  assert.ok(r.state.log.some((e) => e.type === "chequered"));
 });

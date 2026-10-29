@@ -201,6 +201,7 @@ test("team orders: 'swap' makes the car ahead let its team-mate by (driver obeys
 test("pit exit merge: the exit is not clear while a car comes by on the exit side; clear when it has gone", async () => {
   const E = await eng(), T_ = await trf();
   const r = E.createRace({ scenario: subset(load(HUN), ["16", "81"]), seed: 1 }), T = r.cache.T, tc = r.cache.tc;
+  for (let i = 0; i < 400 && r.state.cars.some((c) => c.status === "grid"); i++) E.step(r);   // (race control's start: both cars away)
   for (let i = 0; i < 10; i++) E.step(r);
   const pitCar = r.state.cars.find((c) => c.num === "16"), o = r.state.cars.find((c) => c.num === "81");
   pitCar.where = "pit"; pitCar.pit.phase = "exit"; pitCar.pit.v = 20; pitCar.pit.u = T.pit.L;
