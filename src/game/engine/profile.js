@@ -40,9 +40,17 @@ export function computeProfile(track, car, st, out = makeProfile(track.n)) {
   // 1. corner cap
   let j0 = 0, vmin = Infinity;
   const claArr = typeof claMul !== "number", cdaArr = typeof cdaMul !== "number";
+  // corner-speed band factors (DESIGN §5 k_low/k_mid/k_high): a multiplier on the LATERAL limit by corner speed, ≠ 1 only
+  // because the speed traces need it – a quasi-steady point mass is too fast in hairpins (real cars "V" a slow corner:
+  // rotation and traction, not steady lateral grip, set the minimum speed). μ then depends on v ⇒ fixed-point iteration
+  // from the closed form (3 passes: the band factor changes slowly with v; converged to < 0.1 km/h in the tests).
+  const kLo = car.k_low ?? 1, kMid = car.k_mid ?? 1, banded = kLo !== 1 || kMid !== 1;
+  const v1 = car.vb_low ?? 25, v2 = car.vb_mid ?? 45, v3 = car.vb_high ?? 65;
+  const kBand = (v) => (v <= v1 ? kLo : v <= v2 ? kLo + (kMid - kLo) * (v - v1) / (v2 - v1) : v <= v3 ? kMid + (1 - kMid) * (v - v2) / (v3 - v2) : 1);
   for (let i = 0; i < n; i++) {
-    const k = Math.abs(kap[i]), den = k - mu * kl * (claArr ? claMul[i] : claMul);
-    let v = den > 1e-9 ? Math.sqrt(mu * G / den) : vMax;
+    const k = Math.abs(kap[i]), klc = kl * (claArr ? claMul[i] : claMul);
+    let den = k - mu * klc, v = den > 1e-9 ? Math.sqrt(mu * G / den) : vMax;
+    if (banded && v < v3) for (let it = 0; it < 3; it++) { const m2 = mu * kBand(v); den = k - m2 * klc; v = den > 1e-9 ? Math.sqrt(m2 * G / den) : vMax; }
     if (v > vMax) v = vMax;
     vc[i] = v;
     if (v < vmin) { vmin = v; j0 = i; }

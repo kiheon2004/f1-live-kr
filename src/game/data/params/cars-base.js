@@ -36,6 +36,11 @@ function base(season) {
       "combined slip: peak lateral and longitudinal forces come at different slips; kept 0 unless the speed traces need it", [0, 0.4], "L"),
     P_ice: est(is26 ? 400e3 : 590e3, "W", "ICE power at the wheels at full throttle (fuel-flow limited)",
       "≈ η·ṁ·LHV: ≤2025 100 kg/h × 43 MJ/kg × η≈0.5 ≈ 600 kW; 2026 3000 MJ/h fuel energy × η ≈ 0.48 ≈ 400 kW; minus drivetrain loss; fit to straights", [300e3, 700e3], "M"),
+    k_low: est(1, "1", "lateral-limit factor for slow corners (≤ vb_low); DESIGN §5 band correction", "1 unless the speed traces need it (calibrate.mjs fits it per team)", [0.6, 1.2], "L"),
+    k_mid: est(1, "1", "lateral-limit factor at vb_mid (linear between the bands, 1 from vb_high up)", "as k_low", [0.7, 1.2], "L"),
+    vb_low: est(25, "m/s", "slow-corner band edge (90 km/h)", "band edges chosen to split hairpins / medium / fast corners", [15, 35], "M"),
+    vb_mid: est(45, "m/s", "medium-corner band centre (162 km/h)", "", [35, 55], "M"),
+    vb_high: est(65, "m/s", "fast-corner band edge (234 km/h): above it the factor is 1 (ClA and μ alone)", "", [55, 80], "M"),
     C_tyre_heat: est(1.0, "1", "car's tyre heat input factor (suspension/aero platform: how hard the car works its tyres)",
       "no public figure; differences between teams appear in stint trends (fit per team when data allow)", [0.8, 1.25], "L"),
     // straight-line wing states (DESIGN §5 + aero.js state). Multipliers on CdA/ClA while the state is active.

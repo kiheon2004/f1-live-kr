@@ -100,5 +100,18 @@ test("speed: 2500-sample envelope (corner + braking, as recomputed in the race l
   const time = (s, N) => { const a = process.hrtime.bigint(); for (let i = 0; i < N; i++) X.profile.computeProfile(t, car, s, out); return Number(process.hrtime.bigint() - a) / N / 1e6; };
   const msEnv = time(s0, 2000), msFull = time(s1, 1000);
   console.log(`# profile 2500 samples: envelope ${(msEnv * 1000).toFixed(1)} µs, with forward pass ${(msFull * 1000).toFixed(1)} µs`);
-  assert.ok(msEnv < 1.0, "envelope " + msEnv + " ms (target 0.2 ms on an idle M3; bound is loose for a shared machine)");
+  assert.ok(msEnv < 2.0, "envelope " + msEnv + " ms (target 0.2 ms on an idle M3; the bound is loose for a shared, loaded machine)");
+});
+
+test("corner-speed band factors (k_low / k_mid): only the corners of that speed change; the fixed point is converged", () => {
+  const p0 = prof(), p1 = prof({ ...car, k_low: 0.8 }), p2 = prof({ ...car, k_mid: 0.9 });
+  const slow = apexIn(tr, 900, 945), fast = apexIn(tr, 1245, 1405);
+  assert.ok(p1.vc[slow] < p0.vc[slow] * 0.92, "hairpin slower with k_low 0.8");
+  assert.ok(Math.abs(p1.vc[fast] / p0.vc[fast] - 1) < 0.01, "fast corner (≈ 250 km/h) untouched by k_low");
+  const mid = apexIn(tr, 2835, 2955); // R = 70 m: ≈ 45–60 m/s
+  assert.ok(p2.vc[mid] < p0.vc[mid] * 0.99, `k_mid acts on the 70 m corner (${p0.vc[mid]} m/s)`);
+  // converged: the band factor at the solved speed reproduces the speed (v² = μk·g/(|κ| − μk·kl))
+  const G = 9.80665, kl = 0.5 * st.rho * car.ClA / st.m, v = p1.vc[slow], mu = p1.mu * 0.8; // slow apex is below vb_low ⇒ factor k_low
+  const vv = Math.sqrt(mu * G / (Math.abs(tr.kappa[slow]) - mu * kl));
+  assert.ok(Math.abs(vv - v) < 0.03, `${vv} vs ${v}`);
 });

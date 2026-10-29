@@ -63,7 +63,7 @@ export const SETS = {
 };
 
 // fitted coefficients (log space), their bounds from the PARAM ranges
-export const FIT_KEYS = ["CdA", "ClA", "mu_mech", "P", "a_brake_max", "k_trac"];
+export const FIT_KEYS = ["CdA", "ClA", "mu_mech", "P", "a_brake_max", "k_trac", "k_low", "k_mid", "k_brake"];
 const PRIOR_SIGMA = 0.35, W_LAP = 25;
 // estimated fuel burn per km (kg) to put a plausible fuel mass on the trace lap: ≤2025 ≈ 100 kg / 305 km; 2026 ≈ 70 %
 // (3000 MJ/h energy flow vs 100 kg/h × 43 MJ/kg). Game estimates (the feed has no fuel data).
@@ -145,8 +145,9 @@ function powerArray(race, car, prof, P) {
   for (let i = 0; i < n; i++) arr[i] = P + pk[i] * f;
   return arr;
 }
+const carOf = (base, th) => ({ ...base, CdA: th.CdA, ClA: th.ClA, mu_mech: th.mu_mech, a_brake_max: th.a_brake_max, k_trac: th.k_trac, k_low: th.k_low ?? 1, k_mid: th.k_mid ?? 1, k_brake: th.k_brake ?? base.k_brake });
 function predict(race, tr, theta, tau, base) {
-  const car = { ...base, CdA: theta.CdA, ClA: theta.ClA, mu_mech: theta.mu_mech, a_brake_max: theta.a_brake_max, k_trac: theta.k_trac };
+  const car = carOf(base, theta);
   const aero = aeroArrays(race, tr, base);
   const cp = COMPOUNDS[DEFAULT_ALLOCATION[tr.compound]];
   const st = { m: base.m_min + tr.fuel, rho: race.rho, muTyre: cp.muRel * wearFactor(cp, Math.min(0.9, tr.age * WEAR_PER_LAP)), muTrack: tau, util: 1,
@@ -169,11 +170,11 @@ function predict(race, tr, theta, tau, base) {
 // parameter vector handling
 function bounds(season) {
   const T = CAR_BASE_TABLE[season];
-  return { CdA: T.CdA.range, ClA: T.ClA.range, mu_mech: T.mu_mech.range, P: [300e3, season >= 2026 ? 650e3 : 900e3], a_brake_max: T.a_brake_max.range, k_trac: T.k_trac.range };
+  return { CdA: T.CdA.range, ClA: T.ClA.range, mu_mech: T.mu_mech.range, P: [300e3, season >= 2026 ? 650e3 : 900e3], a_brake_max: T.a_brake_max.range, k_trac: T.k_trac.range, k_low: T.k_low.range, k_mid: T.k_mid.range, k_brake: T.k_brake.range };
 }
 function theta0(season) {
   const b = carBase(season);
-  return { CdA: b.CdA, ClA: b.ClA, mu_mech: b.mu_mech, P: season >= 2026 ? b.P_ice : b.P_ice + 120e3, a_brake_max: b.a_brake_max, k_trac: b.k_trac };
+  return { CdA: b.CdA, ClA: b.ClA, mu_mech: b.mu_mech, P: season >= 2026 ? b.P_ice : b.P_ice + 120e3, a_brake_max: b.a_brake_max, k_trac: b.k_trac, k_low: 1, k_mid: 1, k_brake: b.k_brake };
 }
 const toTheta = (z, t0, B) => Object.fromEntries(FIT_KEYS.map((k, i) => [k, Math.min(B[k][1], Math.max(B[k][0], t0[k] * Math.exp(z[i])))]));
 
@@ -299,7 +300,7 @@ export function stintsOf(race, teams) {
 }
 function refLap(race, theta, tau, base, compound) {
   const key = `_ref_${compound}_${theta.CdA}_${theta.P}`; if (race[key]) return race[key];
-  const car = { ...base, CdA: theta.CdA, ClA: theta.ClA, mu_mech: theta.mu_mech, a_brake_max: theta.a_brake_max, k_trac: theta.k_trac };
+  const car = carOf(base, theta);
   const cp = COMPOUNDS[DEFAULT_ALLOCATION[compound]], burn = BURN_PER_KM[race.season] * race.track.L / 1000;
   const m = base.m_min + Math.max(5, burn * race.N / 2);
   const P = race.season >= 2026 ? theta.P + 150e3 : theta.P; // 2026: a mean MGU-K share on race laps (estimate)
@@ -364,9 +365,9 @@ export function writeTyreParams(res, file) {
 // ---------------------------------------------------------------------------------------------------------------------
 // the params file with provenance (est: true – fitted game values, not team figures)
 export function writeParams(res, file) {
-  const B = bounds(res.season), U = { CdA: "m²", ClA: "m²", mu_mech: "1", P: "W", a_brake_max: "m/s²", k_trac: "1" };
+  const B = bounds(res.season), U = { CdA: "m²", ClA: "m²", mu_mech: "1", P: "W", a_brake_max: "m/s²", k_trac: "1", k_low: "1", k_mid: "1", k_brake: "1" };
   const M = { CdA: "drag area (wings closed)", ClA: "downforce area (wings closed)", mu_mech: "peak tyre–road μ (C3-equivalent, fresh, in window; per-race track factor τ = 1)",
-    P: res.season >= 2026 ? "ICE power at the wheels (MGU-K added by the energy model under the 2026 speed cap)" : "wheel power on a fast race lap (ICE + MGU-K deployment)", a_brake_max: "braking deceleration cap", k_trac: "traction share of total grip" };
+    P: res.season >= 2026 ? "ICE power at the wheels (MGU-K added by the energy model under the 2026 speed cap)" : "wheel power on a fast race lap (ICE + MGU-K deployment)", a_brake_max: "braking deceleration cap", k_trac: "traction share of total grip", k_low: "slow-corner lateral factor", k_mid: "medium-corner lateral factor", k_brake: "braking share of total grip (friction ellipse axis)" };
   const e = res.errors, src = `calibrate.mjs fit ${res.date} on ${res.calibrationRaces.length} ${res.season} races (${res.calibrationRaces.map((x) => x.slice(11).replace(/_Grand_Prix.*$/, "")).join(", ")}); calib speed RMS ${e.calibration.rmsV.toFixed(1)} km/h, validation (τ fitted) ${e.validationB_tauFitted.rmsV.toFixed(1)} km/h on ${res.validationRaces.length} other races`;
   const L = [];
   L.push(`// GENERATED by src/game/tools/calibrate.mjs (${res.date}) – per-team car coefficients for ${res.season}. Do not edit by hand: re-run the tool.`);
