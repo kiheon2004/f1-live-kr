@@ -4369,7 +4369,11 @@ window.Map3D = {
     const targets = [world.real?.group.getObjectByName("barriers"), world.real?.group.getObjectByName("facilities"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
     const secs = [];
     for (const t of pitTeams.teams) {
-      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
+      // (its length as built – the layer's record: pitTeams.teams is re-derived on every update without t.wallStand, so
+      // v0.46 measured every stand as 6 seats, 5.4 m – a 4-seat stand's phantom ends met the walkway's railing once it
+      // opened only in front of the stand: v0.47 run/stands)
+      const built = (pitTeams.group?.userData.wallStands || []).find((q) => q.team === t.team);
+      const L = built ? built.L : (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
       // (where the stand is – it may stand a little along the wall from its box: facilities.js wallAt)
       const uc = G.project(w.p[0], w.p[2]).u, s = G.slots.reduce((p, q) => (Math.abs(q.uc - uc) < Math.abs(p.uc - uc) ? q : p)), out = [-s.inward[0], -s.inward[1]], across = [];
       // (across the stand's length every 0.5 m, from 0.25 m in at either end – not one line at its middle: a line through
