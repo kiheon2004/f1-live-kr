@@ -87,12 +87,16 @@ export function pitCap(car, T, box, P = PIT) {
 // One step of a car on the pit path: phase changes, the box, the work. ctx: { t, dt, team (key), boxes, rng (pit stream of
 // the team), wet (bool), others: [{ num, team, phase, u, v }] (the cars in the lane), penaltyS (s to serve at this stop),
 // stack (bool: the teammate stopped just before), onWorkDone(car, compound) }. Returns an event string or null.
+// Race control's inputs (control.js pitCtx, rules.js): noBox (drive down the fast lane, don't turn into the box – red flag
+// queue, drive-through), holdU (stop by this pit-path distance – red-flag queue slot, closed exit light, pit-lane start),
+// noWork (stop-and-go: the hold only, no work, no tyres).
 export function pitStep(car, T, ctx, P = PIT) {
   const p = car.pit, L = T.pit, box = ctx.boxes[ctx.team], boxU = L.boxes[ctx.team];
   const aIn = P.boxApproach.v * G, aOut = P.launch.v * G;
   let ev = null;
-  if (p.phase === "entry" && p.u >= L.limStart) { p.phase = "lane"; p.times.lim = ctx.t; }
-  if (p.phase === "lane" && boxU != null && p.u >= boxU - 60) { p.phase = "approach"; }
+  // (the limiter engages at the line: the entry braking aimed for it, the last step's discretisation must not show as speeding)
+  if (p.phase === "entry" && p.u >= L.limStart) { p.phase = "lane"; p.times.lim = ctx.t; p.v = Math.min(p.v, L.speedLimit); }
+  if (p.phase === "lane" && !ctx.noBox && boxU != null && p.u >= boxU - 60) { p.phase = "approach"; }
   if (p.phase === "approach") {
     // the box: free, or ours already → stop in it; the teammate in it → stop behind it and wait
     if (box.occupant == null || box.occupant === car.num) { box.occupant = car.num; p.stopU = boxU; }
@@ -107,7 +111,11 @@ export function pitStep(car, T, ctx, P = PIT) {
     }
   }
   if (p.phase === "queue" && (box.occupant == null || box.occupant === car.num)) { box.occupant = car.num; p.phase = "approach"; p.stopU = boxU; p.times.queueEnd = ctx.t; }
-  if (p.phase === "penalty" && ctx.t >= p.holdUntil) { p.served += ctx.penaltyS; startWork(car, ctx, P); ev = "work"; }
+  if (p.phase === "penalty" && ctx.t >= p.holdUntil) {
+    p.served += ctx.penaltyS; p.times.penEnd = ctx.t;
+    if (ctx.noWork) { p.phase = "release"; p.workEnd = ctx.t; p.times.work = ctx.t; p.times.workEnd = ctx.t; p.stops++; ev = "penaltyServed"; }
+    else { startWork(car, ctx, P); ev = "work"; }
+  }
   if (p.phase === "work" && ctx.t >= p.workEnd) {
     p.times.workEnd = ctx.t; p.stops++;
     if (p.call?.compound) ctx.onWorkDone?.(car, p.call.compound);   // (new tyres now – not before the work is done)
@@ -121,16 +129,18 @@ export function pitStep(car, T, ctx, P = PIT) {
     if (threat && !p.unsafeRolled) { p.unsafeRolled = true; if (ctx.rng.chance(P.unsafeRelease.v)) { go = true; ev = "unsafeRelease"; } }
     if (go) { p.phase = "laneOut"; p.times.release = ctx.t; p.unsafeRolled = false; if (box.occupant === car.num) box.occupant = null; }
   }
-  if (p.phase === "laneOut" && p.u >= L.limEnd) { p.phase = "exit"; p.times.limEnd = ctx.t; }
+  if ((p.phase === "laneOut" || (ctx.noBox && p.phase === "lane")) && p.u >= L.limEnd) { p.phase = "exit"; p.times.limEnd = ctx.t; }
   // move along the path (the cap above; accelerate at the launch rate, slow at the approach rate)
   if (p.phase !== "penalty" && p.phase !== "work" && p.phase !== "release") {
     const cap = pitCap(car, T, box, P);
     // (exit: past the limiter end the car accelerates to rejoin – bounded here; on the lap the car model takes over)
-    const target = p.phase === "exit" ? 80 : cap;
+    let target = p.phase === "exit" ? 80 : cap;
+    if (ctx.holdU != null) target = Math.min(target, Math.sqrt(2 * aIn * Math.max(0, ctx.holdU - p.u)));
     if (p.v < target) p.v = Math.min(target, p.v + (p.phase === "exit" ? 1.2 * G : aOut) * ctx.dt);
     else p.v = Math.max(target, p.v - (p.phase === "entry" ? 2.5 * G : aIn) * ctx.dt);
     // (never past the stop point – the last centimetres of the approach)
     if (p.stopU != null && (p.phase === "approach" || p.phase === "queue") && p.u + p.v * ctx.dt > p.stopU) { p.u = p.stopU; p.v = 0; }
+    else if (ctx.holdU != null && p.u + p.v * ctx.dt > ctx.holdU) { p.u = Math.max(p.u, ctx.holdU); p.v = 0; }
     else p.u += p.v * ctx.dt;
   }
   if (p.phase === "exit" && p.u >= L.L) {
