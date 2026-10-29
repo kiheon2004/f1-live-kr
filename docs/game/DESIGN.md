@@ -235,6 +235,19 @@ T.pit          // { L, u (경로 거리 배열), x, y, z, hdg, sIn, sOut, limSta
 SC/VSC는 속도 비율이 아니라: VSC는 차량별 델타 시간(최소 구간 시간) 준수, SC는 SC 차량이 트랙 위 개체로 달리며
 선두가 따라붙고 간격이 줄어듦(추월 금지, 피트는 열림/닫힘 규칙 따라), 재개 절차.
 
+### 10.1 엔진 연결 (v0.48 리드 연결, engine.js)
+- 한 단계: 명령 → 날씨 → 교통 결정(trafficPre) → **단계 시작 상태로** 차량별 `control.caps`(속도 상한·그립 사용 계수·출발
+  런치)와 피트 입력(`control.pitCtx` ⊕ `rules.pitCtx`: noBox/holdU/penaltyS/noWork) → 이동 → trafficPost →
+  `controlStep`(이번 이동의 선·구간·SC선 통과, SC 차량, 깃발, 출발·종료) → `rules.stewardsStep` → 사건(`driverError`,
+  `mechanical`; 접촉은 traffic이 `race.hooks.incidents.contact`로) → 순위 → 종료 시 `rules.classify` → AI.
+- 출발: 등화 1 s 간격 5개, 소등은 시드 지연, 드라이버별 반응·런치 품질(`start:<num>` 스트림). 피트레인 출발 차량은
+  레인 끝에서 대기하다 그리드 차량이 모두 출구를 지나면 합류.
+- 운전 실수 입력 u: 단계 끝에 차가 포락선 위(제한 속도의 97 % 이상, 상한에 걸린 경우 제외)에 있을 때만
+  `errU0 + errGain × (포락선 μ ÷ 지금 μ − 드라이버 기본 pace)`. 손상(`car.dmg`)은 ClA·출력으로 차량 모델에 들어간다.
+- 차고 리타이어 차량은 `where: "garage"`로 레인에서 빠진다. 체커 뒤 3 s가 지난 차는 화면에서 사라진다(쿨다운 랩 미구현).
+- 결과: `results()`는 rules.classify 행 + `gap`(초)·`lapsDown`·`stops`·`stints`·`acct {traffic≈, pit≈, pitQueue≈, penalty}`.
+- 저장: `state.control`, `state.incidents`, `car.inc/dmg/dmgKey/fin`이 상태에 포함, 복원 시 `refreshControlCache`.
+
 ## 11. 피트 (pit.js)
 
 단계: `call`(명령 접수) → `committed`(진입 결정 지점 `sIn − D_commit` 통과: 이후 취소 불가) → `entry`(감속, 분기)
@@ -251,8 +264,8 @@ SC/VSC는 속도 비율이 아니라: VSC는 차량별 델타 시간(최소 구�
 - 시간 손실 계정(차량별, 랩별): 엔진이 아는 기준을 써서 **측정 가능한 것만** 분리.
   - 교통: 앞차 때문에 속도 제한을 받은 동안 `∫(1/v − 1/v_free)ds`(v_free = 같은 걸음의 자유 주행 한계 속도).
   - 피트: 단계별 시간 − 같은 거리 본선 자유 주행 시간.
-  - 타이어: 실제 그립으로 계산한 포락선과 기준 그립(새 타이어 창 안) 포락선의 랩 시간 차(근사, "근사" 표시).
-  - 에너지·페이스 모드: 같은 방식(근사 표시).
+  - 타이어·에너지·페이스 모드: **v0.48에서는 분리하지 않음**(깨끗한 반사실 기준이 없어 숫자로 내지 않고, 결과 화면에
+    그렇게 밝힘 – 스틴트와 사건 기록으로 본다). 교통 손실은 traffic.js의 고스트(같은 타이어·에너지 모델, 교통 없음)로 근사.
   - 페널티: 규칙 시간.
   - 분리할 수 없는 나머지는 "기타"로 둔다(임의 분해 금지).
 
