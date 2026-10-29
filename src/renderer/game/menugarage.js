@@ -4,12 +4,14 @@
 // made here from code.
 //
 // API (window.MenuGarage, and the module's exports) – for the game's screens (the ui helper builds the buttons on top):
-//   show({ season, teamKey, team, colour, entries, focusNum, date?, host?, safeLeft? }) → Promise<state>
+//   show({ season, teamKey, team, colour, entries, focusNum, date?, host?, safeLeft?, safeRight? }) → Promise<state>
 //       season: number; teamKey / team: the scenario's team key and name (car3d's team names: "McLaren", …); colour:
 //       "#rrggbb" or "rrggbb"; entries: the team's two drivers FROM THE CHOSEN RACE'S ENTRY LIST ([{ num, tla, name }] –
 //       which race's list it is is the caller's to say on screen); focusNum: the car in front (default entries[0]);
 //       date: the race's date (car3d picks a mid-season car change by it); host: the element the canvas fills (default
-//       #gGarage3d, else #game); safeLeft: the fraction of the width the menu covers on the left (0…0.6) – the car is
+//       #gGarage3d, else #game); safeLeft / safeRight: the fractions of the width the menu column (left) and the driver
+//       cards (right) cover (each 0…0.6; together ≤ 0.8) – the car is framed between them, the view zoomed out when the
+//       free middle is narrow. safeLeft: the fraction of the width the menu covers on the left – the car is
 //       framed in the rest. Calling it again with another team replaces the room; with the same team only refocuses.
 //   setFocus(num) – the other driver's car to the front bay (no rebuild: the two cars swap bays)
 //   setMotion("auto" | "on" | "off") – the slow camera drift; "auto" follows prefers-reduced-motion; saved
@@ -49,7 +51,7 @@ export const CAM = { pos: [-2.95, 0.58, -4.95], look: [0.35, 0.78, -0.7], fov: 4
 const MOTION_KEY = "f1kr:game:motion";
 
 const MG = { gen: 0, on: false, host: null, canvas: null, renderer: null, world: null, raf: 0, dirty: false, ro: null, mq: null,
-  motion: readMotion(), safeLeft: 0.32, frames: 0, ms: [], last: 0, t0: 0, stale: 0, built: 0, leases: new Map(), err: null, req: null };
+  motion: readMotion(), safeLeft: 0.32, safeRight: 0, frames: 0, ms: [], last: 0, t0: 0, stale: 0, built: 0, leases: new Map(), err: null, req: null };
 
 function readMotion() { try { const v = localStorage.getItem(MOTION_KEY); return ["on", "off", "auto"].includes(v) ? v : "auto"; } catch { return "auto"; } }
 // Resolution: a still picture is drawn once per change – at up to 1.5× (sharp edges on the car's curves); while the
@@ -77,16 +79,20 @@ function ensureRenderer(host) {
   return r;
 }
 function resize() {
-  const r = MG.renderer, h = MG.host || document.body; if (!r) return;
+  const r = MG.renderer; if (!r) return; const h = MG.host || document.body;
   const w = Math.max(2, h.clientWidth || innerWidth), hh = Math.max(2, h.clientHeight || innerHeight);
   r.setSize(w, hh, false);
   if (MG.world) frameCamera(MG.world.camera, w, hh);
 }
-// the car framed in the part of the screen the menu leaves free: the picture's window slid left by half the menu's width
+// the car framed in the part of the screen the menu and the cards leave free: the picture's window slid by half the
+// difference of the two margins (the free middle's centre), zoomed out when that middle is narrower than the 70 % the
+// framing was tuned for (CAM: menu column 30 %, nothing on the right)
+export const frameOf = (l, r) => ({ shift: (l - r) / 2, zoom: Math.min(1, Math.max(0.5, (1 - l - r) / 0.7)) });
 function frameCamera(cam, w, h) {
   cam.aspect = w / h; cam.fov = CAM.fov;
-  const s = Math.max(0, Math.min(0.6, MG.safeLeft));
-  if (s > 0) cam.setViewOffset(w, h, -w * s * 0.5, 0, w, h); else cam.clearViewOffset();
+  const f = frameOf(MG.safeLeft, MG.safeRight);
+  cam.zoom = f.zoom;
+  if (Math.abs(f.shift) > 1e-4) cam.setViewOffset(w, h, -w * f.shift, 0, w, h); else cam.clearViewOffset();
   cam.updateProjectionMatrix();
 }
 
@@ -126,9 +132,10 @@ function buildWorld(o, renderer) {
   });
   const dims = cars[0] ? { length: cars[0].box.max.z - cars[0].box.min.z, width: cars[0].box.max.x - cars[0].box.min.x, height: cars[0].box.max.y, front: cars[0].box.max.z } : undefined;
   const opening = { wall: "right", ...ROOM.opening };
-  // (the camera's corner – front left, ahead of the nose – kept free of equipment)
+  // (the camera's corner – front left, ahead of the nose and beside the front wheels – kept free of equipment: a cooling
+  // unit's duct 3–4 m from the lens filled the frame's edge)
   // (and the partition's opening on both sides: the second car is seen through it)
-  const op = ROOM.opening, keep = [{ x0: -ROOM.width / 2, x1: -1.1, z0: 0, z1: ROOM.carZ0 + 1.2 }, { x0: ROOM.width / 2 - 1.2, x1: ROOM.width / 2, z0: op.z0 - 0.2, z1: op.z1 + 0.2 }];
+  const op = ROOM.opening, keep = [{ x0: -ROOM.width / 2, x1: -1.1, z0: 0, z1: ROOM.carZ0 + 2.6 }, { x0: ROOM.width / 2 - 1.2, x1: ROOM.width / 2, z0: op.z0 - 0.2, z1: op.z1 + 0.2 }];
   const keepB = [{ x0: -ROOM.width / 2, x1: -ROOM.width / 2 + 1.2, z0: op.z0 - 0.2, z1: op.z1 + 0.2 }];
   const A = buildBayInterior(zoneA(), style, { lib, lod: 0, car: dims, carZ0: ROOM.carZ0, keep, shell: { floor: true, walls: ["left", "right", "back"], ceiling: true, header: true, openings: [opening] }, signSub: `${o.season} 시즌` });
   const B = buildBayInterior(zoneB(), style, { lib, lod: 1, car: dims, carZ0: ROOM.carZ0, keep: keepB, shell: { floor: true, walls: ["left", "right", "back"], ceiling: true, header: true, openings: [{ ...opening, wall: "left", shutter: 0 }] }, signs: false });
@@ -244,7 +251,7 @@ export function show(o = {}) {
   if (typeof document === "undefined") return Promise.resolve({ error: "no DOM" });
   const gen = ++MG.gen, key = `${o.season}|${o.teamKey}`;
   MG.req = { season: o.season, teamKey: o.teamKey, focusNum: o.focusNum ?? null };
-  if (o.safeLeft != null) MG.safeLeft = +o.safeLeft || 0;
+  if (o.safeLeft != null || o.safeRight != null) setSafe(o.safeLeft ?? MG.safeLeft, o.safeRight ?? 0, false);
   // (the circuit view never draws under the menu: hidden now – its own loop ends at its next frame)
   try { window.Map3D?.hide?.(); } catch {}
   const host = o.host || document.getElementById("gGarage3d") || document.getElementById("game") || document.body;
@@ -308,7 +315,12 @@ export function probe(ms = 4000) {
 export const _world = () => MG.world;
 // development: try another camera ({ pos, look, fov } – the CAM fields), redrawn at once
 export function setView(v = {}) { for (const k of ["pos", "look", "fov"]) if (v[k] != null) CAM[k] = v[k]; resize(); kick(); return JSON.stringify(CAM); }
-export function setSafeLeft(f) { MG.safeLeft = Math.max(0, Math.min(0.6, +f || 0)); resize(); kick(); return MG.safeLeft; }
+export function setSafe(left, right = 0, draw = true) {
+  let l = Math.max(0, Math.min(0.6, +left || 0)), r = Math.max(0, Math.min(0.6, +right || 0));
+  if (l + r > 0.8) { const k = 0.8 / (l + r); l *= k; r *= k; }   // (at least a fifth of the width stays the car's)
+  MG.safeLeft = l; MG.safeRight = r; if (draw) { resize(); kick(); } return { left: l, right: r };
+}
+export function setSafeLeft(f) { return setSafe(f, MG.safeRight).left; }
 export function hide() {
   MG.gen++; MG.on = false; stopLoop();
   const W = MG.world; MG.world = null; disposeWorld(W);
@@ -331,9 +343,10 @@ export function state() {
       size: [+(c.box.max.x - c.box.min.x).toFixed(3), +c.box.max.y.toFixed(3), +(c.box.max.z - c.box.min.z).toFixed(3)] })) : [],
     bays: W ? W.bays.map((b) => ({ draws: b.userData.stats.draws, triangles: b.userData.stats.triangles, items: b.userData.plan.items.map((i) => i.kind), dropped: b.userData.plan.dropped.map((d) => d.kind), lod: b.userData.lod })) : [],
     lights: W ? { real: W.lights.filter((l) => !l.isHemisphereLight).length, hemi: W.lights.filter((l) => l.isHemisphereLight).length, shadow: W.lights.filter((l) => l.castShadow).length } : null,
+    safe: { left: +MG.safeLeft.toFixed(3), right: +MG.safeRight.toFixed(3) },
     loop: { running: !!MG.raf, motion: MG.motion, moving: moving(), reducedPref: reducedPref(), frames: MG.frames, cpuMs: ms.length ? { median: +ms[ms.length >> 1].toFixed(2), p90: +ms[Math.floor(ms.length * 0.9)].toFixed(2), n: ms.length } : null },
     renderer: r ? { size: [r.domElement.width, r.domElement.height], ratio: r.getPixelRatio(), calls: r.info.render.calls, triangles: r.info.render.triangles, geometries: r.info.memory.geometries, textures: r.info.memory.textures, programs: r.info.programs?.length ?? null } : null,
     leases: MG.leases.size, lastRelease: MG.lastRelease ?? null,
   };
 }
-if (typeof window !== "undefined") window.MenuGarage = { show, setFocus, setMotion, setSafeLeft, setView, probe, hide, dispose, state, ROOM, CAM };
+if (typeof window !== "undefined") window.MenuGarage = { show, setFocus, setMotion, setSafe, setSafeLeft, setView, probe, hide, dispose, state, ROOM, CAM };

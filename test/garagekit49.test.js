@@ -123,3 +123,49 @@ test("garage kit: lights – one shadow at most per rig, none in 'none' mode, th
   assert.ok(second.lights.every((l) => l.isSpotLight && !l.castShadow) && second.lights.length === 2);
   assert.strictEqual(K.buildLightRig(n, fx, [0, 0.5, 5], { key: false, sides: 1, hemi: false, door: false, shadow: false }).lights.length, 1);
 });
+
+test("menu garage: the car framed between the menu column and the driver cards; margins capped so the car keeps a fifth", async () => {
+  const M = await import("../src/renderer/game/menugarage.js");
+  // centred in the free middle: left 30 % → the picture slides right by 15 %; equal margins → no slide, zoomed out
+  assert.deepStrictEqual(M.frameOf(0.3, 0), { shift: 0.15, zoom: 1 });
+  const both = M.frameOf(0.2, 0.2); assert.strictEqual(both.shift, 0); assert.ok(both.zoom < 1 && both.zoom > 0.8);
+  assert.ok(M.frameOf(0.1, 0.3).shift < 0, "a wider right column moves the car left");
+  assert.deepStrictEqual(M.setSafe(0.6, 0.6, false), { left: 0.4, right: 0.4 });
+  assert.deepStrictEqual(M.setSafe(-1, "x", false), { left: 0, right: 0 });
+  assert.strictEqual(M.setSafeLeft(0.25), 0.25);
+  // no DOM: show() refuses instead of throwing
+  assert.deepStrictEqual(await M.show({ season: 2025 }), { error: "no DOM" });
+});
+
+test("garage kit in the garage helper's zones: garageZones → plan → its checkCar finds no kit box in any car (9.63 m race bays, a split narrow bay, a shallow one)", async () => {
+  const K = await kit(), GZ = await import("../src/renderer/garages.js"), GC = await import("../src/renderer/garagecheck.js"), { CAR_ENVELOPE: E } = await import("../src/renderer/carbounds.js");
+  const slot = (k, uc, width, depth, along = [1, 0], inward = [0, 1]) => ({ k, u0: uc - width / 2, u1: uc + width / 2, uc, front: [uc * along[0], uc * along[1]], along, inward, width, height: 4.25, ceil: 4.6, depth, back: 3, floor: 0.2, depthFrom: "facility" });
+  const G = { slots: [slot(0, 0, 7.98, 9.63), slot(1, 8.5, 7.98, 9.63), slot(2, 17, 7.98, 9.63), slot(3, 26, 7.6, 9.63), slot(4, 34, 7.98, 6.2), slot(5, 42, 5.2, 9.63, [-1, 0], [0, -1])] };
+  const teams = [{ team: "McLaren", slots: [0, 1, 2], spaces: [{ slot: 0, num: "4", w: 0 }, { slot: 2, num: "81", w: 0 }] },
+    { team: "Haas F1 Team", slots: [3], spaces: [{ slot: 3, num: "31", w: -1.9 }, { slot: 3, num: "87", w: 1.9 }] },
+    { team: "Williams", slots: [4, 5], spaces: [{ slot: 4, num: "23", w: 0 }, { slot: 5, num: "55", w: 0 }] }];
+  const zones = GZ.garageZones(G, teams);
+  let cars = 0;
+  for (const z of zones) {
+    const n = K.normZone(z);
+    if (z.kind === "box") { assert.ok(n.error); continue; }
+    const p = K.planBay(z, K.teamGarageStyle(z.team || "-", "#777777")), boxes = K.planBoxes(p, z), s = G.slots[z.slot];
+    assert.deepStrictEqual(K.planClashes(p), [], `${z.team} ${z.kind} ${z.slot}`);
+    // every kit box inside its bay (side walls and the race bay's back) and under the ceiling
+    for (const b of boxes) assert.ok(b.min[0] >= -s.width / 2 - 1e-6 && b.max[0] <= s.width / 2 + 1e-6 && b.min[1] >= 0.6 - 1e-6 && b.max[1] <= s.depth + 1e-6 && b.max[2] <= s.ceil + 1e-6, `${b.name} in bay ${z.slot}: ${JSON.stringify(b)}`);
+    if (z.kind !== "car") continue;
+    // the kit's car place is the garage helper's car spot
+    if (p.car.fits) assert.ok(Math.abs(p.car.z0 + E.front - z.carSpot.d) < 1e-9);
+    const car = GC.carBox(z.w, z.carSpot.d, 0, E, "out"), r = GC.checkCar(s, car, boxes);
+    assert.deepStrictEqual(r.hits.filter((h) => h.with.startsWith("kit")), [], `${z.team} #${z.num}: ${JSON.stringify(r.hits)}`);
+    cars++;
+  }
+  assert.strictEqual(cars, 6);
+  // the merge helper: the same zones built at a level per zone (far ones skipped), its own check on every car spot
+  const lib = K.createKitLibrary();
+  const B = K.buildTeamBays(zones, G, { lib, colourOf: (t) => ({ McLaren: "#ff8000", Williams: "#64c4ff" }[t] || "#b6babd"), lodOf: (z) => (z.team === "McLaren" ? 0 : z.team ? 2 : null) });
+  assert.strictEqual(B.bays.length, zones.filter((z) => z.kind !== "box" && z.team).length);
+  assert.ok(B.report.filter((r) => r.kind === "car").every((r) => r.hits.length === 0 && (r.headroom == null || r.headroom > 1)), JSON.stringify(B.report));
+  assert.ok(B.report.every((r) => (r.team === "McLaren" ? r.lod === 0 : r.lod === 2)));
+  lib.dispose();
+});

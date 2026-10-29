@@ -1,4 +1,4 @@
-// Where a garage bay's things go (v0.49 garage kit) – pure: no three.js, no DOM, so it is tested on its own.
+// Where a garage bay's things go (v0.49 garage kit) – pure: no DOM, no scene objects, so it is tested on its own.
 //
 // Input: a zone – a rectangle of floor with a door on one side – as the circuit garages describe one (the "garage"
 // helper's garageZones(G)) or the menu garage builds one:
@@ -21,6 +21,8 @@
 // crew – and lines the side walls and the back with equipment that fits the strips left over; what doesn't fit is
 // dropped and listed (never squeezed through a wall). Sizes of the equipment are estimates (reports/kit.md).
 
+import { CAR_ENVELOPE } from "../carbounds.js";
+
 // footprints (m): w along the wall, d out from it, h – estimates from garage photos and tool-maker catalogues' common
 // sizes (roll cabinets ~1.0–1.4 m wide, ~0.5–0.7 deep), not measured on a team's own kit
 export const MODULES = {
@@ -29,7 +31,7 @@ export const MODULES = {
   tyreRack: { w: 1.62, d: 0.82, h: 1.98 },    // two shelves of two wheels standing
   trolley: { w: 0.95, d: 0.95, h: 1.72 },     // a set's stack in blankets on a castor trolley
   guns: { w: 1.1, d: 0.34, h: 1.75 },         // wall board: wheel guns, hoses
-  cooling: { w: 0.72, d: 0.66, h: 1.18 },     // a cooling unit on castors, its duct
+  cooling: { w: 0.72, d: 0.66, h: 1.18, reach: 0.9 },   // a cooling unit on castors, its duct reaching 0.9 m out (to 0.6 m up)
   wingStand: { w: 1.95, d: 0.72, h: 1.2 },    // A-frame trolley holding a spare front wing
   bins: { w: 1.45, d: 0.5, h: 1.9 },          // shelving with parts bins
   bench: { w: 2.5, d: 0.82, h: 0.95 },        // work bench (monitors above, to ~1.75)
@@ -40,8 +42,10 @@ export const MODULES = {
 // the car's work area: clearances round the car (m) – estimates: the crew works on both sides and at both ends
 export const CLEAR = { side: 1.0, front: 1.1, rear: 0.85, gap: 0.12, minStrip: 0.32 };
 // the car if the caller gives none: the app's 2025 model's measured box (v0.48 garage audit: 5.68 × 2.03 × 1.17 m)
-// (front: the nose's distance ahead of the model's origin, the middle between the axles – the 2025 model's 3.03 m)
-export const CAR_DEFAULT = { length: 5.68, width: 2.03, height: 1.17, front: 3.03 };
+// the car if the caller gives none: the garage helper's envelope of every season's model (carbounds.js CAR_ENVELOPE –
+// the largest; front: the nose's distance ahead of the model's origin, the middle between the axles), so the kit and the
+// garages' car spots use one size
+export const CAR_DEFAULT = { length: CAR_ENVELOPE.length, width: CAR_ENVELOPE.width, height: CAR_ENVELOPE.height, front: CAR_ENVELOPE.front };
 
 const v2 = (a) => (Array.isArray(a) ? [a[0], a.length > 2 ? a[2] : a[1]] : a && typeof a === "object" ? [a.x, a.z] : null);
 const unit = (a) => { const l = Math.hypot(a[0], a[1]); return l > 1e-9 ? [a[0] / l, a[1] / l] : null; };
@@ -120,7 +124,8 @@ export function planBay(zone, style = {}, opts = {}) {
   const zEnd = backD >= CLEAR.minStrip ? D - Math.max(...items.filter((i) => i.side === "back").map((i) => i.d), 0) - CLEAR.gap : D - CLEAR.gap;
   const keep = opts.keep || [], hits = (r) => keep.find((k) => r.x0 < k.x1 && k.x0 < r.x1 && r.z0 < k.z1 && k.z0 < r.z1);
   [-1, 1].forEach((sgn, si) => {
-    let z = Math.max(0.55, Math.min(1.2, D * 0.1));                  // (the opening's first half metre left free)
+    // (nothing under the rolled-up shutter's box: it reaches 0.6 m in – garagespace.js GARAGE_SPACE.door)
+    let z = Math.max(0.65, Math.min(1.2, D * 0.1));
     const list = order[si] || [];
     if (strip < CLEAR.minStrip) { for (const kind of list) dropped.push({ kind, why: `side strip ${strip.toFixed(2)} m` }); return; }
     for (const kind of list) {
@@ -172,5 +177,24 @@ export function planClashes(plan) {
     if (car && items[i].side !== "aisle" && r.x0 < area.x1 - eps && area.x0 < r.x1 - eps && r.z0 < area.z1 - eps && area.z0 < r.z1 - eps) out.push({ a: items[i].kind, b: "work area", what: "overlap" });
     if (car && items[i].side === "aisle" && r.x0 < car.width / 2 && -car.width / 2 < r.x1 && r.z0 < car.z1 && car.z0 < r.z1) out.push({ a: items[i].kind, b: "car", what: "overlap" });
   });
+  return out;
+}
+
+// The plan's things as boxes in the garage helper's bay frame (garagecheck.js: a – m along from the bay's opening middle,
+// + toward its "along"; d – m in from the door line; h – m over the floor), so its checkCar can test a car against the kit
+// like against its own equipment. zone: the garageZones zone the plan was made for (its w: the work space's offset in a
+// split bay). The cooling unit's duct is in its box (it reaches out toward the car); the boom is one box under the ceiling.
+export function planBoxes(plan, zone = {}) {
+  const n = plan.zone, w = +zone.w || 0, sg = n.mirrored ? -1 : 1, out = [];
+  const A = (x) => w + sg * x;
+  const box = (name, x0, x1, z0, z1, h0, h1) => { const a0 = A(x0), a1 = A(x1); out.push({ name: "kit " + name, min: [Math.min(a0, a1), z0, h0], max: [Math.max(a0, a1), z1, h1] }); };
+  for (const it of plan.items) {
+    const f = footprint(it), m = MODULES[it.kind] || {};
+    let { x0, x1 } = f;
+    if (m.reach) { if (it.x < 0) x1 += m.reach; else x0 -= m.reach; }
+    box(it.kind, x0, x1, f.z0, f.z1, 0, it.h);
+  }
+  const o = plan.overhead;
+  if (o) { const xs = o.kind === "twin" ? [-0.55, 0.55] : [0]; box("boom", Math.min(...xs) - 0.4, Math.max(...xs) + 0.4, o.z0, o.z1 + 0.45, o.y0, o.y1); }
   return out;
 }
