@@ -60,7 +60,7 @@ export default {
   tyreBlankets: R({ permitted: "blankets only, ≤3 zones, homologated (C10.8.3d, C10.8.4)", inPitLaneDuringRace: false,
       removeBefore: "tyres carried to the pit-stop area", grid: "disconnected from power at the 5-min signal" },
     { ...b("B5.1.5, B5.5.3b"), also: c("C10.8.3d, C10.8.4") },
-    { note: "blanket temperature limits are in FIA/Pirelli prescriptions (FIA-F1-DOC-062, B6.1.3a) – not fetched" }),
+    { note: "temperature limits are in the per-event Pirelli/FIA prescription sheets (B6.1.3a): 2026 sheets read show slicks 70 °C (max 2 h); 2026 Chinese sheet 0/60/70 like 2025, British sheet 70/40 – intermediate value unresolved (tyres.md)", blanketMaxC: { slick: 70, inter: null, wet: null } }),
   compoundRange: R({ dry: ["C1", "C2", "C3", "C4", "C5"], hardest: "C1", note: "C6 dropped; 18-inch tyres, narrower than 2025" },
     { doc: "Pirelli press release 'The range of compounds for the 2026 season has been set' (24 Nov 2025)", art: "–", accessed: AT,
       url: "https://press.pirelli.com/the-range-of-compounds-for-the-2026-season-has-been-set/" }),
@@ -68,7 +68,8 @@ export default {
 
   // ---------- pit lane & pit stops ----------
   pitSpeedLimit: R({ defaultKmh: 80, perEvent: "Race Director may amend", penaltyInRace: "5 s / 10 s / drive-through / stop-and-go" }, b("B1.6.3a"),
-    { note: "Monaco 2026 amended to 60 km/h per a stewards' document quoting the RD note (press summary, not fetched) – measure per race from cached pit-lane CarData" }),
+    { note: "per-event values MEASURED from the read-only session cache (CarData speed plateaus ≥3 s within ±1 km/h, 50–100 km/h: f1kr-work/v048/research/pitspeed_probe.py → pitspeed_probe.log); races not cached: default unless an event note says otherwise",
+      measuredKmh: { default: 80, "Monaco": 60 } /* all 16 cached 2026 races: 80 except Monaco */ }),
   pitLaneLayout: R({ workOnlyIn: "inner lane (fast lane only at the end of the pit lane for pit-lane starters / suspensions)", noPoweredLifting: true,
       noReversingUnderPower: true, pitStopPositionsPerTeam: 1, pitStopCamera: "one per team above the pit stop position" }, b("B1.6.1, B1.6.3b–c")),
   doubleStack: R({ rule: "one Designated Pit Stop Position per team (B1.6.1) → the second car waits; no article forbids it" }, b("B1.6.1"),

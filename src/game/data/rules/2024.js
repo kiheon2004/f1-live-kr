@@ -66,7 +66,8 @@ export default {
   // ---------- pit lane & pit stops ----------
   pitSpeedLimit: R({ defaultKmh: 80, perEvent: "Race Director may amend (Safety Delegate recommendation)",
       penaltyInRace: "5 s / 10 s / drive-through / stop-go (54.3a–d) at the stewards' choice" }, sr("34.7"),
-    { note: "per-circuit values: see rules-2025.md (Monaco 60 km/h; Zandvoort raised 60→80 for 2025 – press, not event notes). Better: measure the plateau speed in the cached race's pit-lane CarData." }),
+    { note: "per-event values MEASURED from the read-only session cache (CarData speed plateaus ≥3 s within ±1 km/h, 50–100 km/h: f1kr-work/v048/research/pitspeed_probe.py → pitspeed_probe.log); races not cached: default unless an event note says otherwise",
+      measuredKmh: { default: 80 } /* 2024 British (only cached 2024 race) */ }),
   pitLaneLayout: R({ fastLaneMaxWidthM: 3.5, workOnlyIn: "inner lane", noPoweredLifting: true, noReversingUnderPower: true,
       pitStopPositionsPerTeam: 1 }, sr("34.4, 34.5, 34.6, 34.3")),
   doubleStack: R({ rule: "one pit-stop position per team (34.5) → a team-mate arriving while the first car is in the box must wait; no rule forbids it" },

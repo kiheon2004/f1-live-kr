@@ -57,3 +57,22 @@ test("rules: points tables are well-formed and the fastest-lap point exists only
   assert.equal(b.points.value.fastestLap, null);
   assert.equal(c.points.value.fastestLap, null);
 });
+
+// Tyre nominations (src/game/data/tyres/nominations.js): HARD harder than MEDIUM harder than SOFT, inside that season's
+// published range, every race sourced; and – when the session cache is present – every cached race is covered.
+test("tyre nominations: ordered, inside the season range, sourced, and covering the cached races", async (t) => {
+  const m = await import(pathToFileURL(path.join(__dirname, "../../src/game/data/tyres/nominations.js")).href);
+  const nom = m.default, SRC = m.SRC, num = (c) => +c.slice(1);
+  for (const [key, r] of Object.entries(nom.races)) {
+    const range = nom.range[key.slice(0, 4)];
+    assert.ok(range, `${key}: season range`);
+    for (const c of [r.H, r.M, r.S]) assert.ok(range.includes(c), `${key}: ${c} in ${range}`);
+    assert.ok(num(r.H) < num(r.M) && num(r.M) < num(r.S), `${key}: H < M < S (C1 hardest)`);
+    assert.ok(r.s.length >= 1 && r.s.every((s) => SRC[s]), `${key}: sources`);
+    if (r.s.includes("F")) assert.match(r.pdf, /pirelli_preview/, `${key}: the FIA sheet file`);
+  }
+  const fs = require("node:fs"), CACHE = path.join(process.env.HOME || "", "Library/Application Support/f1-live-kr/cache");
+  if (!fs.existsSync(CACHE)) { t.skip("session cache absent – coverage not checked"); return; }
+  const races = new Set(fs.readdirSync(CACHE).map((f) => f.match(/^\d{4}_(\d{4}-\d{2}-\d{2}_.+_Grand_Prix)_\d{4}-\d{2}-\d{2}_Race_/)?.[1]).filter(Boolean));
+  for (const r of races) assert.ok(nom.races[r], `cached race ${r} has a nomination`);
+});

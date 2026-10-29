@@ -42,9 +42,9 @@
 
 ## 4. 피트레인·피트스톱
 - 제한 속도 기본 80 km/h, RD가 변경 가능 (SR 34.7). 경기 중 위반 → 5 s/10 s/드라이브스루/스톱앤고 중 선택 (34.7c).
-  서킷별 값은 이벤트 노트에 있다. 이번에 원문으로 확인한 것 없음. 언론: 모나코 60 km/h 유지, 잔드보르트 2025년 60→80 상향
-  (https://www.planetf1.com/news/fia-confirms-huge-change-ahead-of-dutch-grand-prix, 미열람 요약), 멜버른·싱가포르 상향은
-  미확인. **권장: 캐시 경기의 피트레인 CarData 속도 평탄부에서 서킷별 제한을 직접 측정** (실측, 규칙 출처 대신 "측정" 표시).
+  서킷별 값: **캐시 실측**(`~/projects/f1kr-work/v048/research/pitspeed_probe.py` → `pitspeed_probe.log`, CarData 속도가 ±1 km/h 안에서
+  3 s 이상 평탄한 구간의 최빈값) — 2025 캐시 24경기 모두 **80 km/h, 모나코만 60 km/h**(멜버른·잔드보르트·싱가포르도 80). 언론의
+  잔드보르트 60→80 상향 보도(https://www.planetf1.com/news/fia-confirms-huge-change-ahead-of-dutch-grand-prix, 요약)와 일치.
 - 패스트 레인 폭 ≤3.5 m, 작업은 이너 레인에서만, 동력 리프트 금지, 자력 후진 금지 (SR 34.3, 34.4, 34.6).
 - 팀당 피트스톱 위치 1개 (SR 34.5) → 동시 피트 시 뒤차 대기(조항의 결과, 명시 조항 아님). 최소 크루 인원 규정 없음
   (SR/TR에서 찾지 못함).

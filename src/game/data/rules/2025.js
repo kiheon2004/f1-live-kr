@@ -60,7 +60,7 @@ export default {
   tyreBlankets: R({ permitted: "blankets only, ≤3 zones, homologated (TR 10.8.4d, 10.8.5)", inPitLaneDuringRace: false,
       removeBefore: "tyres carried to the pit-stop area", grid: "disconnected from power at the 5-min signal" },
     { ...sr("26.17, 44.4b"), also: tr("10.8.4d, 10.8.5") },
-    { note: "blanket TEMPERATURE limits are set in Pirelli/FIA prescriptions (SR 30.5a), not in the regulations – not verified" }),
+    { note: "temperature limits are in the per-event Pirelli/FIA prescription sheets (SR 30.5a), not the SR: 2025 sheets read: slicks 70 °C, intermediates 60 °C (max 2 h per range), wets no blankets; tread/sidewall temperature (see tyres.md)", blanketMaxC: { slick: 70, inter: 60, wet: null } }),
   compoundRange: R({ dry: ["C1", "C2", "C3", "C4", "C5", "C6"], hardest: "C1" },
     { doc: "formula1.com, 'What tyres … 2025 Emilia-Romagna GP' (C6 debut)", art: "–", accessed: AT,
       url: "https://www.formula1.com/en/latest/article/what-tyres-will-the-teams-and-drivers-have-for-the-2025-emilia-romagna-grand.2zbwVinaEBPAb8YLDslZ8n" },
@@ -70,7 +70,8 @@ export default {
   // ---------- pit lane & pit stops ----------
   pitSpeedLimit: R({ defaultKmh: 80, perEvent: "Race Director may amend (Safety Delegate recommendation)",
       penaltyInRace: "5 s / 10 s / drive-through / stop-go (54.3a–d) at the stewards' choice" }, sr("34.7"),
-    { note: "per-circuit values: see rules-2025.md (Monaco 60 km/h; Zandvoort raised 60→80 for 2025 – press, not event notes). Better: measure the plateau speed in the cached race's pit-lane CarData." }),
+    { note: "per-event values MEASURED from the read-only session cache (CarData speed plateaus ≥3 s within ±1 km/h, 50–100 km/h: f1kr-work/v048/research/pitspeed_probe.py → pitspeed_probe.log); races not cached: default unless an event note says otherwise",
+      measuredKmh: { default: 80, "Monaco": 60 } /* all 24 cached 2025 races: 80 except Monaco (Melbourne, Zandvoort, Singapore = 80) */ }),
   pitLaneLayout: R({ fastLaneMaxWidthM: 3.5, workOnlyIn: "inner lane", noPoweredLifting: true, noReversingUnderPower: true,
       pitStopPositionsPerTeam: 1 }, sr("34.4, 34.5, 34.6, 34.3")),
   doubleStack: R({ rule: "one pit-stop position per team (34.5) → a team-mate arriving while the first car is in the box must wait; no rule forbids it" },
