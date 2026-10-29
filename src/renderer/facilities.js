@@ -17,6 +17,7 @@ import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { disposeGroup } from "./dispose.js";
 import { entryAt } from "./venues.js";
+import { bayDepths } from "./garagespace.js";
 import { pathFrame, garageLine, garageRun, genericOutline, fitLine, rayRing, GENERIC, PICK } from "./pitlane.js";
 
 // ---------- registry ----------
@@ -489,6 +490,8 @@ FACADES.yasPaddock = { width: () => 7.5, draw(g, w, h, lit) {
 } };
 // height of the garage band (openings, their frames) in each pit-side facade texture
 const GARAGE_TOP = { pitGlass: 4.8, pitStand: 5.6, imolaBox: 4.6 };
+// a garage's pillars (each 0.5 m along the front, between two openings) and the least opening a bay is built with
+const FW = 0.5, MIN_OPEN = 0.5;
 function facadeTex(name, p, lit) {
   const F = FACADES[name];
   return canvasTex(`${name}:${lit ? "lit" : "day"}`, 256, 1024, (g, w, h) => F.draw(g, w, h, lit));
@@ -565,17 +568,17 @@ function pitBuilding(ctx, p) {
     for (const q of parts) {
       if (darkParts.includes(q)) continue;
       const sp = slice(q.uv, s); if (!sp) continue;
-      if (q.min < 1) { spans.push(sp); baseTop = Math.max(baseTop, inBlade(q) ? 0 : q.h); }
+      if (q.min < 1) { spans.push([sp[0], sp[1], !!q.b?.synthetic]); baseTop = Math.max(baseTop, inBlade(q) ? 0 : q.h); }
       if (!inBlade(q)) tops.push(q);
     }
     if (!spans.length) continue;
     spans.sort((a, b) => a[0] - b[0]);
     let cur = [...spans[0]], best = [...cur];
-    for (const sp of spans.slice(1)) { if (sp[0] <= cur[1] + 1) cur[1] = Math.max(cur[1], sp[1]); else cur = [...sp]; if (cur[1] - cur[0] > best[1] - best[0]) best = [...cur]; }
+    for (const sp of spans.slice(1)) { if (sp[0] <= cur[1] + 1) { cur[1] = Math.max(cur[1], sp[1]); cur[2] = cur[2] || sp[2]; } else cur = [...sp]; if (cur[1] - cur[0] > best[1] - best[0]) best = [...cur]; }
     const t = tops.reduce((a, q) => (!a || q.h > a.h ? q : a), null);
     // the ground: the lowest of a few points across the span
     let g = Infinity; for (let k = 0; k <= 4; k++) { const [x, z] = P(s, best[0] + ((best[1] - best[0]) * k) / 4); g = Math.min(g, ctx.groundAt(x, z)); }
-    stations.push({ u: s, v0: best[0], v1: best[1], g, baseTop: baseTop || (t ? t.h : 0), top: t ? t.h : baseTop, rh: t ? t.rh : 0 });
+    stations.push({ u: s, v0: best[0], v1: best[1], syn: best[2], g, baseTop: baseTop || (t ? t.h : 0), top: t ? t.h : baseTop, rh: t ? t.rh : 0 });
   }
   if (stations.length < 4) throw new Error("no footprint");
   if (!stations.every((st) => Number.isFinite(st.g))) throw new Error("no ground");
@@ -627,6 +630,11 @@ function pitBuilding(ctx, p) {
   let plan = null, planInfo = null;
   if (p.bays?.list?.length) {
     const list = p.bays.list.map((q) => { const a = toUV(q.a)[0], b = toUV(q.b)[0]; return { u0: Math.min(a, b), u1: Math.max(a, b), bay: q.bay }; }).sort((x, y) => x.u0 - y.u0);
+    // (v0.49: a bay whose opening between its pillars would be under MIN_OPEN isn't built – said in info.blocked with its
+    // length; the cause is upstream – scenery.js places the bays on the measured path with its fold-backs taken out,
+    // pitlane.js unfoldPath –, this only keeps a garage with no room between its pillars out of the world)
+    const blocked = [];
+    for (let i = list.length - 1; i >= 0; i--) { const q = list[i]; if (q.u1 - q.u0 - FW < MIN_OPEN) { blocked.push({ n: q.bay?.n ?? null, label: q.bay?.label ?? null, length: +(q.u1 - q.u0).toFixed(2), why: "its ends project within " + (FW + MIN_OPEN) + " m of each other on the building's axis" }); list.splice(i, 1); } }
     const lo = Math.max(uMin, uRoot) - 1, hi = uMax + 1, inside = list.filter((q) => q.u0 >= lo && q.u1 <= hi);
     if (inside.length >= list.length * 0.8) {
       const w = list.reduce((a, q) => a + q.u1 - q.u0, 0) / list.length;
@@ -636,7 +644,7 @@ function pitBuilding(ctx, p) {
         for (let u0 = plan[plan.length - 1].u1; u0 + w <= uMax + 0.5; u0 += w) plan.push({ u0, u1: u0 + w, bay: null });
       }
       gStart = plan[0].u0; gEnd = plan[plan.length - 1].u1; nGar = plan.length; gp = w;
-      planInfo = { drawing: list.length, built: inside.length, extra: plan.length - inside.length, width: +w.toFixed(2), src: p.bays.src };
+      planInfo = { drawing: list.length + blocked.length, built: inside.length, extra: plan.length - inside.length, width: +w.toFixed(2), src: p.bays.src, blocked: blocked.length ? blocked : null };
     } else planInfo = { drawing: list.length, built: 0, why: `the drawing's garages run off the building (${inside.length} of ${list.length} on it): equal bays instead` };
   }
   const stationAt = (uu) => { let i = 0; while (i + 1 < stations.length && stations[i + 1].u < uu) i++; const a = stations[i], b = stations[Math.min(i + 1, stations.length - 1)]; const f = b.u > a.u ? Math.max(0, Math.min(1, (uu - a.u) / (b.u - a.u))) : 0; return [a, b, f]; };
@@ -787,12 +795,28 @@ function pitBuilding(ctx, p) {
     F.poly("roofTop", [S(u0, v0, y(u0)), S(u1, v0, y(u1)), S(u1, v1, y(u1)), S(u0, v1, y(u0))], [[0, 0], [1, 0], [1, 1], [0, 1]], [0, 1, 0]);
   }
   // the garages themselves: openings in front (with the facade), their insides apart (seen only from close by)
-  const FI = new Faces(), slots = [], inward = [-v[0] * vTrack, -v[1] * vTrack], depth = Math.min(p.garageDepth || 9, Math.max(4, Math.min(...stations.map((s2) => s2.v1 - s2.v0)) * 0.45));
+  // Each bay's depth from the building behind it (v0.49): the footprint from the garages' front to its back at the stations
+  // over the bay – the narrowest of them, so nothing stands outside the building – less its back wall; of that the race
+  // bay a car is worked in (garagespace.js bayDepths: built and seen from the lane), the rest the back area behind its
+  // partition (not built: nothing of it is seen from the lane, and what is in it varies from race to race). v0.48 gave
+  // every bay of a building 0.45 of its narrowest cross-section anywhere, at least 4 m – 4.0 m at all three circuits
+  // measured, 1.7 m shorter than the car. depthFrom: "map footprint" (the map's own outline) or "made-up outline" (no
+  // building on the map there – genericPitSpec's estimate, Monaco's PIT_LAYOUTS depth: an assumption).
+  const bayFoot = (u0, u1) => {
+    let sel = stations.filter((st) => st.u >= u0 - 1e-6 && st.u <= u1 + 1e-6);
+    if (!sel.length) { const [a, b] = stationAt((u0 + u1) / 2); sel = [a, b]; }
+    // (a station on the outline's very end slices it at a corner: no width – not the building's depth)
+    if (sel.some((st) => st.v1 - st.v0 > 0.5)) sel = sel.filter((st) => st.v1 - st.v0 > 0.5);
+    return { building: Math.min(...sel.map((st) => st.v1 - st.v0)), syn: sel.some((st) => st.syn) };
+  };
+  const FI = new Faces(), slots = [], inward = [-v[0] * vTrack, -v[1] * vTrack];
+  let depth = 0;
   if (G > 0) {
-    const fw = 0.5, hO = G - 0.55, ceil = hO + 0.35, out = outV(1), inv = [inward[0], 0, inward[1]];
+    const fw = FW, hO = G - 0.55, ceil = hO + 0.35, out = outV(1), inv = [inward[0], 0, inward[1]];
     const at = (uu, d, y) => { const [x, z] = P(uu, frontV(uu) - vTrack * d); return [x, y, z]; };
     for (let k = 0; k < nGar; k++) {
       const u0 = plan ? plan[k].u0 : gStart + k * gp, u1 = plan ? plan[k].u1 : u0 + gp, a0 = u0 + fw / 2, a1 = u1 - fw / 2, fl = floorAt((u0 + u1) / 2);
+      const foot = bayFoot(u0, u1), bd = p.garageDepth ? { inner: p.garageDepth, depth: p.garageDepth, back: 0, fits: null } : bayDepths(foot.building), depth = bd.depth;
       // front: the pillar at its start (and the last one at the run's end, or before a gap – the gap walled up to the top
       // of the openings), the lintel over the opening
       const next = plan ? plan[k + 1] : null, gapTo = next && next.u0 > u1 + 0.05 ? next.u0 : null;
@@ -816,8 +840,12 @@ function pitBuilding(ctx, p) {
       for (const d of [depth * 0.35, depth * 0.72]) FI.poly("garBeam", [at(a0, d - 0.15, fl + ceil - 0.02), at(a1, d - 0.15, fl + ceil - 0.02), at(a1, d + 0.15, fl + ceil - 0.02), at(a0, d + 0.15, fl + ceil - 0.02)], null, [0, -1, 0]);
       for (const q of [0.3, 0.7]) { const c0 = a0 + (a1 - a0) * q - 0.25, c1 = c0 + 0.5; FI.poly("garLight", [at(c0, 1.2, fl + ceil - 0.03), at(c1, 1.2, fl + ceil - 0.03), at(c1, depth - 0.8, fl + ceil - 0.03), at(c0, depth - 0.8, fl + ceil - 0.03)], null, [0, -1, 0]); }
       const [fx, fz] = P((u0 + u1) / 2, frontV((u0 + u1) / 2));
-      slots.push({ k, u0, u1, uc: (u0 + u1) / 2, floor: fl, front: [fx, fz], along: [u[0], u[1]], inward, width: a1 - a0, height: hO, ceil, depth, bay: plan ? plan[k].bay : null });
+      slots.push({ k, u0, u1, uc: (u0 + u1) / 2, floor: fl, front: [fx, fz], along: [u[0], u[1]], inward, width: a1 - a0, height: hO, ceil, depth, bay: plan ? plan[k].bay : null,
+        building: +foot.building.toFixed(2), inner: +bd.inner.toFixed(2), back: +bd.back.toFixed(2), depthFrom: p.garageDepth ? "facility" : foot.syn ? "made-up outline" : "map footprint" });
     }
+    // (how far in the built garages reach – the race bays, to their back partition: scenery.js lowers the terrain under
+    // them to that; the back areas behind aren't built, the building's own walls close them)
+    depth = Math.max(0, ...slots.map((sl) => sl.depth));
   }
   // The pit wall (p.pitWall): along the garages, where the track's measured edge is (ctx.trackEdge: metres from a
   // point to the edge of the tarmac) – a concrete wall with the catch fence over it on the track side, and behind it a

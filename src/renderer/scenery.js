@@ -18,7 +18,7 @@ import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./faciliti
 import { START_DATA } from "./startdata.js";
 import { PIT_BOXES, STANDINGS, teamKey } from "./pitorder.js";
 import { layoutFor } from "./garageplans.js";
-import { pathFrame } from "./pitlane.js";
+import { pathFrame, unfoldPath } from "./pitlane.js";
 import { planTunnels, buildTunnels } from "./tunnel.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
@@ -862,12 +862,18 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // season, else the nearest season's: v0.38 keyed PIT_BOXES by season and this still read PIT_BOXES[key].boxes – always
   // nothing, so a picked pit building ran between the limiter lines less 40 m, not along the boxes)
   const pitData = START_DATA[opts.venue?.key]?.pit, layout = pitData && opts.year ? layoutFor(opts.venue?.key, opts.year, PIT_BOXES, STANDINGS, teamKey) : null;
+  // (v0.49: the garages placed on the measured path with its fold-backs taken out – pitlane.js unfoldPath –, fitted to the
+  // boxes moved onto it: equal garages along the lane, not along the data's steps back; Hungaroring 2025's Kick Sauber
+  // garage had been 0.05 m long. The run's ends for a picked building stay the measured path's – layout above.)
+  const unfolded = pitData ? unfoldPath(pitData.path.map(([X, Y]) => gf.xz([X * 0.1, Y * 0.1]))) : null, vk = opts.venue?.key;
+  const bayLayout = layout?.bays && unfolded?.folds.length && PIT_BOXES[vk]
+    ? layoutFor(vk, opts.year, { [vk]: Object.fromEntries(Object.entries(PIT_BOXES[vk]).map(([s, v]) => [s, { ...v, boxes: v.boxes.map(unfolded.toU) }])) }, STANDINGS, teamKey) : layout;
   const bySeason = PIT_BOXES[opts.venue?.key], boxSeason = bySeason && Object.keys(bySeason).map(Number).sort((a, b) => Math.abs(a - (opts.year || 0)) - Math.abs(b - (opts.year || 0)) || b - a)[0];
   let bays = null;
   if (layout?.bays) {
-    const fr = pathFrame(pitData.path.map(([X, Y]) => gf.xz([X * 0.1, Y * 0.1]))), P = (u) => { const q = fr.at(u); return [q.x, q.z]; };
-    bays = { list: layout.bays.map((b) => ({ a: P(b.u0), b: P(b.u1), bay: { n: b.n, owners: b.owners, teams: b.teams, label: b.label, garage: b.garage, section: b.section } })),
-      src: layout.plan.src, meta: { src: layout.plan.src, conf: layout.plan.conf, note: layout.plan.note || null, season: layout.from.plan, layoutFrom: layout.from.layout, resid: +layout.fit.resid.toFixed(2) } };
+    const lay = bayLayout?.bays ? bayLayout : layout, fr = lay === layout ? pathFrame(pitData.path.map(([X, Y]) => gf.xz([X * 0.1, Y * 0.1]))) : unfolded.frame, P = (u) => { const q = fr.at(u); return [q.x, q.z]; };
+    bays = { list: lay.bays.map((b) => ({ a: P(b.u0), b: P(b.u1), bay: { n: b.n, owners: b.owners, teams: b.teams, label: b.label, garage: b.garage, section: b.section } })),
+      src: layout.plan.src, meta: { src: layout.plan.src, conf: layout.plan.conf, note: layout.plan.note || null, season: layout.from.plan, layoutFrom: layout.from.layout, resid: +lay.fit.resid.toFixed(2), folds: unfolded?.folds.length ? unfolded.folds.map((f) => f.map((v) => +v.toFixed(1))) : null } };
   }
   const garagePlan = layout ? (layout.why ? { why: layout.why } : bays.meta) : { why: "no pit data or season" };
   const generic = opts.buildings !== false ? genericPitSpec({ venue: opts.venue, location: scene.location, year: opts.year, pit: pitData, toScene: ([X, Y]) => gf.xz([X * 0.1, Y * 0.1]), toTrack, trackEdge: edgeOfTrack, boxes: bySeason?.[boxSeason]?.boxes, layout: layout?.bays ? layout : null }) : null;

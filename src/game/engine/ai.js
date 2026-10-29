@@ -14,7 +14,7 @@
 //     AI.maxEvents event re-plans per team per lap.
 // State: race.state.ai (plain JSON, saved and restored with the race). The team models (strategy.js teamModel) are
 // derived data in race.cache, rebuilt identically from the scenario + seed on load.
-import * as CMD from "./commands.js";
+import { commandAs } from "./engine.js";   // (a cycle engine ↔ ai: only called at run time, both loaded by then)
 import { teamModel, publicView, planCandidates, evaluate, scenarios, crossoverGains, freshCosts, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, lastClean, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
 import { streamFor } from "./rng.js";
 import { AI, TEAM_TENDENCY } from "../data/params/ai.js";
@@ -204,7 +204,7 @@ function stintLife(M, est, total) {
 const touched = (race, num, kinds) => { const cs = race.state.commands; return cs.log.some((c) => c.by === "player" && c.car === num && kinds.includes(c.type)) || cs.queue.some((c) => c.by === "player" && c.car === num && kinds.includes(c.type)); };
 function order(race, team, car, type, args) {
   const S = race.state, id = `ai:${team}:${car?.num ?? "team"}:${type}:${S.t}`;
-  return CMD.submit(S.commands, S.t, { id, type, car: car?.num ?? null, team, args, by: "ai:" + team });
+  return commandAs(race, { id, type, car: car?.num ?? null, team, args }, "ai:" + team);
 }
 
 // ---------- one decision for one car ----------

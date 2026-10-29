@@ -66,17 +66,20 @@ test("adapter mapping: engine (s, d) lands on the engine's own lap point in the 
   assert.ok(M.info.plainRatioWorstErrM >= 0 && Number.isFinite(M.info.plainRatioWorstErrM));
 });
 
-test("adapter interpolation: between two snapshots by render time, s wrapped over the line, phases from the newer one; nothing written to the snapshots", async () => {
+test("adapter interpolation: between two snapshots by render time, s wrapped over the line, a phase change applied at its own sim time (not the newer snapshot's early); nothing written to the snapshots", async () => {
   const { createGameAdapter } = await import("../../src/renderer/game/adapter3d.js");
   const sc = scenarioOf(ellipse(0, 2)), L = sc.track.L;
   const a = { t: 1000, cars: [{ num: "1", pos: 1, where: "lap", s: L - 10, d: 1, v: 80, steer: 0, wheelDist: 100, pit: { phase: "none" }, tyre: { compound: "MEDIUM" } }] };
-  const b = { t: 1250, cars: [{ num: "1", pos: 1, where: "lap", s: 10, d: 3, v: 80, steer: 0.1, wheelDist: 120, pit: { phase: "called" }, tyre: { compound: "MEDIUM" } }] };
+  const b = { t: 1250, cars: [{ num: "1", pos: 1, where: "lap", s: 10, d: 3, v: 80, steer: 0.1, wheelDist: 120, pit: { phase: "called" }, tyre: { compound: "MEDIUM" }, trans: [{ t: 1100, set: { phase: "called" } }] }] };
   const frozen = JSON.stringify([a, b]);
   const src = { paused: false, speed: 1, pair: () => ({ a, b, renderT: 1125 }) };
   const A = createGameAdapter({ scenario: sc, source: src });
   const fr = A.frameCars();
   assert.ok(Math.abs(fr.cars[0].s - 0) < 1e-6 || Math.abs(fr.cars[0].s - L) < 1e-6, `s ${fr.cars[0].s}`);
   assert.strictEqual(fr.cars[0].d, 2); assert.strictEqual(fr.cars[0].wheelDist, 110); assert.strictEqual(fr.cars[0].pit.phase, "called");
+  // before the change's own time: still a's phase
+  const early = createGameAdapter({ scenario: sc, source: { paused: false, speed: 1, pair: () => ({ a, b, renderT: 1050 }) } }).frameCars();
+  assert.strictEqual(early.cars[0].pit.phase, "none");
   assert.strictEqual(JSON.stringify([a, b]), frozen);
   assert.strictEqual(A.ctx.src, null, "the game context is no live / replay source");
   assert.strictEqual(A.ctx.t, 1125);

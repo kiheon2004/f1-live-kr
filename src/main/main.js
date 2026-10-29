@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification, powerMonitor } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Notification, powerMonitor, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { Archive } = require("./archive");
@@ -10,6 +10,7 @@ const { Scenes } = require("./scene");
 const { GoogleTiles } = require("./google");
 const { Clouds } = require("./clouds");
 const { GameStore } = require("./gamestore");
+const { GamePrep } = require("./gameprep");
 const geo = require("./geo");
 const V = require("./validate");
 const { pathToFileURL } = require("node:url");
@@ -139,6 +140,19 @@ app.whenReady().then(() => {
   handle("game:results", (_e, sid) => games.listResults(sid));
   handle("game:save", (_e, slot, d) => games.saveGame(slot, d));
   handle("game:load", (_e, slot) => games.loadGame(slot));
+  handle("game:saves", () => games.listSaves());
+  handle("game:removeSave", (_e, slot) => games.removeSave(slot));
+  // preparing a race from the session cache (read only) in a utility process; progress to the page as "game:prep"
+  const prep = new GamePrep({ cacheDir, store: games, send: (m) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send("game:prep", m); } });
+  handle("game:prepList", () => prep.list());
+  handle("game:prepare", (_e, sessionPath) => prep.start(sessionPath));
+  handle("game:prepCancel", (_e, jobId) => prep.cancel(jobId == null ? null : num(jobId)));
+  // importing a scenario file the user picks (copied into the game folder after checking it is one)
+  handle("game:import", async () => {
+    const r = await dialog.showOpenDialog(mainWin, { title: "게임 시나리오 가져오기", filters: [{ name: "게임 시나리오", extensions: ["json"] }], properties: ["openFile"] });
+    if (r.canceled || !r.filePaths?.[0]) return { ok: false, why: "취소" };
+    return games.importScenario(r.filePaths[0]);
+  });
   handle("live:start", () => { live.start(); });
   handle("live:stop", () => { live.stop(); });
   handle("auth:status", () => auth.status());

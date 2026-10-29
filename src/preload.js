@@ -54,6 +54,15 @@ contextBridge.exposeInMainWorld("api", {
     results: (id) => ipcRenderer.invoke("game:results", id),
     save: (slot, data) => ipcRenderer.invoke("game:save", slot, data),
     load: (slot) => ipcRenderer.invoke("game:load", slot),
+    saves: () => ipcRenderer.invoke("game:saves"),
+    removeSave: (slot) => ipcRenderer.invoke("game:removeSave", slot),
+    // preparing a race from the session cache: the list (prepared or not), start → { ok, jobId }, cancel; progress /
+    // done / error / cancelled arrive through onPrep(fn) with the job id (a late answer of an older job is the page's to drop)
+    prepList: () => ipcRenderer.invoke("game:prepList"),
+    prepare: (sessionPath) => ipcRenderer.invoke("game:prepare", sessionPath),
+    prepCancel: (jobId) => ipcRenderer.invoke("game:prepCancel", jobId),
+    onPrep: (fn) => { const h = (_e, m) => fn(m); ipcRenderer.on("game:prep", h); return () => ipcRenderer.removeListener("game:prep", h); },
+    importScenario: () => ipcRenderer.invoke("game:import"),
   },
   compactWindow: (on) => ipcRenderer.invoke("win:compact", on),
   pinWindow: (on) => ipcRenderer.invoke("win:pin", on),
