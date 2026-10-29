@@ -29,7 +29,7 @@ function base(season) {
     a_brake_max: est(52, "m/s²", "cap on braking deceleration (brake system / driver), on top of the grip limit",
       "peak F1 decelerations ≈ 5–6 g at high speed are widely reported; the cap matters only at the top of the speed range", [35, 65], "M"),
     k_brake: est(1.0, "1", "longitudinal-to-lateral grip ratio in braking (friction ellipse axis)",
-      "tyres give similar peak longitudinal and lateral μ; 4-wheel braking uses all of it", [0.8, 1.2], "M"),
+      "tyres give similar peak longitudinal and lateral μ; 4-wheel braking uses all of it", [0.5, 1.2], "M"),
     k_trac: est(0.58, "1", "share of the total grip available for traction (rear axle load share, RWD)",
       "rear weight distribution ≈ 54–56 % + rear downforce share; sets low-speed acceleration (fit to corner-exit acceleration)", [0.45, 0.7], "M"),
     f_comb: est(0, "1", "longitudinal grip share kept at the lateral limit (floor of the friction ellipse; 0 = plain ellipse)",
