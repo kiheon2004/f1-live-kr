@@ -230,7 +230,8 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
       let g = new Float64Array(R + 1).fill(BIG); g[0] = 0; const args = [];
       for (const c of ms) {
         const ng = new Float64Array(R + 1).fill(BIG), arg = new Int32Array(R + 1);
-        for (let r = 1; r <= R; r++) for (let n = 1; n <= r; n++) { const v = g[r - n] + fresh[c].cost[n]; if (v < ng[r]) { ng[r] = v; arg[r] = n; } }
+        // (a fresh set runs at least minStint laps – a 1–3-lap stint is never a strategy, only a way to dodge a forecast)
+        for (let r = 1; r <= R; r++) for (let n = Math.min(AI.minStint, r); n <= r; n++) { const v = g[r - n] + fresh[c].cost[n]; if (v < ng[r]) { ng[r] = v; arg[r] = n; } }
         g = ng; args.push(arg);
       }
       let best = BIG, n0b = R; const tot = new Float64Array(R + 1).fill(BIG);
@@ -451,7 +452,7 @@ export function trafficHold(ctx, stops = [], out = null) {
       // caught up: held this lap; a car fast enough (passDelta) gets by after a lap behind (a pass takes setting up)
       c.wait = c.behind === a.num ? (c.wait || 0) + 1 : 1; c.behind = a.num;
       if (a.lt - c.lt >= ctx.passDelta && c.wait > 1) continue;
-      c.held += minT - c.next; c.next = minT; c.lt = c.next - c.t;
+      c.held += (minT - c.next) * (c === me ? Math.exp(-(L - ctx.lap - 1) / AI.holdTau) : 1); c.next = minT; c.lt = c.next - c.t;
     }
     if (out && L === ctx.lap + 1) out.first = me ? me.held : 0;
     for (const c of st) c.t = c.next;
