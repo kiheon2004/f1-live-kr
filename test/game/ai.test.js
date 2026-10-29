@@ -50,9 +50,11 @@ test("no hidden-state leak: other teams' tyre wear, fuel, energy and modes don't
     if (mutate) for (const c of x.state.cars) if (c.teamKey !== "Williams") { c.tyre.wear = 0.99; c.tyre.Ts = 140; c.energy.fuel = 3; c.energy.soc = 0; c.mode.pace = "attack"; c.mode.energy = "harvest"; c.plan = { stints: [{ compound: "SOFT", toLap: 12 }, { compound: "HARD", toLap: 70 }] }; }
     for (const n in x.state.ai.teams.Williams.cars) x.state.ai.teams.Williams.cars[n].lastLap--;
     x.state.ai.teams.Williams.cars[Object.keys(x.state.ai.teams.Williams.cars)[0]].nextFull = 0;
-    aiStep(x); return x.state.commands.queue.map((c) => ({ ...c, id: "" }));
+    const w0 = x.state.ai.work.decisions; aiStep(x);
+    // what the decision produced: its orders (if any – a plan that still fits needs none), the team's estimates and log
+    return { full: x.state.ai.work.decisions - w0, orders: x.state.commands.queue.map((c) => ({ ...c, id: "" })), team: x.state.ai.teams.Williams };
   };
-  const a = decideWith(false); assert.ok(a.length > 0, "a decision was made");
+  const a = decideWith(false); assert.ok(a.full > 0, "a full re-plan was made");
   assert.deepStrictEqual(decideWith(true), a);
 });
 
@@ -66,7 +68,11 @@ test("player's team: the AI gives defaults, then hands a car off for the kinds o
   const mine = r.state.commands.log.filter((c) => c.car === "81" && c.by.startsWith("ai:") && c.tEff > 100);
   assert.ok(!mine.some((c) => ["plan", "pit", "pitCancel", "pace"].includes(c.type)), "no AI strategy/pace orders for a car the player ordered");
   assert.strictEqual(r.state.cars.find((c) => c.num === "81").plan.by, "player");
-  assert.ok(r.state.commands.log.some((c) => c.car === "4" && c.by === "ai:McLaren"), "the teammate the player didn't touch is still run by the AI");
+  // the teammate the player didn't touch is still run by the AI: its plan is the AI's and the AI keeps deciding for it
+  // (orders only when something needs changing – with tyres that last, ten laps may need none)
+  const c4 = r.state.ai.teams.McLaren.cars["4"], car4 = r.state.cars.find((c) => c.num === "4");
+  assert.match(car4.plan.by, /^ai:McLaren/); assert.strictEqual(c4.lastLap, car4.lap, "decided at its last lap");
+  assert.ok(c4.nextFull > 0, "full re-plans for it");
 });
 
 test("tendencies: drawn per race and team inside the documented ranges – different seeds, different weekends", async () => {
