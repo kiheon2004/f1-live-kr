@@ -31,7 +31,7 @@ export const commitS = (T, P = PIT) => T.wrap(T.pit.sIn - P.commit.v);
 // The player's / AI's call. car: the car's state (needs .pit, .s); returns { ok, why }.
 export function pitCall(car, T, { compound, t }, P = PIT) {
   const p = car.pit;
-  if (car.status !== "run") return { ok: false, why: `not running (${car.status})` };
+  if (car.status !== "run" && car.status !== "grid") return { ok: false, why: `not running (${car.status})` };   // (on the grid: a call for the first lap)
   if (p.phase === "called") { p.call.compound = compound || p.call.compound; return { ok: true, why: "tyres changed" }; }
   if (p.phase !== "none") return { ok: false, why: p.phase === "committed" ? "already committed to the pit entry" : "already in the pit lane" };
   // armed: it commits at the next pass of the commit point. Called within callLate of it: not armed – that pass arms it and

@@ -11,6 +11,7 @@ export const INCIDENTS = {
   // expects ÷ the grip the tyre and the surface give now). Consistency enters through u (the driver model's AR(1)), not
   // here again; wet skill scales the water term.
   errU0: { v: 0.97, unit: "u", est: true, range: [0.9, 0.99], why: "below this grip use the driver has margin: no errors" },
+  errGain: { v: 4.0, unit: "u per unit of over-use", est: true, range: [2, 8], why: "the engine's u = errU0 + errGain × (grip used ÷ grip there − the driver's own balanced pace): a driver at his normal level has margin (0), his AR(1) excursions, attack mode (+0.8 %) and grip that dropped since his last envelope refresh push him over – v0.48 wiring: the raw ratio sits at ≈ 0.99 all race (the calibrated pace), which over errU0 gave ~20 errors per car" },
   errRate: { v: 0.012, unit: "1/s at u = 1", est: true, range: [0.003, 0.05], why: "hazard at the limit; with typical racing u this gives a few small errors per car per race (lock-ups, snaps), ~0.5–1 off-track excursions and rare spins / crashes" },
   errTyre: { v: 3.0, unit: "× per unit out of window", est: true, range: [1, 6], why: "a tyre out of its temperature window (0 = in, 1 = far out) multiplies the hazard by 1 + this × out – the grip is less predictable" },
   errWater: { v: 1.5, unit: "× per mm", est: true, range: [0.5, 4], why: "water on the line (mm) multiplies the hazard by 1 + this × h × tyre-mismatch × (wet-skill factor)" },

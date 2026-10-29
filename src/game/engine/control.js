@@ -272,7 +272,7 @@ export function controlStep(race, T, env = {}, P = CONTROL) {
   if (ctl.start && !ctl.start.released) startStep(race, T, P);
   // pit-lane starters: released when every car that started on the grid has passed the pit exit
   if (!ctl.pitStartOpen && ctl.phase !== "grid" && T.pit) {
-    const gridCars = S.cars.filter((c) => !c.pitStart && c.status === "run");
+    const gridCars = S.cars.filter((c) => !c.pitStart && (c.status === "run" || c.status === "grid"));   // (still on its slot – reaction time – counts: not yet passed)
     if (gridCars.every((c) => c.dist > T.pit.sOut + P.carLen.v || c.where === "pit")) { ctl.pitStartOpen = true; if (S.cars.some((c) => c.pitStart)) msg(race, "PIT EXIT OPEN – PIT LANE STARTERS MAY JOIN"); }
   }
   // standing restart: every car on its grid slot (or 90 s waited) → the start procedure again
@@ -678,6 +678,8 @@ export function scRole(race, car) {
 }
 
 // ---------- per-step cache: track order of the cars on the lap and the SC ----------
+// (the engine calls refreshControlCache after a restore: pred() reads this cache before the first controlStep)
+export const refreshControlCache = (race, T) => stepCache(race, T, tables(race, T));
 function stepCache(race, T, K) {
   const S = race.state, ctl = S.control, objs = [];
   for (const c of S.cars) if (onTrack(c) || (c.status === "fin" && c.where !== "pit")) objs.push({ car: c, pos: lapPos(c, T), v: c.v });

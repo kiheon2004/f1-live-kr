@@ -138,10 +138,12 @@ function blueFlags(race, T, P) {
     }
     const cur = W.blue[c.num];
     if (!best) { if (cur) delete W.blue[c.num]; continue; }
-    const blue = best.g <= B.blueGapS;
+    // already giving way (traffic's yield to that car – race.hooks.traffic): complying, the clock doesn't run
+    const yielding = !!race.hooks?.traffic?.yielding?.(c, best.f);
+    const blue = best.g <= B.blueGapS && !yielding;
     if (!cur || cur.by !== best.f.num) W.blue[c.num] = { by: best.f.num, gapS: best.g, blue, since: blue ? S.t : null, warned: false, pen: false };
     else {
-      cur.gapS = best.g; cur.blue = blue; if (blue && cur.since == null) cur.since = S.t;
+      cur.gapS = best.g; cur.blue = blue; if (blue && cur.since == null) cur.since = S.t; if (yielding) cur.since = null;
       const shown = cur.since != null ? (S.t - cur.since) / 1000 : 0;
       if (shown > P.blueWarnS.v && !cur.warned) { cur.warned = true; msg(race, `BLACK AND WHITE FLAG FOR CAR ${c.num} – IGNORING BLUE FLAGS`, [c.num]); }
       if (shown > P.bluePenS.v && !cur.pen) { cur.pen = true; penalise(race, T, c, P.bluePenalty.v, "IGNORING BLUE FLAGS"); }
