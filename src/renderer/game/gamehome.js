@@ -39,6 +39,8 @@ async function loadEngine() {
   try {
     const m = await import("../../game/engine/engine.js");
     if (["createRace", "step", "snapshot", "command", "events", "results"].every((k) => typeof m[k] === "function")) { G.engine = m; G.engineErr = null; }
+    // the strategy estimator (pre-race screen) – optional: without it the fields stay greyed
+    try { G.strat = await import("../../game/engine/strategy.js"); } catch { G.strat = null; }
     else G.engineErr = "engine.js에 createRace / step / snapshot / command / events / results가 아직 없어요";
   } catch { G.engineErr = "엔진 연결 전"; }
   paint();
@@ -141,7 +143,7 @@ function paintPrerace() {
       <table class="g-tbl"><tr><th>드라이버</th><th>출발 타이어</th><th>계획 스틴트·피트 윈도</th><th>예상 피트 손실</th></tr>
       ${mine.map((e) => `<tr><td><b>${esc(e.tla)}</b> #${esc(e.num)}</td><td><select data-start="${esc(e.num)}">${comps.map((c) => `<option value="${c}" ${G.plan[e.num].start === c ? "selected" : ""}>${CMP_KO[c] || c}</option>`).join("")}</select></td><td>${planCell(sc, e.num)}</td><td>${pitLossCell(e.num)}</td></tr>`).join("")}</table>
       <p class="muted">출발 타이어 목록: 이 경기 기록에 나온 컴파운드. ${pit?.stats?.passSecMedian ? `피트레인 통과 시간(이 경기 자료 실측 중앙값, 정차 포함): ${pit.stats.passSecMedian.toFixed(1)}초 – 엔진의 예상 손실이 아니에요.` : ""}</p></section>
-    <section class="g-card"><h3>두 드라이버 전략 비교 · 규정·팀 내 피트 충돌</h3><p>${G.engine ? NOEST : PENDING} <span class="muted">전략 추정(스틴트 비교·의무 타이어·동시 피트 검사)이 AI 작업과 함께 연결되면 여기에 보여요.</span></p></section>
+    <section class="g-card"><h3>두 드라이버 전략 비교 · 규정·팀 내 피트 충돌 <small>팀의 추정치</small></h3>${compareCard(sc)}</section>
     <div class="g-row"><button class="primary" id="gStart" ${G.engine ? "" : "disabled"}>레이스 시작</button>${G.engine ? "" : `<span class="muted">${esc(G.engineErr || "엔진 연결 전")} – 레이스는 실제 엔진으로만 시작해요.</span>`}<button class="ghost" data-go="races">← 경기 선택</button></div>
   </div>`;
 }
@@ -182,7 +184,32 @@ function pitLossCell(num) {
 function planCell(sc, num) {
   if (!G.engine) return PENDING;
   const p = plansOf(sc)[num]; if (!p) return PENDING;
-  return `${p.stints.map((x, i) => `${CMP_KO[x.compound] || x.compound}${i < p.stints.length - 1 ? ` ~${x.toLap}랩` : ""}`).join(" → ")}<br><small class="muted">엔진 기본 계획 · 피트 윈도 추정 ${NOEST}</small>`;
+  const c = preEst(sc)?.cars.find((x) => String(x.num) === String(num)), b = c?.best;
+  const plan = `${p.stints.map((x, i) => `${CMP_KO[x.compound] || x.compound}${i < p.stints.length - 1 ? ` ~${x.toLap}랩` : ""}`).join(" → ")}`;
+  if (!b) return `${plan}<br><small class="muted">엔진 기본 계획 · 피트 윈도 추정 ${NOEST}</small>`;
+  return `${plan}<br><small class="muted">팀 추정 ${b.stops}스톱 · 첫 피트 윈도 ${b.window ? `${b.window[0]}–${b.window[1]}랩` : "–"} · 예상 ${fmtRace(b.mean)} ± ${b.sd.toFixed(0)}초 (10–90%: ${fmtRace(b.p10)}–${fmtRace(b.p90)})</small>
+    ${c.alternatives.length ? `<br><small class="muted">대안: ${c.alternatives.map((a) => `${a.stints.map((x) => `${(CMP_KO[x.compound] || x.compound)[0]}${x.laps}`).join("-")} (+${a.vsBest.toFixed(1)}초)`).join(" · ")}</small>` : ""}`;
+}
+const fmtRace = (s) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+// the strategy estimator's pre-race view for this race/seed/team/start tyres (strategy.js preRaceStrategy on a race created
+// for this seed – nothing stepped; ≈ 0.1 s)
+function preEst(sc) {
+  if (!G.engine || !G.strat?.preRaceStrategy) return null;
+  const start = Object.fromEntries(myCars(sc).map((e) => [e.num, G.plan[e.num]?.start]).filter((x) => x[1]));
+  const key = `${G.sid}|${G.seed}|${G.teamKey}|${JSON.stringify(start)}`;
+  if (G.preFor !== key) { G.preFor = key; try { G.pre = G.strat.preRaceStrategy(G.engine.createRace({ scenario: sc, seed: G.seed, userTeam: G.teamKey }), G.teamKey, { start }); G.preErr = null; } catch (e) { G.pre = null; G.preErr = e.message; } }
+  return G.pre;
+}
+function compareCard(sc) {
+  if (!G.engine) return `<p>${PENDING}</p>`;
+  const P = preEst(sc); if (!P) return `<p>${NOEST} <span class="muted">${esc(G.preErr || "")}</span></p>`;
+  const [a, b] = P.cars;
+  return `<p class="muted">${esc(P.label)}</p>
+    ${a && b && a.best && b.best ? `<p>${esc(a.tla)} ${a.best.stops}스톱 vs ${esc(b.tla)} ${b.best.stops}스톱 · 예상 차이 ${Math.abs(P.compare.diffS).toFixed(1)}초 (${P.compare.same ? "같은 계획" : "다른 계획"})</p>` : ""}
+    <p>예상 피트 손실: ${esc(P.pitLoss.text)}</p>
+    <p>규정: ${esc(P.rule.text)} · 사용 가능 건조 타이어 ${P.rule.compounds.map((c) => CMP_KO[c] || c).join("/")} <small class="muted">(${esc(P.rule.compoundSource)})</small></p>
+    <p>${P.conflicts.length ? P.conflicts.map((c) => `⚠ ${esc(c.text)}`).join("<br>") : "팀 내 동시 피트 예상 없음"}</p>
+    <p class="muted">${esc(P.weather.text)} · ${esc(P.weather.uncertainty)}</p>`;
 }
 async function computePitLoss(num) {
   const E = G.engine, sc = G.sc, key = `${G.sid}|${G.seed}|${num}`; if (!E || !sc) return;
@@ -212,7 +239,9 @@ async function startRace({ dev = false, devOpts = {} } = {}) {
     race = D.createDevRace(sc, devOpts); engine = { step: D.devStep, snapshot: D.devSnapshot, command: () => ({ ok: false, why: "개발용 스냅샷: 명령을 받지 않아요" }) };
   } else {
     const E = G.engine; if (!E) return;
-    race = E.createRace({ scenario: sc, seed: G.seed, userTeam: G.teamKey, weatherMode: "real", plans: plansOf(sc) });
+    // every team on the team AI (ai.js); the player's two cars start on the plans shown here and the AI keeps their
+    // defaults (pace/energy/plan) only until the player orders a car
+    race = E.createRace({ scenario: sc, seed: G.seed, userTeam: G.teamKey, weatherMode: "real", plans: plansOf(sc), ai: true });
     engine = { step: E.step, snapshot: E.snapshot, command: E.command, events: E.events, results: E.results };
   }
   G.dev = dev; G.events = []; G.orders = []; G.result = null;
@@ -235,8 +264,10 @@ const MINE_SLOW = new Set(["pitCommitted", "pitEntry"]);
 const autoSlowRule = () => ({ to: 1, match: (e) => AUTO_SLOW.has(e.type) || (MINE_SLOW.has(e.type) && myCars(G.sc).some((x) => String(x.num) === String(e.car))) });
 // the player's plans for the engine: its default plan for each of the team's cars with the start tyre chosen here
 function plansOf(sc) {
-  const out = {};
+  const out = {}, P = preEst(sc);
   for (const e of myCars(sc)) {
+    const b = P?.cars.find((x) => String(x.num) === String(e.num))?.best;
+    if (b) { out[e.num] = { stints: b.plan.map((x) => ({ ...x })), by: "player" }; continue; }
     const base = G.engine.defaultPlan ? G.engine.defaultPlan(sc, e.num) : { stints: [{ compound: G.plan[e.num]?.start || "MEDIUM", toLap: sc.race.laps }] };
     const st = base.stints.map((x) => ({ ...x }));
     if (G.plan[e.num]?.start) st[0].compound = G.plan[e.num].start;

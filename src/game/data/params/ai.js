@@ -9,8 +9,10 @@ export const AI_TABLE = {
   // ---- the team's own tyre model: physics defaults + an error the team doesn't know (seeded per race and team) ----
   kwErrSd: est(0.25, "ln", "σ of the team's prior error on each compound's wear rate (log scale)", "pre-race simulations miss the real degradation by tens of percent – that is why teams watch the first laps closely", [0.05, 0.5]),
   muErrSd: est(0.004, "1", "σ of the team's prior error on each compound's relative grip", "≈ 0.3 s/lap compound offset uncertainty before the race", [0, 0.01]),
+  gripErrSd: est(0.015, "ln", "σ of the team's error on the track grip level it takes from practice", "practice long runs pin the grip level to ~1–2 %", [0, 0.05]),
   priorLaps: est(3, "laps", "weight of the prior wear estimate, in laps of own observation", "after ~3 laps of a stint a team trusts its own data as much as its model", [1, 10]),
   wearObsSd: est(0.02, "1", "σ of the team's reading of its own tyre wear per lap (tread estimate from its sensors and models)", "own-car telemetry is good but not perfect", [0, 0.05]),
+  heldGapS: est(1.2, "s", "a public lap run closer than this behind another car is treated as held (not used to learn degradation)", "dirty air / no room to pass", [0.5, 2.5]),
   lapOffGain: est(0.25, "1", "EWMA gain of the lap-time offset (model vs own clean laps)", "a few laps to learn the track/driver offset", [0.05, 0.6]),
   vsAgeLaps: est(60, "laps", "length of the team's virtual stint tables", "longer than any stint", [30, 90]),
   // ---- pit loss ----
@@ -32,7 +34,8 @@ export const AI_TABLE = {
   // ---- traffic (lap-level forecast of the field) ----
   passDelta: est(0.9, "s/lap", "pace advantage a car needs to pass in the lap-level traffic forecast (start value)", "DRS-era passing needs ~0.5–1 s/lap", [0.3, 3]),
   passDeltaStreet: est(2.5, "s/lap", "the same at a street circuit", "Monaco/Singapore: nearly impossible", [1, 6]),
-  passLearn: est(5, "laps", "laps of observed on-track passes after which the team trusts its own count", "learned from the public order", [3, 30]),
+  passLearn: est(3, "laps", "laps of observed on-track passes after which the team trusts its own count", "learned from the public order", [3, 30]),
+  kHoldMax: est(2.5, "×", "bound on the calibration of the traffic forecast by the own cars' measured traffic loss (each way)", "the engine's traffic account is itself approximate – a bounded correction, not a free factor", [1, 6]),
   minGapS: est(0.6, "s", "how close a held car runs behind the car ahead in the lap-level forecast", "dirty air", [0.3, 1.2]),
   horizon: est(40, "laps", "laps the traffic forecast looks ahead (every stop of a candidate inside it counts)", "bounded work per decision (pace tables cached: ≈ 20 cars × 40 laps per candidate)", [5, 80]),
   // ---- decisions ----

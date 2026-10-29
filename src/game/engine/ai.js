@@ -34,7 +34,7 @@ export function newAiState(race, { teams = null } = {}) {
     const cars = {}; for (const car of S.cars.filter((x) => x.teamKey === team)) cars[car.num] = { lastLap: 0, nextFull: 0, falloff: 0, trafficAt: 0, modes: [], events: 0, wearLn: 0, wearN: 0 };
     out.teams[team] = { tend, est: { g: 1, s: 1, Sdy: 0, Sdd: 0, nWear: 0, off: {}, lane: null, nLane: 0, passDelta: null, stintLife: {} }, cars, pending: [], fcMax: null, evLap: -1, evN: 0, decisions: [] };
   }
-  for (const c of S.cars) out.seen[c.num] = { inPit: c.where === "pit", tIn: null };
+  for (const c of S.cars) out.seen[c.num] = { inPit: c.where === "pit", tIn: null, lap: 0, dirty: false };
   return out;
 }
 
@@ -49,10 +49,20 @@ export function aiPrePlans(race, teams = null) {
     for (const num of M.nums) {
       const st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0 };
       // (traffic from the grid: equal pace for everyone before any lap is run – what the team can say before the start)
-      const tctx = prepTraffic(M, est, view, num);
+      const tctx = prepTraffic(M, est, view, num), tctx2 = prepTraffic(M, est, view, num, { rivals: "long" });
       const ev = evaluate(M, est, st, planCandidates(M, est, st, { top: 4 }), scns);
-      for (const c of ev) { const stops = []; let lap = 0; for (let i = 0; i < c.stints.length - 1; i++) { lap += c.stints[i].laps; stops.push({ lap, compound: c.stints[i + 1].compound }); } c.hold = trafficHold(tctx, stops); }
-      ev.sort((a, b) => a.mean + risk * a.sdRel + a.hold - (b.mean + risk * b.sdRel + b.hold));
+      // the teammate's first stop already planned: the same in-lap costs the second car a queue (cars a few places apart
+      // on the grid run close early on – the gap guessed from the grid slots, ≈ 0.3 s per place)
+      const mate = M.nums.find((n) => n !== num && plans[n]), mateStop = mate ? plans[mate].stints[0].toLap : null;
+      const gm = mate ? 0.3 * Math.abs((S.cars.find((c) => c.num === num).grid ?? 20) - (S.cars.find((c) => c.num === mate).grid ?? 20)) : Infinity;
+      for (const c of ev) { const stops = []; let lap = 0; for (let i = 0; i < c.stints.length - 1; i++) { lap += c.stints[i].laps; stops.push({ lap, compound: c.stints[i + 1].compound }); } c.hold = (trafficHold(tctx, stops) + trafficHold(tctx2, stops)) / 2;
+        c.queue = stops[0]?.lap === mateStop && gm < PIT.workBase.v + AI.queueMargin ? PIT.workBase.v + AI.queueMargin - gm : 0; }
+      ev.sort((a, b) => a.mean + risk * a.sdRel + a.hold + a.queue - (b.mean + risk * b.sdRel + b.hold + b.queue));
+      if (ev[0]?.queue > 0 && ev[0].stints.length > 1) {   // one lap either side of the clash
+        const sh = [-1, 1].map((d) => { const x = ev[0].stints.map((y) => ({ ...y })); x[0].laps += d; x[1].laps -= d; return { stints: x, stops: ev[0].stops }; }).filter((c) => c.stints[0].laps >= 1 && c.stints[1].laps >= 1);
+        for (const c of evaluate(M, est, st, sh, scns)) { c.hold = ev[0].hold; c.queue = 0; ev.push(c); }
+        ev.sort((a, b) => a.mean + risk * a.sdRel + a.hold + a.queue - (b.mean + risk * b.sdRel + b.hold + b.queue));
+      }
       if (ev[0]) plans[num] = { stints: toPlan(st, ev[0]), by: "ai:" + team, modes: ev[0].stints.map((s) => s.mode) };
     }
   }
@@ -68,6 +78,14 @@ export function aiStep(race) {
     const o = A.seen[c.num], inPit = c.where === "pit";
     if (inPit && !o.inPit) { o.tIn = t; rivalStop(race, c); }
     if (!inPit && o.inPit && o.tIn != null) { const lane = (t - o.tIn) / 1000; for (const team in A.teams) learnLane(A.teams[team].est, lane); o.tIn = null; }
+    if (flag !== "green") o.dirty = true;
+    // a lap completed by any car: its time, compound and tyre age are public – every team learns the compounds'
+    // degradation from the whole field (laps run close behind another car, or under a flag, are left out: held, not slow)
+    if (c.lap > (o.lap ?? 0)) {
+      o.lap = c.lap; const dirty = o.dirty; o.dirty = false;
+      let gapAhead = Infinity; for (const x of S.cars) if (x !== c && x.status === "run" && x.where === "lap" && x.dist > c.dist) gapAhead = Math.min(gapAhead, (x.dist - c.dist) / Math.max(20, c.v));
+      if (!dirty && gapAhead > AI.heldGapS) for (const team in A.teams) learnPublic(race, team, c);
+    }
     o.inPit = inPit;
   }
   if (flag !== A.lastFlag) { for (const team in A.teams) queue(race, team, { kind: "flag:" + flag }); A.lastFlag = flag; }
@@ -126,6 +144,26 @@ function learnLane(est, lane) {
   est.lane = +(prior + w * d).toFixed(3); est.nLane++;
 }
 
+// one public lap of any car → the team's degradation scale per compound (y ≈ α_car + s_c·d: y the lap less the model's
+// age-0 lap at that car's estimated fuel, d the model's degradation at its tyre age; α per car, s per compound – ridge
+// toward 1 with priorLaps of weight). A rival's fuel and pace mode are not public: fuel from the race distance, mode balanced.
+function learnPublic(race, team, c) {
+  const S = race.state, TS = S.ai.teams[team], est = TS.est, M = teamModel(race, team), l = c.laps[c.laps.length - 1];
+  if (!l || l.pit || l.n <= 1 || c.tyre.laps < 2 || l.compound !== c.tyre.name || !DRY.includes(l.compound)) return;
+  const own = c.teamKey === team, mode = own ? c.mode.pace : "balanced", fuel = own ? (l.fuel ?? M.fuelRef) : Math.max(0, M.fuel0 - M.fuelPerLap * l.n);
+  const num = own ? c.num : M.nums[0], age = c.tyre.laps - 0.5;
+  const y = l.t - lapTime(M, { g: est.g, s: 1 }, num, l.compound, mode, 0, 0, fuel), d = degPart(M, est, num, l.compound, mode, age);
+  if (!Number.isFinite(y) || Math.abs(y - d) > 15) return;
+  est.offR ||= {}; est.sdy ||= {}; est.sdd ||= {}; est.sc ||= {};
+  const sc = est.sc[l.compound] ?? est.s ?? 1, a0 = est.offR[c.num], a = a0 == null ? y - sc * d : a0 + AI.lapOffGain * (y - sc * d - a0);
+  est.offR[c.num] = +a.toFixed(3);
+  if (a0 == null) return;   // (the first lap only sets the car's level)
+  est.sdy[l.compound] = (est.sdy[l.compound] || 0) + d * (y - a); est.sdd[l.compound] = (est.sdd[l.compound] || 0) + d * d;
+  const lam = AI.priorLaps * 4;
+  est.sc[l.compound] = +Math.min(2.5, Math.max(0.2, (lam + est.sdy[l.compound]) / (lam + est.sdd[l.compound]))).toFixed(4);
+  let sy = 0, sd = 0; for (const k in est.sdy) { sy += est.sdy[k]; sd += est.sdd[k]; } est.s = +Math.min(2.5, Math.max(0.2, (lam + sy) / (lam + sd))).toFixed(4);
+}
+
 // the lap just finished: lap-time offset (clean laps), wear factor (own wear reading), falloff, passing difficulty
 function learnLap(race, team, car) {
   const S = race.state, TS = S.ai.teams[team], cs = TS.cars[car.num], est = TS.est, M = teamModel(race, team);
@@ -133,6 +171,7 @@ function learnLap(race, team, car) {
   const l = car.laps[car.laps.length - 1]; if (!l) return;
   const traffic = car.acct.traffic - cs.trafficAt; cs.trafficAt = car.acct.traffic;
   const dirty = cs.dirty; cs.dirty = false;
+  if (cs.predLap === car.lap && !dirty && !l.pit) { est.trR = +((est.trR || 0) + Math.max(0, traffic)).toFixed(3); est.trP = +((est.trP || 0) + cs.predHold).toFixed(3); }
   const age = Math.max(0, car.tyre.laps - 1), mode = car.mode.pace;
   if (!l.pit && l.n > 1 && !dirty && traffic < 0.3 && car.tyre.laps >= 2 && l.compound === car.tyre.name) {
     // y: the lap less the model's age-0 lap (fuel included); d: the model's degradation at this age → y ≈ off + s·d
@@ -140,8 +179,6 @@ function learnLap(race, team, car) {
     const off = est.off[car.num], res = y - (est.s ?? 1) * d - (off ?? 0);
     if (Number.isFinite(y) && Math.abs(y - d) < 15) {
       const a = off == null ? y - (est.s ?? 1) * d : off + AI.lapOffGain * res; est.off[car.num] = +a.toFixed(3);
-      est.Sdy = (est.Sdy || 0) + d * (y - a); est.Sdd = (est.Sdd || 0) + d * d;
-      const lam = AI.priorLaps * 4; est.s = +Math.min(2.5, Math.max(0.2, (lam + est.Sdy) / (lam + est.Sdd))).toFixed(4);
       cs.falloff = off != null && res > AI.falloff ? cs.falloff + 1 : 0;
       if (cs.falloff >= 2) { queue(race, team, { kind: "falloff:" + car.num }); cs.falloff = 0; }
     }
@@ -192,23 +229,40 @@ function decide(race, team, car, why) {
     // weather: box now for a wet tyre / back to slicks (the reactive rule decides later laps in the scenarios)
     if (view.water > 0.05 || view.rain > 0.1 || view.forecast.blocks.slice(0, 3).some((b) => b.pRain > 0.3))
       for (const w of [...WETS, ...M.av.dry]) if (w !== car.tyre.name && M.vs[w] && st.total - st.lap > 1) cands.push({ stints: [{ compound: car.tyre.name, laps: 1, mode: car.mode.pace }, { compound: w, laps: st.total - st.lap - 1, mode: "balanced" }], stops: 1, tag: "weather" });
-    const scns = scenarios(M, est, view, `${car.num}:${S.t}`);
+    const scns = scenarios(M, est, view, `${car.num}:${car.pit.stops}`);   // (the same draws for the whole stint: plans compared on common scenarios don't flip on sampling noise)
     let ev = evaluate(M, est, st, cands, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap });
     // traffic over the next laps for each candidate's next stop, and the teammate's box (a queue when both come in together)
     const mate = S.cars.find((o) => o.teamKey === team && o.num !== car.num && o.status === "run");
     const mateStop = mate?.plan?.stints?.find((x) => x.toLap > mate.lap && x !== mate.plan.stints[mate.plan.stints.length - 1])?.toLap ?? null;
     const gapMate = mate ? Math.abs(mate.dist - car.dist) / (race.cache.T.L / view.lapS) : Infinity;
-    const tctx = prepTraffic(M, est, view, car.num);
-    for (const c of ev) {
+    // before any rival has stopped their plans are a guess: the forecast averages two (they stop at their tyres' life /
+    // they run long to about half distance); after that the "life" guess with each rival's observed tyre age
+    const anyStop = view.cars.some((c) => c.team !== team && c.stops > 0);
+    const tctx = prepTraffic(M, est, view, car.num), tctx2 = anyStop ? null : prepTraffic(M, est, view, car.num, { rivals: "long" });
+    // the traffic forecast calibrated on the team's own cars: the time they really lost in traffic (own data) against what
+    // the forecast said for those laps (prior: 5 s of agreement)
+    const kHold = Math.min(AI.kHoldMax, Math.max(1 / AI.kHoldMax, (5 + (est.trR || 0)) / (5 + (est.trP || 0))));
+    const score = (c) => {
       const stops = []; { let lap = st.lap; for (let i = 0; i < c.stints.length - 1; i++) { lap += c.stints[i].laps; stops.push({ lap, compound: c.stints[i + 1].compound }); } }
-      const stop = stops[0]?.lap ?? null;
-      c.hold = trafficHold(tctx, stops);
-      c.queue = stop != null && stop === mateStop && gapMate < PIT.workBase.v + AI.queueMargin + 2 ? Math.max(0, PIT.workBase.v + AI.queueMargin - gapMate * 0.5) : 0;
+      const o = {}, o2 = {}; let h = trafficHold(tctx, stops, o), h1 = o.first ?? 0;
+      if (tctx2) { h = (h + trafficHold(tctx2, stops, o2)) / 2; h1 = (h1 + (o2.first ?? 0)) / 2; }
+      c.hold = h * kHold; c.hold1 = h1 * kHold;
+      // the second car into the box waits for the first one's stop (the team pays it whichever car it is)
+      c.queue = stops.length && stops[0].lap === mateStop && gapMate < PIT.workBase.v + AI.queueMargin ? PIT.workBase.v + AI.queueMargin - gapMate : 0;
       c.score = c.mean + TS.tend.risk * c.sdRel + c.hold + c.queue;
+      return c;
+    };
+    ev.forEach(score);
+    // a clash with the teammate: the same plan one lap either side, scored the same way
+    ev.sort((a, b) => a.score - b.score);
+    if (ev[0].queue > 0 && ev[0].stints.length > 1) {
+      const sh = [-1, 1].map((d) => { const x = ev[0].stints.map((y) => ({ ...y })); x[0].laps += d; x[1].laps -= d; return { stints: x, stops: ev[0].stops, tag: "shift" }; }).filter((c) => c.stints[0].laps >= 1 && c.stints[1].laps >= 1);
+      ev.push(...evaluate(M, est, st, sh, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap }).map(score));
     }
     ev.sort((a, b) => a.score - b.score);
     const best = ev[0], now = cur ? ev.find((c) => c.tag === "current") : null;
     const change = best && (!now || (best.tag !== "current" && best.score < now.score - TS.tend.hyst));
+    const run = change ? best : now; if (run) { cs.predHold = +(run.hold1 / kHold).toFixed(3); cs.predLap = car.lap + 1; }
     if (change) {
       const plan = toPlan(st, best);
       order(race, team, car, "plan", { stints: plan });
