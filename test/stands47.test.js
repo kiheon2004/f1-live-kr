@@ -60,11 +60,12 @@ test("stand check: two neighbours over the same stretch, a stand off the walkway
 // the real input (Madrid 2026, 5 min before the end – Map3D.standCheck(true, true), run/stands/stands_madrid2.log): the
 // run's 29 garages in two blocks 116 m apart, each garage's lane section (u, wall face, fast lane's centre), the stands
 const madrid = () => require("./fixtures/stands47_madrid26.json");
-// where a car in the fast lane is drawn (map3d.js pitModelFor's at + pitstate.js laneOffsetOf, inside the run)
-async function fastLaneAt(slots, u) {
-  const { laneStationAt, CREW_ROOM } = await import("../src/renderer/pitlane.js");
-  const { i, t } = laneStationAt(slots.map((s) => s[0]), u), a = slots[i], b = slots[Math.min(slots.length - 1, i + 1)];
-  return { wall: a[1] + (b[1] - a[1]) * t, carEdge: a[2] + (b[2] - a[2]) * t + CREW_ROOM.carHalf };
+// where a car in the fast lane is drawn (map3d.js pitModelFor's at = pitlane.js laneSectionAt, + pitstate.js
+// laneOffsetOf, inside the run): the facility's wall face at u where known (laneFace), else the sections either side
+async function fastLaneAt(slots, u, laneFace = null) {
+  const { laneSectionAt, crossSection, CREW_ROOM } = await import("../src/renderer/pitlane.js");
+  const st = slots.map(([uc, wall]) => ({ cs: crossSection({ wall }), floor: 0, s: { uc } })), c = laneSectionAt(st, slots.map((x) => x[0]), u, laneFace == null ? null : () => laneFace);
+  return { wall: c.wall, carEdge: c.fastC + CREW_ROOM.carHalf };
 }
 
 test("pit lane: a place along the run between the garages either side by their centres – a gap in the run (Madrid 2026) doesn't shift the cars onto a far garage's section", async () => {
@@ -78,21 +79,20 @@ test("pit lane: a place along the run between the garages either side by their c
   // Madrid 2026: every place along every stand – the fast lane's cars short of the lane's face and of the stand
   const M = madrid(); let worst = Infinity;
   for (const s of M.stands) for (const x of s.across) {
-    const f = await fastLaneAt(M.slots, x.u);
+    const f = await fastLaneAt(M.slots, x.u, x.laneFace), g = await fastLaneAt(M.slots, x.u);
     // (the lane's sections are a garage apart, the facility's wall every 3 m: at the run's end, where the wall kinks,
     // they differ by up to 0.5 m – the old count put Haas on a section 6.6 m off)
-    assert.ok(Math.abs(f.wall - x.laneFace) < 1, `${s.team} u ${x.u}: the lane's section ${f.wall.toFixed(2)} m, the facility's wall face ${x.laneFace}`);
+    assert.ok(Math.abs(g.wall - x.laneFace) < 1, `${s.team} u ${x.u}: the lane's section ${f.wall.toFixed(2)} m, the facility's wall face ${x.laneFace}`);
     worst = Math.min(worst, x.standLane - f.carEdge);
   }
-  // (0.85 m along the straight – the fast lane's centre 1.75 m in from the wall face, the deck 0.1 m over it; least at
-  // Cadillac's end where the wall kinks between two lane sections: ~0.1 m)
-  assert.ok(worst > 0, `the fast lane's cars ${(-worst).toFixed(2)} m into a stand`);
+  // (0.65 m: the fast lane's centre 1.75 m in from the wall face, a car 1 m to its side, the deck 0.1 m over the face)
+  assert.ok(worst > 0.5, `the fast lane's cars ${(-worst).toFixed(2)} m into a stand`);
 });
 
 test("stand check on the real input (Madrid 2026): neighbours apart, in box order, on the walkway, out of the lane and the cars' way; one stand moved (Cadillac, at the kink)", async () => {
   const { checkStands } = await import("../src/renderer/standcheck.js");
   const M = madrid(), stands = [];
-  for (const s of M.stands) { const across = []; for (const x of s.across) across.push({ ...x, carEdge: (await fastLaneAt(M.slots, x.u)).carEdge }); stands.push({ ...s, across }); }
+  for (const s of M.stands) { const across = []; for (const x of s.across) across.push({ ...x, carEdge: (await fastLaneAt(M.slots, x.u, x.laneFace)).carEdge }); stands.push({ ...s, across }); }
   // (the railing apart – its own test)
   const v = checkStands({ ...M, rail: null, stands });
   assert.ok(v.ok, v.problems.join("; "));
@@ -135,4 +135,21 @@ test("the walkway's railing opened in front of a stand – not metres beyond it 
   }
   G.openRail([]);
   assert.deepStrictEqual(railOpen(G, rail), []);
+});
+
+test("pit lane: the fast lane's wall side from the facility's own wall face at u – not sections a garage apart interpolated across the run's end (Sakhir 2025: the cars 1.7 m into Kick Sauber's stand)", async () => {
+  const { laneSectionAt, crossSection, CREW_ROOM } = await import("../src/renderer/pitlane.js");
+  const S = require("./fixtures/stands47_sakhir25.json"), st = S.slots.map(([u, wall]) => ({ cs: crossSection({ wall }), floor: 0, s: { uc: u } })), us = S.slots.map((x) => x[0]);
+  // (the facility's wall face where it was measured: along the stand)
+  const xs = S.stand.across, wallFace = (u) => { let i = 0; while (i + 2 < xs.length && xs[i + 1].u < u) i++; const f = Math.max(0, Math.min(1, (u - xs[i].u) / (xs[i + 1].u - xs[i].u))); return xs[i].laneFace + (xs[i + 1].laneFace - xs[i].laneFace) * f; };
+  // (what v0.46 drew: up to 1.7 m into the stand – in the fixture)
+  assert.ok(Math.min(...xs.map((x) => x.standLane - x.carEdgeV046)) < -1.5);
+  for (const x of xs) {
+    const c = laneSectionAt(st, us, x.u, wallFace), edge = c.fastC + CREW_ROOM.carHalf;
+    assert.ok(edge < x.standLane - 0.5, `u ${x.u}: the fast lane's cars' wall side ${edge.toFixed(2)} m out, the stand's lane side ${x.standLane}`);
+    assert.ok(Math.abs(c.wall - x.laneFace) < 1e-6);
+  }
+  // without the facility's wall (none known): the sections, as before
+  const c = laneSectionAt(st, us, us[3] + 1);
+  assert.ok(Math.abs(c.wall - (S.slots[3][1] + (S.slots[4][1] - S.slots[3][1]) * (1 / (us[4] - us[3])))) < 1e-9);
 });

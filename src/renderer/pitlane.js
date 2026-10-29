@@ -203,3 +203,17 @@ export function laneStationAt(us, u) {
   let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (us[m] <= u) lo = m; else hi = m; }
   return { i: lo, t: (u - us[lo]) / (us[lo + 1] - us[lo] || 1) };
 }
+
+// The pit lane across at u (map3d.js pitModelFor: where the cars drive, where a box is painted): the sections either side
+// (st: [{ cs: crossSection, floor, s: the garage }], us their centres) give the floor and the garage; the wall's face to
+// the lane – and so the fast lane and the boxes – the facility's own at u (wallFace(u): its wall every 3 m), where it has
+// one. The sections, a garage apart, interpolated across a step in the garages' fronts or a kink in the wall at the run's
+// end, had the wall up to 3 m further out than it is over half a garage – Sakhir 2025: the fast lane's cars drawn 1.7 m
+// into Kick Sauber's stand and the wall behind it (v0.47, run/stands).
+export function laneSectionAt(st, us, u, wallFace = null) {
+  const { i, t } = laneStationAt(us, u), a = st[Math.max(0, i)], b = st[Math.min(st.length - 1, Math.max(0, i) + 1)];
+  const floor = a.floor + (b.floor - a.floor) * t, slot = t < 0.5 ? a.s : b.s, w = wallFace ? wallFace(u) : null;
+  if (w > 0) { const cs = crossSection({ wall: w }); return { ok: cs.ok, fastC: cs.fastC, boxC: cs.boxC, inner: cs.inner, wall: cs.wall, floor, slot }; }
+  const L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
+  return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor, slot };
+}

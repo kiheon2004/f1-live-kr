@@ -17,7 +17,7 @@ import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
-import { LANES, laneCells, crossSection, laneStationAt } from "./pitlane.js";
+import { LANES, laneCells, crossSection, laneSectionAt } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
@@ -291,13 +291,10 @@ function pitModelFor(G) {
     const wall = G.wallFace ? G.wallFace(s.uc) : null;
     return { s, cs: crossSection({ wall, edge }), edge, floor: s.floor };
   });
-  // (between the garages either side of u by their centres – laneStationAt: a run's garages can have a gap, Madrid 2026)
-  const us = st.map((x) => x.s.uc);
-  const at = (u) => {
-    const { i, t } = laneStationAt(us, u);
-    const a = st[Math.max(0, i)], b = st[Math.min(st.length - 1, Math.max(0, i) + 1)], L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
-    return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor: a.floor + (b.floor - a.floor) * t, slot: t < 0.5 ? a.s : b.s };
-  };
+  // (between the garages either side of u by their centres – a run's garages can have a gap, Madrid 2026 –, the wall's
+  // face the facility's own at u, within the run: laneSectionAt)
+  const us = st.map((x) => x.s.uc), wf = G.wallFace ? (u) => G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, u))) : null;
+  const at = (u) => laneSectionAt(st, us, u, wf);
   m = { G, st, at, ok: st.filter((x) => x.cs.ok).length, wallFrom: [...new Set(st.map((x) => x.cs.wallFrom))] };
   pitModels.set(G, m);
   return m;
