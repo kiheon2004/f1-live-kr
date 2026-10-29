@@ -25,6 +25,7 @@
 // SC, switch tyres when the other tyre is clearly faster on the water there) → mean, σ, p10/p90 of the race time.
 // Traffic (lap-level forecast of the field from public timing) adds the time a candidate would spend held behind cars –
 // undercut/overcut come out of fresh-tyre pace, pit loss and that traffic, not from a bonus.
+import { availableCompounds } from "./compounds.js";
 import { computeProfile, makeProfile } from "./profile.js";
 import { windowFactor, wearFactor, waterFactor, fitTemp } from "./tyre.js";
 import { createEnergy, ersCap } from "./energy.js";
@@ -57,13 +58,11 @@ const Phi = (z) => { const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989423 
 const flagOf = (race) => race.state.control?.flag || "green";   // (no control module: green)
 const ownCars = (race, team) => race.state.cars.filter((c) => c.teamKey === team);
 
-// the dry compounds this event offers (the Pirelli nomination when the research data has it – est false; else the
-// compounds the scenario lists, marked as such), plus the two wet tyres
+// the compounds this event offers – compounds.js, the same answer the engine and the screens use (the Pirelli nomination;
+// else S/M/H with an assumed C-mapping, est) plus the two wet tyres; never the compounds the real race happened to use
 export function available(race) {
-  const C = race.cache, sc = race.scenario;
-  if (C.alloc && !C.alloc.est) return { dry: DRY.slice(), wet: WETS.slice(), source: "Pirelli nomination (research data)" };
-  const seen = (sc.tyres?.compoundsSeen || []).filter((c) => DRY.includes(c));
-  return { dry: seen.length >= 2 ? DRY.filter((c) => seen.includes(c)) : DRY.slice(), wet: WETS.slice(), source: seen.length >= 2 ? "scenario compound list (est)" : "default S/M/H (est)" };
+  const A = availableCompounds(race.scenario);
+  return { dry: A.dry.slice(), wet: A.wet.slice(), source: A.source, est: A.est };
 }
 
 // the season's tyre rule as the estimator applies it: { minDry, minSets, exemptWet, text }
