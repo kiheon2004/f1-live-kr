@@ -470,11 +470,21 @@ export function preRaceStrategy(race, team, { top = 4, start = {} } = {}) {
   const view = publicView(race, team); view.lapS = ltOfMu(M, 0.95 * M.muTrack * M.pace);
   const ents = new Map(sc.entries.map((e) => [String(e.num), e]));
   const scns = scenarios(M, est, view, "pre");
-  const cars = M.nums.map((num) => {
+  const firstStop = [];
+  const cars = M.nums.map((num, i) => {
     const st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0 };
-    const cands = evaluate(M, est, st, planCandidates(M, est, st, { top: 10 }).filter((c) => !start[num] || c.stints[0].compound === start[num]), scns);
-    const risk = 0; cands.sort((a, b) => a.mean + risk * a.sd - (b.mean + risk * b.sd));
-    const best = cands[0];
+    let cands = evaluate(M, est, st, planCandidates(M, est, st, { top: 10 }).filter((c) => !start[num] || c.stints[0].compound === start[num]), scns);
+    // the second car: the same first in-lap as its teammate costs it a queue behind the teammate's stop (cars close on
+    // the grid run close early on) – the same plan a lap either side is offered and scored with that
+    const q = PIT.workBase.v + AI.queueMargin, clash = (c) => (i > 0 && c.stints.length > 1 && c.stints[0].laps === firstStop[0] ? q : 0);
+    cands.forEach((c) => { c.queue = clash(c); });
+    cands.sort((a, b) => a.mean + a.queue - (b.mean + b.queue));
+    if (cands[0]?.queue > 0) {
+      const b0 = cands[0], sh = [-1, 1].map((d) => { const x = b0.stints.map((y) => ({ ...y })); x[0].laps += d; x[1].laps -= d; return { stints: x, stops: b0.stops, window: b0.window }; }).filter((c) => c.stints[0].laps >= 1 && c.stints[1].laps >= 1);
+      for (const c of evaluate(M, est, st, sh, scns)) { c.queue = 0; cands.push(c); }
+      cands.sort((a, b) => a.mean + a.queue - (b.mean + b.queue));
+    }
+    const best = cands[0]; if (best) firstStop[i] = best.stints[0].laps;
     return { num, tla: ents.get(String(num))?.tla, grid: S.cars.find((c) => c.num === num)?.grid ?? null,
       best: best && describe(best, st, best.mean), alternatives: best ? cands.slice(1, top).map((c) => describe(c, st, best.mean)) : [] };
   });

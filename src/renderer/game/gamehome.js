@@ -38,9 +38,11 @@ async function loadEngine() {
   G.engineErr = "checking";
   try {
     const m = await import("../../game/engine/engine.js");
-    if (["createRace", "step", "snapshot", "command", "events", "results"].every((k) => typeof m[k] === "function")) { G.engine = m; G.engineErr = null; }
-    // the strategy estimator (pre-race screen) – optional: without it the fields stay greyed
-    try { G.strat = await import("../../game/engine/strategy.js"); } catch { G.strat = null; }
+    if (["createRace", "step", "snapshot", "command", "events", "results"].every((k) => typeof m[k] === "function")) {
+      G.engine = m; G.engineErr = null;
+      // the strategy estimator (pre-race screen) – optional: without it the fields stay greyed
+      try { G.strat = await import("../../game/engine/strategy.js"); } catch { G.strat = null; }
+    }
     else G.engineErr = "engine.js에 createRace / step / snapshot / command / events / results가 아직 없어요";
   } catch { G.engineErr = "엔진 연결 전"; }
   paint();
