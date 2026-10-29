@@ -59,6 +59,26 @@ src/renderer/game/
     adapter3d.js    엔진 스냅샷 → map3d 게임 모드 입력(명시적 경계, §13)
 ```
 
+### 1.1 엔진 상태 형태 (계약)
+
+경기 상태 `race.state`는 JSON으로 저장 가능한 평범한 객체다(파생 캐시 — 트랙 배열, 포락선 — 는 `race.cache`에 두고
+복원 때 다시 만든다).
+
+```js
+state = { v: STATE_VERSION, t /* ms */, step, seed, scenarioId, rulesSeason, totalLaps, finished,
+  cars: [car], order: [num…] /* 현재 순위 */, control: {...control.js}, surface: {...weather.js},
+  boxes: {...pit.js}, commands: {...commands.js}, ai: { [teamKey]: {...} }, log: [event], results: null }
+car = { num, teamKey, team, tla, driverId, grid /* 출발 슬롯 1.. 또는 null */, pitStart,
+  status: "grid"|"run"|"pit"|"fin"|"dnf", out: null | { cause, t, lap },
+  where: "lap"|"pit", s, d, v, aLong, aLat, steer, wheelDist,
+  lap /* 완료 랩 */, dist /* 출발선 기준 경주 거리 m(그리드는 음수) */, lapT0, laps: [{ n, t, sectors, compound, pit, flag }],
+  tyre: {...tyre.js}, energy: {...energy.js}, driver: {...driver.js}, mode: { pace, energy },
+  plan: { stints: [{ compound, toLap }] }, pit: {...pit.js}, traffic: {...traffic.js},
+  pen: { pendingS /* 피트에서 서비스할 시간 */, finalS /* 결과에 더할 시간 */, serve: [{ kind, given }] },
+  acct: { traffic, pit, tyre, energy, penalty, other } /* 초, §12 */ }
+```
+순위: `status` 완주/진행 차량은 `dist` 내림차순(같은 랩 내 위치), 피트 차량은 `pit.pitToLap(u)`로 환산. 리타이어는 뒤.
+
 ## 2. 시간
 
 - **세 시계.** 벽시계(사용자 시간, 화면 쪽에서만 `performance.now()`), 시뮬레이션 시각 `t`(정수 ms, 엔진 상태),
@@ -100,6 +120,22 @@ src/renderer/game/
   2026 직선 모드 구간(라이브 aero.js 공식 목록 재사용 + 추정), 섹터 경계, SC 라인.
 - **추월 공간**: 표본별 `pass` 지표 = (폭 − 2 × 차폭 − 여유) ≥ 0 이고, 앞선 직선 길이와 뒤 제동 구간이 있는 곳.
   추월 판단은 이 지표와 실제 속도 차로 한다(§8).
+
+### 4.1 track.js 공개 인터페이스 (계약)
+
+```js
+const T = loadTrack(scenario.track)
+T.L            // 랩 길이 m (출발선 기준), T.n 표본 수, T.ds 표본 간격 m
+T.s, T.x, T.y, T.z, T.hdg, T.kappa, T.grade, T.wL, T.wR, T.line   // Float64Array(n)
+T.zone         // Uint32Array(n) 비트: ZONE.BRAKE, ZONE.DRS, ZONE.STRAIGHT_MODE, ZONE.PIT_ENTRY, ZONE.PIT_EXIT, ZONE.COVER, ZONE.SECTOR1/2/3
+T.wrap(s)      // [0, L)
+T.idx(s)       // 랩 s의 표본 번호(내림, 감쌈)
+T.at(arr, s)   // 배열 arr를 s에서 선형 보간
+T.ahead(a, b)  // a에서 b까지 앞쪽 거리(감쌈, 0..L)
+T.zones        // { drs: [{detect, start, end}], straight: [{start, end}], sectors: [s1end, s2end], cover: [[a, b]] }
+T.pit          // { L, u (경로 거리 배열), x, y, z, hdg, sIn, sOut, limStart, limEnd, speedLimit (m/s), boxes: { [teamKey]: u },
+               //   lapToPit(s) → u | null (분기 구간에서만), pitToLap(u) → 근사 랩 s (화면·간격 계산용) }
+```
 
 ## 5. 차량·속도 (profile.js, car.js)
 
@@ -208,6 +244,27 @@ SC/VSC는 속도 비율이 아니라: VSC는 차량별 델타 시간(최소 구�
 - 서킷: 게임 시나리오의 원본 랩 형상(같은 세션 위치 자료)으로 라이브와 같은 `buildWorld`를 쓰고, 엔진 `s` → 월드
   `s` 변환은 출발선 기준 비율(두 랩 라인 길이 차 보정).
 - 게임 종료(`detach`) 후 라이브 모드는 원래대로(회귀 테스트·실제 화면).
+
+### 13.1 스냅샷 계약 (엔진 → 화면)
+
+`snapshot(race)`는 렌더 프레임마다 호출해도 되는 가벼운 순수 객체를 돌려준다(엔진 상태를 바꾸지 않음).
+
+```js
+{ t, scenarioId, totalLaps, leaderLap, flag: "grid"|"green"|"yellow"|"vsc"|"sc"|"red"|"chequered",
+  sc: { s, d, v } | null,                     // 세이프티카 개체(트랙 위)
+  weather: { rain, airT, trackT, wind, water, est },   // 진실의 현재값(화면 = 엔진), water: 평균 수막 mm
+  cars: [{ num, teamKey, team, tla, color, status: "grid"|"run"|"pit"|"fin"|"dnf", pos, lap,
+           where: "lap"|"pit", s, u, d, v, a, steer,          // s: 랩 m(where lap), u: 피트 경로 m(where pit), d: 횡 m(+왼쪽)
+           wheelDist,                                        // 누적 주행 m(바퀴 회전 = 거리/반지름)
+           aero: { open, front }, drs, overtake,             // 게임 상태(실제 텔레메트리 아님)
+           tyre: { compound, wear, Ts, Tc, age }, energy: { soc, mode, deployKw }, fuel,
+           pit: { phase, u, workT0, workT1, err, compound },     // compound: 이 정차에서 끼울 타이어(작업 중 크루가 들고 있는 것)
+           gap: { leader, ahead } }] }                       // 초(랩 다운이면 leader는 null, lapsDown 별도)
+```
+`steer`: 앞바퀴 조향각(rad), +는 왼쪽. 추가 API: `events(race, sinceT)` → 그 이후 사건(로그·자동 감속용),
+`results(race)` → 분류 + 차량별 시간 손실 계정(§12).
+화면은 마지막 두 스냅샷(t₀ < t₁)을 렌더 시각으로 보간한다(s는 감쌈 보간, 피트 단계·상태는 t₁ 값). 보간은 엔진에
+아무것도 쓰지 않는다.
 
 ## 14. 저장 (save.js)
 

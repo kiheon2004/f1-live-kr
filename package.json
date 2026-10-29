@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/*.test.js test/game/*.test.js",
     "dist": "electron-builder --mac dir",
     "share": "electron-builder --mac zip --arm64 --x64 && electron-builder --win zip --x64",
     "vendor": "cp node_modules/three/build/three.module.js node_modules/three/build/three.core.js src/renderer/vendor/ && sed \"s#from 'three';#from './three.module.js';#\" node_modules/three/examples/jsm/controls/OrbitControls.js > src/renderer/vendor/OrbitControls.js && for f in utils/BufferGeometryUtils utils/SkeletonUtils loaders/GLTFLoader; do sed -e \"s#from 'three';#from './three.module.js';#\" -e \"s#from '../utils/#from './#\" node_modules/three/examples/jsm/$f.js > src/renderer/vendor/$(basename $f).js; done"
