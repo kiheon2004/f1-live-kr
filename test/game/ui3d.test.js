@@ -80,6 +80,9 @@ test("adapter interpolation: between two snapshots by render time, s wrapped ove
   assert.strictEqual(JSON.stringify([a, b]), frozen);
   assert.strictEqual(A.ctx.src, null, "the game context is no live / replay source");
   assert.strictEqual(A.ctx.t, 1125);
+  // the road drawn as wide as the engine's (wL / wR 6 m: points from 5 m right to 5 m left of the lap line, decimetres)
+  const pts = A.ctx.carPoints(), C = sc.track.columns, far = Math.max(...pts.slice(0, 11).map((p) => Math.hypot(p[0] / 10 - C.x[0], p[1] / 10 - C.y[0])));
+  assert.strictEqual(pts.length, sc.track.n * 11); assert.ok(Math.abs(far - 5) < 1e-6, `edge point ${far} m out`);
 });
 
 // a fake wall clock the runner reads (ms); steps may "cost" wall time

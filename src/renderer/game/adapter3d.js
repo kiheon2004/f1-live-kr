@@ -29,7 +29,7 @@ export function createGameAdapter({ scenario, source, label = "게임" }) {
   const corners = (tr.corners || []).map((k) => { const i = Math.round(wrapTo(k.s, tr.L) / tr.ds) % tr.n; return { n: k.n, x: C.x[i] * 10, y: C.y[i] * 10 }; });
   const entries = new Map((scenario.entries || []).map((e) => [String(e.num), e]));
   const startUtc = Date.parse(m.startUtc || "") || null;
-  let focus = null, renderT = 0, map = null;
+  let focus = null, renderT = 0, map = null, widthPts = null;
 
   const A = {
     label, scenario, source, entries,
@@ -49,7 +49,11 @@ export function createGameAdapter({ scenario, source, label = "게임" }) {
       utcNow: () => (startUtc != null ? startUtc + renderT : null),
       sourceKey: () => `game:${m.id || "?"}`,
       trackPoints: () => lapPts,
-      carPoints: () => [],
+      // the road's width as the ENGINE drives it (track.columns wL / wR: m left / right of the lap line) – map3d's measureWidth
+      // takes the tarmac's edges from a cloud of points across the road; here those points span the engine's drivable width
+      // (1 m in from each edge: measureWidth adds a metre for half a car), so the road drawn is the road raced on. Not car
+      // positions – the scenario has none.
+      carPoints: () => widthPts || (widthPts = edgePoints(tr)),
       gridSpots: () => null,
     },
     // the drivers as the car models need them (team name and colour: the scenario's entry list, that race's own)
@@ -98,6 +102,17 @@ export function createGameAdapter({ scenario, source, label = "게임" }) {
   return A;
 }
 
+// points across the engine's road ([x, y, z] decimetres, the feed's frame): every sample, from 1 m inside the right edge to
+// 1 m inside the left one, 1 m apart (left normal of heading h: (−sin h, cos h))
+function edgePoints(tr) {
+  const C = tr.columns, out = [];
+  if (!C.wL || !C.wR) return out;
+  for (let i = 0; i < tr.n; i++) {
+    const nx = -Math.sin(C.hdg[i]), ny = Math.cos(C.hdg[i]), a = -(C.wR[i] - 1), b = C.wL[i] - 1;
+    for (let o = a; o <= b + 1e-9; o += 1) out.push([(C.x[i] + nx * o) * 10, (C.y[i] + ny * o) * 10, C.z[i] * 10]);
+  }
+  return out;
+}
 // knots every `step` m of engine s: the engine's lap point projected onto the world's line
 export function buildMapping(tr, world, F, step = 25) {
   const C = tr.columns, Le = tr.L, Lw = F.L, c = world.center, n = tr.n;
