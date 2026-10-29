@@ -80,14 +80,13 @@ test("causality: more wear → more stops; bigger pit loss → fewer stops; an S
   const race = createRace({ scenario: HUN, seed: 2 }), M = S.teamModel(race, "Mercedes"), num = M.nums[0];
   const st = { num, lap: 20, total: race.state.totalLaps, cur: { name: "MEDIUM", age: 8 }, used: ["MEDIUM"], sets: 1 };
   const best = (est, flag = "green") => S.planCandidates(M, { lane: M.lanePrior, ...est }, st, { flag, top: 1 })[0];
-  // (wear factors within the range where a fresh set lasts longer than a few laps: with the model's worn-tyre grip floor a
-  // tyre that is finished in 3–4 laps whatever is done makes extra stops pointless – reported, not hidden)
+  // (wear factors around the retuned tyres (3bc10fc: a medium lasts ~25–30 laps at Hungary): ×0.7 one stop, ×2 two, ×4 three+)
   const stopsBy = (g) => best({ g }).stops;
-  assert.ok(stopsBy(0.3) <= stopsBy(0.7) && stopsBy(0.7) <= stopsBy(1.3) && stopsBy(0.3) < stopsBy(1.3), `stops by wear ${stopsBy(0.3)} ${stopsBy(0.7)} ${stopsBy(1.3)}`);
-  const stopsLane = (dl) => best({ lane: M.lanePrior + dl }).stops;
-  assert.ok(stopsLane(-8) >= stopsLane(0) && stopsLane(0) >= stopsLane(25) && stopsLane(-8) > stopsLane(25), `stops by lane ${stopsLane(-8)} ${stopsLane(0)} ${stopsLane(25)}`);
+  assert.ok(stopsBy(0.7) <= stopsBy(2) && stopsBy(2) <= stopsBy(4) && stopsBy(0.7) < stopsBy(4), `stops by wear ${stopsBy(0.7)} ${stopsBy(2)} ${stopsBy(4)}`);
+  const stopsLane = (dl) => best({ lane: M.lanePrior + dl, g: 2 }).stops;   // (at a wear where two stops are an option)
+  assert.ok(stopsLane(-15) >= stopsLane(0) && stopsLane(0) >= stopsLane(40) && stopsLane(-15) > stopsLane(40), `stops by lane ${stopsLane(-15)} ${stopsLane(0)} ${stopsLane(40)}`);
   // the next stop's lap: under an SC "this lap" (n0 = 1) gets the SC loss; the best plan moves toward it
-  const g = best({}), s = best({}, "sc");
+  const g = best({ g: 3 }), s = best({ g: 3 }, "sc");   // (several stops ahead, the next ~10 laps away: it can move to the SC lap)
   assert.ok(s.stints[0].laps <= g.stints[0].laps);
   assert.ok(s.cost < g.cost, "the same race is cheaper with an SC stop available");
 });

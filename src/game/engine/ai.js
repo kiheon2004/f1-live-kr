@@ -15,7 +15,7 @@
 // State: race.state.ai (plain JSON, saved and restored with the race). The team models (strategy.js teamModel) are
 // derived data in race.cache, rebuilt identically from the scenario + seed on load.
 import * as CMD from "./commands.js";
-import { teamModel, publicView, planCandidates, evaluate, scenarios, crossoverGains, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, lastClean, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
+import { teamModel, publicView, planCandidates, evaluate, scenarios, crossoverGains, freshCosts, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, lastClean, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
 import { streamFor } from "./rng.js";
 import { AI, TEAM_TENDENCY } from "../data/params/ai.js";
 import { PIT } from "../data/params/pit.js";
@@ -231,13 +231,28 @@ function decide(race, team, car, why) {
     let best = null, bg = need;
     const gains = crossoverGains(M, est, view, car.num, { name: car.tyre.name, age: car.tyre.laps, fuel: car.energy.fuel }, { K, corr, key: `${car.num}:${car.pit.stops}:w` });
     for (const c in gains) if (gains[c] > bg) { bg = gains[c]; best = c; }
+    // a stop the plan makes in the next two laps anyway: no extra stop to pay for – only the right tyre for it
+    const ns = nextStopOf(car), imminent = ns && ns.toLap - car.lap <= 2;
+    if (imminent && !best) {
+      const fc = freshCosts(M, est, view, car.num, { K, corr, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
+      let pick = ns.compound; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta) pick = c;
+      if (pick !== ns.compound && WETS.includes(pick) !== WETS.includes(ns.compound)) {
+        const stints = [{ compound: car.tyre.name, toLap: ns.toLap }, { compound: pick, toLap: S.totalLaps }];
+        order(race, team, car, "plan", { stints }); cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = ns.toLap; cs.lockLap = ns.toLap + 1;
+        TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why: why + ",plannedStopTyre", plan: `${ns.compound}→${pick}@${ns.toLap}`, water: +view.water.toFixed(3), corr });
+        return;
+      }
+    }
     if (best) {
       order(race, team, car, "plan", { stints: [{ compound: car.tyre.name, toLap: car.lap + 1 }, { compound: best, toLap: S.totalLaps }] });
-      cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = car.lap + 1;
+      cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = car.lap + 1; cs.lockLap = car.lap + 2;
       TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why: why + ",crossover", plan: `→${best}`, gain: +bg.toFixed(1), water: +view.water.toFixed(3), corr });
       return;
     }
   }
+  // (a tyre-family switch just ordered stands until its stop is made: a re-plan from an event in between – a rival's stop,
+  // a forecast update – would otherwise put the dry plan back before the order is even carried out)
+  if (cs.lockLap != null && car.lap < cs.lockLap) return;
   const full = why !== "lap" || inWindow || car.lap >= cs.nextFull || view.water > 0.02 || wetTyre || view.flag !== "green";
   if (!handsPlan && full) {
     cs.nextFull = car.lap + AI.replanEvery; S.ai.work.decisions++;
@@ -283,6 +298,12 @@ function decide(race, team, car, why) {
     const best = ev[0], now = cur ? ev.find((c) => c.tag === "current") : null;
     const change = best && (!now || (best.tag !== "current" && best.score < now.score - TS.tend.hyst));
     const run = change ? best : now; if (run) { cs.predHold = +(run.hold1 / kHold).toFixed(3); cs.predLap = car.lap + 1; }
+    if (change && corrNow && best.stints.length > 1) {
+      // wet or drying: the tyre for the plan's next stop chosen for the water expected then (the dry DP doesn't know it)
+      const fc = freshCosts(M, est, view, car.num, { K: Math.min(10, S.totalLaps - car.lap - 1), corr: corrNow, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
+      const want = best.stints[1].compound; let pick = want; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta) pick = c;
+      if (WETS.includes(pick) !== WETS.includes(want)) best.stints[1].compound = pick;
+    }
     if (change) {
       const plan = toPlan(st, best);
       order(race, team, car, "plan", { stints: plan });
@@ -333,6 +354,8 @@ function conditionCorr(race, team, M, est, view) {
   const out = {}; for (const k in by) if (by[k].length >= 2) { const a = by[k].sort((x, y) => x - y); out[k] = +a[a.length >> 1].toFixed(2); }
   return out;
 }
+
+const nextStopOf = (car) => { const p = car.plan?.stints || []; for (let i = 0; i < p.length - 1; i++) if (p[i].toLap > car.lap) return { toLap: p[i].toLap, compound: p[i + 1].compound }; return null; };
 
 // the car's present plan as a candidate from the state now (stints still to run; the current stint's in-lap ≥ next lap)
 function planAsCandidate(car, st, modes = []) {

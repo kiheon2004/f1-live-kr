@@ -34,9 +34,16 @@ export const AI_TABLE = {
   passDelta: est(0.9, "s/lap", "pace advantage a car needs to pass in the lap-level traffic forecast (start value)", "DRS-era passing needs ~0.5–1 s/lap", [0.3, 3]),
   passDeltaStreet: est(2.5, "s/lap", "the same at a street circuit", "Monaco/Singapore: nearly impossible", [1, 6]),
   passLearn: est(3, "laps", "laps of observed on-track passes after which the team trusts its own count", "learned from the public order", [3, 30]),
-  kHoldMax: est(2.5, "×", "bound on the calibration of the traffic forecast by the own cars' measured traffic loss (each way)", "the engine's traffic account is itself approximate – a bounded correction, not a free factor", [1, 6]),
+  kHoldMax: est(2.0, "×", "bound on the calibration of the traffic forecast by the own cars' measured traffic loss (each way)", "traffic.js measures the loss against a free ghost of the car (slipstream can make a lap's loss negative – counted as 0); on full races the per-team factors came out 0.3–2.5 around 1 (Hungary/Suzuka 2025): a bounded correction, not a free factor", [1, 6]),
+  holdTau: est(10, "laps", "the traffic forecast's hold k laps ahead counts × exp(−k/holdTau)", "a lap-level forecast of 20 cars' pace and stops loses accuracy fast; far-ahead holds are guesses (the retuned tyres' longer stints made 40-lap holds dominate plans)", [3, 40]),
+  minStint: est(5, "laps", "shortest fresh stint a plan may contain", "a 1–3-lap stint is never a strategy in dry running (weather switches are the crossover rule's)", [2, 10]),
   minGapS: est(0.6, "s", "how close a held car runs behind the car ahead in the lap-level forecast", "dirty air", [0.3, 1.2]),
   horizon: est(40, "laps", "laps the traffic forecast looks ahead (every stop of a candidate inside it counts)", "bounded work per decision (pace tables cached: ≈ 20 cars × 40 laps per candidate)", [5, 80]),
+  // ---- the cost of driver errors (pace modes) ----
+  limShare: est(0.5, "1", "share of a lap a car runs on its grip limit (where the error hazard applies)", "corners and braking zones; the straights are power-limited", [0.2, 0.8]),
+  errLoss: { moment: est(0.4, "s", "time a slow moment costs", "a lift for about a second", [0.1, 1.5]), wide: est(1.0, "s", "time running wide costs", "off the track for ~2 s at a capped speed", [0.3, 3]),
+    spin: est(15, "s", "time a spin costs (stopped, rejoin, cold tyres)", "", [6, 40]) },
+  dnfCost: est(600, "s", "race-time equivalent the team puts on a retirement (crash)", "losing the race; large enough that a crash risk is never worth a tenth", [120, 3000]),
   // ---- decisions ----
   mc: est(16, "scenarios", "Monte-Carlo scenarios per evaluation (forecast × wear error × SC)", "bounded work (≈ 1 ms)", [4, 64]),
   window: est(4, "laps", "a stop this many laps ahead or closer is 'in the window' (lap-by-lap timing check with traffic)", "", [2, 8]),

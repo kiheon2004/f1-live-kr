@@ -50,9 +50,11 @@ test("no hidden-state leak: other teams' tyre wear, fuel, energy and modes don't
     if (mutate) for (const c of x.state.cars) if (c.teamKey !== "Williams") { c.tyre.wear = 0.99; c.tyre.Ts = 140; c.energy.fuel = 3; c.energy.soc = 0; c.mode.pace = "attack"; c.mode.energy = "harvest"; c.plan = { stints: [{ compound: "SOFT", toLap: 12 }, { compound: "HARD", toLap: 70 }] }; }
     for (const n in x.state.ai.teams.Williams.cars) x.state.ai.teams.Williams.cars[n].lastLap--;
     x.state.ai.teams.Williams.cars[Object.keys(x.state.ai.teams.Williams.cars)[0]].nextFull = 0;
-    aiStep(x); return x.state.commands.queue.map((c) => ({ ...c, id: "" }));
+    const w0 = x.state.ai.work.decisions; aiStep(x);
+    // what the decision produced: its orders (if any – a plan that still fits needs none), the team's estimates and log
+    return { full: x.state.ai.work.decisions - w0, orders: x.state.commands.queue.map((c) => ({ ...c, id: "" })), team: x.state.ai.teams.Williams };
   };
-  const a = decideWith(false); assert.ok(a.length > 0, "a decision was made");
+  const a = decideWith(false); assert.ok(a.full > 0, "a full re-plan was made");
   assert.deepStrictEqual(decideWith(true), a);
 });
 
@@ -66,7 +68,11 @@ test("player's team: the AI gives defaults, then hands a car off for the kinds o
   const mine = r.state.commands.log.filter((c) => c.car === "81" && c.by.startsWith("ai:") && c.tEff > 100);
   assert.ok(!mine.some((c) => ["plan", "pit", "pitCancel", "pace"].includes(c.type)), "no AI strategy/pace orders for a car the player ordered");
   assert.strictEqual(r.state.cars.find((c) => c.num === "81").plan.by, "player");
-  assert.ok(r.state.commands.log.some((c) => c.car === "4" && c.by === "ai:McLaren"), "the teammate the player didn't touch is still run by the AI");
+  // the teammate the player didn't touch is still run by the AI: its plan is the AI's and the AI keeps deciding for it
+  // (orders only when something needs changing – with tyres that last, ten laps may need none)
+  const c4 = r.state.ai.teams.McLaren.cars["4"], car4 = r.state.cars.find((c) => c.num === "4");
+  assert.match(car4.plan.by, /^ai:McLaren/); assert.strictEqual(c4.lastLap, car4.lap, "decided at its last lap");
+  assert.ok(c4.nextFull > 0, "full re-plans for it");
 });
 
 test("tendencies: drawn per race and team inside the documented ranges – different seeds, different weekends", async () => {
@@ -91,4 +97,28 @@ test("SC deployed: the AI re-plans after its reaction delay and boxes cars whose
   assert.ok(firstT >= 1000, "not before the reaction delay");
   const boxes = r.state.commands.log.filter((c) => c.tEff > t0 && c.by.startsWith("ai:") && c.type === "pit");
   assert.ok(evs.length > 0 || boxes.length > 0, "the SC led to re-plans");
+});
+
+test("rain at Silverstone 2025, the player's cars on pre-race plans: a tyre-family switch the AI orders is the tyre fitted at the next stop (an event re-plan in between doesn't put the dry plan back) – for the AI's own cars and the player's", async () => {
+  const { createRace, step } = await E(), S = await import("../../src/game/engine/strategy.js");
+  const SIL = JSON.parse(fs.readFileSync(path.join(__dirname, "../fixtures/game/2025-07-06_British_Grand_Prix_2025-07-06_Race.scenario.json"), "utf8"));
+  const P = S.preRaceStrategy(createRace({ scenario: SIL, seed: 1, userTeam: "McLaren" }), "McLaren");
+  const plans = Object.fromEntries(P.cars.map((c) => [c.num, { stints: c.best.plan, by: "player" }]));   // (as the game screen passes them)
+  const r = createRace({ scenario: SIL, seed: 1, ai: true, userTeam: "McLaren", plans });
+  while (r.state.leaderLap < 24 && !r.state.finished) step(r);
+  let checked = 0, mclaren = 0;
+  for (const [team, T] of Object.entries(r.state.ai.teams)) for (const num of Object.keys(T.cars)) {
+    const car = r.state.cars.find((c) => c.num === num), sw = T.decisions.filter((d) => d.num === num && /crossover|plannedStopTyre/.test(d.why));
+    for (const [k, d] of sw.entries()) {
+      const target = d.plan.match(/→(\w+)/)?.[1]; if (!target) continue;
+      const pitLap = car.laps.find((l) => l.pit && l.n > d.lap)?.n;   // (d.lap = laps completed when deciding: the next in-lap is later) if (pitLap == null) continue;
+      checked++; if (team === "McLaren") mclaren++;
+      const undo = T.decisions.find((x) => x.num === num && x.t > d.t && x.lap < pitLap && !/crossover|plannedStopTyre/.test(x.why));
+      assert.ok(!undo, `${car.tla}: switch to ${target} on lap ${d.lap} re-planned over by "${undo?.why}" (${undo?.plan}) before its stop`);
+      if (sw[k + 1] && sw[k + 1].lap <= pitLap) continue;   // (a later switch decision of its own before that stop)
+      const fitted = car.laps.find((l) => l.n === pitLap + 1)?.compound; if (!fitted) continue;
+      assert.strictEqual(S.WETS.includes(fitted), S.WETS.includes(target), `${car.tla}: switch to ${target} ordered on lap ${d.lap}, fitted ${fitted} at the stop on lap ${pitLap}`);
+    }
+  }
+  assert.ok(checked >= 10 && mclaren >= 2, `switches checked ${checked} (McLaren ${mclaren})`);
 });

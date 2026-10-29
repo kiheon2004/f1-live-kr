@@ -32,9 +32,12 @@ function carTime(race, c) {
 function run(sc, seed, opts = {}, hook = null) {
   const t0 = process.hrtime.bigint(), race = createRace({ scenario: sc, seed, ...opts });
   if (hook?.init) hook.init(race);
-  while (!race.state.finished) { step(race); hook?.step?.(race); if (race.state.t > 4 * 3600e3) throw new Error("no finish"); }
+  // (a race that hasn't finished after 4 h of sim time is recorded as stuck – an engine matter, reported – and skipped)
+  let stuck = false;
+  while (!race.state.finished) { step(race); hook?.step?.(race); if (race.state.t > 4 * 3600e3) { stuck = true; break; } }
+  if (stuck) { console.log(`STUCK ${sc.meta.id} seed ${seed} ai ${JSON.stringify(opts.ai ?? false)} flag ${race.state.control?.flag} leaderLap ${race.state.leaderLap}`); return { ms: 0, stuck: true, cars: race.state.cars.map((c) => ({ num: c.num, team: c.teamKey, time: null, pos: null, stops: c.pit.stops, compounds: [], interLap: null })), ai: null }; }
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  const pos = new Map(race.state.results.rows.map((r) => [r.num, r.pos]));
+  const pos = new Map((race.state.results?.rows || []).map((r) => [r.num, r.pos]));
   const cars = race.state.cars.map((c) => ({ num: c.num, team: c.teamKey, time: carTime(race, c), pos: pos.get(c.num), stops: c.pit.stops,
     compounds: [...new Set(c.laps.map((l) => l.compound))], interLap: c.laps.find((l) => l.compound === "INTERMEDIATE" || l.compound === "WET")?.n ?? null }));
   return { ms, cars, ai: race.state.ai ? race.state.ai.work : null };
@@ -53,7 +56,7 @@ if (mode === "ab") {
       // the k teams of this seed (rotating, so over the seeds different teams take part)
       for (let j = 0; j < Math.min(K, teams.length); j++) {
         const team = teams[(si * K + j) % teams.length], r = run(sc, seed, { ai: { teams: [team] } });
-        for (const c of r.cars.filter((x) => x.team === team)) { const b = base.cars.find((x) => x.num === c.num); rec.ab.push({ team, num: c.num, dTime: c.time != null && b.time != null ? +(c.time - b.time).toFixed(2) : null, dPos: c.pos - b.pos, stops: c.stops, baseStops: b.stops }); }
+        for (const c of r.cars.filter((x) => x.team === team)) { const b = base.cars.find((x) => x.num === c.num); rec.ab.push({ team, num: c.num, dTime: c.time != null && b.time != null ? +(c.time - b.time).toFixed(2) : null, dPos: c.time != null && b.time != null ? c.pos - b.pos : null, stops: c.stops, baseStops: b.stops }); }
       }
       res.push(rec);
       const dAll = all.cars.map((c) => { const b = base.cars.find((x) => x.num === c.num); return c.time != null && b.time != null ? c.time - b.time : null; });
