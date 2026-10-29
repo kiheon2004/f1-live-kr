@@ -936,7 +936,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // for the pit wall among (they come before the pit building: its lane, which cuts the FINAL walls drawn below, is
   // placed from them). Every final piece is a candidate's (same 2 m grid); the lane's cut stops short of the map's pit
   // wall (pitwallcheck.js pitLaneOf: wallFace − 0.3 m), so the wall the facilities took stays drawn – no cycle.
-  const wallKeep = (l, q) => q.some(([x, z]) => trackDist(x, z) < 45), wallStats = { candidate: {}, final: {} };
+  const wallKeep = (l, q) => q.some(([x, z]) => trackDist(x, z) < 45), wallStats = { candidate: { where: [] }, final: { where: [] } };
   const wallCand = clipBarrierLines(scene.lines, gf.xz, { cut: (x, z) => corridor.on(x, z, -0.3) && "road", keep: wallKeep, stats: wallStats.candidate });
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");

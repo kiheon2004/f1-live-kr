@@ -4404,6 +4404,14 @@ window.Map3D = {
   // development (v0.47): the map's walls at both stages (mapwalls.js – the candidates barrierRay searched, the final ones
   // drawn): lines, segments, how many crossed the road / pit lane in their middle, test points cut by the road and the lane
   mapWalls() { return JSON.stringify(world?.real?.mapWalls || null); },
+  // development (v0.47): look down at the i-th recorded map wall segment that crossed the road in its middle or had a cut
+  // end (stage "final" or "candidate"), from `h` m over the track's height nearest it
+  viewMapWall(i = 0, stage = "final", h = 40, fov = 50, back = 25) {
+    const w = world?.real?.mapWalls?.[stage]?.where?.[i]; if (!w) return "none";
+    const [s] = world.grid.nearest(w[2], w[3], 6), y = s ? s.p.y : 0;
+    // (returns the camera as a Map3D.look call too: the same view in another build – before / after pictures)
+    const v = [w[2], y + h, w[3] + back, w[2], y, w[3], fov].map((x) => +x.toFixed(2)); this.look(...v); return `${JSON.stringify(w)} Map3D.look(${v.join(", ")})`;
+  },
   // development: the pit lane's per-frame cost (pitFrame: every pit car's state; the crews), average over the frames
   pitCostMs(reset = false) { const r = { avgMs: +(pitCost.ms / Math.max(1, pitCost.frames)).toFixed(3), frames: pitCost.frames }; if (reset) { pitCost.ms = 0; pitCost.frames = 0; } return JSON.stringify(r); },
   // development: look at garage k of the pit building from `back` m out in the pit lane, `h` m up (`side` m along)

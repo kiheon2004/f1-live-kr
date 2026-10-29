@@ -27,7 +27,8 @@
 // "lane"…), keep(l, q) → false leaves the line out (q: its points in scene metres), dense(x, z), step, stats (an object:
 // filled with { lines, left – lines `keep` left out, segs, crossing – segments whose two ends are kept but whose middle is
 // cut, endCut – segments with a cut end, crossingSparse / endCutSparse – of those, the ones away from `dense` (v0.46 drew
-// those as mapped: a crossing one whole, one with a cut end not at all), cut: { reason: test points cut } }). → runs [{ ...l, pts: [[x, z]…] }] in scene metres, each ≥ 2 points.
+// those as mapped: a crossing one whole, one with a cut end not at all), cut: { reason: test points cut }; where: an array – filled with up to 40 [kind, sub, x, z, length] of those
+// segments, for a look at them: Map3D.viewMapWall) }). → runs [{ ...l, pts: [[x, z]…] }] in scene metres, each ≥ 2 points.
 export function clipBarrierLines(lines, xz, { cut = () => false, keep = null, dense = null, step = 2, stats = null } = {}) {
   const out = [], st = stats || {};
   st.lines ??= 0; st.left ??= 0; st.segs ??= 0; st.crossing ??= 0; st.endCut ??= 0; st.crossingSparse ??= 0; st.endCutSparse ??= 0; st.cut ??= {};
@@ -48,7 +49,8 @@ export function clipBarrierLines(lines, xz, { cut = () => false, keep = null, de
       for (let k = 1; k <= m; k++) c.push(why(...pt(k)));
       const dn = !!dense && (dense(ax, az) || dense(bx, bz));
       st.segs++;
-      if (aCut || c[m]) { st.endCut++; if (dense && !dn) st.endCutSparse++; } else if (c.some(Boolean)) { st.crossing++; if (dense && !dn) st.crossingSparse++; }
+      const mark = (kind) => { if (Array.isArray(st.where) && st.where.length < 40) st.where.push([kind, l.sub, +((ax + bx) / 2).toFixed(1), +((az + bz) / 2).toFixed(1), +Math.hypot(bx - ax, bz - az).toFixed(1)]); };
+      if (aCut || c[m]) { st.endCut++; if (dense && !dn) { st.endCutSparse++; mark("endCut"); } } else if (c.some(Boolean)) { st.crossing++; mark(dense && !dn ? "crossingSparse" : "crossing"); if (dense && !dn) st.crossingSparse++; }
       if (!c.some(Boolean)) {
         // (nothing cut: as mapped)
         if (dn) for (let k = 1; k <= m; k++) run.push(k === m ? [bx, bz] : pt(k));
