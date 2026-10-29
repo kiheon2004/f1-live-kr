@@ -56,7 +56,7 @@ if (mode === "ab") {
       // the k teams of this seed (rotating, so over the seeds different teams take part)
       for (let j = 0; j < Math.min(K, teams.length); j++) {
         const team = teams[(si * K + j) % teams.length], r = run(sc, seed, { ai: { teams: [team] } });
-        for (const c of r.cars.filter((x) => x.team === team)) { const b = base.cars.find((x) => x.num === c.num); rec.ab.push({ team, num: c.num, dTime: c.time != null && b.time != null ? +(c.time - b.time).toFixed(2) : null, dPos: c.pos - b.pos, stops: c.stops, baseStops: b.stops }); }
+        for (const c of r.cars.filter((x) => x.team === team)) { const b = base.cars.find((x) => x.num === c.num); rec.ab.push({ team, num: c.num, dTime: c.time != null && b.time != null ? +(c.time - b.time).toFixed(2) : null, dPos: c.time != null && b.time != null ? c.pos - b.pos : null, stops: c.stops, baseStops: b.stops }); }
       }
       res.push(rec);
       const dAll = all.cars.map((c) => { const b = base.cars.find((x) => x.num === c.num); return c.time != null && b.time != null ? c.time - b.time : null; });
