@@ -826,7 +826,7 @@ function pitBuilding(ctx, p) {
   // railing is opened in front of each (openRail). (FIA Appendix O 2026 §7.9: the pit lane "separated by a pit wall and
   // signalling platform" from the straight; Autosport 2024-03-19: the stands "built along the top of the chemin de ronde
   // (wall-walk), against the fence between the pitlane and the main straight" – H.)
-  let wallAt = null, wallDbg = null, wallFace = null, wallOut = null, wallFrom = null, railU = [];
+  let wallAt = null, wallDbg = null, wallFace = null, wallOut = null, wallFrom = null, railU = [], railBase = 0;
   const occupancy = [];   // what the wall and the paddock stand on (scene x, z): trees keep off it – it isn't the building replaced
   if (p.pitWall && ctx.trackEdge && G > 0) {
     const pw = p.pitWall, W = [];
@@ -893,6 +893,11 @@ function pitBuilding(ctx, p) {
       const vS = fitLine(W.map((w) => [w.u, frontV(w.u) + vTrack * w.d]));
       const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, vS[i] - vTrack * dd); return [x, floorAt(W[i].u) + y, z]; };
       wallDbg = W.filter((_, i) => i % 8 === 0).map((w, k) => { const i = k * 8; return [Math.round(w.u), w.d, +((vS[i] - frontV(w.u)) * vTrack).toFixed(1)]; });
+      // (the walkway's railing shares its mesh with the building's balustrades – balconies, a roof terrace – laid out
+      // before it: openRail counts its pieces from here. v0.46 counted from the mesh's first quad: wherever the building
+      // has balustrades – Suzuka, Silverstone – the opening fell that many pieces along the walkway and the last ones
+      // weren't drawn at all; v0.47 run/stands)
+      railBase = F.arr("rail").pos.length / 18;
       for (let i = 0; i + 1 < W.length; i++) {
         const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
         // wall (track face, top, pit face), fence above it – none over the map's own (a mapped station's d is its wall's
@@ -907,8 +912,15 @@ function pitBuilding(ctx, p) {
         const w0 = base, w1 = base + walk;
         F.poly("walkway", [ptAt(i, w0, deckH), ptAt(i + 1, w0, deckH), ptAt(i + 1, w1, deckH), ptAt(i, w1, deckH)], null, [0, 1, 0]);
         F.poly("pitWall", [ptAt(i, w1, 0), ptAt(i + 1, w1, 0), ptAt(i + 1, w1, deckH), ptAt(i, w1, deckH)], null, io);
-        F.poly("rail", [ptAt(i, w1, deckH), ptAt(i + 1, w1, deckH), ptAt(i + 1, w1, deckH + 1.1), ptAt(i, w1, deckH + 1.1)], [[0, 0], [1, 0], [1, 1], [0, 1]], io);
-        railU.push([W[i].u, W[i + 1].u]);
+        // (in pieces of 0.5 m at most, each its share of the segment's texture: openRail leaves out whole pieces, and whole
+        // 3 m segments had left the railing open up to 3.1 m past a stand's end with nothing in front – v0.47, Madrid
+        // 2026, run/stands)
+        const nR = Math.max(1, Math.ceil((W[i + 1].u - W[i].u) / 0.5)), a0 = ptAt(i, w1, deckH), a1 = ptAt(i + 1, w1, deckH), lerp = (f, y) => [a0[0] + (a1[0] - a0[0]) * f, a0[1] + (a1[1] - a0[1]) * f + y, a0[2] + (a1[2] - a0[2]) * f];
+        for (let j = 0; j < nR; j++) {
+          const f0 = j / nR, f1 = (j + 1) / nR;
+          F.poly("rail", [lerp(f0, 0), lerp(f1, 0), lerp(f1, 1.1), lerp(f0, 1.1)], [[f0, 0], [f1, 0], [f1, 1], [f0, 1]], io);
+          railU.push([W[i].u + (W[i + 1].u - W[i].u) * f0, W[i].u + (W[i + 1].u - W[i].u) * f1]);
+        }
       }
       // the walkway's centre at u (for the teams' stands): [x, y, z], facing the pit lane – between two samples, between
       // their points (a team's box is anywhere along the wall, not only every 3 m)
@@ -951,6 +963,10 @@ function pitBuilding(ctx, p) {
           const stray = (q) => { const A = walkAt(q - half).p, B = walkAt(q + half).p, dx = B[0] - A[0], dz = B[2] - A[2], L = Math.hypot(dx, dz) || 1; let m = 0; for (let t = -half; t <= half + 1e-6; t += 0.5) { const P0 = walkAt(q + t).p; m = Math.max(m, Math.abs(((P0[0] - A[0]) * dz - (P0[2] - A[2]) * dx) / L)); } return m; };
           let q = uu, best = stray(uu);
           if (best > 0.1) for (let k = 1; k <= 12 && best > 0.1; k++) for (const sgn of [-1, 1]) { const qq = uu + sgn * k * 0.5, m = stray(qq); if (m < best - 1e-6) { best = m; q = qq; } if (best <= 0.1) break; }
+          // (on the walkway end to end – its roof 0.15 m past either end of the deck, its step 0.5 m past the +u end: garages.js
+          // pitWallStand: a box by the run's end had the stand off the walkway's last station – Zandvoort 2026 Cadillac, the
+          // step 0.07 m past it; v0.47 run/stands)
+          const qLo = W[0].u + half + 0.15, qHi = W[W.length - 1].u - half - 0.55; if (qLo <= qHi) q = Math.max(qLo, Math.min(qHi, q));
           const A = walkAt(q - half).p, B = walkAt(q + half).p, m = A.map((x, k) => (x + B[k]) / 2), Cq = walkAt(q).p; d = [B[0] - A[0], B[2] - A[2]]; p = [(m[0] + Cq[0]) / 2, Cq[1], (m[2] + Cq[2]) / 2];
         }
         const len = Math.hypot(d[0], d[1]) || 1, al = [d[0] / len, d[1] / len], sg = Math.sign(-al[1] * o0[0] + al[0] * o0[1]) || 1;
@@ -1034,9 +1050,11 @@ function pitBuilding(ctx, p) {
   // it): its segments over a span are left out of its index – a stand is open to its pit lane. → segments left out
   const railMesh = meshes.find((m) => m.name === "rail");
   const openRail = railMesh ? (spans = []) => {
-    const idx = []; let cut = 0;
-    railU.forEach(([a, b], i) => { if (spans.some(([s0, s1]) => b > s0 && a < s1)) { cut++; return; } for (let k = 0; k < 6; k++) idx.push(i * 6 + k); });
-    railMesh.geometry.setIndex(cut ? idx : null); return cut;
+    // (every quad of the mesh kept but the walkway's pieces over a span: its own from railBase on)
+    const n = railMesh.geometry.attributes.position.count / 6, off = new Set();
+    railU.forEach(([a, b], i) => { if (spans.some(([s0, s1]) => b > s0 && a < s1)) off.add(railBase + i); });
+    const idx = []; for (let q = 0; q < n; q++) if (!off.has(q)) for (let k = 0; k < 6; k++) idx.push(q * 6 + k);
+    railMesh.geometry.setIndex(off.size ? idx : null); return off.size;
   } : null;
   let interior = null;
   if (FI.m.size) { interior = new THREE.Group(); interior.name = "garageInteriors"; for (const m of FI.meshes((key) => facilityMaterial(key, p))) { m.castShadow = false; interior.add(m); } meshes.push(interior); }
@@ -1069,7 +1087,7 @@ function pitBuilding(ctx, p) {
   const project = (x, z) => { const uu = (x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], vv = (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]; return { u: uu, off: (vv - frontV(Math.max(gStart, Math.min(gEnd, uu)))) * vTrack }; };
   // (for the pit lane across – map3d.js pitModel: the wall's face to the lane, metres out from the garages' front, and
   // the garages' floor height, both along the garages)
-  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt, wallFace, wallOut, wallFrom, openRail, floorAt, plan: plan ? { ...p.bays.meta, ...planInfo } : null } : null;
+  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt, wallFace, wallOut, wallFrom, openRail, railU, floorAt, plan: plan ? { ...p.bays.meta, ...planInfo } : null } : null;
   return { meshes, footprint, occupancy, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),

@@ -8,6 +8,7 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
+import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
@@ -17,7 +18,7 @@ import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
-import { LANES, laneCells, crossSection } from "./pitlane.js";
+import { LANES, laneCells, crossSection, laneSectionAt } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
@@ -25,7 +26,7 @@ import { circuitVerdict, pitsUpToWall } from "./pitwallcheck.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { probeMirrorPass, samePipeline, glassVsPicture, rendererState, flatFill, glassPixels, glassOnScreen } from "./mirrorprobe.js";
-import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO } from "./car3d.js";
+import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO, lockFor } from "./car3d.js";
 import { kitMode } from "./kit.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
@@ -291,11 +292,10 @@ function pitModelFor(G) {
     const wall = G.wallFace ? G.wallFace(s.uc) : null;
     return { s, cs: crossSection({ wall, edge }), edge, floor: s.floor };
   });
-  const at = (u) => {
-    const f = Math.max(0, Math.min(st.length - 1, (u - G.gStart) / G.pitch - 0.5)), i = Math.min(st.length - 2, Math.floor(f)), t = st.length > 1 ? f - Math.max(0, i) : 0;
-    const a = st[Math.max(0, i)], b = st[Math.min(st.length - 1, Math.max(0, i) + 1)], L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
-    return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor: a.floor + (b.floor - a.floor) * t, slot: t < 0.5 ? a.s : b.s };
-  };
+  // (between the garages either side of u by their centres – a run's garages can have a gap, Madrid 2026 –, the wall's
+  // face the facility's own at u, within the run: laneSectionAt)
+  const us = st.map((x) => x.s.uc), wf = G.wallFace ? (u) => G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, u))) : null;
+  const at = (u) => laneSectionAt(st, us, u, wf);
   m = { G, st, at, ok: st.filter((x) => x.cs.ok).length, wallFrom: [...new Set(st.map((x) => x.cs.wallFrom))] };
   pitModels.set(G, m);
   return m;
@@ -1478,6 +1478,31 @@ let devTrafMark = false;   // (development: red rings under cars with an overlap
 let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, devGpu = null, devShadowDrawn = false;
 // development: the focused car's steering wheel held at an angle (deg, + = its left grip up) or swept (Map3D.steerWheel)
 const KA = [0, 0, 0], KB = [0, 0, 0], KC = [0, 0, 0];   // (the steering's curvature: three points of the path)
+// On the track: the front wheels' steer (rad) from the path's curvature where the car is (st: its track coordinates) –
+// the frame's own steering (updateCars) and its history (wheelHistOf) by the one rule
+function pathSteer(F, st, speed) {
+  const fwd = st.vs >= 0 ? 1 : -1, h = Math.max(4, Math.min(12, Math.abs(st.vs) * 0.15));
+  F.at(st.s - fwd * h, st.d, KA); F.at(st.s, st.d, KB); F.at(st.s + fwd * h, st.d, KC);
+  const kappa = wrap(Math.atan2(KC[0] - KB[0], KC[2] - KB[2]) - Math.atan2(KB[0] - KA[0], KB[2] - KA[2])) / h;
+  return Math.max(-0.4, Math.min(0.4, Math.atan(3.4 * kappa) + (0.01 * speed * speed * kappa) / 9.81));
+}
+// v0.47 (request §2): the steering wheel's turn (rad, as car3d's wheel.rotation.z) at any moment of the session – the
+// lowered arm's swing is read from its history (car3d setWheels' hist, armswap.js swapAt), so continuous play at any
+// frame rate or replay speed, a pause, the car out of close-up and a direct seek show the same arms at the same moment.
+// From the smoothed track's state at that moment (a function of the moment, smooth.js) by pathSteer, at the track's own
+// speed (the frame's adds the queue's small traffic.js rates – the drawn wheel may differ from it by a hair; the swing
+// is timed by this one); standing (≤ 3 m/s) 0, the eased frame steering's aim. null where there is no state (no
+// smoothed track yet, a pit-lane starter's estimated path): there setWheels keeps the frame-to-frame stepSwap – that
+// steering is eased frame to frame and snapped on a seek (a known limit, kept). Kept per car on armswap's grid.
+const histSt = {};
+function wheelHistOf(c, num, sm) {
+  c.histSm = sm;   // (the tracks this frame's cars are posed from – smoothFor; a new one clears the kept samples)
+  return (c.wheelHist || (c.wheelHist = gridMemo((ms) => {
+    const sm = c.histSm, st = sm?.frame ? sm.state(num, ms, histSt) : null; if (!st) return null;
+    const speed = Math.hypot(st.vs, st.vd), L = lockFor(speed);
+    return Math.max(-L, Math.min(L, -(speed > 3 ? pathSteer(sm.frame, st, speed) : 0) * STEER_RATIO));
+  }))).key(sm);
+}
 // development: the focused driver's arm axes drawn over the car (Map3D.armDiag) – shoulder → elbow → wrist (white),
 // the hand's axes at the wrist (x to the little finger red, y to the knuckles green, z out of the palm blue), the
 // forearm's twisted x at the wrist (magenta), each grip's axis (yellow); never in the app's own views
@@ -1735,10 +1760,7 @@ function updateCars(dt) {
     // lane, an estimated path) from the turning rate as before, eased – snapped after a jump of the session's time.
     let steer;
     if (st && c.speed > 3) {
-      const fwd = st.vs >= 0 ? 1 : -1, h = Math.max(4, Math.min(12, Math.abs(st.vs) * 0.15));
-      F.at(st.s - fwd * h, st.d, KA); F.at(st.s, st.d, KB); F.at(st.s + fwd * h, st.d, KC);
-      const kappa = wrap(Math.atan2(KC[0] - KB[0], KC[2] - KB[2]) - Math.atan2(KB[0] - KA[0], KB[2] - KA[2])) / h;
-      steer = Math.max(-0.4, Math.min(0.4, Math.atan(3.4 * kappa) + (0.01 * c.speed * c.speed * kappa) / 9.81));
+      steer = pathSteer(F, st, c.speed);
       c.steer = steer;
     } else {
       steer = c.speed > 3 ? Math.max(-0.4, Math.min(0.4, Math.atan((3.4 * yawRate) / c.speed) + (0.01 * c.speed * yawRate) / 9.81 - (c.slide || 0) * 2)) : 0;
@@ -1748,7 +1770,7 @@ function updateCars(dt) {
     }
     c.steerT = A.t;
     if (devSteer != null && num === focusNum) c.steer = devSteerNow();
-    setWheels(c.model, devSpin != null && num === focusNum ? (performance.now() / 1000) * devSpin * 2 * Math.PI : c.spinW, c.steer, devSteer != null && num === focusNum ? performance.now() : A.t, devSteer != null && num === focusNum ? 0 : c.speed);   // (v0.45: the session's time – the lowered arm's swing goes by it, armswap.js; v0.46: the speed – past ±90° only at a slow corner, car3d lockFor)
+    setWheels(c.model, devSpin != null && num === focusNum ? (performance.now() / 1000) * devSpin * 2 * Math.PI : c.spinW, c.steer, devSteer != null && num === focusNum ? performance.now() : A.t, devSteer != null && num === focusNum ? 0 : c.speed, devSteer != null && num === focusNum ? null : wheelHistOf(c, num, sm));   // (v0.45: the session's time – the lowered arm's swing goes by it, armswap.js; v0.46: the speed – past ±90° only at a slow corner, car3d lockFor; v0.47: the steering's history – the swing read from it)
     if (devArmDiag && num === focusNum) drawArmDiag(c.model);
     // the shift lights (shiftlights.js): this driver's revs against where they shift up in this gear – close up only
     if (c.model.userData.leds && c.model.userData.lod === "near") lightLeds(c, num, A.t, src);
@@ -4370,7 +4392,11 @@ window.Map3D = {
     const targets = [world.real?.group.getObjectByName("barriers"), world.real?.group.getObjectByName("facilities"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
     const secs = [];
     for (const t of pitTeams.teams) {
-      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
+      // (its length as built – the layer's record: pitTeams.teams is re-derived on every update without t.wallStand, so
+      // v0.46 measured every stand as 6 seats, 5.4 m – a 4-seat stand's phantom ends met the walkway's railing once it
+      // opened only in front of the stand: v0.47 run/stands)
+      const built = (pitTeams.group?.userData.wallStands || []).find((q) => q.team === t.team);
+      const L = built ? built.L : (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
       // (where the stand is – it may stand a little along the wall from its box: facilities.js wallAt)
       const uc = G.project(w.p[0], w.p[2]).u, s = G.slots.reduce((p, q) => (Math.abs(q.uc - uc) < Math.abs(p.uc - uc) ? q : p)), out = [-s.inward[0], -s.inward[1]], across = [];
       // (across the stand's length every 0.5 m, from 0.25 m in at either end – not one line at its middle: a line through
@@ -4400,6 +4426,63 @@ window.Map3D = {
     const row = (r, s) => ({ team: r.team, u: s.u, standAt: s.at, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY, ...(r.worst ? { worst: r.worst } : {}) });
     return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, wrong: v.wrong, problems: v.problems,
       first: v.res[0] && row(v.res[0], secs[0]), wrongOnes: v.res.map((r, i) => [r, secs[i]]).filter(([r]) => !r.ok).slice(0, detail ? 99 : 2).map(([r, s]) => row(r, s)), all: detail ? v.res.map((r, i) => row(r, secs[i])) : undefined });
+  },
+  // development (v0.47): the map's walls at both stages (mapwalls.js – the candidates barrierRay searched, the final ones
+  // drawn): lines, segments, how many crossed the road / pit lane in their middle, test points cut by the road and the lane
+  mapWalls() { return JSON.stringify(world?.real?.mapWalls || null); },
+  // development (v0.47): look down at the i-th recorded map wall segment that crossed the road in its middle or had a cut
+  // end (stage "final" or "candidate"), from `h` m over the track's height nearest it
+  viewMapWall(i = 0, stage = "final", h = 40, fov = 50, back = 25) {
+    const w = world?.real?.mapWalls?.[stage]?.where?.[i]; if (!w) return "none";
+    const [s] = world.grid.nearest(w[2], w[3], 6), y = s ? s.p.y : 0;
+    // (returns the camera as a Map3D.look call too: the same view in another build – before / after pictures)
+    const v = [w[2], y + h, w[3] + back, w[2], y, w[3], fov].map((x) => +x.toFixed(2)); this.look(...v); return `${JSON.stringify(w)} Map3D.look(${v.join(", ")})`;
+  },
+  // development (v0.47): the teams' stands against each other – overlaps, order, the walkway's ends, the railing opened
+  // in front of them, the lane and the cars' path (standcheck.js judges; each stand as garages.js built it). dump: the
+  // plain input too (a test fixture)
+  async standCheck(detail = false, dump = false) {
+    const G = pitTeams.G; if (!G || !pitTeams.teams) return JSON.stringify({ ok: false, why: "no garages" });
+    const { checkStands, PARTS } = await import("./standcheck.js"), { CREW_ROOM } = await import("./pitlane.js");
+    const u0 = G.project(0, 0).u, ux = G.project(1, 0).u - u0, uz = G.project(0, 1).u - u0, axis = { o: [-u0 * ux, -u0 * uz], u: [ux, uz] };
+    const m = pitModelFor(G), lane = world.pitLane, r3 = (x) => +x.toFixed(3);
+    const feedOff = (u) => { if (!lane) return null; let best = 6, off = null; for (const q of lane.pts) { const pr = G.project(q.x, q.z), d = Math.abs(pr.u - u); if (d < best) { best = d; off = pr.off; } } return off; };
+    // (the stands as the layer built them – pitTeams.teams is re-derived on every update, the layer only when the allocation changes)
+    const built = pitTeams.group?.userData.wallStands || [], boxes = built.map((t) => [t.box - 2.87, t.box + 2.87, t.boxOff + 1.17]);
+    const stands = [];
+    for (const w of built) {
+      const t = w;
+      const parts = PARTS(w.L, w.enclosed).filter((q) => q.low), across = [];
+      // (across its length every 0.25 m, the step's end included: the lane side of what stands there – deck, step, posts)
+      if (!w.upper) for (let a = -w.L / 2 - 0.05; a <= w.L / 2 + 0.55; a += 0.25) {
+        const o = Math.max(...parts.filter((q) => Math.abs(a - q.a) <= q.la / 2 + 1e-6).map((q) => q.o + q.lo / 2)); if (!Number.isFinite(o)) continue;
+        const x = w.p[0] + w.along[0] * a + w.out[0] * o, z = w.p[1] + w.along[1] * a + w.out[1] * o, pr = G.project(x, z), u = pr.u, uu = Math.max(G.gStart, Math.min(G.gEnd, u));
+        const cs = m.at(uu), f = feedOff(u), car = laneOffsetOf({ lane: "fast", w: 0 }, cs, f ?? cs.fastC, u, G.gStart, G.gEnd), bx = boxes.filter((b) => u >= b[0] && u <= b[1]);
+        const dk = Math.abs(a) <= w.L / 2 - 0.25 + 1e-6 ? G.project(w.p[0] + w.along[0] * a + w.out[0] * 0.85, w.p[1] + w.along[1] * a + w.out[1] * 0.85).off : null;
+        across.push({ a: r3(a), u: r3(u), standLane: r3(pr.off), deckLane: dk == null ? null : r3(dk), laneFace: G.wallFace ? r3(G.wallFace(uu)) : null, carEdge: r3(car + CREW_ROOM.carHalf), boxEdge: bx.length ? r3(Math.max(...bx.map((b) => b[2]))) : null, feedEdge: f == null ? null : r3(f + CREW_ROOM.carHalf) });
+      }
+      stands.push({ team: t.team, box: r3(t.box), L: w.L, p: w.p.map(r3), along: w.along.map((x) => +x.toFixed(5)), out: w.out.map((x) => +x.toFixed(5)), enclosed: w.enclosed, upper: w.upper, across });
+    }
+    // (the walkway railing as drawn: the rail mesh's quads out at the lane's face – the building's balustrades share the
+    // mesh –, each shown or left out of its index; not railU, which says what openRail meant to do)
+    const railDrawn = () => {
+      const rm = pitTeams.facility?.getObjectByName("rail"); if (!rm) return [];
+      const pos = rm.geometry.attributes.position, ix = rm.geometry.index, shown = new Set(), out = [];
+      if (ix) for (let k = 0; k < ix.count; k += 6) shown.add(Math.floor(ix.getX(k) / 6));
+      for (let q = 0; q < pos.count / 6; q++) {
+        let u0 = Infinity, u1 = -Infinity, off = 0;
+        for (let k = 0; k < 6; k++) { const pr = G.project(pos.getX(q * 6 + k), pos.getZ(q * 6 + k)); u0 = Math.min(u0, pr.u); u1 = Math.max(u1, pr.u); off += pr.off / 6; }
+        const wf = G.wallFace?.(Math.max(G.gStart, Math.min(G.gEnd, (u0 + u1) / 2)));
+        if (wf != null && Math.abs(off - wf) < 0.6 && u1 - u0 > 0.05) out.push([r3(u0), r3(u1), !ix || shown.has(q) ? 1 : 0]);
+      }
+      return out.sort((a, b) => a[0] - b[0]);
+    };
+    const input = { axis: { o: axis.o.map(r3), u: axis.u.map((x) => +x.toFixed(6)) }, wall: G.railU?.length ? [r3(G.railU[0][0]), r3(G.railU[G.railU.length - 1][1])] : null, run: [r3(G.gStart), r3(G.gEnd)],
+      rail: railDrawn(), spans: (pitTeams.group?.userData.standSpans || []).map(([a, b]) => [r3(a), r3(b)]), stands };
+    const v = checkStands(input);
+    return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, bad: v.problems.length, problems: v.problems, nMoved: v.nMoved, maxMove: v.maxMove, minGap: v.minGap, minCarGap: v.minCarGap,
+      rail: v.rail && { segments: v.rail.segments, open: v.rail.open, openM: v.rail.openM, maxBeyond: v.rail.maxBeyond, beyond: detail ? v.rail.beyond : undefined, through: v.rail.through },
+      tight: v.tight, overlaps: v.overlaps, order: v.order, ends: v.ends, moved: detail ? v.moved : v.moved.filter((q) => Math.abs(q.du) > 0.25), gaps: detail ? v.gaps : undefined, lane: detail ? v.lane : undefined, ...(dump ? { input, model: { pitch: r3(G.pitch), slots: m.st.map((x) => [r3(x.s.uc), x.cs.wall == null ? null : r3(x.cs.wall), x.cs.fastC == null ? null : r3(x.cs.fastC)]) } } : {}) });
   },
   // development: the pit lane's per-frame cost (pitFrame: every pit car's state; the crews), average over the frames
   pitCostMs(reset = false) { const r = { avgMs: +(pitCost.ms / Math.max(1, pitCost.frames)).toFixed(3), frames: pitCost.frames }; if (reset) { pitCost.ms = 0; pitCost.frames = 0; } return JSON.stringify(r); },
@@ -4817,6 +4900,9 @@ window.Map3D = {
   },
   partVis(name, on) { const c = cars.get(app().focus || leader()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
   // development: the focused driver's arm axes on/off (drawArmDiag)
+  // v0.47: the focused car's arms' swing now – q per arm (0 beside the body, 1 across; armswap.js), the wheel drawn and
+  // the steering history's at this moment (deg), and whether the swing came from the history (swapAt) or frame to frame
+  armQ(num) { const A = app(), c = cars.get(num || A.focus || leader()), u = c?.model.userData; if (!u?.arms) return null; const h = u.hist && u.armT != null ? u.hist(u.armT) : null; return { num: num || A.focus || leader(), t: u.armT, q: u.arms.map((a) => a.q), wheelDeg: +(u.wheel.rotation.z * 57.29578).toFixed(2), histDeg: h == null ? null : +(h * 57.29578).toFixed(2), from: h == null ? "frames" : "history", lod: u.lod, near: u.near.visible }; },
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones
   // development: hold the focused car's wings at a fraction (0 shut … 1 open; null: back to the estimate / data)
@@ -4844,6 +4930,29 @@ window.Map3D = {
       }
     }
     return JSON.stringify(ev);
+  },
+  // development (v0.47): the wings never read ahead – over [t0, t1] every car's pose with the whole telemetry and with
+  // the telemetry cut at the query's limit (t + lag, or now) must be the same; returns the counts and the first misses
+  aeroPrefix(t0, t1, step = 250, max = 20) {
+    const src = app().src, sm = smooth.src === src ? smooth.tr : null; if (!sm?.coords) return "no smooth tracks";
+    const st = {}, I = {}, a = {}, b = {}, miss = []; let n = 0, inZone = 0, open = 0, braking = 0;
+    for (const num of Object.keys(src.tracks?.cars || {})) {
+      const tel = src.car?.[num]; if (!tel?.t?.length) continue;
+      for (let t = t0; t <= t1; t += step) {
+        if (!sm.state(num, t, st)) continue;
+        const X = aeroCtx(src, t), lim = src.isLive ? t : t + (sm.telLag || 0);
+        Object.assign(I, { allowed: X.allowed, spans: X.Z.spans, L: X.Z.L, s: st.s, speed: st.vs * 3.6, tel, t, now: src.isLive ? t : null, onTrack: true, racing: X.t0 == null || t >= X.t0, startGate: X.t0, mode: X.mode, hist: sm.coords(num), lag: sm.telLag || 0 });
+        activeAeroAt(I, a);
+        let lo = 0, hi = tel.t.length; while (lo < hi) { const m = (lo + hi) >> 1; if (tel.t[m] <= lim) lo = m + 1; else hi = m; }
+        const cut = (x) => x && (x.subarray ? x.subarray(0, lo) : x.slice(0, lo));
+        I.tel = { t: cut(tel.t), brk: cut(tel.brk), v: cut(tel.v) };
+        activeAeroAt(I, b); n++;
+        if (a.why !== "outside the zones" && a.why !== "no zone") inZone++;
+        if (a.open > 0) open++; if (/braking/.test(a.why)) braking++;
+        if (a.open !== b.open || a.why !== b.why) { if (miss.length < max) miss.push({ num, rel: Math.round((t - (src.startTime?.() || 0)) / 100) / 10, full: [+a.open.toFixed(3), a.why], cut: [+b.open.toFixed(3), b.why] }); else miss.n = (miss.n || max) + 1; }
+      }
+    }
+    return JSON.stringify({ n, inZone, open, braking, misses: miss.n || miss.length, first: miss });
   },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {

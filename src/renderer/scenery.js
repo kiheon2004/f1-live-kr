@@ -22,7 +22,8 @@ import { pathFrame } from "./pitlane.js";
 import { planTunnels, buildTunnels } from "./tunnel.js";
 import { lightField, lampMeshes, glowPoints, releaseField } from "./nightlights.js";
 import { disposeGroup } from "./dispose.js";
-import { pitLaneOf, solidBarrierSegs } from "./pitwallcheck.js";
+import { pitLaneOf } from "./pitwallcheck.js";
+import { clipBarrierLines, runSegs } from "./mapwalls.js";
 import { otherSection, joinHeight, roadProbes, clearRoads, skirtStrips, shoreCap } from "./roadground.js";
 
 const MARGIN = 900;                     // metres of surroundings around the track
@@ -930,6 +931,13 @@ async function buildReal(api, scene, world, opts, onStep, own) {
 
   // (tplan, the covered stretches: planned with the terrain, above)
   let bld = null, lm = null, pitG = null;
+  // The map's barriers within 45 m of the track, split + clipped once for the drawing and the search (mapwalls.js, v0.47
+  // request §3): the CANDIDATE walls here – cut by the track's tarmac only – are what the facilities' barrierRay looks
+  // for the pit wall among (they come before the pit building: its lane, which cuts the FINAL walls drawn below, is
+  // placed from them). Every final piece is a candidate's (same 2 m grid); the lane's cut stops short of the map's pit
+  // wall (pitwallcheck.js pitLaneOf: wallFace − 0.3 m), so the wall the facilities took stays drawn – no cycle.
+  const wallKeep = (l, q) => q.some(([x, z]) => trackDist(x, z) < 45), wallStats = { candidate: { where: [] }, final: { where: [] } };
+  const wallCand = clipBarrierLines(scene.lines, gf.xz, { cut: (x, z) => corridor.on(x, z, -0.3) && "road", keep: wallKeep, stats: wallStats.candidate });
   if (opts.buildings !== false) {
     onStep?.("건물 세우는 중");
     lm = buildLandmarks({ scene, gf, groundAt, location: scene.location, venue: opts.venue, toTrack });
@@ -954,12 +962,11 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const trackEdge = sideEdge;
     // the map's solid barriers (walls, jersey barriers, retaining walls, guard rails – not fences) as segments, and the
     // distance along a ray to the first of them: a pit building's wall is the mapped one where the map has it
-    const barrierSegs = [];
-    // (only what is drawn – barriersMesh below cuts a piece's points on the tarmac: v0.46, Silverstone 2024's mapped wall
-    // was found there, none was drawn, and the last teams' stands had no wall before the tarmac – run/pitwall)
-    barrierSegs.push(...solidBarrierSegs(scene.lines, gf.xz, (x, z) => corridor.on(x, z, -0.3)));
+    // (only what is drawn – the candidate walls above, cut where barriersMesh's walls are: v0.46, Silverstone 2024's mapped
+    // wall was found there, none was drawn, and the last teams' stands had no wall before the tarmac – run/pitwall)
+    const barrierSegs = runSegs(wallCand.filter((l) => /^(wall|retaining_wall|jersey_barrier|guard_rail)$/.test(l.sub || "")));
     // (kind "fence": the mapped fences – the pit wall's debris fence where the map has no wall: facilities.js)
-    const fenceSegs = solidBarrierSegs(scene.lines, gf.xz, (x, z) => corridor.on(x, z, -0.3), /^fence$/);
+    const fenceSegs = runSegs(wallCand.filter((l) => l.sub === "fence"));
     const barrierRay = (x, z, dx, dz, max = 60, kind = "solid") => {
       let best = Infinity;
       for (const [ax, az, bx, bz] of kind === "fence" ? fenceSegs : barrierSegs) {
@@ -1047,26 +1054,20 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // in front of the garages, where the session's cars drive in and out of their boxes (v0.46: Imola 2025, two mapped
   // fences ran across the lane between the boxes and the fast lane, the teams' stands shut off from the lane behind
   // them; run/pitwall) – the pit wall a map has stays (it is the lane's end: pitwallcheck.js pitLaneOf)
-  const near = [], inLane = pitLaneOf(pitG);
-  let laneCut = 0;
-  for (const l of scene.lines) {
-    if (l.k !== "barrier" || !l.pts.some((p) => { const [x, z] = gf.xz(p); return trackDist(x, z) < 45; })) continue;
-    let run = [];
-    // (with a pit lane to keep clear: points every 2 m along the line – a straight piece can cross the lane between two)
-    // (only near the garages: the rest as mapped)
-    const nearPits = (x, z) => { const p = pitG.project(x, z); return p.u > pitG.gStart - 80 && p.u < pitG.gEnd + 80 && Math.abs(p.off) < 120; };
-    const pts = inLane ? l.pts.flatMap((p, i) => { if (!i) return [p]; const q = l.pts[i - 1], [ax, az] = gf.xz(q), [bx, bz] = gf.xz(p); if (!nearPits(ax, az) && !nearPits(bx, bz)) return [p]; const m = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2)); return Array.from({ length: m }, (_, k) => q.map((c, j) => c + ((p[j] - c) * (k + 1)) / m)); }) : l.pts;
-    for (const p of pts) { const [x, z] = gf.xz(p), lane = !!inLane?.(x, z); laneCut += lane; if (lane || corridor.on(x, z, -0.3)) { if (run.length > 1) near.push({ ...l, pts: run }); run = []; } else run.push(p); }
-    if (run.length > 1) near.push({ ...l, pts: run });
-  }
+  // (the FINAL walls: the candidates' lines cut by the tarmac and the pit lane – mapwalls.js; near the garages in 2 m
+  // points as v0.46 drew them, a straight piece can cross the lane between two mapped points)
+  const inLane = pitLaneOf(pitG);
+  const nearPits = inLane ? (x, z) => { const p = pitG.project(x, z); return p.u > pitG.gStart - 80 && p.u < pitG.gEnd + 80 && Math.abs(p.off) < 120; } : null;
+  const near = clipBarrierLines(scene.lines, gf.xz, { cut: (x, z) => (inLane?.(x, z) && "lane") || (corridor.on(x, z, -0.3) && "road"), keep: wallKeep, dense: nearPits, stats: wallStats.final });
+  const laneCut = wallStats.final.cut.lane || 0;
   if (pitG) pitG.mapBarrierPointsCut = laneCut;
   let covered = 0;
-  const bm = barriersMesh(near, gf, heightNear);
+  const bm = barriersMesh(near, { xz: (p) => p }, heightNear);   // (near: scene metres already)
   if (bm) group.add(bm);
   // Share of the lap with a mapped barrier within 30 m (to decide whether the generic walls are still needed).
   if (near.length) {
     const cells = new Set();
-    for (const l of near) for (const p of l.pts) { const [x, z] = gf.xz(p); cells.add(`${Math.floor(x / 30)},${Math.floor(z / 30)}`); }
+    for (const l of near) for (const [x, z] of l.pts) { cells.add(`${Math.floor(x / 30)},${Math.floor(z / 30)}`); }
     for (const s of world.samples) if (cells.has(`${Math.floor(s.p.x / 30)},${Math.floor(s.p.z / 30)}`)) covered++;
   }
   // Night (the session is or runs into the night): the light field of the floodlights, street lights and car parks,
@@ -1091,6 +1092,8 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     night,
     group, edge, terrainLevel: demOk ? offset : null, groundAt, sea: seaLevel != null && seaCells > 200,
     barrierShare: covered / world.samples.length,
+    // (development: the map's walls at both stages – mapwalls.js stats; Map3D.mapWalls)
+    mapWalls: { candidate: wallStats.candidate, final: wallStats.final, candidateSegs: runSegs(wallCand).length, finalSegs: runSegs(near).length },
     // (where the venue's other tarmac meets the track – escape roads, rejoin routes: a generated barrier leaves it open)
     auxGap: aux.length ? onJoiningRun(aux, 1.5, 30, T) : null,
     aux,       // (development: the strips – Map3D.auxNear)

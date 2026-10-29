@@ -33,7 +33,7 @@ import { BODY, driverGlove, mirrorGlove, armSkin, gauntletSkin, trunkGeometry, l
 import { kitStyle, kitEntry, kitMaterial, kitReadable, kitMode } from "./kit.js";
 import { harnessGeometry, HARNESS } from "./harness.js";
 import { armGeo, planArmsPath, smoothPlan, armFromPlan, armOut, twistedX, PLAN_COST, PLAN_MAX, LOCK_MAX, BIG, armSwapPose } from "./arms.js";
-import { swapState, stepSwap } from "./armswap.js";
+import { swapState, stepSwap, swapAt } from "./armswap.js";
 import { ARM_PLANS } from "./armplans.js";
 import { wheelSpec, wheelParts as steeringParts, ledGeometry, teamWheel } from "./wheel3d.js";
 import { paintScreen, screenModel } from "./wheelscreen.js";
@@ -1780,7 +1780,10 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
     sk.updateMatrixWorld(true); const skel = new THREE.Skeleton(bones); sk.bind(skel); sk.frustumCulled = false; sk.name = "arm";
     const gl = new THREE.SkinnedMesh(t.wheel.gauntlet, gloveMat); gl.bind(skel, sk.bindMatrix); gl.frustumCulled = false; gl.name = "gauntlet";
     near.add(sk, gl);
-    return { k, mesh: sk, gauntlet: gl, bones, hand: hands[k > 0 ? 0 : 1], pose: armOut(), swap: swapState() };
+    // (degAt: this arm's angle in the steering history setWheels was given – armswap.js swapAt; made once, no allocation per frame)
+    const A = { k, mesh: sk, gauntlet: gl, bones, hand: hands[k > 0 ? 0 : 1], pose: armOut(), swap: swapState(), q: 0 };
+    A.degAt = (ms) => { const w = g.userData.hist(ms); return w == null ? null : (k * w) / (Math.PI / 180); };
+    return A;
   });
   // each wheel: its steer group w at the axle (turns about y – the fronts) holding the spin group s (rolls about x: the
   // parts that come off at a stop – tyre, band, rim, cover, nut) and, at the front, the corner mesh (drum, intake,
@@ -1853,14 +1856,16 @@ export const LOCK = { slow: 15, fast: 25 };
 export const lockFor = (speed) => (speed == null ? Math.PI / 2 : (90 + (LOCK_MAX - 90) * Math.max(0, Math.min(1, (LOCK.fast - speed) / (LOCK.fast - LOCK.slow)))) * Math.PI / 180);
 // t: the session's time (ms) – the lowered arm's swing across goes by it (armswap.js); without it, the hands stay on the
 // grips beside the body (the plan – a pure function of the angle). speed (m/s): the car's – the lock (lockFor); without
-// it ±90° as before v0.46.
-export function setWheels(car, spin, steer, t = null, speed = null) {
+// it ±90° as before v0.46. hist (v0.47): the steering wheel's turn (rad, as u.wheel.rotation.z) at any moment of the
+// session (ms) or null where not known – the swing is then read from that history (armswap.js swapAt: the same arms
+// at the same moment however it was reached); without it, or with none known now, the frame-to-frame stepSwap.
+export function setWheels(car, spin, steer, t = null, speed = null, hist = null) {
   const u = car.userData;
   u.wheels.forEach((w, i) => { w.rotation.y = i < 2 ? steer : 0; });
   // (spin: one angle, or [front, rear] – each axle its own radius)
   u.spins.forEach((s, i) => { s.rotation.x = Array.isArray(spin) ? spin[i < 2 ? 0 : 1] : spin; });
   if (u.wheel) { const L = lockFor(speed); u.wheel.rotation.z = Math.max(-L, Math.min(L, -steer * STEER_RATIO)); }
-  if (u.arms && u.near.visible) placeArms(u, t);
+  if (u.arms && u.near.visible) { u.hist = hist; u.armT = t; placeArms(u, t); }
 }
 // A wheel off the car at a pit stop (i in userData.wheels' order): only what comes off with a real wheel is hidden – its
 // spin group (tyre, band, rim, cover, nut); the drum, intake, upright, caliper, disc, hub and the 2022–25 fence and
@@ -1922,7 +1927,7 @@ const rollAbout = (v, k, a, o) => { const c = Math.cos(a), s = Math.sin(a), d = 
 function placeArms(u, t = null) {
   const plan = u.armPlan, a0 = u.wheel.rotation.z, up = plan.geo.grip.up;
   for (const A of u.arms) {
-    const k = A.k, q = plan.swap ? stepSwap(A.swap, (k * a0) / (Math.PI / 180), t) : 0;
+    const k = A.k, q = (A.q = !plan.swap ? 0 : t != null && u.hist && u.hist(t) != null ? swapAt(A.degAt, t) : stepSwap(A.swap, (k * a0) / (Math.PI / 180), t));
     const o = plan.swap ? armSwapPose(plan, plan.swap, plan.move, k * a0, q, A.pose) : armFromPlan(plan, k * a0, A.pose), [b0, b1, b2, b3, b4] = A.bones, L2 = BODY.farm;
     rollAbout(o.H, o.A, Q90, _bx); setBone(b0, k, o.S, _bx, o.A);                          // upper arm (rolled a quarter turn)
     rollAbout(o.H, o.f, Q90, _bx); setBone(b1, k, o.E, _bx, o.f);                          // forearm at the elbow: the hinge's turn only
