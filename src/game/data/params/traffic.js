@@ -74,6 +74,7 @@ export const TRAFFIC_TABLE = {
   defendMinS: est(0.6, "s", "no defensive move later than this before the braking point (moving under braking is not allowed)", "", [0.3, 1.5], "M"),
   defendMove: est(1.5, "×width", "size of the defensive move toward the inside (one move)", "a covering move is about a car width; crossing the whole road cost the defender far more than real defending does", [0.5, 3]),
   defendMaxS: est(3, "s", "the defensive move is made at most this long before the braking point (once the attacker is preparing)", "the covering move comes late on the straight", [1, 6], "M"),
+  stopV: est(3, "m/s", "a car slower than this is 'not moving': nobody yields to it or waits behind it at standstill (it is passed where there is room) and a car giving way to it stops doing so", "a crawling or stopped car is an obstacle, not a car to let by", [1, 8]),
   yieldDv: est(2.5, "m/s", "a car giving way (lost the corner, abort) runs at least this much slower than the car it lets through", "", [1, 5]),
   yieldT: est(0.8, "s", "… and drops back over about this long", "", [0.3, 2]),
   liftFrac: est(0.95, "1", "a lapped car under blue flags / a team-order yield lifts to this share of its free speed on straights", "", [0.85, 0.99]),

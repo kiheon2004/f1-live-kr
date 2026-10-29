@@ -229,7 +229,12 @@ export function trafficPre(race, t) {
     if (w && tr.role === "yield" && (tr.kind === "blue" || tr.kind === "team")) {
       // lift on the straights while the faster car is close behind or beside (not in corners: that would be erratic)
       const rel = T.delta(w.s, c.s), k = Math.abs(T.at(T.kappaLine || T.kappa, c.s));
-      if (rel > -(len + P.mLong) && rel < 1.5 * Math.max(w.v, 20) && k < 1 / 400) { const v = P.liftFrac * vfAt(prof, T, c.s, tc); if (v < cap) { cap = v; why = "let by"; } }
+      if (rel > -(len + P.mLong) && rel < 1.5 * Math.max(w.v, 20) && k < 1 / 400) {
+        // lift; and once it is close behind or alongside, run a little slower than it, so it does get by on this straight
+        let v = P.liftFrac * vfAt(prof, T, c.s, tc);
+        if (rel < 3 * len + 10 && w.v >= P.stopV) v = Math.min(v, w.v - P.yieldDv);
+        if (v < cap) { cap = Math.max(P.stopV, v); why = "let by"; }
+      }
     }
     tr.cap = cap; tr.capWhy = why;
     // ----- wings: DRS (≤2025) and Straight Mode (2026) – separate systems, separate states -----
@@ -272,7 +277,12 @@ function decide(race, c, tr, ctx) {
   const rel = w ? T.delta(w.s, c.s) : 0;   // + : c ahead of w
   // ----- giving way / yielding -----
   if (tr.role === "yield" || tr.role === "abort") {
-    if (!w || rel < -(len + P.mLong) || t - tr.since > 20000 || (rel > len / 2 && tr.kind !== "blue" && tr.kind !== "team")) {
+    // a yield ends when the other car has gone by, is not moving (nothing to let by – a stopped car is an obstacle to go
+    // round, not a car to wait for), is itself giving way (two cars giving way to each other each cap themselves below
+    // the other's speed: a spiral to standstill – the 2026 Japan deadlock), or after 20 s (8 s for a corner)
+    const pw = w ? prev[w.num] : null, wYields = !!(pw && (pw.role === "yield" || pw.role === "abort"));
+    const stale = t - tr.since > (tr.kind === "corner" || tr.role === "abort" ? 8000 : 20000);
+    if (!w || rel < -(len + P.mLong) || stale || w.v < P.stopV || (wYields && (tr.kind === "corner" || tr.role === "abort" || pw.with === c.num)) || (rel > len / 2 && tr.kind !== "blue" && tr.kind !== "team")) {
       if (tr.role === "abort") tr.cool = tr.corner;
       if (tr.kind === "team" && w && rel < -(len + P.mLong) && teamOrders[c.teamKey]) { teamOrders[c.teamKey].done = t; log(race, { t, car: c.num, type: "teamOrderDone", cause: "swap", effect: `${w.tla} is ahead` }); }
       setRole(null, null);
@@ -282,7 +292,7 @@ function decide(race, c, tr, ctx) {
   // a car behind told me it keeps the corner (it is beside me): give way
   for (const o of ctx.L) {
     const p = prev[o.num]; if (!p || p.with !== c.num) continue;
-    if (p.role === "att" && p.keep === o.num) { setRole("yield", o.num, null, "corner"); tr.corner = p.corner; return; }
+    if (p.role === "att" && p.keep === o.num && o.v >= P.stopV) { setRole("yield", o.num, null, "corner"); tr.corner = p.corner; return; }
   }
   // two cars side by side that are not an attack pair (after a start, an abort, a pit exit, a lane change in a train):
   // nobody is attacking, so the car behind tucks in behind; at a corner's turn-in the car more than half a length ahead
@@ -294,7 +304,8 @@ function decide(race, c, tr, ctx) {
       if (Math.abs(o.d - c.d) < wid) continue;
       const po = prev[o.num];
       if ((po && (po.role === "att" || po.role === "def") && po.with === c.num) || ((tr.role === "att" || tr.role === "def") && tr.with === o.num)) continue;   // (the pair's own rule)
-      if (po && po.role === "yield" && po.with === c.num) continue;      // (it is already giving way to me)
+      if (po && (po.role === "yield" || po.role === "abort")) continue;   // (it is giving way already – never yield to a yielding car)
+      if (o.v < P.stopV) continue;                                       // (nor to a car that isn't moving)
       // not an attack: the status quo – the car that was last clear ahead of the other keeps its place (S.tclear); a pair
       // never seen clear (the start) uses the turn-in rule / the car ahead
       const key = c.num < o.num ? c.num + "|" + o.num : o.num + "|" + c.num, was = S.tclear?.[key];
@@ -398,8 +409,9 @@ function decide(race, c, tr, ctx) {
   if (a.dist > c.dist + T.L / 2) { /* a lap ahead: unlapping is allowed – a normal attack */ }
   if (!ctlMay(race, T, c, a)) return;
   // an easy pass (anywhere there is room): the car ahead is letting me by, merging from the pits, or going into them
-  const pa = prev[a.num], easy = !!(pa && ((pa.role === "yield" && pa.with === c.num) || pa.role === "merge" || pa.role === "pitIn"));
-  if (tr.cool === nc) return;                                    // (tried and gave up for this corner)
+  // (…or stopped: a car standing in my lane is gone round where there is room – never queued behind at v = 0)
+  const pa = prev[a.num], easy = !!(pa && ((pa.role === "yield" && pa.with === c.num) || pa.role === "merge" || pa.role === "pitIn")) || a.v < P.stopV;
+  if (tr.cool === nc && a.v >= P.stopV) return;               // (tried and gave up for this corner – not for a stopped car)
   tr.easy = false;
   if (easy) { tr.corner = nc; setRole("att", a.num, "out"); tr.easy = true; tr.side = chooseSide(T, c, a, cor, pa, tc, true); return; }
   if (!cor || !cor.pass) return;
@@ -616,24 +628,34 @@ export function trafficPost(race, t, s0of) {
   // 2. detection lines (DRS zones, 2026 Overtake) and lap starts
   const sorted = L.slice().sort((a, b) => a.s - b.s || (a.num < b.num ? -1 : 1)), n = sorted.length;
   const aheadOf = (c) => { const i = sorted.indexOf(c); for (let k = 1; k < n; k++) { const o = sorted[(i + k) % n]; if (o !== c) return o; } return null; };
+  // two passes: first every car's crossing times this step, then the eligibility – a gap measured against a car that
+  // crossed the same line in the same step must see that car's new time whatever the cars' order in the array
+  const cross = new Map();
   for (const c of L) {
     const s0 = s0of.get(c.num); if (s0 == null) continue;
     const tr = c.traffic, moved = T.ahead(s0, c.s); if (moved <= 0 || moved > 50) continue;
     const at = (x) => { const d = T.ahead(s0, x); return d > 0 && d <= moved ? t - DT * 1000 + Math.round((d / moved) * DT * 1000) : null; };
-    tc.drsZones.forEach((z, k) => {
-      const tx = at(z.detect ?? z.start); if (tx == null) return;
-      tr.det[k] = tx; const o = aheadOf(c), to = o?.traffic.det[k];
+    const x = { det: tc.drsZones.map((z) => at(z.detect ?? z.start)), end: tc.drsZones.map((z) => at(z.end)), ot: tc.otDet != null ? at(tc.otDet) : null, act: tc.otAct != null ? at(tc.otAct) : null };
+    x.det.forEach((tx, k) => { if (tx != null) tr.det[k] = tx; });
+    if (x.ot != null) tr.otDetT = x.ot;
+    cross.set(c.num, x);
+  }
+  for (const c of L) {
+    const x = cross.get(c.num); if (!x) continue;
+    const tr = c.traffic;
+    x.det.forEach((tx, k) => {
+      if (tx == null) return;
+      const o = aheadOf(c), to = o?.traffic.det[k];
       tr.drs.elig = o && to != null && tx - to < (tc.rules.drs.value.detectionGapS ?? 1) * 1000 && tx - to >= 0 ? k : -1;
     });
-    tc.drsZones.forEach((z, k) => { if (at(z.end) != null) { if (tr.drs.elig === k) tr.drs.elig = -1; if (tr.drs.closed === k) tr.drs.closed = -1; } });
+    x.end.forEach((tx, k) => { if (tx != null) { if (tr.drs.elig === k) tr.drs.elig = -1; if (tr.drs.closed === k) tr.drs.closed = -1; } });
     if (tc.otDet != null) {
-      const tx = at(tc.otDet);
-      if (tx != null) {
-        tr.otDetT = tx; const o = aheadOf(c), to = o?.traffic.otDetT;
-        tr.ot.elig = !!(o && to != null && tx - to >= 0 && tx - to < (tc.rules.overtakeMode.value.detectionGapS ?? 1) * 1000);
+      if (x.ot != null) {
+        const o = aheadOf(c), to = o?.traffic.otDetT;
+        tr.ot.elig = !!(o && to != null && x.ot - to >= 0 && x.ot - to < (tc.rules.overtakeMode.value.detectionGapS ?? 1) * 1000);
         if (!tc.otOn && S.order[0] === c.num) tc.otOn = true;    // (enabled when the leader first crosses the Detection Line)
       }
-      if (at(tc.otAct) != null) { tr.ot.active = tr.ot.elig && ctlOt(race, T, c); tr.ot.elig = false; }
+      if (x.act != null) { tr.ot.active = tr.ot.elig && ctlOt(race, T, c); tr.ot.elig = false; }
     }
   }
   for (const c of L) { const tr = c.traffic; if (tr.lapSeen !== c.lap) { tr.ot.lapStart = tr.ot.active; tr.lapSeen = c.lap; } }

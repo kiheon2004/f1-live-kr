@@ -222,3 +222,41 @@ test("order independence: the cars' order in the state array does not change the
   for (let i = 0; i < 2400; i++) { E.step(a); E.step(b); }
   assert.strictEqual(fp(a), fp(b));
 });
+
+// regression (2026 Japan seed 1, t ≈ 72 s): three cars side by side, each giving way to another – each give-way caps a car
+// below the other's speed, so the chain spiralled to v = 0 and the field queued behind for the rest of the race
+test("no yield deadlock: two cars side by side giving way to each other keep moving and stop yielding", async () => {
+  const E = await eng();
+  const r = E.createRace({ scenario: subset(load(MON), ["4", "81"], 14), seed: 1 }), T = r.cache.T, tc = r.cache.tc;
+  const [a, b] = ["4", "81"].map((n) => r.state.cars.find((c) => c.num === n));
+  for (let i = 0; i < 30 * 20; i++) E.step(r);
+  // put them side by side on the same spot at the same speed (b half a metre ahead, 2.6 m apart) …
+  const line = T.at(T.line, a.s), [lo, hi] = [-T.at(T.wR, a.s) + tc.wid / 2, T.at(T.wL, a.s) - tc.wid / 2], dc = Math.max(lo + 1.3, Math.min(hi - 1.3, line));
+  b.s = T.wrap(a.s + 0.5); b.v = a.v; b.dist = a.dist + 0.5; a.d = dc - 1.3; b.d = dc + 1.3; a.traffic.e = a.d - line; b.traffic.e = b.d - T.at(T.line, b.s);
+  // … each giving way to the other (the state the deadlock started from)
+  for (const [x, y] of [[a, b], [b, a]]) Object.assign(x.traffic, { role: "yield", with: y.num, kind: "corner", since: r.state.t, ph: null });
+  let minV = Infinity;
+  for (let i = 0; i < 20 * 20; i++) { E.step(r); if (i > 60) minV = Math.min(minV, a.v, b.v); }
+  assert.ok(minV > 8, `both kept moving (slowest ${minV.toFixed(1)} m/s after the first 3 s)`);
+  assert.ok(!(a.traffic.role === "yield" && b.traffic.role === "yield" && a.traffic.with === b.num && b.traffic.with === a.num), "the mutual yield ended");
+});
+
+test("a car standing still in a corner ahead is driven round – nobody waits behind it at v = 0, nobody yields to it", async () => {
+  const E = await eng();
+  const r = E.createRace({ scenario: subset(load(MON), ["4", "81"], 25), seed: 1 }), T = r.cache.T, tc = r.cache.tc;
+  const A = r.state.cars.find((c) => c.num === "4"), B = r.state.cars.find((c) => c.num === "81");
+  for (let i = 0; i < 20 * 20; i++) E.step(r);
+  // A stops at the next apex it reaches (an incident's speed cap 0 for 90 s – control.js applies car.inc)
+  for (let i = 0; i < 120 * 20 && tc.inC[T.idx(A.s)] < 0; i++) E.step(r);
+  A.inc = { kind: "test stop", until: r.state.t + 90000, vCap: 0 };
+  let still = 0, worst = 0, passed = false, yieldedToIt = 0;
+  for (let i = 0; i < 90 * 20 && !passed; i++) {
+    E.step(r);
+    if (B.v < 1) { still += 0.05; worst = Math.max(worst, still); } else still = 0;
+    if (B.traffic.role === "yield" && B.traffic.with === A.num && A.v < 3) yieldedToIt += 1;   // (a yield begun while A still moved ends at once)
+    passed = B.dist > A.dist + tc.len;
+  }
+  assert.ok(passed, "B went round the stopped car");
+  assert.ok(worst < 5, `B never stood behind it for long (${worst.toFixed(1)} s)`);
+  assert.ok(yieldedToIt <= 1, `nobody gives way to a car that isn't moving (${yieldedToIt} steps)`);
+});
