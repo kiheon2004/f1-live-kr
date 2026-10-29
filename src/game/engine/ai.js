@@ -15,7 +15,7 @@
 // State: race.state.ai (plain JSON, saved and restored with the race). The team models (strategy.js teamModel) are
 // derived data in race.cache, rebuilt identically from the scenario + seed on load.
 import * as CMD from "./commands.js";
-import { teamModel, publicView, planCandidates, evaluate, scenarios, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
+import { teamModel, publicView, planCandidates, evaluate, scenarios, crossoverGains, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, lastClean, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
 import { streamFor } from "./rng.js";
 import { AI, TEAM_TENDENCY } from "../data/params/ai.js";
 import { PIT } from "../data/params/pit.js";
@@ -149,7 +149,7 @@ function learnLane(est, lane) {
 // toward 1 with priorLaps of weight). A rival's fuel and pace mode are not public: fuel from the race distance, mode balanced.
 function learnPublic(race, team, c) {
   const S = race.state, TS = S.ai.teams[team], est = TS.est, M = teamModel(race, team), l = c.laps[c.laps.length - 1];
-  if (!l || l.pit || l.n <= 1 || c.tyre.laps < 2 || l.compound !== c.tyre.name || !DRY.includes(l.compound)) return;
+  if (!l || !lastClean(c.laps) || c.tyre.laps < 2 || l.compound !== c.tyre.name || !DRY.includes(l.compound)) return;
   const own = c.teamKey === team, mode = own ? c.mode.pace : "balanced", fuel = own ? (l.fuel ?? M.fuelRef) : Math.max(0, M.fuel0 - M.fuelPerLap * l.n);
   const num = own ? c.num : M.nums[0], age = c.tyre.laps - 0.5;
   const y = l.t - lapTime(M, { g: est.g, s: 1 }, num, l.compound, mode, 0, 0, fuel), d = degPart(M, est, num, l.compound, mode, age);
@@ -173,7 +173,7 @@ function learnLap(race, team, car) {
   const dirty = cs.dirty; cs.dirty = false;
   if (cs.predLap === car.lap && !dirty && !l.pit) { est.trR = +((est.trR || 0) + Math.max(0, traffic)).toFixed(3); est.trP = +((est.trP || 0) + cs.predHold).toFixed(3); }
   const age = Math.max(0, car.tyre.laps - 1), mode = car.mode.pace;
-  if (!l.pit && l.n > 1 && !dirty && traffic < 0.3 && car.tyre.laps >= 2 && l.compound === car.tyre.name) {
+  if (lastClean(car.laps) && !dirty && traffic < 0.3 && car.tyre.laps >= 2 && l.compound === car.tyre.name) {
     // y: the lap less the model's age-0 lap (fuel included); d: the model's degradation at this age → y ≈ off + s·d
     const y = l.t - lapTime(M, { g: est.g, s: 1 }, car.num, l.compound, mode, 0, 0, l.fuel ?? M.fuelRef), d = degPart(M, est, car.num, l.compound, mode, age + 0.5);
     const off = est.off[car.num], res = y - (est.s ?? 1) * d - (off ?? 0);
@@ -219,18 +219,38 @@ function decide(race, team, car, why) {
   const st = { num: car.num, lap: car.lap, total: S.totalLaps, cur: { name: car.tyre.name, age: car.tyre.laps }, used: [...new Set([...car.laps.map((l) => l.compound), car.tyre.name])], sets: 1 + car.pit.stops, fuel: car.energy.fuel };
   const nextStop = (car.plan?.stints || []).find((x) => x.toLap > car.lap && x !== car.plan.stints[car.plan.stints.length - 1]);
   const inWindow = nextStop && nextStop.toLap - car.lap <= AI.window;
-  const full = why !== "lap" || inWindow || car.lap >= cs.nextFull || view.water > 0.1 || view.flag !== "green";
+  const wetTyre = WETS.includes(car.tyre.name);
+  // the tyre-family check every lap: box for the other family when a fresh set of it is expected to be clearly faster
+  // over the next laps – the water expected there from the forecast scenarios (rain coming → it rises, a dry forecast →
+  // it falls), the model corrected by what the field is doing on each compound right now (public lap times: the
+  // crossover teams watch). The same rule the scenarios assume for later laps.
+  if (!handsPlan && (view.water > 0.02 || view.rain > 0.1 || wetTyre || view.forecast.blocks.slice(0, 2).some((b) => b.pRain > 0.3)) && car.pit.phase === "none" && S.totalLaps - car.lap > 2) {
+    const corr = conditionCorr(race, team, M, est, view), K = Math.min(10, S.totalLaps - car.lap - 1);
+    // (just switched: switching back needs a further margin – one lap's reading is noisy)
+    const need = pitLoss(M, est, view.flag) + AI.switchDelta * (car.lap - (cs.switchLap ?? -9) < 4 ? 3 : 1);
+    let best = null, bg = need;
+    const gains = crossoverGains(M, est, view, car.num, { name: car.tyre.name, age: car.tyre.laps, fuel: car.energy.fuel }, { K, corr, key: `${car.num}:${car.pit.stops}:w` });
+    for (const c in gains) if (gains[c] > bg) { bg = gains[c]; best = c; }
+    if (best) {
+      order(race, team, car, "plan", { stints: [{ compound: car.tyre.name, toLap: car.lap + 1 }, { compound: best, toLap: S.totalLaps }] });
+      cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = car.lap + 1;
+      TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why: why + ",crossover", plan: `→${best}`, gain: +bg.toFixed(1), water: +view.water.toFixed(3), corr });
+      return;
+    }
+  }
+  const full = why !== "lap" || inWindow || car.lap >= cs.nextFull || view.water > 0.02 || wetTyre || view.flag !== "green";
   if (!handsPlan && full) {
     cs.nextFull = car.lap + AI.replanEvery; S.ai.work.decisions++;
     const flag = view.flag === "sc" || view.flag === "vsc" ? view.flag : "green";
-    let cands = planCandidates(M, est, st, { flag, top: 4 });
+    const corrNow = view.water > 0.02 || view.rain > 0.1 || wetTyre ? conditionCorr(race, team, M, est, view) : null;
+    // dry plans only while on slicks (a wet tyre's plan: stay on it – the crossover check brings the slicks)
+    let cands = wetTyre ? [] : planCandidates(M, est, st, { flag, top: 4 });
     // the present plan as a candidate (continuing it costs nothing to decide)
     const cur = planAsCandidate(car, st, cs.modes); if (cur) cands.push(cur);
     // weather: box now for a wet tyre / back to slicks (the reactive rule decides later laps in the scenarios)
-    if (view.water > 0.05 || view.rain > 0.1 || view.forecast.blocks.slice(0, 3).some((b) => b.pRain > 0.3))
-      for (const w of [...WETS, ...M.av.dry]) if (w !== car.tyre.name && M.vs[w] && st.total - st.lap > 1) cands.push({ stints: [{ compound: car.tyre.name, laps: 1, mode: car.mode.pace }, { compound: w, laps: st.total - st.lap - 1, mode: "balanced" }], stops: 1, tag: "weather" });
     const scns = scenarios(M, est, view, `${car.num}:${car.pit.stops}`);   // (the same draws for the whole stint: plans compared on common scenarios don't flip on sampling noise)
-    let ev = evaluate(M, est, st, cands, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap });
+    let ev = evaluate(M, est, st, cands, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap, corr: corrNow });
+    if (!ev.length) return;
     // traffic over the next laps for each candidate's next stop, and the teammate's box (a queue when both come in together)
     const mate = S.cars.find((o) => o.teamKey === team && o.num !== car.num && o.status === "run");
     const mateStop = mate?.plan?.stints?.find((x) => x.toLap > mate.lap && x !== mate.plan.stints[mate.plan.stints.length - 1])?.toLap ?? null;
@@ -257,7 +277,7 @@ function decide(race, team, car, why) {
     ev.sort((a, b) => a.score - b.score);
     if (ev[0].queue > 0 && ev[0].stints.length > 1) {
       const sh = [-1, 1].map((d) => { const x = ev[0].stints.map((y) => ({ ...y })); x[0].laps += d; x[1].laps -= d; return { stints: x, stops: ev[0].stops, tag: "shift" }; }).filter((c) => c.stints[0].laps >= 1 && c.stints[1].laps >= 1);
-      ev.push(...evaluate(M, est, st, sh, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap }).map(score));
+      ev.push(...evaluate(M, est, st, sh, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap, corr: corrNow }).map(score));
     }
     ev.sort((a, b) => a.score - b.score);
     const best = ev[0], now = cur ? ev.find((c) => c.tag === "current") : null;
@@ -298,6 +318,20 @@ function decide(race, team, car, why) {
       else if (pol === "swap" && gap > 3) order(race, team, null, "teamOrder", { policy: "free" });
     }
   }
+}
+
+// what the field's latest laps say about each compound in the conditions now: median of (lap − the team's model for that
+// compound, age and the water now − the car's usual offset) over cars that finished a clean lap in the last 150 s
+function conditionCorr(race, team, M, est, view) {
+  const S = race.state, by = {};
+  for (const c of S.cars) {
+    const l = lastClean(c.laps); if (!l || c.status !== "run" || S.t - (c.lapT0 ?? 0) > 150000 || l.compound !== c.tyre.name) continue;
+    const fuel = Math.max(0, M.fuel0 - M.fuelPerLap * l.n), off = est.offR?.[c.num] ?? 0;
+    const r = l.t - lapTime(M, { g: est.g, sc: est.sc, s: est.s }, M.nums[0], l.compound, "balanced", Math.max(0, c.tyre.laps - 0.5), view.water, fuel) - off;
+    if (Number.isFinite(r)) (by[l.compound] ||= []).push(r);
+  }
+  const out = {}; for (const k in by) if (by[k].length >= 2) { const a = by[k].sort((x, y) => x - y); out[k] = +a[a.length >> 1].toFixed(2); }
+  return out;
 }
 
 // the car's present plan as a candidate from the state now (stints still to run; the current stint's in-lap ≥ next lap)

@@ -27,8 +27,7 @@ export const AI_TABLE = {
   scLaps: est(4, "laps", "typical SC duration", "3–5 laps", [2, 7]),
   scWindow: est(0.45, "×stint", "how much of the planned stint may be cut to stop under an SC", "teams take a cheap stop when the planned stop was not far off", [0.2, 0.8]),
   // ---- weather ----
-  hRain: est(1.2, "mm", "water on the racing line the team expects in steady light rain", "WEATHER.rainOn against drainage and the cars' clearing", [0.3, 3]),
-  dryTau: est(12, "min", "time constant of the line drying once the rain stops", "the line dries in 10–20 min", [5, 30]),
+  hRain: est(0.5, "mm", "water depth the team runs its virtual intermediate stint at (wet-tyre thermal table; the wet tyre at 2.5 mm)", "WEATHER.rainOn (2.5 mm/h) against drainage and the cars' clearing: the engine's own surface model reaches ≈ 0.25 mm after 10 min of it", [0.1, 3]),
   switchDelta: est(2.0, "s/lap", "lap-time gain of the other tyre over the current one at which a team switches (reactive rule in the scenarios)", "teams wait for clear evidence", [0.5, 5]),
   wetPersist: est(0.6, "1", "chance a wet forecast block stays wet into the next one in the scenario draws", "rain comes in spells, not in independent 15-min pieces", [0, 0.9]),
   // ---- traffic (lap-level forecast of the field) ----

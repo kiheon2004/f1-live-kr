@@ -57,7 +57,7 @@ test("public view: other cars' position, gap, compound, tyre age, stops, lap tim
   const r = createRace({ scenario: HUN, seed: 1 }); for (let i = 0; i < 3000; i++) step(r);
   const v = S.publicView(r, "McLaren"), keys = new Set(v.cars.flatMap((c) => Object.keys(c)));
   for (const k of ["wear", "fuel", "soc", "energy", "mode", "tyre", "driver", "Ts", "Tc", "plan"]) assert.ok(!keys.has(k), "no " + k);
-  for (const c of v.cars) for (const l of c.laps) assert.deepStrictEqual(Object.keys(l).sort(), ["compound", "n", "pit", "t"]);
+  for (const c of v.cars) for (const l of c.laps) assert.deepStrictEqual(Object.keys(l).sort(), ["compound", "n", "out", "pit", "t"]);
   assert.ok(Array.isArray(v.forecast.blocks) && v.forecast.blocks.length);
 });
 
@@ -100,23 +100,25 @@ test("scenarios: seeded and repeatable; a wet forecast puts water in them, a dry
   const a = S.scenarios(M, est, mk(0.02), "k", 32), b = S.scenarios(M, est, mk(0.02), "k", 32);
   assert.deepStrictEqual(a.map((x) => x.g), b.map((x) => x.g));
   assert.ok(a.every((x) => x.water.every((h) => h === 0)), "dry forecast: no water");
-  const w = S.scenarios(M, est, mk(0.9), "k", 32), wetShare = w.filter((x) => Math.max(...x.water) > 0.5).length / w.length;
+  const w = S.scenarios(M, est, mk(0.9), "k", 32), wetShare = w.filter((x) => Math.max(...x.water) > 0.1).length / w.length;
   assert.ok(wetShare > 0.6, "wet forecast: most scenarios wet " + wetShare);
   const scShare = a.filter((x) => x.sc.some((v) => v)).length / a.length;
   assert.ok(scShare > 0.15 && scShare < 0.85, "SC in some scenarios " + scShare);
 });
 
-test("rain forecast → the estimate prefers inters now; dry forecast → slicks kept (same track state now)", async () => {
+test("rain forecast → inters pay for the stop now; the same damp track with a dry forecast → slicks kept", async () => {
   const { createRace } = await E(), S = await ST();
   const race = createRace({ scenario: HUN, seed: 1 }), M = S.teamModel(race, "Alpine"), num = M.nums[0], est = { lane: M.lanePrior, stintLife: {} };
-  const st = { num, lap: 30, total: race.state.totalLaps, cur: { name: "HARD", age: 5 }, used: ["MEDIUM", "HARD"], sets: 2 };
-  const stay = { stints: [{ compound: "HARD", laps: 40, mode: "balanced" }], stops: 0 };
-  const inter = { stints: [{ compound: "HARD", laps: 1, mode: "balanced" }, { compound: "INTERMEDIATE", laps: 39, mode: "balanced" }], stops: 1 };
   const view = (p, water, rain) => { const v = S.publicView(race, "Alpine"); v.lap = 30; v.lapS = 80; v.t = 2400000; v.water = water; v.rain = rain; v.forecast = { issued: v.t, blocks: Array.from({ length: 8 }, (_, j) => ({ from: v.t + j * 900000, to: v.t + (j + 1) * 900000, pRain: p })) }; return v; };
-  const pick = (v) => { const ev = S.evaluate(M, est, st, [stay, inter], S.scenarios(M, est, v, "r", 24)); return ev[0].mean < ev[1].mean ? "stay" : "inter"; };
-  assert.strictEqual(pick(view(0.95, 0.15, 2.5)), "inter", "damp, raining, more forecast: inters");
-  assert.strictEqual(pick(view(0.03, 0.15, 0)), "stay", "the same damp track with a dry forecast: slicks kept");
-  assert.strictEqual(pick(view(0.03, 0, 0)), "stay");
+  const gain = (v) => S.crossoverGains(M, est, v, num, { name: "HARD", age: 5 }, { K: 10 }).INTERMEDIATE;
+  const loss = S.pitLoss(M, est);
+  const wet = gain(view(0.95, 0.2, 2.5)), dry = gain(view(0.03, 0.2, 0)), bone = gain(view(0.03, 0, 0));
+  assert.ok(wet > loss, `raining + wet forecast: inters gain ${wet.toFixed(1)} s > the stop ${loss.toFixed(1)} s`);
+  assert.ok(dry < loss, `damp + dry forecast: ${dry.toFixed(1)} s < the stop – slicks kept`);
+  assert.ok(wet > dry && dry > bone, "more water expected → more for the inter");
+  // and the other way: on inters with a drying track and a dry forecast, slicks pay
+  const back = S.crossoverGains(M, est, view(0.03, 0.02, 0), num, { name: "INTERMEDIATE", age: 8 }, { K: 10 });
+  assert.ok(Math.max(back.MEDIUM, back.HARD) > loss);
 });
 
 test("pre-race strategy: everything §3 asks for, labelled as an estimate; both cars; conflicts flagged", async () => {

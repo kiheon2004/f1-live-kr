@@ -279,16 +279,21 @@ export function scenarios(M, est, view, key, n = AI.mc) {
     const water = new Float64Array(total + 2);
     if (anyRain) {
       // rain per forecast block (Gaussian copula: each block's marginal = its pRain, neighbours correlated), then a one-
-      // segment water film (fill toward hRain while wet, dry with dryTau) sampled at each lap's middle
+      // segment water film (the team's water model below) sampled at each lap's middle
       const wet = []; let z = r.normal(); const rho = AI.wetPersist;
       for (let j = 0; j < Math.max(1, blocks.length); j++) { if (j) z = rho * z + Math.sqrt(1 - rho * rho) * r.normal(); wet.push(Phi(z) < (blocks[j]?.pRain ?? 0)); }
       const blkMs = blocks.length ? blocks[0].to - blocks[0].from : 900000, t0 = blocks[0]?.from ?? view.t;
       let h = view.water || 0, tm = view.t, nowRain = (view.rain || 0) > 0.1;
+      const nCars = view.cars.filter((c) => c.status === "run").length || 20, Tt = view.trackT ?? 30;
+      const evapMin = Math.max(0, WEATHER.evap.v * (1 + WEATHER.evapT.v * (Tt - 25))) / 60;
       for (let L = S0 + 1; L <= total; L++) {
         const tL = view.t + (L - S0 - 0.5) * lapS * 1000;
         while (tm < tL) {
           const j = Math.min(wet.length - 1, Math.max(0, Math.floor((tm - t0) / blkMs))), raining = tm - view.t < 300000 && nowRain ? true : wet[j];
-          h = raining ? h + (AI.hRain - h) * (1 - Math.exp(-60 / 300)) : h * Math.exp(-1 / AI.dryTau);
+          // the team's water model: the game's published surface physics for one segment (rain in at the intensity the
+          // weather service gives for "raining", drainage, evaporation at the track temperature, the cars' clearing)
+          const R = raining ? WEATHER.rainOn.v : 0, passes = nCars * 60 / Math.max(60, lapS);
+          h += R / 60 - h * (1 - Math.exp(-WEATHER.drain.v / 60)) - evapMin; h *= Math.pow(1 - WEATHER.carClear.v, passes); if (h < 0) h = 0;
           tm += 60000;
         }
         water[L] = h;
@@ -301,24 +306,28 @@ export function scenarios(M, est, view, key, n = AI.mc) {
 
 // cost (s) of following a candidate from state st in one scenario, with the reactive rules (SC: bring the next stop
 // forward; weather: switch to the tyre that is clearly faster on the water there)
-export function evalCandidate(M, est, st, cand, scn, { fuel = M.fuelRef, burn = M.fuelPerLap } = {}) {
+// corr: { compound: s } what the field's latest laps say about each compound in the conditions now (ai.js conditionCorr) –
+// applied in full for corrLaps laps, then fading over as many again (conditions change)
+export function evalCandidate(M, est, st, cand, scn, { fuel = M.fuelRef, burn = M.fuelPerLap, corr = null, corrLaps = 3 } = {}) {
   const e = { ...est, g: scn.g }, total = st.total, loss = pitLoss(M, e, "green"), lossSc = pitLoss(M, e, "sc");
   const stops = []; { let lap = st.lap; for (let i = 0; i < cand.stints.length - 1; i++) { lap += cand.stints[i].laps; stops.push({ lap, compound: cand.stints[i + 1].compound, mode: cand.stints[i + 1].mode }); } }
   let name = cand.stints[0].compound, mode = cand.stints[0].mode, age = st.cur ? st.cur.age : 0, cost = 0, f = fuel, k = 0, plannedLen = cand.stints[0].laps;
   const used = new Set([...(st.used || []), name]); let sets = (st.sets || (st.cur ? 1 : 0)) + (st.cur ? 0 : 1), weatherMode = false;
   const opts = [...M.av.dry, ...M.av.wet].filter((c) => M.vs[c]);
+  const cw = (L) => { const k = L - st.lap; return k <= corrLaps ? 1 : Math.max(0, 1 - (k - corrLaps) / corrLaps); };
+  const LT = (c, m, a, h, f, L) => lapTime(M, e, st.num, c, m, a, h, f) + (corr && corr[c] ? corr[c] * cw(L) : 0);
   for (let L = st.lap + 1; L <= total; L++) {
     const h = scn.water[L], underSc = scn.sc[L];
     // SC: the next planned stop comes forward if it was within the window (only when the SC is out on that lap)
     if (underSc && k < stops.length && !weatherMode && stops[k].lap - L <= AI.scWindow * plannedLen && stops[k].lap >= L && L < total) stops[k].lap = L;
-    cost += underSc ? M.scLapS : lapTime(M, e, st.num, name, mode, age, h, f);   // (SC laps: everyone at the SC's pace – the same for every candidate)
+    cost += underSc ? M.scLapS : LT(name, mode, age, h, f, L);   // (SC laps: everyone at the SC's pace – the same for every candidate)
     age++; f -= burn;
     let pitTo = null;
     if (k < stops.length && stops[k].lap === L && !weatherMode) { pitTo = stops[k].compound; mode = stops[k].mode; k++; }
     if (scn.wetAny && L < total) {
       // the tyre that is fastest for the water now (a fresh set) vs the present one
-      let best = name, bt = lapTime(M, e, st.num, name, mode, age, h, f);
-      for (const c of opts) { const tt = lapTime(M, e, st.num, c, "balanced", 0, h, f); if (tt + AI.switchDelta < bt) { bt = tt; best = c; } }
+      let best = name, bt = LT(name, mode, age, h, f, L);
+      for (const c of opts) { const tt = LT(c, "balanced", 0, h, f, L); if (tt + AI.switchDelta < bt) { bt = tt; best = c; } }
       const wrongFamily = (WETS.includes(best) !== WETS.includes(name));
       if (best !== name && wrongFamily) { pitTo = best; mode = "balanced"; weatherMode = true; }
       else if (pitTo && WETS.includes(name) !== WETS.includes(pitTo) && h > 0.3) pitTo = null;   // (don't fit slicks on a wet track because the plan said so)
@@ -332,6 +341,19 @@ export function evalCandidate(M, est, st, cand, scn, { fuel = M.fuelRef, burn = 
   }
   if (!ruleOk(M.rule, [...used], sets)) cost += 60;   // (a breach is a DSQ – a large cost, not a ban: the scenario may make it unavoidable)
   return cost;
+}
+
+// the tyre-family crossover: for each tyre of the other family (slicks ↔ intermediates/wets), the time a fresh set of it
+// gains over the present set in the next K laps, on the water the forecast scenarios expect there (mean of 8 draws: rain
+// coming → the water rises, a dry forecast → it falls), the model corrected by the field's latest laps on each compound
+// (corr – full on the next lap, half after). A switch pays when the gain beats the stop (ai.js; the scenarios use the
+// per-lap form of the same rule).
+export function crossoverGains(M, est, view, num, cur, { K = 10, corr = {}, key = "x" } = {}) {
+  const scW = scenarios(M, est, view, key, 8), hAt = (k) => scW.reduce((a, x) => a + x.water[Math.min(view.total, view.lap + k)], 0) / scW.length;
+  const lt = (c, age, k) => lapTime(M, est, num, c, "balanced", age, hAt(k), cur.fuel ?? M.fuelRef) + (corr[c] ?? 0) * (k <= 1 ? 1 : 0.5);
+  const wet = WETS.includes(cur.name), out = {};
+  for (const c of [...M.av.dry, ...M.av.wet]) if (M.vs[c] && WETS.includes(c) !== wet) { let g = 0; for (let k = 1; k <= K; k++) g += lt(cur.name, cur.age + k, k) - lt(c, k - 1, k); out[c] = g; }
+  return out;
 }
 
 // candidates × scenarios → stats per candidate (mean, sd, p10, p90)
@@ -349,6 +371,10 @@ export function evaluate(M, est, st, cands, scns, opts) {
 }
 
 // ---------- public view (what the team may see) ----------
+// laps that say something about pace: not the in-lap (pit flag: the lap the car entered the lane), not the out-lap that
+// follows it (the timing line is in the lane: that lap carries the stationary time), not the standing-start lap
+export const cleanLaps = (laps) => laps.filter((l, i) => !l.pit && !(i > 0 && laps[i - 1].pit) && l.n > 1);
+export const lastClean = (laps) => { const i = laps.length - 1; return i >= 0 && !laps[i].pit && !(i > 0 && laps[i - 1].pit) && laps[i].n > 1 ? laps[i] : null; };
 export function publicView(race, team, { forecast = null } = {}) {
   const S = race.state, C = race.cache, T = C.T, w = C.w || {};
   const lead = S.cars.find((c) => c.num === S.order[0]);
@@ -356,7 +382,7 @@ export function publicView(race, team, { forecast = null } = {}) {
   const fc = forecast || (C.forecastFn ? C.forecastFn(race) : forecastAt(C.truth, S.t, S.seed));
   const cars = S.order.map((n, i) => {
     const c = S.cars.find((x) => x.num === n);
-    const laps = c.laps.slice(-6).map((l) => ({ n: l.n, t: l.t, compound: l.compound, pit: !!l.pit }));
+    const k0 = Math.max(0, c.laps.length - 6), laps = c.laps.slice(k0).map((l, i) => ({ n: l.n, t: l.t, compound: l.compound, pit: !!l.pit, out: k0 + i > 0 && !!c.laps[k0 + i - 1].pit }));
     const used = [...new Set([...c.laps.map((l) => l.compound), c.tyre.name])];
     return { num: c.num, team: c.teamKey, pos: i + 1, lap: c.lap, dist: c.dist, gap: lead ? (lead.dist - c.dist) / (T.L / lapS) : 0,
       inPit: c.where === "pit", status: c.status, compound: c.tyre.name, age: c.tyre.laps, stops: c.pit.stops, used, laps };
@@ -366,7 +392,7 @@ export function publicView(race, team, { forecast = null } = {}) {
 }
 // a typical green lap now (s): the median of the field's recent clean laps, else the team model's
 function estLapS(race) {
-  const xs = []; for (const c of race.state.cars) for (const l of c.laps.slice(-3)) if (!l.pit && l.n > 1) xs.push(l.t);
+  const xs = []; for (const c of race.state.cars) for (const l of cleanLaps(c.laps).slice(-3)) xs.push(l.t);
   if (xs.length >= 5) return median(xs);
   const M = race.cache.aiModels && Object.values(race.cache.aiModels)[0]; return M ? ltOfMu(M, 0.95 * M.muTrack * M.pace) : 90;
 }
@@ -387,10 +413,13 @@ export function prepTraffic(M, est, view, num, { H = AI.horizon, passDelta = est
   const life = est?.stintLife || {}, Hm = Math.min(H, view.total - view.lap);
   const tab = {}; const pace = (name, age) => { const t = tab[name] || (tab[name] = []); const a = Math.min(M.A, Math.round(age)); return t[a] ?? (t[a] = lapTime(M, est, num, name, "balanced", a)); };
   const rel = view.cars.filter((c) => (c.status === "run" || c.status === "grid" || c.status === "pitstart") && Math.abs(c.gap - me.gap) < loss + 30);
-  const resid = (c) => { const clean = c.laps.filter((l) => !l.pit && l.n > 1).slice(-3); return clean.length ? median(clean.map((l) => l.t - pace(l.compound, Math.max(0, c.age - (c.lap - l.n))))) : NaN; };
-  const r0 = resid(me);
+  // a rival's pace relative to the own car: the same laps compared (same conditions, same lap of the race), each less the
+  // model's tyre effect for its compound and age then – conditions that change (rain, a drying line) cancel out
+  const ex = (c, l) => l.t - pace(l.compound, Math.max(0, c.age - (c.lap - l.n)));
+  const mine = new Map(me.laps.filter((l) => !l.pit && !l.out && l.n > 1).map((l) => [l.n, ex(me, l)]));
+  const rel0 = (c) => { const d = c.laps.filter((l) => !l.pit && !l.out && l.n > 1 && mine.has(l.n)).slice(-3).map((l) => ex(c, l) - mine.get(l.n)); return d.length ? median(d) : 0; };
   const cars = rel.map((c) => {
-    const rr = c.num === num ? 0 : resid(c), base = Number.isFinite(rr) && Number.isFinite(r0) ? rr - r0 : 0;
+    const base = c.num === num ? 0 : Math.max(-5, Math.min(5, rel0(c)));
     let stop = null;
     if (c.num !== num && !c.inPit && WETS.indexOf(c.compound) < 0) {
       const L = life[c.compound] || 25, mustStop = new Set(c.used.filter((x) => DRY.includes(x))).size < 2;
