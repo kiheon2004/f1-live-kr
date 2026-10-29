@@ -15,6 +15,8 @@
 // heights (mesh names: map3d.js, scenery.js barriersMesh, facilities.js); low: met by a line at the lane's own height,
 // under a raised stand (a platform's edge under its deck isn't in its way; the wall a line over it misses is the wall) }.
 
+import { clipBarrierLines, runSegs } from "./mapwalls.js";
+
 // a wall – solid, a car or a person doesn't pass it; a screen – a fence or a railing: no crash wall, but between a stand
 // and its pit lane it shuts the stand off from the lane all the same
 export const WALL = /^(barrier:(wall|retaining_wall|jersey_barrier|guard_rail)|syntheticWalls|pitWall)$/;
@@ -83,18 +85,9 @@ export function pitLaneOf(G, margin = 0.3) {
 // wall before the last teams' stands; run/pitwall)
 // (kinds: the fences instead – the pit wall's debris fence a map may have where it has no wall: facilities.js)
 export function solidBarrierSegs(lines, xz, onTarmac = () => false, kinds = /^(wall|retaining_wall|jersey_barrier|guard_rail)$/) {
-  const out = [];
-  for (const l of lines) if (l.k === "barrier" && kinds.test(l.sub || "")) {
-    const q = l.pts.map(xz), on = q.map(([x, z]) => onTarmac(x, z));
-    for (let i = 1; i < q.length; i++) {
-      const [ax, az] = q[i - 1], [bx, bz] = q[i];
-      if (!on[i - 1] && !on[i]) { out.push([ax, az, bx, bz]); continue; }
-      // (an end on the tarmac: in 2 m pieces, the ones off it – as drawn: scenery.js cuts a line near the pits in 2 m
-      // points. Whole, the piece was drawn but not found – Monza 2026: the map's wall stood through three stands, ours at
-      // the edge behind it; run/pitwall)
-      const m = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2)), pt = (k) => [ax + ((bx - ax) * k) / m, az + ((bz - az) * k) / m];
-      for (let k = 0; k < m; k++) { const a = pt(k), b = pt(k + 1); if (!onTarmac(...a) && !onTarmac(...b)) out.push([...a, ...b]); }
-    }
-  }
-  return out;
+  // (v0.47: the shared split + clip – mapwalls.js clipBarrierLines, the CANDIDATE walls: a piece is tested every 2 m,
+  // not only at its ends – one whose two ends were off the tarmac had been kept whole though its middle crossed the
+  // road; the pieces as drawn, whole where nothing is cut, in 2 m pieces off the tarmac where something is – Monza 2026:
+  // the map's wall stood through three stands, ours at the edge behind it; run/pitwall)
+  return runSegs(clipBarrierLines(lines.filter((l) => l.k === "barrier" && kinds.test(l.sub || "")), xz, { cut: onTarmac }));
 }
