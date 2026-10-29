@@ -105,6 +105,17 @@ export function laneOffsetOf(s, cs, off, u, gStart, gEnd, P = PIT) {
   return off + (want - off) * inRun;
 }
 
+// v0.49: a car going into its garage (lane "garage": retired and standing, or a long stay outside a race) – where it is at
+// w (0 → 1, pitState's), from where it stood in the lane to its own work space's car spot (garages.js garageZones), never
+// through a wall: first along the inner lane to in front of its own door, turning to face out (w 0–0.5), then backwards
+// straight in through the door to the spot (0.5–1) – the cars are wheeled in tail first (garagespace.js). An ESTIMATE
+// throughout: the feed has nothing of it. from: { u, off } where it stands; to: { u, off } its spot (off < 0: inside);
+// laneOff: the inner (box) lane's offset there. → { u, off, turn (0: as it stood, 1: facing out) }
+export function garagePath(w, from, to, laneOff) {
+  const a = ss(0, 0.5, w), b = ss(0.5, 1, w), lane = from.off + (laneOff - from.off) * a;
+  return { u: from.u + (to.u - from.u) * a, off: lane + (to.off - laneOff) * b, turn: a };
+}
+
 // A team's crew, from its cars' states (crew.js draws it): "work" round the car in its box (not at a stop-and-go:
 // no work is allowed), "hold" standing back by the garage at a stop-and-go, "ready" at the box while a car of the team
 // comes down the lane to it (FIA 34.13: in the pit lane only just before the work), "back" walking back over the
