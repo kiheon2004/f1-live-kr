@@ -67,8 +67,10 @@ export function paintTeam() {
   const ss = seasons();
   if (!ss.length) return `<div class="g-empty"><h3>준비된 경기가 없어요</h3><p class="muted">게임은 이 컴퓨터의 세션 기록에서 준비한 경기로 열려요. 아래에서 준비하거나 시나리오 파일을 가져오세요.${G.listErr ? " 오류: " + esc(G.listErr) : ""}</p>${SaveUI.paintRaces({ standalone: true })}</div>`;
   if (!ss.includes(G.season)) G.season = ss[0];
-  const teams = teamsOf(G.season);
-  return `<div class="g-team-pick"><div class="g-row"><h2>팀 선택</h2><label>시즌 <select data-chg="menu:season">${ss.map((y) => `<option ${y === G.season ? "selected" : ""}>${y}</option>`).join("")}</select></label>
+  const teams = teamsOf(G.season), cont = SaveUI.continueInfo();
+  // (after a restart the game opens here: the latest save is one click away – its own team and race come with it)
+  const contBar = cont.ok ? `<div class="g-row g-cont"><button class="primary" data-act="menu:continue"><span>이어하기</span> <small>${esc(cont.text)}</small></button></div>` : "";
+  return `<div class="g-team-pick">${contBar}<div class="g-row"><h2>팀 선택</h2><label>시즌 <select data-chg="menu:season">${ss.map((y) => `<option ${y === G.season ? "selected" : ""}>${y}</option>`).join("")}</select></label>
     <span class="muted">팀과 드라이버는 그 시즌의 준비된 경기 참가 명단에서 읽어요.</span></div>
     <div class="g-grid">${teams.map((t) => `<button class="g-team ${t.key === G.teamKey ? "on" : ""}" data-act="menu:team" data-team="${esc(t.key)}" style="--tc:${esc(t.colour || "#888")}"><b>${esc(teamKo(t.name))}</b>
       <span>${[...t.drivers.values()].map((d) => `#${esc(d.num)} ${esc(d.tla)}`).join(" · ")}</span><small>준비된 경기 ${t.races}개</small></button>`).join("")}</div></div>`;
