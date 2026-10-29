@@ -224,7 +224,7 @@ const order = (k) => PH_ORDER.indexOf(k);
 const EV_KO = { "driver error": "실수", contact: "접촉", mechanical: "고장", rc: "레이스 컨트롤", stewards: "스튜어드", retired: "리타이어", sc: "세이프티카", vsc: "VSC", red: "적색기", green: "녹색기", chequered: "체커기",
   pitCall: "피트 요청", pitCancel: "피트 요청 취소", pitEntry: "피트 진입", pitExit: "피트 출구", pitCommitted: "피트 진입 확정", pitLaneStart: "피트레인 출발", pitExitHold: "피트 출구 대기", start: "출발 준비", lightsOut: "출발",
   finished: "완주", fuelEmpty: "연료 소진", ersEmpty: "배터리 소진", teamOrder: "팀 지시", teamOrderDone: "팀 지시 완료", redTyreChange: "적색기 중 타이어 교체",
-  "pit:work": "정비 시작", "pit:workDone": "정비 완료", "pit:release": "출발 신호", "pit:queue": "앞차 정비 대기", "pit:penalty": "페널티 정지", "pit:lane": "피트레인", "pit:approach": "박스 접근", "pit:exit": "피트 출구", "pit:entry": "피트 진입", "pit:laneOut": "피트레인 출구" };
+  overtake: "추월", lapping: "랩 추월", "pit:work": "정비 시작", "pit:workDone": "정비 완료", "pit:release": "출발 신호", "pit:queue": "앞차 정비 대기", "pit:penalty": "페널티 정지", "pit:lane": "피트레인", "pit:approach": "박스 접근", "pit:exit": "피트 출구", "pit:entry": "피트 진입", "pit:laneOut": "피트레인 출구" };
 // traffic's running commentary (who defends where, a pass given up, blue flags) – the engine's own log, too much for the panel
 const EV_SKIP = new Set(["defend", "attackAborted", "attack", "blueFlag", "yield", "pass"]);
 const effText = (x) => x == null ? "" : typeof x === "string" ? x : [x.kind, x.outcome && x.outcome !== "none" ? x.outcome : "", x.out ? `out (${x.out})` : "", x.stoppedS ? `${x.stoppedS}s 정지` : "", x.damage ? "손상" : "", x.fault ? `결함 ${x.fault}` : ""].filter(Boolean).join(" · ");
@@ -236,6 +236,8 @@ function evDetail(e, all) {
   if (e.type === "pitCall") { const m = /^box for (\w+): (.*)$/.exec(String(e.effect || "")); return m ? `${CMP_KO[m[1]] || m[1]} · ${whyKo(m[2])}` : /^refused: (.*)/.test(String(e.effect)) ? `거절 – ${whyKo(String(e.effect).slice(9))}` : ""; }
   if (e.type === "pitCancel") return e.effect === "cancelled" ? "" : /^refused: (.*)/.test(String(e.effect)) ? `거절 – ${whyKo(String(e.effect).slice(9))}` : "";
   if (/^pit:/.test(e.type)) return "";
+  // (traffic's passes: "passes HAM at T10" / "at straight (DRS zone 2)" → the car passed and where)
+  { const m = /^passes (\w+) at (.+)$/.exec(String(e.effect || "")); if (m) return `${m[1]} 앞으로 · ${m[2].replace(/^straight/, "직선").replace(/DRS zone (\d+)/, "DRS 구간 $1")}`; }
   return e.effect ? effText(e.effect) : e.cause && typeof e.cause === "string" && e.cause !== "player" && e.cause !== "pit" ? e.cause : "";
 }
 export const evShown = (e) => !EV_SKIP.has(e.type) && !/^ai:/.test(String(e.cause || ""));
