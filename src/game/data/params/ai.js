@@ -32,9 +32,9 @@ export const AI_TABLE = {
   // ---- traffic (lap-level forecast of the field) ----
   passDelta: est(0.9, "s/lap", "pace advantage a car needs to pass in the lap-level traffic forecast (start value)", "DRS-era passing needs ~0.5–1 s/lap", [0.3, 3]),
   passDeltaStreet: est(2.5, "s/lap", "the same at a street circuit", "Monaco/Singapore: nearly impossible", [1, 6]),
-  passLearn: est(10, "laps", "laps of observed on-track passes after which the team trusts its own count", "learned from the public order", [3, 30]),
+  passLearn: est(5, "laps", "laps of observed on-track passes after which the team trusts its own count", "learned from the public order", [3, 30]),
   minGapS: est(0.6, "s", "how close a held car runs behind the car ahead in the lap-level forecast", "dirty air", [0.3, 1.2]),
-  horizon: est(12, "laps", "laps the traffic forecast looks ahead", "bounded work per decision", [5, 25]),
+  horizon: est(40, "laps", "laps the traffic forecast looks ahead (every stop of a candidate inside it counts)", "bounded work per decision (pace tables cached: ≈ 20 cars × 40 laps per candidate)", [5, 80]),
   // ---- decisions ----
   mc: est(16, "scenarios", "Monte-Carlo scenarios per evaluation (forecast × wear error × SC)", "bounded work (≈ 1 ms)", [4, 64]),
   window: est(4, "laps", "a stop this many laps ahead or closer is 'in the window' (lap-by-lap timing check with traffic)", "", [2, 8]),

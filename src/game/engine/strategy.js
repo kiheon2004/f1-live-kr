@@ -143,7 +143,7 @@ function buildModel(race, team) {
   };
   const vs = {};
   for (const name of av.dry) { vs[name] = {}; for (const mode of MODES) vs[name][mode] = stint(name, mode, 0); }
-  for (const name of av.wet) if (belief[name]) { vs[name] = {}; vs[name].balanced = stint(name, "balanced", name === "WET" ? 2.5 : AI.hRain); vs[name].manage = vs[name].balanced; vs[name].attack = vs[name].balanced; }
+  for (const name of av.wet) if (belief[name]) { const t = stint(name, "balanced", 0); t.wet = stint(name, "balanced", name === "WET" ? 2.5 : AI.hRain); vs[name] = { balanced: t, manage: t, attack: t }; }
   // pit loss: the lane walked with the pit model's own public rules (limiter, box approach/launch, typical stationary time)
   // against the same stretch on the lap at the team's free pace; the team's prior error on top
   const L = T.pit, lim = L.speedLimit, boxU = L.boxes?.[team] ?? (L.limStart + L.limEnd) / 2;
@@ -174,13 +174,20 @@ export function ltOfMu(M, mu) {
   const x = (mu - g[0]) / (g[1] - g[0]), i = Math.floor(x), f = x - i; return l[i] + (l[i + 1] - l[i]) * f;
 }
 
-// the team's estimate of one lap (s): est = { g (wear factor), off: {num: s} }
+// the team's estimate of one lap (s): est = { g (wear-rate factor, from its wear readings), s (degradation scale, from its
+// lap times), off: {num: s} (car offset) }. lap = LT at age 0 + s·(LT at age·g − LT at age 0) + fuel + offset: the
+// physics model gives the shape, the team's own laps the size (teams fit "deg per lap" from their stints the same way).
+// Water: a slick's grip × S(h); a wet tyre between its dry-surface table (overheating, wear) and its wet one by dryness.
 export function lapTime(M, est, num, name, mode, age, water = 0, fuel = M.fuelRef) {
-  const v = M.vs[name] || M.vs.MEDIUM || Object.values(M.vs)[0], t = (v[mode] || v.balanced);
-  const d = M.drivers[num] || { pace: M.pace }, cpT = M.belief[name];
-  const mu = interp(t.mu, age * (est?.g ?? 1)) * (water > 0 && cpT ? waterFactor(cpT, water) / waterFactor(cpT, name === "WET" ? 2.5 : WETS.includes(name) ? AI.hRain : 0) : 1);
-  return ltOfMu(M, mu * M.muTrack * d.pace * PACE_MODES[mode].util) + M.kFuel * (fuel - M.fuelRef) + (est?.off?.[num] ?? 0);
+  const v = M.vs[name] || M.vs.MEDIUM || Object.values(M.vs)[0], t = (v[mode] || v.balanced), cpT = M.belief[name];
+  const d = M.drivers[num] || { pace: M.pace }, k = M.muTrack * d.pace * PACE_MODES[mode].util, ae = age * (est?.g ?? 1);
+  let mu0 = t.mu[0], mua = interp(t.mu, ae);
+  if (t.wet) { const dry = water > 0 ? Math.exp(-water / 0.3) : 1; mu0 = dry * mu0 + (1 - dry) * t.wet.mu[0]; mua = dry * mua + (1 - dry) * interp(t.wet.mu, ae); }
+  const S = water > 0 && cpT ? waterFactor(cpT, water) : 1, lt0 = ltOfMu(M, mu0 * S * k), lta = ltOfMu(M, mua * S * k);
+  return lt0 + (est?.s ?? 1) * (lta - lt0) + M.kFuel * (fuel - M.fuelRef) + (est?.off?.[num] ?? 0);
 }
+// the model's degradation part of a lap (s, before the scale s and the offset): for learning s
+export const degPart = (M, est, num, name, mode, age) => lapTime(M, { g: est?.g, s: 1 }, num, name, mode, age) - lapTime(M, { g: est?.g, s: 1 }, num, name, mode, 0);
 // the wear the team expects after `age` laps (for learning g from its own readings)
 export const wearAt = (M, name, mode, age) => interp((M.vs[name]?.[mode] || M.vs[name]?.balanced || { wear: [0] }).wear, age);
 
@@ -239,7 +246,10 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
     }
   }
   out.sort((a, b) => a.cost - b.cost);
-  return out.slice(0, top);
+  // the best few, and the best of every stop count (a plan with fewer stops can win once traffic is counted – ai.js adds it)
+  const pick = out.slice(0, top);
+  for (let k = 0; k <= maxStops; k++) { const b = out.find((c) => c.stops === k); if (b && !pick.includes(b)) pick.push(b); }
+  return pick;
 }
 
 // stints → the engine's plan order: [{ compound, toLap }] (toLap = in-lap of each stop; last = total)
@@ -359,45 +369,54 @@ function estLapS(race) {
 }
 
 // ---------- traffic: lap-level forecast of the field ----------
-// Over `H` laps: every car runs its estimated pace (public recent laps, less the team's degradation model for its compound
-// and age) and stops when the team guesses it will (its compound's typical stint); a car can't close below minGap on the
-// car ahead unless it is passDelta/lap faster. Returns the own car's time held behind others (s) for its stop lap `myStop`
-// (null = no stop within H) and compound.
-export function trafficHold(M, est, view, num, myStop, myCompound, { H = AI.horizon, passDelta = est?.passDelta ?? (M.street ? AI.passDeltaStreet : AI.passDelta) } = {}) {
-  const loss = pitLoss(M, est, view.flag), me = view.cars.find((c) => c.num === num); if (!me) return 0;
-  const life = est?.stintLife || {};
-  const rel = view.cars.filter((c) => c.status === "run" && Math.abs(c.gap - me.gap) < loss + 25);
-  const pace = (c, name, age) => lapTime(M, est, num, name, "balanced", age) - (c.num === num ? 0 : 0);
-  const base = new Map();
-  for (const c of rel) {
-    if (c.num === num) { base.set(c.num, 0); continue; }
-    const clean = c.laps.filter((l) => !l.pit && l.n > 1).slice(-3);
-    const own = clean.length ? median(clean.map((l) => l.t - pace(c, l.compound, Math.max(0, c.age - (c.lap - l.n))))) : 0;
-    const mine = me.laps.filter((l) => !l.pit && l.n > 1).slice(-3);
-    const ref = mine.length ? median(mine.map((l) => l.t - pace(me, l.compound, Math.max(0, me.age - (me.lap - l.n))))) : 0;
-    base.set(c.num, Number.isFinite(own - ref) ? own - ref : 0);
-  }
-  const run = (traffic) => {
-    const st = rel.map((c) => ({ num: c.num, t: c.gap, name: c.compound, age: c.age, stop: c.num === num ? myStop : (c.inPit ? null : view.lap + Math.max(1, Math.round((life[c.compound] || 25) - c.age))), comp: c.num === num ? myCompound : (c.compound === "HARD" ? "MEDIUM" : "HARD"), held: 0 }));
-    for (let L = view.lap + 1; L <= Math.min(view.total, view.lap + H); L++) {
-      for (const c of st) {
-        let lt = pace(c, c.name, c.age) + base.get(c.num); c.age++;
-        if (c.stop === L) { lt += loss; c.name = c.comp; c.age = 0; c.pitted = L; }
-        c.next = c.t + lt; c.lt = lt;
-      }
-      if (traffic) {
-        st.sort((a, b) => a.t - b.t);   // road order at the start of the lap
-        for (let i = 1; i < st.length; i++) {
-          const c = st[i], a = st[i - 1]; if (c.pitted === L || a.pitted === L) continue;
-          const minT = a.next + AI.minGapS;
-          if (c.next < minT && a.lt - c.lt < passDelta) { c.held += minT - c.next; c.next = minT; c.lt = c.next - c.t; }
-        }
-      }
-      for (const c of st) c.t = c.next;
+// Over the next H laps: every car runs its estimated pace (its public recent laps less the team's degradation model for
+// its compound and age, relative to the own car) and stops when the team guesses it will; a car can't close below minGap
+// on the car ahead unless it is passDelta/lap faster (passDelta: learned from the passes seen in the public order).
+// The rivals' stops are guessed from public facts only: a rival still short of the compound's typical life stops when it
+// gets there; one already past it is running long – it stops once, half-way through what is left, if it still has to
+// (one dry compound used) and otherwise runs to the end.
+// prepTraffic(...) once per decision → ctx; trafficHold(ctx, stops) per candidate: the own car's time held (s) when it
+// stops at `stops` = [{ lap, compound }] (in-laps).
+export function prepTraffic(M, est, view, num, { H = AI.horizon, passDelta = est?.passDelta ?? (M.street ? AI.passDeltaStreet : AI.passDelta) } = {}) {
+  const loss = pitLoss(M, est, view.flag), me = view.cars.find((c) => c.num === num); if (!me) return null;
+  const life = est?.stintLife || {}, Hm = Math.min(H, view.total - view.lap);
+  const tab = {}; const pace = (name, age) => { const t = tab[name] || (tab[name] = []); const a = Math.min(M.A, Math.round(age)); return t[a] ?? (t[a] = lapTime(M, est, num, name, "balanced", a)); };
+  const rel = view.cars.filter((c) => (c.status === "run" || c.status === "grid" || c.status === "pitstart") && Math.abs(c.gap - me.gap) < loss + 30);
+  const resid = (c) => { const clean = c.laps.filter((l) => !l.pit && l.n > 1).slice(-3); return clean.length ? median(clean.map((l) => l.t - pace(l.compound, Math.max(0, c.age - (c.lap - l.n))))) : NaN; };
+  const r0 = resid(me);
+  const cars = rel.map((c) => {
+    const rr = c.num === num ? 0 : resid(c), base = Number.isFinite(rr) && Number.isFinite(r0) ? rr - r0 : 0;
+    let stop = null;
+    if (c.num !== num && !c.inPit && WETS.indexOf(c.compound) < 0) {
+      const L = life[c.compound] || 25, mustStop = new Set(c.used.filter((x) => DRY.includes(x))).size < 2;
+      if (c.age < L) stop = view.lap + Math.max(1, Math.round(L - c.age));
+      else if (mustStop) stop = view.lap + Math.max(1, Math.round((view.total - view.lap) / 2));
+      if (stop != null && stop >= view.total) stop = null;
     }
-    return st.find((c) => c.num === num);
-  };
-  return run(true).held;
+    return { num: c.num, gap: c.gap, name: c.compound, age: c.age, base, stop, comp: c.compound === "HARD" ? "MEDIUM" : "HARD" };
+  });
+  return { M, num, cars, pace, loss, passDelta, lap: view.lap, H: Hm };
+}
+export function trafficHold(ctx, stops = []) {
+  if (!ctx) return 0;
+  const st = ctx.cars.map((c) => ({ ...c, t: c.gap, held: 0, next: 0, lt: 0, pitted: -1 })), me = st.find((c) => c.num === ctx.num);
+  const own = new Map(stops.map((x) => [x.lap, x.compound]));
+  for (let L = ctx.lap + 1; L <= ctx.lap + ctx.H; L++) {
+    for (const c of st) {
+      let lt = ctx.pace(c.name, c.age) + c.base; c.age++;
+      const pit = c === me ? own.get(L) : c.stop === L ? c.comp : undefined;
+      if (pit) { lt += ctx.loss; c.name = pit; c.age = 0; c.pitted = L; }
+      c.next = c.t + lt; c.lt = lt;
+    }
+    st.sort((a, b) => a.t - b.t);   // road order at the start of the lap
+    for (let i = 1; i < st.length; i++) {
+      const c = st[i], a = st[i - 1]; if (c.pitted === L || a.pitted === L) continue;
+      const minT = a.next + AI.minGapS;
+      if (c.next < minT && a.lt - c.lt < ctx.passDelta) { c.held += minT - c.next; c.next = minT; c.lt = c.next - c.t; }
+    }
+    for (const c of st) c.t = c.next;
+  }
+  return me ? me.held : 0;
 }
 
 // ---------- pre-race strategy (request §3) ----------
