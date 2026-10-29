@@ -103,7 +103,7 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   const alloc = nom ? { HARD: nom.H, MEDIUM: nom.M, SOFT: nom.S, INTERMEDIATE: "INTERMEDIATE", WET: "WET", est: false } : { ...DEFAULT_ALLOCATION, est: true };
   const tau = TRACK_TAU[sc.meta.id] ?? 1;
   race.cache = { T, PT, cars, drivers, profiles, alloc, tau, tauEst: !(sc.meta.id in TRACK_TAU), ep: energyParams(season), truth: weatherTruth(rec, { mode: race.state.weatherMode, seed: race.state.seed, minutes: 240 }),
-    surface: race.cache?.surface || null, w: {}, carById: null };
+    surface: race.cache?.surface || null, w: {}, carById: null, ghostProf: {} };
   if (!race.state.surface) race.state.surface = saveSurface(newSurface(T));
   race.cache.surface = loadSurface(race.state.surface);
   race.cache.carById = null;
@@ -213,9 +213,37 @@ function moveLap(race, car, t) {
   car.dist = car.armed ? car.lap * T.L + car.s : car.s - T.L;
   // the traffic time account: a free "ghost" of this car (same envelope, power, mass, non-traffic caps; no traffic) runs
   // beside it while traffic influences it – the loss is the time difference at the same distance (traffic.js)
-  trafficAccount(race, car, { m: E.m, P: E.P, rho: E.rho, mu: pr.prof.mu, vCap: lapCapForPit(car, T) }, pr.prof, cp);
+  trafficAccount(race, car, ghostModels(E));
   // plan: call the stop when the plan says (the team's plan – ai.js decides plans; executing them is the engine's)
   planCall(race, car, t);
+}
+
+// the traffic ghost's models (traffic.js trafficAccount): the same tyre / energy / envelope code as a real car, on the
+// ghost's own copies of the tyre and energy state (taken when the episode starts); its envelope is recomputed every 2 s
+// from its own grip and mass (inputs kept in gh.pin, so a restored race rebuilds the same one)
+function ghostModels(E) {
+  return {
+    start(race, car, gh) { gh.tyre = JSON.parse(JSON.stringify(car.tyre)); gh.energy = JSON.parse(JSON.stringify(car.energy)); gh.energy.events = []; gh.pat = -1e9; },
+    env(race, car, gh, t) {
+      const C = race.cache, T = C.T, cp = C.cars[car.num], gp = C.ghostProf[car.num] || (C.ghostProf[car.num] = { prof: makeProfile(T.n), pat: null });
+      const muTyre = tyreGrip(gh.tyre, E.water), m = cp.m_min + gh.energy.fuel;
+      // (rebuild the cached envelope if it isn't this ghost's – a restored race – then the car's own refresh rule)
+      if (gh.pin && (gp.pat !== gh.pat || gp.num !== car.num)) { computeProfile(C.PT, cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = gh.pat; gp.num = car.num; }
+      const mu = cp.mu_mech * muTyre * E.rubber * E.util;
+      if (!gh.pin || (t - gh.pat >= 500 && needsReprofile(gp.prof, mu, m)) || t - gh.pat >= REPROFILE.everyMs) {
+        gh.pin = { muTyre, muTrack: E.rubber, util: E.util, m, rho: E.rho }; gh.pat = t;
+        computeProfile(C.PT, cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = t; gp.num = car.num;
+      }
+      const pIce = iceCap(gh.energy, cp.P_ice, C.ep), pErs = ersCap(gh.energy, C.ep, car.mode.energy, gh.v, false);
+      return { prof: gp.prof, env: { m, P: pIce + pErs, rho: E.rho, mu: gp.prof.mu, vCap: lapCapForPit(car, T) }, pIce, pErs };
+    },
+    after(race, car, gh, gs, ge, t) {
+      const C = race.cache, cp = C.cars[car.num], [pi, pe] = splitPower(gs.pDrive, ge.pIce, ge.pErs);
+      stepTyre(gh.tyre, { v: gs.v, aLat: gs.aLat, aLong: gs.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver), Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
+      stepEnergy(gh.energy, C.ep, { pIce: pi, pErs: pe, pBrake: gs.pBrake, iceFull: pi >= ge.pIce * 0.999 && ge.pIce > 0 }, DT, t);
+      if (gs.crossed) { tyreLap(gh.tyre); energyLap(gh.energy); }
+    },
+  };
 }
 
 function movePit(race, car, t) {

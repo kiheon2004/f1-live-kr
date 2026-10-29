@@ -531,24 +531,26 @@ export function pathFactor(race, car) {
 
 // The traffic time account (DESIGN §12): time lost because of other cars = ∫(1/v − 1/v_free) ds. v_free is not a table or
 // an envelope speed: when traffic starts to influence a car (a cap, the wake, DRS, a lane, giving way) a free "ghost" of
-// it starts at its place and speed and is integrated each step with the same car model, envelope, power (the team mode's,
-// no scene boost), mass and non-traffic caps – only without the traffic. The loss is the car's time at a distance minus
-// the ghost's time at the same distance (from the ghost's crossing times every 10 m). The episode ends 5 s after the last
-// influence and at the pit entry (a new ghost starts if the ghost got further ahead than its 1.6 km history – a very long
-// train). Negative = the tow / DRS made the car faster.
-// Exactness: the counterfactual is the same car with the same tyre and energy state each step – what the ghost does not
-// know is how the tyres (heat in the wake) and the battery (deploy in attack scenes) would have evolved without traffic,
-// and a ghost (re)started mid-episode starts at the car's traffic-reduced speed. test/game/traffic.test.js compares it
-// with a real solo run of the same car (reports/traffic.md has the numbers).
+// it starts at its place and speed, with a COPY of its tyre and energy state, and is integrated each step with the same car,
+// tyre and energy models and its own envelope (recomputed every 2 s from its own grip and mass) – only without the
+// traffic. So what following does to the tyres (heat in the wake) and the battery (deploy in attack scenes, harvesting
+// behind a slow car) is part of the loss, as it should be: it is caused by the car ahead. The loss is the car's time at a
+// distance minus the ghost's time at the same distance (ghost crossing times every 10 m). The episode ends 5 s after the
+// last influence and at the pit entry (a new ghost starts if one got further ahead than its 1.6 km history – a very long
+// train). Negative = the tow / DRS made the car faster. The engine supplies the models through `G` (engine.js
+// ghostModels): start(gh) copies the state, env(gh) → { env, prof, … } for stepCar, after(gh, gs, ge) steps tyre/energy.
+// Exactness: test/game/traffic.test.js and reports/traffic.md compare it with real solo runs of the same car.
 const BIN = 10, HMAX = 160;
-export function trafficAccount(race, car, env, prof, cp) {
+export function trafficAccount(race, car, G) {
   const S = race.state, C = race.cache, T = C.T, tr = car.traffic, t = S.t + DT_MS;   // (step end time: S.t is updated after the moves)
   let gh = tr.gh;
   // (episode over; or the ghost ran further ahead than its 10 m history covers: close it and start a new one)
   if (gh && (!tr.inf || gh.x - (car.dist - gh.d0) > (HMAX - 2) * BIN)) { tr.gh = gh = null; }
-  if (!gh) { if (tr.inf) tr.gh = { s: car.s, v: car.v, x: 0, d0: car.dist, base: car.acct.traffic, h0: 0, h: [t] }; return; }
+  if (!gh) { if (tr.inf) { tr.gh = { s: car.s, v: car.v, x: 0, d0: car.dist, base: car.acct.traffic, h0: 0, h: [t] }; G.start(race, car, tr.gh); } return; }
+  const ge = G.env(race, car, gh, t);
   const gs = { s: gh.s, v: gh.v, lap: 0, aLong: 0, aLat: 0, pDrive: 0, pBrake: 0, crossed: false, tCross: 0, limited: false, over: 0 };
-  stepCar(gs, C.PT, prof, cp, env, DT);
+  stepCar(gs, C.PT, ge.prof, C.cars[car.num], ge.env, DT);
+  G.after(race, car, gh, gs, ge, t);
   const dx = T.ahead(gh.s, gs.s) + (gs.crossed && gs.s >= gh.s ? T.L : 0), x0 = gh.x;
   gh.s = gs.s; gh.v = gs.v; gh.x += dx;
   while ((gh.h0 + gh.h.length) * BIN <= gh.x && dx > 0) { const xb = (gh.h0 + gh.h.length) * BIN; gh.h.push(t - DT_MS + Math.round(DT_MS * (xb - x0) / dx)); }
