@@ -94,7 +94,8 @@ export function pitStep(car, T, ctx, P = PIT) {
   const p = car.pit, L = T.pit, box = ctx.boxes[ctx.team], boxU = L.boxes[ctx.team];
   const aIn = P.boxApproach.v * G, aOut = P.launch.v * G;
   let ev = null;
-  if (p.phase === "entry" && p.u >= L.limStart) { p.phase = "lane"; p.times.lim = ctx.t; }
+  // (the limiter engages at the line: the entry braking aimed for it, the last step's discretisation must not show as speeding)
+  if (p.phase === "entry" && p.u >= L.limStart) { p.phase = "lane"; p.times.lim = ctx.t; p.v = Math.min(p.v, L.speedLimit); }
   if (p.phase === "lane" && !ctx.noBox && boxU != null && p.u >= boxU - 60) { p.phase = "approach"; }
   if (p.phase === "approach") {
     // the box: free, or ours already → stop in it; the teammate in it → stop behind it and wait

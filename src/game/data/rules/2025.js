@@ -25,15 +25,15 @@ export default {
 
   // ---------- points & classification ----------
   points: R({ race: [25, 18, 15, 12, 10, 8, 6, 4, 2, 1], sprint: [8, 7, 6, 5, 4, 3, 2, 1], fastestLap: null }, sr("6.4"),
-    { note: "no fastest-lap point in 2025 (it existed 2019–2024)" }),
+    { implemented: true, impl: "engine/rules.js classify", implNote: "race points (the game has no sprint races)", note: "no fastest-lap point in 2025 (it existed 2019–2024)" }),
   pointsShortened: R({ minLeaderLaps: 2, minGreenLapsForReducedScale: 2, // laps by the leader without SC/VSC (6.5 b)
       bands: [{ fracMin: 0, scale: [6, 4, 3, 2, 1] }, { fracMin: 0.25, scale: [13, 10, 8, 6, 5, 4, 3, 2, 1] },
               { fracMin: 0.5, scale: [19, 14, 12, 10, 8, 6, 4, 3, 2, 1] }, { fracMin: 0.75, scale: "full" }] }, sr("6.5"),
-    { note: "fraction = leader's distance / scheduled race distance at the end-of-session signal" }),
+    { implemented: true, impl: "engine/rules.js classify", note: "fraction = leader's distance / scheduled race distance at the end-of-session signal" }),
   classification: R({ order: "laps completed desc, then order of crossing the Line", minFracOfWinnerLaps: 0.9, round: "down" },
-    sr("62.1–62.2"), { note: "unclassified if < 90 % of the winner's laps, the 90 % figure rounded DOWN to whole laps" }),
-  resultIfNotResumed: R({ takeAt: "end of the penultimate lap before the lap in which the suspension signal was given" }, sr("58.14")),
-  finishSignal: R({ rule: "chequered flag when the leader has covered the full distance; if shown early the race ends at the leader's last crossing before it; if late, when it should have ended" }, sr("59.1–59.2")),
+    sr("62.1–62.2"), { implemented: true, impl: "engine/rules.js classify", note: "unclassified if < 90 % of the winner's laps, the 90 % figure rounded DOWN to whole laps" }),
+  resultIfNotResumed: R({ takeAt: "end of the penultimate lap before the lap in which the suspension signal was given" }, sr("58.14"), { implemented: true, impl: "engine/control.js endUnderRed + rules.js classify" }),
+  finishSignal: R({ rule: "chequered flag when the leader has covered the full distance; if shown early the race ends at the leader's last crossing before it; if late, when it should have ended" }, sr("59.1–59.2"), { implemented: true, impl: "engine/control.js (chequered flag at the leader's crossing; each car at its next crossing on the track)", implNote: "the flag is never shown early or late in the game" }),
 
   // ---------- distance & time ----------
   distance: R({ raceMinKm: 305, monacoMinKm: 260, sprintMinKm: 100, laps: "least number of complete laps exceeding the distance" },
@@ -41,7 +41,7 @@ export default {
   timeLimit: R({ raceMs: 2 * 3600e3, raceMaxWithSuspensionMs: 3 * 3600e3, sprintMs: 3600e3, sprintMaxWithSuspensionMs: 1.5 * 3600e3,
       endRule: "leader shown the flag at the end of the lap FOLLOWING the lap in which the period ended (never beyond the scheduled laps)",
       suspensionAddsToPeriod: true, scStartClockFrom: "green lights when the SC leaves the grid (formation behind SC)" },
-    sr("5.3a ii–iii, 5.4c–d")),
+    sr("5.3a ii–iii, 5.4c–d"), { implemented: true, impl: "engine/control.js controlStep", implNote: "the 3 h clock from an SC start does not apply: the game has no SC start" }),
   scStartLapReduction: R({ rule: "laps reduced by (laps behind the safety car − 1) when the formation lap starts behind the SC" }, sr("5.4b, 49.1")),
 
   // ---------- tyres ----------
@@ -52,7 +52,7 @@ export default {
   mandatoryDryCompounds: R({ minDistinctDrySpecs: 2, atLeastOneMandatorySpec: true, exemptIfInterOrWetUsed: true,
       penalty: "disqualification", ifSuspendedAndNotRestarted: "+30 s to elapsed time",
       monaco: { minSetsAnySpec: 3, ifSuspendedNotRestarted: "+30 s (only 2 sets used), +60 s (1 set)" } }, sr("30.5m"),
-    { note: "Monaco 3-set rule is NEW in 2025 (not in 2024)" }),
+    { implemented: true, impl: "engine/rules.js tyreRuleCheck", implNote: "the FIA mandatory specification comes from scenario.tyres.mandatory when known (none → any two dry specifications)", note: "Monaco 3-set rule is NEW in 2025 (not in 2024)" }),
   tyreUsedWhen: R({ pitLane: "when the transponder shows the car left the pit lane with them", grid: "when the car leaves its grid slot under its own power" }, sr("30.5c")),
   wrongTyres: R({ maxLineCrossings: 2, penalty: "stop-go 10 s (54.3d)" }, sr("30.5b")),
   wetTyresBehindSc: R({ rule: "wet-weather tyres compulsory until the SC orange lights go out and it returns to the pits when the start/resumption is behind the SC with wets mandated; changing spec meanwhile = stop-go" },
@@ -70,18 +70,18 @@ export default {
   // ---------- pit lane & pit stops ----------
   pitSpeedLimit: R({ defaultKmh: 80, perEvent: "Race Director may amend (Safety Delegate recommendation)",
       penaltyInRace: "5 s / 10 s / drive-through / stop-go (54.3a–d) at the stewards' choice" }, sr("34.7"),
-    { note: "per-event values MEASURED from the read-only session cache (CarData speed plateaus ≥3 s within ±1 km/h, 50–100 km/h: f1kr-work/v048/research/pitspeed_probe.py → pitspeed_probe.log); races not cached: default unless an event note says otherwise",
+    { implemented: true, impl: "engine/rules.js stewardsStep (speeding → 5 s, stewards' practice)", note: "per-event values MEASURED from the read-only session cache (CarData speed plateaus ≥3 s within ±1 km/h, 50–100 km/h: f1kr-work/v048/research/pitspeed_probe.py → pitspeed_probe.log); races not cached: default unless an event note says otherwise",
       measuredKmh: { default: 80, "Monaco": 60 } /* all 24 cached 2025 races: 80 except Monaco (Melbourne, Zandvoort, Singapore = 80) */ }),
   pitLaneLayout: R({ fastLaneMaxWidthM: 3.5, workOnlyIn: "inner lane", noPoweredLifting: true, noReversingUnderPower: true,
       pitStopPositionsPerTeam: 1 }, sr("34.4, 34.5, 34.6, 34.3")),
   doubleStack: R({ rule: "one pit-stop position per team (34.5) → a team-mate arriving while the first car is in the box must wait; no rule forbids it" },
     sr("34.5"), { note: "the queueing is a CONSEQUENCE of 34.5, not an explicit article" }),
   unsafeRelease: R({ releasedWhen: "car has completely cleared its pit stop position", forbidden: "endangering personnel / another driver, or likely to damage another car",
-      penaltyInRace: "stop-go 10 s (54.3d)", continuingKnowinglyUnsafe: "additional penalty" }, sr("34.14")),
+      penaltyInRace: "stop-go 10 s (54.3d)", continuingKnowinglyUnsafe: "additional penalty" }, sr("34.14"), { implemented: true, impl: "engine/rules.js onUnsafeRelease (pit.js reports it)", implNote: "a release into another car's path: 5 s (stewards' practice); the stop-and-go of 34.14d / B1.6.2 is for an unsafe CONDITION, not modelled" }),
   pitEntryClosed: R({ allowed: "only essential, evident repairs", penalty: "stop-go 10 s" }, sr("34.15")),
-  pitExit: R({ rule: "leave only on green light; blue flag/light at the exit warns of cars on track" }, sr("53.1")),
-  pitEntryUnderSc: R({ rule: "no car may enter the pits under SC unless to change tyres (except when all cars are routed through the pit lane)" }, sr("55.12")),
-  pitEntryUnderVsc: R({ rule: "no car may enter the pits under VSC unless to change tyres" }, sr("56.4")),
+  pitExit: R({ rule: "leave only on green light; blue flag/light at the exit warns of cars on track" }, sr("53.1"), { implemented: true, impl: "engine/control.js pitCtx / pitOpen (exit light: red flag, SC queue passing, pit-lane starters)" }),
+  pitEntryUnderSc: R({ rule: "no car may enter the pits under SC unless to change tyres (except when all cars are routed through the pit lane)" }, sr("55.12"), { implemented: true, impl: "engine/control.js pitOpen" }),
+  pitEntryUnderVsc: R({ rule: "no car may enter the pits under VSC unless to change tyres" }, sr("56.4"), { implemented: true, impl: "engine/control.js pitOpen" }),
 
   // ---------- penalties ----------
   penalties: R({
@@ -91,7 +91,7 @@ export default {
       stopGo: { stopS: 10, workAllowed: false, maxLineCrossings: 2 },
       notUnderScVsc: "drive-through / stop-go may not be served under VSC or after SC deployed (unless already in pit entry); laps behind SC/VSC added to the 2 crossings",
       lastThreeLapsOrAfter: { fiveSec: 5, tenSec: 10, driveThrough: 20, stopGo: 30, unit: "s added to elapsed time" },
-      unservable: "grid penalty at next race (stewards' discretion)" }, sr("54.3a–d, 54.4b–d")),
+      unservable: "grid penalty at next race (stewards' discretion)" }, sr("54.3a–d, 54.4b–d"), { implemented: true, impl: "engine/rules.js penalise / onPitEntry / pitCtx / onPitExit / stewardsStep", implNote: "an unserved drive-through / stop-and-go → disqualification (game choice for the 'further penalty' of SR 54.4e / B1.9)" }),
 
   // ---------- safety car ----------
   safetyCar: R({ deploy: "SC joins with orange lights regardless of the leader's position", queueMaxGap: "10 car lengths",
@@ -102,11 +102,11 @@ export default {
       scIn: "'SAFETY CAR IN THIS LAP', lights out; leader dictates pace, may fall back >10 lengths; no erratic acceleration/braking; green at the Line",
       lapsCount: true, lastLap: "SC still out at the start of / deployed in the last lap → SC enters pits at end of lap, cars take the flag without overtaking",
       pitLaneUse: "RD may route all cars + SC through the pit lane (drive-through penalty if a car does not)" },
-    sr("55.3–55.17")),
+    sr("55.3–55.17"), { implemented: true, impl: "engine/control.js (SC car, queue, wave-by, unlapping, SC in this lap, restart, last lap)", implNote: "not done: race control routing all cars through the pit lane; 'OVERTAKING WILL NOT BE PERMITTED'" }),
   virtualSafetyCar: R({ minTime: "above the FIA ECU minimum time once in each marshalling sector and at both SC lines; also when panels turn green",
       overtaking: "none, except pit entry after SC line 1 / pit exit before SC line 2 / within pit lane / car with obvious problem",
       ending: "'VSC ENDING' then 10–15 s later panels turn green and racing resumes immediately (green extinguished after 30 s)", lapsCount: true },
-    sr("56.1–56.8")),
+    sr("56.1–56.8"), { implemented: true, impl: "engine/control.js (per-car minimum time per marshalling sector, VSC ENDING 10–15 s)", implNote: "marshalling sectors are equal-length (est) – the real light-panel positions are not in the scenario" }),
 
   // ---------- red flag ----------
   redFlag: R({ onSignal: "no overtaking, pit exit closed, all cars slowly to the pit lane; first car to the pit exit in the fast lane, others queue behind (or on the grid if pit entry closed)",
@@ -116,30 +116,30 @@ export default {
       tyreChange: "free (permitted work) – but wheels must be fitted at the 5-min signal; changing them before leaving after resumption = stop-go",
       resume: "≥10 min notice; SC leads out when pit exit opens; lapped cars + cars between SC and leader may do an extra lap to rejoin the back; then STANDING START PROCEDURE (grid) or ROLLING START PROCEDURE (SC in, green at the Line) chosen by RD (message by the 1-min signal); SC may stay in the pit lane for a standing restart",
       noOvertakeUntil: "rolling: the Line after the SC returns to the pits" },
-    sr("57.1–57.5, 58.1–58.14")),
+    sr("57.1–57.5, 58.1–58.14"), { implemented: true, impl: "engine/control.js (pit-lane queue in resumption order, free tyre change, season resumption procedure, standing / rolling)", implNote: "repairs of accident damage during the suspension are not modelled" }),
 
   // ---------- flags / lapping ----------
   blueFlags: R({ preWarningGapS: 3.0, blueGapS: 1.2, rule: "lapped driver must let the faster car past at the first available opportunity (ISC)" },
-    rdn("3"), { verified: true, note: "values from ONE event's notes (Zandvoort 2025); assumed the same at other 2025 events – check per event" }),
+    rdn("3"), { implemented: true, impl: "engine/rules.js stewardsStep / yieldRequest", verified: true, note: "values from ONE event's notes (Zandvoort 2025); assumed the same at other 2025 events – check per event" }),
   trackLimits: R({ trackEdge: "white lines are track, kerbs are not; a car has left the track when no part touches it", lapTimeDeleted: "each failure → lap time invalidated (qualifying & race)",
       raceSanction: "stewards' penalty guidelines (warning/black-and-white flag, then time penalties) – not in the regulations" },
     { ...sr("33.3"), also: rdn("21") },
-    { verified: false, note: "the count → penalty ladder (e.g. 3rd = black-and-white flag, 4th = 5 s) is from press explainers, not a fetched FIA document" }),
+    { implemented: true, impl: "engine/rules.js trackLimits (+ incidents.js 'wide')", implNote: "the ladder (B&W flag at 3, 5 s at 4 and each later) is the stewards' practice read from FIA race control messages – data/params/stewards.js", verified: false, note: "the count → penalty ladder (e.g. 3rd = black-and-white flag, 4th = 5 s) is from press explainers, not a fetched FIA document" }),
 
   // ---------- start ----------
   start: R({ grid: "staggered 1×1, rows 16 m apart", formation: "pole leads; pit-lane speed limit until past pole; no practice starts; keep tight; overtaking only to restore order",
       lights: "once all cars have stopped: the 5-, 4-, 3-, 2- and 1-second lights appear in turn; lights out at any time after the 1-second light (44.10b) – the light interval itself is not stated in the SR", pitLaneStart: "join once all cars on track have passed the pit exit after the start",
       falseStart: "moved after the 4-second light and before lights out → 5 s / 10 s / drive-through", abortedStart: "restart from 10-min signal; race shortened by 1 lap; the cause starts from the pit lane",
       extraFormationLap: "race shortened by 1 lap each time", scStart: "formation behind SC; standing or rolling start chosen by RD; laps reduced by SC laps − 1",
-      mguKAtStart: "MGU-K only after 100 km/h at a standing start (TR energy-flow diagram)" },
-    { ...sr("42.5, 44.1–44.13, 45, 47, 48, 49–52"), also: tr("5.3.2 (energy-flow diagram)") }),
+      mguKMinKmh: 100, mguKAtStart: "MGU-K only after 100 km/h at a standing start (TR energy-flow diagram)" },
+    { ...sr("42.5, 44.1–44.13, 45, 47, 48, 49–52"), also: tr("5.3.2 (energy-flow diagram)") }, { implPartial: "engine/control.js: grid slots, lights, seeded reactions and launch inputs, false-start detection, pit-lane starters – NOT: formation lap, aborted start, extra formation lap, SC start" }),
 
   // ---------- DRS (2011–2025) ----------
   drs: R({ zones: "pre-determined activation zones per circuit (event notes)", enabledAfterLaps: 1, enabledAfterSc: "1 lap after the SC period",
       detectionGapS: 1.0, at: "detection points", disabledOn: "first brake application after activation",
       rdMayDisable: "at absolute discretion; poor visibility; yellow flags in the activation zone", flapGapMaxMm: 85 },
     { ...sr("22.1a–i"), also: tr("3.10.10g") },
-    { note: "'completed one lap after the start' – so usable from lap 2 at the earliest (RD enables it by message: RaceControlMessages 'DRS ENABLED')" }),
+    { implemented: true, impl: "engine/control.js drsAllowed (availability)", implNote: "availability only (laps since start/restart, SC/VSC/red, wet, yellow in the zone): the 1 s detection and the flap are the aero model's", note: "'completed one lap after the start' – so usable from lap 2 at the earliest (RD enables it by message: RaceControlMessages 'DRS ENABLED')" }),
 
   // ---------- power unit / energy ----------
   ers: R({ mguKMaxKw: 120, mguKMaxNm: 200, esToMguKPerLapMJ: 4, mguKToEsPerLapMJ: 2, mguH: "unlimited (MGU-H ↔ ES/MGU-K)",
