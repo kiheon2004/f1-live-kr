@@ -63,8 +63,13 @@ export const SETS = {
 };
 
 // fitted coefficients (log space), their bounds from the PARAM ranges
-export const FIT_KEYS = ["CdA", "ClA", "mu_mech", "P", "a_brake_max", "k_trac", "k_low", "k_mid", "k_brake"];
+// k_low / k_mid (corner band factors) are NOT fitted while the corner curvature correction is on: per-corner factors and
+// per-speed-band factors can trade against each other (degenerate); the corner factors are the track's, so they win.
+export const FIT_KEYS = ["CdA", "ClA", "mu_mech", "P", "a_brake_max", "k_trac", "k_brake"];
 const PRIOR_SIGMA = 0.35, W_LAP = 25;
+// which curvature the driving model uses: "kappaLine" (the extract's racing-line estimate) or "kappa" (the field-averaged lap line)
+let KAPPA_COL = "kappaLine";
+export const setKappaCol = (c) => { KAPPA_COL = c; };
 // estimated fuel burn per km (kg) to put a plausible fuel mass on the trace lap: ≤2025 ≈ 100 kg / 305 km; 2026 ≈ 70 %
 // (3000 MJ/h energy flow vs 100 kg/h × 43 MJ/kg). Game estimates (the feed has no fuel data).
 const BURN_PER_KM = { 2024: 0.33, 2025: 0.33, 2026: 0.23 };
@@ -83,11 +88,12 @@ function cachedCarData(sessionPath) {
 
 const inZone = (s, z, L, pad = 0) => (z.end >= z.start ? s >= z.start - pad && s <= z.end : s >= z.start - pad || s <= z.end);
 
-export function loadRace(dir, id, { drs = true } = {}) {
+export function loadRace(dir, id, { drs = true, kappaCol = KAPPA_COL } = {}) {
   const S = JSON.parse(fs.readFileSync(path.join(dir, id + ".scenario.json"), "utf8"));
   const C = JSON.parse(fs.readFileSync(path.join(dir, id + ".calib.json"), "utf8"));
   const T = S.track, season = S.meta.season, N = S.race.laps;
-  const track = { n: T.n, ds: T.ds, L: T.L, kappa: Float64Array.from(T.columns.kappa), grade: Float64Array.from(T.columns.grade) };
+  const track = { n: T.n, ds: T.ds, L: T.L, kappa: Float64Array.from(T.columns[kappaCol] || T.columns.kappa), grade: Float64Array.from(T.columns.grade) };
+  const kappa0 = Float64Array.from(track.kappa);
   const w = S.weather.cols, idx = w.t.map((t, i) => [t, i]).filter(([t]) => t >= 0 && t <= C.raceSeconds).map(([, i]) => i);
   const mean = (k) => { const a = idx.map((i) => w[k][i]).filter(Number.isFinite); return a.length ? a.reduce((x, y) => x + y) / a.length : null; };
   const air = mean("air") ?? 25, pMbar = mean("pressure") ?? 1013, tTrack = mean("track") ?? air + 10;
@@ -116,9 +122,59 @@ export function loadRace(dir, id, { drs = true } = {}) {
       fuel: Math.max(1, BURN_PER_KM[season] * T.L / 1000 * (N - tr.lap) + 1), drsOpen: open });
   }
   // per-trace aero multiplier arrays are built on demand (they depend on the car's DRS/Straight Mode multipliers)
-  return { id, season, track, rho, air, tTrack, pMbar, N, drsZones, straight, drsSource, traces, prof: makeProfile(T.n), drivers: C.drivers, periods: C.periods };
+  return { id, season, track, rho, air, tTrack, pMbar, N, drsZones, straight, drsSource, traces, prof: makeProfile(T.n), drivers: C.drivers, periods: C.periods, kappa0, corners: cornerRegions(track), cornerC: null };
 }
 function lower(a, x) { let lo = 0, hi = a.length - 1; if (hi < 0 || a[0] > x) return 0; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (a[m] <= x) lo = m; else hi = m - 1; } return lo; }
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Corner curvature correction (track model, DESIGN §4 "compare the curvature with real telemetry minimum speeds").
+// The lap line's curvature comes from positions good to 1–2 m, smoothed: a corner's radius can be off by tens of percent
+// (the extract's own check shows implied lateral 1.6–6 g at corner minima). Fitting cars to such a track would bend the car
+// coefficients to the track's errors. So each corner region j gets a factor c_j on κ, chosen so that the field's mean
+// minimum speed in that region matches the model with the current team cars; c_j have geometric mean 1 per race (the level
+// is τ's job). These are TRACK numbers (one set per race, shared by all cars), proposed as a correction for track.js; the
+// team differences stay a prediction. Validation mode A uses the raw track (no corrections, τ = 1).
+export function cornerRegions(track) {
+  const n = track.n, k = track.kappa, out = [], used = new Uint8Array(n);
+  const idx = [...Array(n).keys()].filter((i) => Math.abs(k[i]) > 1 / 400 && Math.abs(k[i]) >= Math.abs(k[(i - 1 + n) % n]) && Math.abs(k[i]) >= Math.abs(k[(i + 1) % n])).sort((a, b) => Math.abs(k[b]) - Math.abs(k[a]));
+  for (const p of idx) {
+    if (used[p]) continue;
+    const thr = 0.35 * Math.abs(k[p]), sg = Math.sign(k[p]);
+    let a = p, b = p;
+    while (!used[(a - 1 + n) % n] && Math.sign(k[(a - 1 + n) % n]) === sg && Math.abs(k[(a - 1 + n) % n]) > thr && (p - a + n) % n < 150) a = (a - 1 + n) % n;
+    while (!used[(b + 1) % n] && Math.sign(k[(b + 1) % n]) === sg && Math.abs(k[(b + 1) % n]) > thr && (b - p + n) % n < 150) b = (b + 1) % n;
+    for (let i = a; ; i = (i + 1) % n) { used[i] = 1; if (i === b) break; }
+    out.push({ a, b, peak: p });
+  }
+  return out;
+}
+function applyCorners(race, on) {
+  const k = race.track.kappa; k.set(race.kappa0);
+  if (!on || !race.cornerC) return;
+  race.corners.forEach((c, j) => { for (let i = c.a; ; i = (i + 1) % race.track.n) { k[i] = race.kappa0[i] * race.cornerC[j]; if (i === c.b) break; } });
+}
+function fitCorners(race, theta, tau, base, it = 4) {
+  if (!race.cornerC) race.cornerC = new Float64Array(race.corners.length).fill(1);
+  applyCorners(race, true);
+  const ds = race.track.ds, n = race.track.n;
+  for (let r = 0; r < it; r++) {
+    const ratio = new Float64Array(race.corners.length), cnt = new Float64Array(race.corners.length);
+    for (const t of race.traces) {
+      if (!theta[t.team]) continue;
+      const p = predict(race, t, theta[t.team], tau, base);
+      race.corners.forEach((c, j) => {
+        let vr = Infinity, vm = Infinity;
+        for (let i = c.a; ; i = (i + 1) % n) { const b = Math.floor(i * ds / t.bin); if (Number.isFinite(t.v[b])) { vr = Math.min(vr, t.v[b]); vm = Math.min(vm, p.vPred[b]); } if (i === c.b) break; }
+        if (Number.isFinite(vr) && Number.isFinite(vm) && vr > 30) { ratio[j] += Math.log(vm / vr); cnt[j]++; }
+      });
+    }
+    race.corners.forEach((c, j) => { if (cnt[j]) race.cornerC[j] = Math.min(2.5, Math.max(0.4, race.cornerC[j] * Math.exp(1.6 * ratio[j] / cnt[j]))); });
+    const gm = Math.exp(race.cornerC.reduce((s, x) => s + Math.log(x), 0) / race.cornerC.length);
+    for (let j = 0; j < race.cornerC.length; j++) race.cornerC[j] /= gm;
+    applyCorners(race, true);
+  }
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // one trace's prediction with car θ and race factor τ → { mse (km/h²), dLap (s), vPred (10 m bins) }
@@ -201,7 +257,7 @@ function golden(f, a, b, it = 24) { const g = (Math.sqrt(5) - 1) / 2; let c = b 
 const traceLoss = (p) => p.mse + W_LAP * p.dLap * p.dLap;
 
 // ---------------------------------------------------------------------------------------------------------------------
-export function calibrate({ season, scen, rounds = 3, evals = 450, log = console.log }) {
+export function calibrate({ season, scen, rounds = 3, evals = 450, log = console.log, noCorners = false }) {
   const set = SETS[season], base = carBase(season), B = bounds(season), t0 = theta0(season);
   const load = (ids) => ids.filter((id) => fs.existsSync(path.join(scen, id + ".calib.json"))).map((id) => loadRace(scen, id));
   const cal = load(set.calib), val = load(set.valid);
@@ -223,12 +279,19 @@ export function calibrate({ season, scen, rounds = 3, evals = 450, log = console
     for (const r of cal) tau[r.id] = golden((x) => r.traces.reduce((s, t) => s + (theta[t.team] ? traceLoss(predict(r, t, theta[t.team], x, base)) : 0), 0), 0.8, 1.2);
     const gm = Math.exp(cal.reduce((s, r) => s + Math.log(tau[r.id]), 0) / cal.length);
     for (const r of cal) tau[r.id] /= gm; for (const t of teams) theta[t].mu_mech *= gm;
+    if (!noCorners) for (const r of cal) fitCorners(r, theta, tau[r.id], base);
     const e = evaluate(cal, theta, tau, base);
     log(`round ${round + 1}: calibration speed RMS ${e.rmsV.toFixed(2)} km/h, lap |err| mean ${e.mae.toFixed(3)} s`);
   }
   // validation
   const tau1 = Object.fromEntries(val.map((r) => [r.id, 1]));
-  const tauV = Object.fromEntries(val.map((r) => [r.id, golden((x) => r.traces.reduce((s, t) => s + (theta[t.team] ? traceLoss(predict(r, t, theta[t.team], x, base)) : 0), 0), 0.8, 1.2)]));
+  for (const r of val) applyCorners(r, false);
+  const errA = evaluate(val, theta, tau1, base);
+  const tauV = {};
+  for (const r of val) { // mode B: the track numbers (τ, corner factors) fitted on the race itself with the calibrated team cars
+    tauV[r.id] = golden((x) => r.traces.reduce((s, t) => s + (theta[t.team] ? traceLoss(predict(r, t, theta[t.team], x, base)) : 0), 0), 0.8, 1.2);
+    if (!noCorners) { fitCorners(r, theta, tauV[r.id], base); tauV[r.id] = golden((x) => r.traces.reduce((s, t) => s + (theta[t.team] ? traceLoss(predict(r, t, theta[t.team], x, base)) : 0), 0), 0.8, 1.2); }
+  }
   const meanCar = Object.fromEntries(FIT_KEYS.map((k) => [k, Math.exp(teams.reduce((s, t) => s + Math.log(theta[t][k]), 0) / teams.length)]));
   const allMean = Object.fromEntries(teams.map((t) => [t, meanCar]));
   const generic = Object.fromEntries(teams.map((t) => [t, t0]));
@@ -236,11 +299,12 @@ export function calibrate({ season, scen, rounds = 3, evals = 450, log = console
   const tauMean = (races) => Object.fromEntries(races.map((r) => [r.id, golden((x) => r.traces.reduce((s, t) => s + (allMean[t.team] ? traceLoss(predict(r, t, allMean[t.team], x, base)) : 0), 0), 0.8, 1.2)]));
   const out = {
     season, date: new Date().toISOString().slice(0, 10), calibrationRaces: cal.map((r) => r.id), validationRaces: val.map((r) => r.id), excluded: set.excluded,
-    method: { fitted: FIT_KEYS, loss: `mean speed² error over 10 m bins (km/h²) + ${W_LAP}·lap error² (s²) + log prior σ ${PRIOR_SIGMA}`, rounds, evals, burnPerKm: BURN_PER_KM[season], wearPerLap: WEAR_PER_LAP },
+    method: { curvature: KAPPA_COL, fitted: FIT_KEYS, loss: `mean speed² error over 10 m bins (km/h²) + ${W_LAP}·lap error² (s²) + log prior σ ${PRIOR_SIGMA}`, rounds, evals, burnPerKm: BURN_PER_KM[season], wearPerLap: WEAR_PER_LAP },
     tau, tauValidationFitted: tauV, theta, meanCar,
+    cornerFactors: Object.fromEntries([...cal, ...val].filter((r) => r.cornerC).map((r) => [r.id, r.corners.map((c, j) => ({ s0: +(c.a * r.track.ds).toFixed(0), s1: +(c.b * r.track.ds).toFixed(0), peakR: +(1 / Math.abs(r.kappa0[c.peak])).toFixed(1), c: +r.cornerC[j].toFixed(3) }))])),
     errors: {
       calibration: evaluate(cal, theta, tau, base),
-      validationA_tau1: evaluate(val, theta, tau1, base),
+      validationA_rawTrack_tau1: errA,
       validationB_tauFitted: evaluate(val, theta, tauV, base),
       baselineGenericCar_validationB: evaluate(val, generic, tauGen(val), base),
       baselineSeasonMeanCar_calibration: evaluate(cal, allMean, tauMean(cal), base),
@@ -253,17 +317,25 @@ export function calibrate({ season, scen, rounds = 3, evals = 450, log = console
 
 // errors of a set: speed RMS (km/h), mean |lap error| (s), mean lap error (bias), top speed error, slowest-corner error
 export function evaluate(races, theta, tau, base, onlyTeam = null) {
-  let se = 0, n = 0, ae = 0, be = 0, m = 0, topE = 0, minE = 0; const per = [];
+  let se = 0, n = 0, ae = 0, be = 0, m = 0, topE = 0, minE = 0; const per = [], ph = { accel: [0, 0, 0], brake: [0, 0, 0], corner: [0, 0, 0] };
   for (const r of races) for (const t of r.traces) {
     if (!theta[t.team] || (onlyTeam && t.team !== onlyTeam)) continue;
     const p = predict(r, t, theta[t.team], tau[r.id] ?? 1, base);
     se += p.mse; n++; ae += Math.abs(p.dLap); be += p.dLap; m++;
+    // error by phase of the real trace: braking (speed falling), cornering (lateral ≥ 1.2 g on the track's κ), else accelerating
+    for (let b = 1; b + 1 < t.v.length; b++) {
+      if (!Number.isFinite(t.v[b]) || !Number.isFinite(t.v[b - 1]) || !Number.isFinite(t.v[b + 1]) || !Number.isFinite(p.vPred[b])) continue;
+      const i = Math.min(r.track.n - 1, Math.round((b + 0.5) * t.bin / r.track.ds)), aLat = (t.v[b] / 3.6) ** 2 * Math.abs(r.track.kappa[i]);
+      const c = aLat > 12 ? ph.corner : t.v[b + 1] - t.v[b - 1] < -3 ? ph.brake : ph.accel, e = p.vPred[b] - t.v[b];
+      c[0] += e; c[1] += e * e; c[2]++;
+    }
     let vmo = -1, vmp = -1, mo = 1e9, mp = 1e9;
     for (let b = 0; b < t.v.length; b++) if (Number.isFinite(t.v[b])) { if (t.v[b] > vmo) { vmo = t.v[b]; vmp = p.vPred[b]; } if (t.v[b] < mo) { mo = t.v[b]; mp = p.vPred[b]; } }
     topE += Math.abs(vmp - vmo); minE += Math.abs(mp - mo);
     per.push({ race: r.id, num: t.num, team: t.team, rmsV: +Math.sqrt(p.mse).toFixed(2), dLap: +p.dLap.toFixed(3) });
   }
-  return { traces: n, rmsV: n ? Math.sqrt(se / n) : NaN, mae: m ? ae / m : NaN, bias: m ? be / m : NaN, topSpeedAbsErr: m ? topE / m : NaN, slowestCornerAbsErr: m ? minE / m : NaN, per: onlyTeam ? undefined : per };
+  return { traces: n, rmsV: n ? Math.sqrt(se / n) : NaN, mae: m ? ae / m : NaN, bias: m ? be / m : NaN, topSpeedAbsErr: m ? topE / m : NaN, slowestCornerAbsErr: m ? minE / m : NaN,
+    phases: Object.fromEntries(Object.entries(ph).map(([k, [a, b2, c]]) => [k, { bins: c, bias: c ? +(a / c).toFixed(2) : null, rms: c ? +Math.sqrt(b2 / c).toFixed(2) : null }])), per: onlyTeam ? undefined : per };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -374,7 +446,7 @@ export function writeParams(res, file) {
   L.push(`// Fitted game values (est: true): the speed traces identify combinations of these numbers, not a team's real figures.`);
   L.push(`// Calibration races: ${res.calibrationRaces.join(", ")}`);
   L.push(`// Validation races: ${res.validationRaces.join(", ")}`);
-  L.push(`// Errors (speed RMS km/h / mean |lap| s): calibration ${e.calibration.rmsV.toFixed(2)} / ${e.calibration.mae.toFixed(3)}; validation τ=1 ${e.validationA_tau1.rmsV.toFixed(2)} / ${e.validationA_tau1.mae.toFixed(3)}; validation τ fitted ${e.validationB_tauFitted.rmsV.toFixed(2)} / ${e.validationB_tauFitted.mae.toFixed(3)}`);
+  L.push(`// Errors (speed RMS km/h / mean |lap| s): calibration ${e.calibration.rmsV.toFixed(2)} / ${e.calibration.mae.toFixed(3)}; validation raw track τ=1 ${e.validationA_rawTrack_tau1.rmsV.toFixed(2)} / ${e.validationA_rawTrack_tau1.mae.toFixed(3)}; validation τ fitted ${e.validationB_tauFitted.rmsV.toFixed(2)} / ${e.validationB_tauFitted.mae.toFixed(3)}`);
   L.push(`import { P } from "./param.js";`);
   L.push(`const fit = (v, unit, meaning, range) => P(v, unit, meaning, ${JSON.stringify(src)}, range, true, "M");`);
   L.push(`export const CARS_${res.season}_TABLE = {`);
@@ -394,7 +466,8 @@ export function writeParams(res, file) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const season = +(args.season || 2025), scen = args.scen || path.join(WORK, "scenarios"), outDir = args.out || path.join(WORK, "calib");
+  if (args.kappa) setKappaCol(args.kappa === "lap" ? "kappa" : "kappaLine");
+  const season = +(args.season || 2025), scen = args.scen || path.join(WORK, "calib/scenarios-snapshot"), outDir = args.out || path.join(WORK, "calib");
   const paramsDir = args.params || path.join(path.dirname(new URL(import.meta.url).pathname), "../data/params");
   fs.mkdirSync(outDir, { recursive: true });
   const logLines = []; const log = (s) => { console.log(s); logLines.push(s); };
@@ -407,9 +480,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!args["no-write"]) writeTyreParams(tr, path.join(paramsDir, `tyres-${season}.js`));
     process.exit(0);
   }
-  const res = calibrate({ season, scen, rounds: +(args.rounds || 3), evals: +(args.evals || 450), log });
+  const res = calibrate({ season, scen, rounds: +(args.rounds || 3), evals: +(args.evals || 450), log, noCorners: !!args["no-corners"] });
   const e = res.errors;
-  for (const [k, v] of Object.entries(e)) log(`${k}: speed RMS ${v.rmsV.toFixed(2)} km/h, lap |err| ${v.mae.toFixed(3)} s (bias ${v.bias.toFixed(3)}), top speed |err| ${v.topSpeedAbsErr.toFixed(1)} km/h, slowest corner |err| ${v.slowestCornerAbsErr.toFixed(1)} km/h, ${v.traces} traces`);
+  for (const [k, v] of Object.entries(e)) log(`${k}: speed RMS ${v.rmsV.toFixed(2)} km/h, lap |err| ${v.mae.toFixed(3)} s (bias ${v.bias.toFixed(3)}), top speed |err| ${v.topSpeedAbsErr.toFixed(1)} km/h, slowest corner |err| ${v.slowestCornerAbsErr.toFixed(1)} km/h, ${v.traces} traces; by phase ${Object.entries(v.phases).map(([k, x]) => `${k} bias ${x.bias} rms ${x.rms}`).join(", ")}`);
   for (const [t, p] of Object.entries(res.perTeam)) log(`  ${t}: calib ${p.calibration.rmsV.toFixed(2)} | valid ${p.validationB.rmsV.toFixed(2)} (mean car ${p.validationB_meanCar.rmsV.toFixed(2)}) km/h  θ ${FIT_KEYS.map((k) => k + "=" + (+res.theta[t][k].toPrecision(4))).join(" ")}`);
   log(`time ${(Number(process.hrtime.bigint() - t0) / 1e9).toFixed(1)} s`);
   fs.writeFileSync(path.join(outDir, `cars-${season}.json`), JSON.stringify(res, null, 1));
