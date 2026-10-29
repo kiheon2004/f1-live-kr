@@ -377,6 +377,14 @@ export function crossoverGains(M, est, view, num, cur, { K = 10, corr = {}, key 
   return out;
 }
 
+// the cost (s) of each fresh set over the next K laps on the expected water (same water path and correction as above):
+// which tyre a stop that is going to happen anyway should fit
+export function freshCosts(M, est, view, num, { K = 10, corr = {}, key = "x", fuel = M.fuelRef } = {}) {
+  const scW = scenarios(M, est, view, key, 8), hAt = (k) => scW.reduce((a, x) => a + x.water[Math.min(view.total, view.lap + k)], 0) / scW.length, out = {};
+  for (const c of [...M.av.dry, ...M.av.wet]) if (M.vs[c]) { let g = 0; for (let k = 1; k <= K; k++) g += lapTime(M, est, num, c, "balanced", k - 1, hAt(k), fuel) + (corr[c] ?? 0) * (k <= 1 ? 1 : 0.5); out[c] = g; }
+  return out;
+}
+
 // candidates × scenarios → stats per candidate (mean, sd, p10, p90)
 export function evaluate(M, est, st, cands, scns, opts) {
   // sd: spread of the race time itself (SC laps and rain included – what the screen shows); sdRel: spread of the candidate

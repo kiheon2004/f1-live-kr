@@ -98,3 +98,27 @@ test("SC deployed: the AI re-plans after its reaction delay and boxes cars whose
   const boxes = r.state.commands.log.filter((c) => c.tEff > t0 && c.by.startsWith("ai:") && c.type === "pit");
   assert.ok(evs.length > 0 || boxes.length > 0, "the SC led to re-plans");
 });
+
+test("rain at Silverstone 2025, the player's cars on pre-race plans: a tyre-family switch the AI orders is the tyre fitted at the next stop (an event re-plan in between doesn't put the dry plan back) – for the AI's own cars and the player's", async () => {
+  const { createRace, step } = await E(), S = await import("../../src/game/engine/strategy.js");
+  const SIL = JSON.parse(fs.readFileSync(path.join(__dirname, "../fixtures/game/2025-07-06_British_Grand_Prix_2025-07-06_Race.scenario.json"), "utf8"));
+  const P = S.preRaceStrategy(createRace({ scenario: SIL, seed: 1, userTeam: "McLaren" }), "McLaren");
+  const plans = Object.fromEntries(P.cars.map((c) => [c.num, { stints: c.best.plan, by: "player" }]));   // (as the game screen passes them)
+  const r = createRace({ scenario: SIL, seed: 1, ai: true, userTeam: "McLaren", plans });
+  while (r.state.leaderLap < 24 && !r.state.finished) step(r);
+  let checked = 0, mclaren = 0;
+  for (const [team, T] of Object.entries(r.state.ai.teams)) for (const num of Object.keys(T.cars)) {
+    const car = r.state.cars.find((c) => c.num === num), sw = T.decisions.filter((d) => d.num === num && /crossover|plannedStopTyre/.test(d.why));
+    for (const [k, d] of sw.entries()) {
+      const target = d.plan.match(/→(\w+)/)?.[1]; if (!target) continue;
+      const pitLap = car.laps.find((l) => l.pit && l.n > d.lap)?.n;   // (d.lap = laps completed when deciding: the next in-lap is later) if (pitLap == null) continue;
+      checked++; if (team === "McLaren") mclaren++;
+      const undo = T.decisions.find((x) => x.num === num && x.t > d.t && x.lap < pitLap && !/crossover|plannedStopTyre/.test(x.why));
+      assert.ok(!undo, `${car.tla}: switch to ${target} on lap ${d.lap} re-planned over by "${undo?.why}" (${undo?.plan}) before its stop`);
+      if (sw[k + 1] && sw[k + 1].lap <= pitLap) continue;   // (a later switch decision of its own before that stop)
+      const fitted = car.laps.find((l) => l.n === pitLap + 1)?.compound; if (!fitted) continue;
+      assert.strictEqual(S.WETS.includes(fitted), S.WETS.includes(target), `${car.tla}: switch to ${target} ordered on lap ${d.lap}, fitted ${fitted} at the stop on lap ${pitLap}`);
+    }
+  }
+  assert.ok(checked >= 10 && mclaren >= 2, `switches checked ${checked} (McLaren ${mclaren})`);
+});
