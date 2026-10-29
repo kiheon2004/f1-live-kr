@@ -89,11 +89,10 @@ export function computeProfile(track, car, st, out = makeProfile(track.n)) {
   return out;
 }
 
-// share of the longitudinal grip left at lateral use r = a_lat/a_tot: the friction ellipse √(1 − r²), floored at fMin.
-// Why the floor: on a perfect circle the car exactly at the corner cap has zero traction, and dv/dt ∝ √(v_c − v) is not
-// Lipschitz – the integrated lap time then depends on the step size (first-order error, ≈ 0.04 s/lap at DT 50 ms on
-// Silverstone). Real tyres give some longitudinal force at peak lateral (peak lateral and longitudinal come at different
-// slips), so a small floor is physical as well as numerically clean (cars-base f_comb, est).
+// share of the longitudinal grip left at lateral use r = a_lat/a_tot: the friction ellipse √(1 − r²), optionally floored at
+// fMin (cars-base f_comb, default 0 = the plain ellipse). A floor would say "some drive/braking is still available at the
+// lateral limit" (combined slip); the speed traces (calibrate.mjs) decide whether it is needed. (It is not needed for the
+// integration: car.js marches the 2 m samples, so the √ near r = 1 no longer makes the lap time depend on DT.)
 export const comb = (r, fMin) => { const f = r < 1 ? Math.sqrt(1 - r * r) : 0; return f > fMin ? f : fMin; };
 
 // the envelope's speed limit at lap distance s (linear between samples; s wraps)

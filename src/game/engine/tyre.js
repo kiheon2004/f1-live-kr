@@ -22,10 +22,11 @@ export const compoundParams = (name) => COMPOUNDS[name] || null;
 
 // a fresh (or used: wear0 > 0) set fitted now. T0: start temperature (°C) – pass the blanket temperature for an out-lap
 // (fitTemp(season, compound, Tair)) or the ambient for a cold set.
-export function createTyre(compound, { T0 = 25, wear0 = 0, laps0 = 0, km0 = 0 } = {}) {
+// kwScale: wear-rate multiplier from the stint calibration (tyres-<season>.js, by the race name SOFT/MEDIUM/HARD), default 1
+export function createTyre(compound, { T0 = 25, wear0 = 0, laps0 = 0, km0 = 0, kwScale = 1 } = {}) {
   if (!COMPOUNDS[compound]) throw new Error("unknown compound " + compound);
   const w = Math.min(1, Math.max(0, wear0));
-  return { compound, wear: w, Ts: T0, Tc: T0, laps: laps0, km: km0, used: w > 0 || laps0 > 0, overheatS: 0, Q: 0 };
+  return { compound, wear: w, Ts: T0, Tc: T0, laps: laps0, km: km0, used: w > 0 || laps0 > 0, overheatS: 0, Q: 0, kwScale };
 }
 
 // the temperature a set starts its out-lap at: blanket limit for its kind (season data), else ambient
@@ -71,7 +72,7 @@ export function stepTyre(ty, inp, dt) {
   ty.Tc = clamp(Tc + dTc * dt, TH.Tlo, TH.Thi);
   const Tw = windowTemp(ty), over = Tw > cp.winHi ? Tw - cp.winHi : 0;
   const H = 1 + cp.kH * over / 10;
-  const dw = cp.kw * (inp.abrasion ?? 1) * Q * H * dwm * dt;
+  const dw = cp.kw * (ty.kwScale ?? 1) * (inp.abrasion ?? 1) * Q * H * dwm * dt;
   ty.wear = Math.min(1, ty.wear + (dw > 0 ? dw : 0));
   if (over > 0) ty.overheatS += dt;
   ty.km += v * dt / 1000;
