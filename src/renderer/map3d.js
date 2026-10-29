@@ -503,7 +503,8 @@ function updateCrews(frame) {
   const was = new Set(liftedCars); liftedCars.clear();
   const done = () => { for (const num of was) if (!liftedCars.has(num)) { const c = cars.get(num); if (c) restoreCar(c); } };
   if (!G || !world || !frame) { world?.crews?.clear(); done(); pitWorkNote(null); return; }
-  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
+  // (v0.49: the crews lit by the night's floodlights like the pit building – they were near black at night races)
+  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); world.crews.group.traverse((o) => nightLit(o.material)); }
   const A = app(), src = A.src, m = pitModelFor(G), drivers = src?.state.DriverList || {}, list = [], loose = [], byTeam = new Map();
   const policy = pitWorkPolicy();
   let shown = null;
@@ -3656,7 +3657,7 @@ const gameLifted = new Set();
 let gamePitCam = null;
 const gameKit = {
   setCamByDirector(m) { pitCamDirecting = true; try { setCam(m); } finally { pitCamDirecting = false; } },
-  pitTeamsGroup: () => pitTeams.group || null,
+  pitTeamsGroup: () => pitTeams.group || null, nightLit,
   THREE, get camera() { return camera; }, cars, lifted: gameLifted, ROAD_LIFT,
   world: () => world, camMode: () => camMode, focus: () => app().focus || leader(),
   carFor, paintLabel, scaleForView, applyLift, restoreCar, pitModelFor,

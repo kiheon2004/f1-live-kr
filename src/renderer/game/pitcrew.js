@@ -102,7 +102,7 @@ function crews(K, A, fr) {
   const was = K.lifted, now = new Set(), mem = K.crewMem || (K.crewMem = {}), info = (K.crewInfo = {});
   const done = () => { for (const num of was) if (!now.has(num)) { const c = K.cars.get(num); if (c) K.restoreCar(c); } was.clear(); for (const n of now) was.add(n); };
   if (!G || !world || !teams) { world?.crews?.clear(); done(); return; }
-  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
+  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); world.crews.group.traverse((o) => K.nightLit?.(o.material)); }
   const m = K.pitModelFor(G), list = [], loose = [], T = fr.t, byTeam = new Map(), P = A.scenario.track.pit;
   if (mem.lastT != null && T < mem.lastT - 50) for (const k of Object.keys(mem)) if (k !== "lastT") delete mem[k];   // (a seek back: start over)
   mem.lastT = T;
