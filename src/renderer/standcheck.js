@@ -75,7 +75,8 @@ export const TOL = {
 // input: {
 //   axis: { o: [x, z], u: [ux, uz] } – u along the garages = (point − o) · u (facilities.js project's u),
 //   wall: [u0, u1] – the walkway's ends; run: [gStart, gEnd] – the garages' run,
-//   rail: [[u0, u1]] – the railing's segments (facilities.js railU) or null (none: Monaco's upstairs stands),
+//   rail: [[u0, u1, shown?]] – the walkway railing's pieces (facilities.js railU), or null (none: Monaco's upstairs
+//         stands); with shown (1 drawn, 0 left out – read from the mesh as drawn) the spans aren't needed,
 //   spans: [[u0, u1]] – what was opened (garages.js standSpans),
 //   stands: [{ team, box (u), L, p: [x, z], along, out, enclosed, upper,
 //              across: [{ a, u, standLane (m out from the garages: the deck's / step's / posts' lane side), deckLane (the
@@ -124,7 +125,7 @@ export function checkStands(input, tol = TOL) {
   // the railing: what openRail leaves out (a segment over a span), against where the stands' decks and steps are
   let rail = null;
   if (input.rail?.length) {
-    const spans = input.spans || [], open = input.rail.filter(([a, b]) => spans.some(([s0, s1]) => b > s0 && a < s1)), closed = input.rail.filter((q) => !open.includes(q));
+    const spans = input.spans || [], drawn = input.rail.every((q) => q.length > 2), open = input.rail.filter((q) => (drawn ? !q[2] : spans.some(([s0, s1]) => q[1] > s0 && q[0] < s1))), closed = input.rail.filter((q) => !open.includes(q));
     const walks = st.filter((s) => !s.upper).map((s) => s.walk), beyond = minus(open, walks).map(([a, b]) => [r2(a), r2(b), r2(b - a)]);
     const through = [];
     for (const s of st) if (!s.upper) for (const [a, b] of closed) { const o = Math.min(b, s.walk[1]) - Math.max(a, s.walk[0]); if (o > T.rail) through.push(`${s.team}: the railing left across ${r2(o)} m of its deck/step`); }

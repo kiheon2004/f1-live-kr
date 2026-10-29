@@ -103,11 +103,11 @@ test("stand check on the real input (Madrid 2026): neighbours apart, in box orde
 
 // the plain pit wall of a synthetic pit building (as test/pitwall45.test.js): a building along x, the track's tarmac edge
 // 30 m out from its garages
-async function plainWall() {
+async function plainWall(more = {}) {
   const rect = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], gf = { xz: ([X, Y]) => [X, -Y], fromLL: () => [0, 0], toLL: () => [0, 0] };
   const F = await import("../src/renderer/facilities.js");
   const r = await F.buildFacilities({ scene: { location: "T", buildings: [{ name: "Pits", kind: "block", cls: "yes", est: 1, pts: rect(-150, 0, 150, 30), min: 0, h: 8 }] }, gf, groundAt: () => 0, trackEdge: (x, z) => z + 60, barrierRay: null, location: "T", year: 2025, toTrack: () => [0, -1], alongTrack: () => [1, 0],
-    registry: [{ id: "w", loc: ["T"], status: "permanent", checked: "t", replaces: { names: /^Pits$/ }, builder: "pitBuilding", params: { garages: 30, height: 12, plate: 0.8, overhang: { pit: 2, paddock: 1, end: 1 }, facade: { pit: "pitGlass", paddock: "paddockPanels" }, pitWall: { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 } } }] });
+    registry: [{ id: "w", loc: ["T"], status: "permanent", checked: "t", replaces: { names: /^Pits$/ }, builder: "pitBuilding", params: { garages: 30, height: 12, plate: 0.8, overhang: { pit: 2, paddock: 1, end: 1 }, facade: { pit: "pitGlass", paddock: "paddockPanels" }, pitWall: { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, deck: 0.3 }, ...more } }] });
   let rail = null; r.group.traverse((o) => { if (o.isMesh && o.name === "rail") rail = o; });
   return { G: r.group.children[0].userData.garages, rail };
 }
@@ -117,7 +117,7 @@ function railOpen(G, rail) {
   if (!idx) return [];
   for (let k = 0; k < idx.count; k += 6) shown.add(Math.floor(idx.getX(k) / 6));
   const open = [];
-  for (let q = 0; q < n; q++) if (!shown.has(q)) { const us = [0, 1, 2, 3, 4, 5].map((v) => G.project(pos.getX(q * 6 + v), pos.getZ(q * 6 + v)).u); open.push([Math.min(...us), Math.max(...us)]); }
+  for (let q = 0; q < n; q++) if (!shown.has(q)) { const us = [0, 1, 2, 3, 4, 5].map((v) => G.project(pos.getX(q * 6 + v), pos.getZ(q * 6 + v))); open.push([Math.min(...us.map((p) => p.u)), Math.max(...us.map((p) => p.u)), Math.min(...us.map((p) => p.off))]); }
   return open.sort((a, b) => a[0] - b[0]).reduce((m, s) => { const l = m[m.length - 1]; if (l && s[0] <= l[1] + 1e-6) l[1] = Math.max(l[1], s[1]); else m.push(s); return m; }, []);
 }
 
@@ -152,4 +152,16 @@ test("pit lane: the fast lane's wall side from the facility's own wall face at u
   // without the facility's wall (none known): the sections, as before
   const c = laneSectionAt(st, us, us[3] + 1);
   assert.ok(Math.abs(c.wall - (S.slots[3][1] + (S.slots[4][1] - S.slots[3][1]) * (1 / (us[4] - us[3])))) < 1e-9);
+});
+
+test("the railing opened in front of a stand where the building has balconies with balustrades (the same mesh): the pit wall's own pieces opened, the balconies' kept (Suzuka, Silverstone)", async () => {
+  const { G, rail } = await plainWall({ balconies: [{ y: 4, depth: 2 }] });
+  const n = rail.geometry.attributes.position.count / 6;
+  G.openRail([[-3, 3.3]]);
+  const open = railOpen(G, rail), shown = rail.geometry.index.count / 6;
+  // (what is left out: the walkway's railing – 29 m or so out from the garages – over the span, nothing else)
+  assert.ok(open.length >= 1 && open.every(([a, b, off]) => off > 25 && a >= -3.6 && b <= 3.9), JSON.stringify(open.map((q) => q.map((x) => +x.toFixed(2)))));
+  assert.strictEqual(n - shown, Math.round((open[0][1] - open[0][0]) / 0.5), "only the opened pieces are left out – every other quad (the balconies' balustrades too) still drawn");
+  G.openRail([]);
+  assert.deepStrictEqual(railOpen(G, rail), []);
 });

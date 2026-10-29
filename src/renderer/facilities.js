@@ -826,7 +826,7 @@ function pitBuilding(ctx, p) {
   // railing is opened in front of each (openRail). (FIA Appendix O 2026 §7.9: the pit lane "separated by a pit wall and
   // signalling platform" from the straight; Autosport 2024-03-19: the stands "built along the top of the chemin de ronde
   // (wall-walk), against the fence between the pitlane and the main straight" – H.)
-  let wallAt = null, wallDbg = null, wallFace = null, wallOut = null, wallFrom = null, railU = [];
+  let wallAt = null, wallDbg = null, wallFace = null, wallOut = null, wallFrom = null, railU = [], railBase = 0;
   const occupancy = [];   // what the wall and the paddock stand on (scene x, z): trees keep off it – it isn't the building replaced
   if (p.pitWall && ctx.trackEdge && G > 0) {
     const pw = p.pitWall, W = [];
@@ -893,6 +893,11 @@ function pitBuilding(ctx, p) {
       const vS = fitLine(W.map((w) => [w.u, frontV(w.u) + vTrack * w.d]));
       const ptAt = (i, dd, y) => { const [x, z] = P(W[i].u, vS[i] - vTrack * dd); return [x, floorAt(W[i].u) + y, z]; };
       wallDbg = W.filter((_, i) => i % 8 === 0).map((w, k) => { const i = k * 8; return [Math.round(w.u), w.d, +((vS[i] - frontV(w.u)) * vTrack).toFixed(1)]; });
+      // (the walkway's railing shares its mesh with the building's balustrades – balconies, a roof terrace – laid out
+      // before it: openRail counts its pieces from here. v0.46 counted from the mesh's first quad: wherever the building
+      // has balustrades – Suzuka, Silverstone – the opening fell that many pieces along the walkway and the last ones
+      // weren't drawn at all; v0.47 run/stands)
+      railBase = F.arr("rail").pos.length / 18;
       for (let i = 0; i + 1 < W.length; i++) {
         const o = [v[0] * vTrack, 0, v[1] * vTrack], io = [-o[0], 0, -o[2]];
         // wall (track face, top, pit face), fence above it – none over the map's own (a mapped station's d is its wall's
@@ -1041,9 +1046,11 @@ function pitBuilding(ctx, p) {
   // it): its segments over a span are left out of its index – a stand is open to its pit lane. → segments left out
   const railMesh = meshes.find((m) => m.name === "rail");
   const openRail = railMesh ? (spans = []) => {
-    const idx = []; let cut = 0;
-    railU.forEach(([a, b], i) => { if (spans.some(([s0, s1]) => b > s0 && a < s1)) { cut++; return; } for (let k = 0; k < 6; k++) idx.push(i * 6 + k); });
-    railMesh.geometry.setIndex(cut ? idx : null); return cut;
+    // (every quad of the mesh kept but the walkway's pieces over a span: its own from railBase on)
+    const n = railMesh.geometry.attributes.position.count / 6, off = new Set();
+    railU.forEach(([a, b], i) => { if (spans.some(([s0, s1]) => b > s0 && a < s1)) off.add(railBase + i); });
+    const idx = []; for (let q = 0; q < n; q++) if (!off.has(q)) for (let k = 0; k < 6; k++) idx.push(q * 6 + k);
+    railMesh.geometry.setIndex(off.size ? idx : null); return off.size;
   } : null;
   let interior = null;
   if (FI.m.size) { interior = new THREE.Group(); interior.name = "garageInteriors"; for (const m of FI.meshes((key) => facilityMaterial(key, p))) { m.castShadow = false; interior.add(m); } meshes.push(interior); }

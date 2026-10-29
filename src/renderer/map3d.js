@@ -4425,8 +4425,22 @@ window.Map3D = {
       }
       stands.push({ team: t.team, box: r3(t.box), L: w.L, p: w.p.map(r3), along: w.along.map((x) => +x.toFixed(5)), out: w.out.map((x) => +x.toFixed(5)), enclosed: w.enclosed, upper: w.upper, across });
     }
+    // (the walkway railing as drawn: the rail mesh's quads out at the lane's face – the building's balustrades share the
+    // mesh –, each shown or left out of its index; not railU, which says what openRail meant to do)
+    const railDrawn = () => {
+      const rm = pitTeams.facility?.getObjectByName("rail"); if (!rm) return [];
+      const pos = rm.geometry.attributes.position, ix = rm.geometry.index, shown = new Set(), out = [];
+      if (ix) for (let k = 0; k < ix.count; k += 6) shown.add(Math.floor(ix.getX(k) / 6));
+      for (let q = 0; q < pos.count / 6; q++) {
+        let u0 = Infinity, u1 = -Infinity, off = 0;
+        for (let k = 0; k < 6; k++) { const pr = G.project(pos.getX(q * 6 + k), pos.getZ(q * 6 + k)); u0 = Math.min(u0, pr.u); u1 = Math.max(u1, pr.u); off += pr.off / 6; }
+        const wf = G.wallFace?.(Math.max(G.gStart, Math.min(G.gEnd, (u0 + u1) / 2)));
+        if (wf != null && Math.abs(off - wf) < 0.6 && u1 - u0 > 0.05) out.push([r3(u0), r3(u1), !ix || shown.has(q) ? 1 : 0]);
+      }
+      return out.sort((a, b) => a[0] - b[0]);
+    };
     const input = { axis: { o: axis.o.map(r3), u: axis.u.map((x) => +x.toFixed(6)) }, wall: G.railU?.length ? [r3(G.railU[0][0]), r3(G.railU[G.railU.length - 1][1])] : null, run: [r3(G.gStart), r3(G.gEnd)],
-      rail: (G.railU || []).map(([a, b]) => [r3(a), r3(b)]), spans: (pitTeams.group?.userData.standSpans || []).map(([a, b]) => [r3(a), r3(b)]), stands };
+      rail: railDrawn(), spans: (pitTeams.group?.userData.standSpans || []).map(([a, b]) => [r3(a), r3(b)]), stands };
     const v = checkStands(input);
     return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, bad: v.problems.length, problems: v.problems, nMoved: v.nMoved, maxMove: v.maxMove, minGap: v.minGap, minCarGap: v.minCarGap,
       rail: v.rail && { segments: v.rail.segments, open: v.rail.open, openM: v.rail.openM, maxBeyond: v.rail.maxBeyond, beyond: detail ? v.rail.beyond : undefined, through: v.rail.through },
