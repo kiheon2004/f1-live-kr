@@ -29,6 +29,7 @@ import { weatherTruth, truthAt, forecastAt, newSurface, surfaceStep, waterAt, ru
 import { Streams } from "./rng.js";
 import { DT_MS, DT } from "./clock.js";
 import * as CMD from "./commands.js";
+import { newAiState, aiPrePlans, aiStep } from "./ai.js";
 import { carBase } from "../data/params/cars-base.js";
 import { energyParams } from "../data/params/energy.js";
 import { airDensity } from "../data/params/physics.js";
@@ -48,9 +49,22 @@ const CAR_LEN = 5.63;   // m – 2024–25 cars ≈ 5.6 m (TR Art. 3: no length 
 
 // ---------- creation ----------
 
-export function createRace({ scenario, seed = 1, userTeam = null, weatherMode = "real", carParams = null, driverParams = null, plans = null }) {
+// ai: false (default – every car on its given/default plan), true (every team run by ai.js; the player's team too until
+// the player orders a car) or { teams: [teamKey…] } (only those). The AI's pre-race plans are computed on a throw-away race
+// of the same seed and given to the race like the player's pre-race plans (plans passed here win for their cars).
+export function createRace(opts) {
+  const { ai = false, ...rest } = opts;
+  if (!ai) return createRace0(rest);
+  const teams = ai === true ? null : ai.teams || null;
+  const pre = aiPrePlans(createRace0({ ...rest, plans: null }), teams);
+  const race = createRace0({ ...rest, plans: { ...pre, ...(rest.plans || {}) } });
+  race.state.ai = newAiState(race, { teams });
+  for (const team in race.state.ai.teams) for (const num in race.state.ai.teams[team].cars) { const p = pre[num]; if (p && !rest.plans?.[num]) race.state.ai.teams[team].cars[num].modes = p.stints.map((s, i) => ({ toLap: s.toLap, mode: p.modes[i] })); }
+  return race;
+}
+function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real", carParams = null, driverParams = null, plans = null, tyreWear = 1 }) {
   const sc = scenario, season = sc.meta.season;
-  const state = { v: STATE_VERSION, engine: ENGINE_VERSION, t: 0, step: 0, seed: seed >>> 0, scenarioId: sc.meta.id, season,
+  const state = { v: STATE_VERSION, engine: ENGINE_VERSION, t: 0, step: 0, seed: seed >>> 0, scenarioId: sc.meta.id, season, tyreWear,
     userTeam, weatherMode, totalLaps: sc.race.laps, phase: "grid", finished: false, leaderLap: 0, chequeredAt: null,
     cars: [], order: [], boxes: null, commands: CMD.newCommandState(), teamOrders: {}, log: [], results: null };
   const race = { state, scenario: sc, cache: null, rng: new Streams(seed) };
@@ -109,7 +123,7 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
 
 // a set of tyres by its race name: the model's compound is the event's C-number; the name is kept for rules and screens
 function newTyre(race, name, airT) {
-  const C = race.cache, code = C.alloc[name] || name, ty = createTyre(code, { T0: fitTemp(race.state.season, code, airT ?? 25) });
+  const C = race.cache, code = C.alloc[name] || name, ty = createTyre(code, { T0: fitTemp(race.state.season, code, airT ?? 25), kwScale: race.state.tyreWear ?? 1 });   // (tyreWear: a sensitivity knob, 1 = the model)
   ty.name = name; return ty;
 }
 
@@ -154,6 +168,8 @@ export function step(race) {
   // 5. order, finish
   sortOrder(race);
   finishCheck(race, t);
+  // 6. the team AI (only orders – applied from the next step, like the player's)
+  if (S.ai) aiStep(race);
 }
 
 // the speed cap from the car ahead on the lap (same lane): keep a safe gap at its speed, braking distance included –
