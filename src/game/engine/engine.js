@@ -568,7 +568,9 @@ export function snapshot(race) {
       ...snapTraffic(c),
       tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: c.where === "lap" && c.status === "run" ? Math.round((c.deployW || 0) / 1000) : 0 }, fuel: c.energy.fuel,
       pit: snapPit(c.pit),
-      gap: { leader: lead && c.lap === lead.lap ? gapSec(c, lead, T) : null, ahead: null } })) };
+      // (by race distance, not by completed laps: right after the leader crosses the line the cars behind have one lap
+      // fewer without being a lap down – v0.49: the tower showed "+1랩" for them)
+      gap: lead ? gapOf(c, lead, T) : { leader: null, ahead: null, lapsDown: 0 } })) };
 }
 // the pit state for the screen. workT1 is the engine's planned end of the work (the crew animation is fitted to it); a
 // screen must not show it as a number before render time reaches it (request §15: no future stationary time shown).
@@ -584,6 +586,7 @@ function snapPit(p) {
 const avg = (a) => { let s = 0; for (const x of a) s += x; return a.length ? s / a.length : 0; };
 // the front wheels' steer for the screen: the path's curvature × wheelbase (kinematic, rad, + left)
 const steerOf = (T, c) => (c.where === "lap" ? Math.max(-0.4, Math.min(0.4, Math.atan(3.6 * T.at(T.kappaLine || T.kappa, c.s)))) : 0);
+const gapOf = (c, lead, T) => { const down = c === lead ? 0 : Math.max(0, Math.floor((lead.dist - c.dist) / T.L)); return { leader: down ? null : gapSec(c, lead, T), ahead: null, lapsDown: down }; };
 const gapSec = (c, lead, T) => (c === lead ? 0 : c.v > 1 ? +((lead.dist - c.dist) / Math.max(20, c.v)).toFixed(2) : null);
 
 // ---------- save / load ----------

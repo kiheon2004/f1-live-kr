@@ -135,3 +135,14 @@ test("prepare: the cache's race sessions and their scenario ids as the builder n
     assert.strictEqual(idOf("2025/2025-08-03_Hungarian_Grand_Prix/2025-08-03_Race/"), SC.meta.id);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("snapshot gap: by race distance – no car is shown a lap down just because the leader has crossed the line first", async () => {
+  const { createRace, step, snapshot } = await E();
+  const r = createRace({ scenario: SC, seed: 1 });
+  let crossings = 0, falseLapped = 0;
+  while (r.state.leaderLap < 6) {
+    const l0 = r.state.leaderLap; step(r);
+    if (r.state.leaderLap > l0) { crossings++; for (const c of snapshot(r).cars) if (c.gap.lapsDown > 0 && c.status === "run") falseLapped++; }
+  }
+  assert.ok(crossings >= 5); assert.strictEqual(falseLapped, 0);
+});

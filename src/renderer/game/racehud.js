@@ -141,7 +141,7 @@ export function paint() {
   const note = $("grNote"); if (G.saveNote) { note.hidden = false; note.className = `gr-note ${G.saveNote.ok ? "" : "bad"}`; setT(note, G.saveNote.text); } else note.hidden = true;
   H.ordersDirty = false;
 }
-const gapTxt = (c, lead) => { const g = c.gap && typeof c.gap === "object" ? c.gap.leader : c.gap; if (Number.isFinite(g)) return "+" + g.toFixed(1); return lead && c.lap < lead.lap ? `+${lead.lap - c.lap}랩` : ""; };
+const gapTxt = (c, lead) => { const g = c.gap && typeof c.gap === "object" ? c.gap.leader : c.gap; if (Number.isFinite(g)) return "+" + g.toFixed(1); const down = c.gap?.lapsDown; return down > 0 ? `+${down}랩` : ""; };
 
 function paintCard(e, snap, T, onCam) {
   const root = document.querySelector(`.gr-card[data-car="${CSS.escape(String(e.num))}"]`); if (!root) return;
