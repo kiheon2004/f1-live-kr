@@ -20,6 +20,18 @@
 const wrapTo = (x, L) => ((x % L) + L) % L;
 const lerp = (a, b, f) => a + (b - a) * f;
 
+// a car's discrete state at time T: snapshot a's (taken at ta), with the changes the engine recorded in (ta, T] applied in
+// order (b's trans list; a change older than its window is already in a). Raw engine status ("run" also in the pit).
+export function discreteAt(ca, cb, ta, T) {
+  const D = { where: ca.where, status: rawStatus(ca), phase: ca.pit?.phase ?? "none", tyre: ca.tyre?.compound, code: ca.tyre?.code };
+  for (const e of cb.trans || []) {
+    if (e.t <= ta || e.t > T) continue;
+    for (const k in e.set) D[k] = e.set[k];
+  }
+  return D;
+}
+const rawStatus = (c) => (c.status === "pit" ? "run" : c.status);
+
 export function createGameAdapter({ scenario, source, label = "게임" }) {
   const m = scenario.meta || {}, tr = scenario.track, C = tr.columns;
   // the lap as the feed's points (decimetres, [x, y, z]) – buildWorld's input, closed by its first point
@@ -63,8 +75,11 @@ export function createGameAdapter({ scenario, source, label = "게임" }) {
     bind(world, F) { map = buildMapping(tr, world, F); A.mappingInfo = map.info; return map.info; },
     unbind() { map = null; },
     get map() { return map; },
-    // the cars to draw at render time: the last two snapshots interpolated (s wrapped, d / v / wheel distance / steer
-    // linear; phases, status, tyres and pit times are the newer snapshot's) – nothing is written back to the engine
+    // the cars to draw at render time T between the last two snapshots a, b (nothing is written back to the engine):
+    // continuous values (s, u, d, v, steer, wheel distance, wings) interpolated; DISCRETE state (lap / pit, status, pit
+    // phase, the tyre fitted) is a's, then each change the engine recorded with its sim time (snapshot car.trans) applied
+    // once T has reached it, in order – never b's early (v0.49 §4: new tyres drawn before the work had ended). While a
+    // change of lap ↔ pit is due, the position follows the side the car is on at T (extrapolated from that snapshot).
     frameCars() {
       const pr = source.pair(); if (!pr?.b) return null;
       const { a, b } = pr, T = pr.renderT; renderT = T;
@@ -73,13 +88,23 @@ export function createGameAdapter({ scenario, source, label = "게임" }) {
       const out = [];
       for (const cb of b.cars) {
         const ca = prev.get(cb.num), c = { ...cb };
-        if (ca && f < 1 && ca.where === cb.where) {
-          if (cb.where === "lap" && cb.s != null && ca.s != null) { let ds = cb.s - ca.s; if (ds < -tr.L / 2) ds += tr.L; if (ds > tr.L / 2) ds -= tr.L; c.s = wrapTo(ca.s + ds * f, tr.L); }
-          else if (cb.u != null && ca.u != null) c.u = lerp(ca.u, cb.u, f);
+        if (ca && f < 1) {
+          const D = discreteAt(ca, cb, a.t, T);
+          if (D.where === ca.where && D.where === cb.where) {
+            if (cb.where === "lap" && cb.s != null && ca.s != null) { let ds = cb.s - ca.s; if (ds < -tr.L / 2) ds += tr.L; if (ds > tr.L / 2) ds -= tr.L; c.s = wrapTo(ca.s + ds * f, tr.L); }
+            else if (cb.u != null && ca.u != null) c.u = lerp(ca.u, cb.u, f);
+          } else if (D.where === ca.where) {   // (still on a's side: a's place moved on at a's speed)
+            Object.assign(c, { where: ca.where, s: ca.s != null ? wrapTo(ca.s + (ca.v || 0) * (T - a.t) / 1000, tr.L) : ca.s, u: ca.u != null ? ca.u + (ca.v || 0) * (T - a.t) / 1000 : ca.u });
+          } else {   // (already on b's side: b's place moved back at b's speed)
+            Object.assign(c, { s: cb.s != null ? wrapTo(cb.s - (cb.v || 0) * (b.t - T) / 1000, tr.L) : cb.s, u: cb.u != null ? Math.max(0, cb.u - (cb.v || 0) * (b.t - T) / 1000) : cb.u });
+          }
           c.d = lerp(ca.d ?? 0, cb.d ?? 0, f); c.v = lerp(ca.v, cb.v, f); c.steer = lerp(ca.steer ?? 0, cb.steer ?? 0, f);
           c.wheelDist = lerp(ca.wheelDist ?? 0, cb.wheelDist ?? 0, f);
           if (ca.aero && cb.aero) c.aero = { open: lerp(ca.aero.open || 0, cb.aero.open || 0, f), front: lerp(ca.aero.front || 0, cb.aero.front || 0, f) };
-        } else if (ca && f < 0.5 && ca.where !== cb.where) Object.assign(c, { where: ca.where, s: ca.s, u: ca.u, d: ca.d, v: ca.v });   // (crossing lap ↔ pit between the two: the nearer one)
+          c.where = D.where; c.status = D.where === "pit" && D.status === "run" ? "pit" : D.status;
+          c.pit = { ...cb.pit, phase: D.phase };
+          if (D.tyre !== cb.tyre?.compound || D.code !== cb.tyre?.code) c.tyre = { ...ca.tyre };   // (the old set until the change)
+        }
         out.push(c);
       }
       return { t: T, snap: b, cars: out, f };
