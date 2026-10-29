@@ -44,6 +44,7 @@ import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTra
 import { createWeather } from "./weather3d.js";
 import { updateGameCars, paintGameHud, pitPoint } from "./game/cars3d.js";
 import { createPitCam } from "./game/pitcam.js";
+import { createPitKit } from "./garagekit/pitkit.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -212,7 +213,26 @@ function initGeoSettings() {
 const newPitTeams = () => ({ key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null, frame: null });
 // (the game's mode works on its own record – the live one, with what a live feed has gathered, is kept aside untouched)
 let pitTeams = newPitTeams(), livePitTeams = null;
+// v0.49: the garage interior kit in the team bays (garagekit/pitkit.js) – made with the teams' layer, freed with it.
+// garageKitOn: Map3D.garageKit(false) draws the layer's own simple equipment instead (before / after comparisons).
+let pitKit = null, garageKitOn = true;
+// the teams the kit draws in full: the focused car's and, in the game, the pit camera's subject's
+const kitNearSet = new Set();
+function kitNear() {
+  kitNearSet.clear();
+  const teamOf = (num) => num != null && (pitTeams.teams || []).find((t) => (t.drivers || []).some((d) => String(d.num) === String(num)))?.team;
+  const a = teamOf(app()?.focus), b = game ? teamOf(gamePitCam?.S?.subject) : null;
+  if (a) kitNearSet.add(a); if (b) kitNearSet.add(b);
+  return kitNearSet;
+}
+function attachPitKit(G, teams, season) {
+  pitKit = null;
+  if (!garageKitOn || !pitTeams.group || !pitTeams.zones?.length) return;
+  try { pitKit = createPitKit({ G, zones: pitTeams.zones, teams, season, near: new Set(kitNear()), onMaterial: nightLit }); pitTeams.group.add(pitKit.group); }
+  catch (e) { pitKit = null; console.warn("garage kit:", e); }
+}
 function clearPitTeams() {
+  pitKit = null;
   if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); pitTeams.facility?.userData?.garages?.openRail?.([]); }
   pitTeams.group = null; pitTeams.key = null;
 }
@@ -274,7 +294,8 @@ function updatePitTeams(force = false) {
   clearPitTeams();
   pitTeams.key = key;
   if (!teams.length) return;   // neutral garages
-  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null);
+  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null, { kit: garageKitOn });
+  attachPitKit(G, teams, A.sessionYear?.() || null);
   // a layer added at night takes the light field too (its own materials only – the rest of the world has it already)
   pitTeams.group.traverse((o) => { for (const m of [].concat(o.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
@@ -3479,6 +3500,8 @@ function frame(now) {
   realPart("buildings")?.userData.update?.(camera.position);
   realPart("facilities")?.userData.update?.(camera.position);
   updatePitTeams();
+  // (the kit's near teams and its one light – cheap unless the focused / pit-camera team changed)
+  if (pitKit && pitTeams.group?.visible !== false) pitKit.update({ near: kitNear(), cam: camera.position, focus: app()?.focus });
   if (!devNoHud) paintHud();
   // glare points: pixels per metre at 1 m away, fading into the haze as the fog does; time for blinking lights
   NL.time.value = now / 1000;
@@ -3765,7 +3788,8 @@ function gamePitTeams(force) {
   if (key === pitTeams.key) return;
   clearPitTeams(); pitTeams.key = key;
   if (!teams.length) return;
-  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null);
+  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null, { kit: garageKitOn });
+  attachPitKit(G, teams, A.sessionYear?.() || null);
   pitTeams.group.traverse((x) => { for (const m of [].concat(x.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
   G.openRail?.(pitTeams.group.userData.standSpans || []);
@@ -4484,7 +4508,7 @@ window.Map3D = {
     const G = pitTeams.G; if (!G || !pitTeams.zones) return JSON.stringify({ G: !!G, zones: !!pitTeams.zones });
     const { garageCheckScene } = await import("./garagecheck.js"), A = app();
     const drivers = game ? game.drivers() : A.src?.state.DriverList || {};
-    const r = await garageCheckScene({ G, zones: pitTeams.zones, layer: pitTeams.group, teams: o.teams || null, drivers, season: A.sessionYear?.() || null, date: sessionDate(), park: o.park !== false, boxes: o.boxes !== false });
+    const r = await garageCheckScene({ G, zones: pitTeams.zones, layer: pitTeams.group, teams: o.teams || null, drivers, season: A.sessionYear?.() || null, date: sessionDate(), park: o.park !== false, boxes: o.boxes !== false, extra: pitKit ? (sl) => pitKit.boxesFor(sl.k) : null });
     scene.add(r.group);
     const zs = pitTeams.zones.filter((z) => !o.teams || o.teams.includes(z.team));
     // (game: each team's box where the engine stops its cars against the box painted in the lane – v0.48 A1 / A2)
@@ -4493,6 +4517,12 @@ window.Map3D = {
       engineBoxes = (pitTeams.teams || []).map((t) => { const bu = P?.boxes?.[ent.get(t.team)]; if (bu == null || t.box == null) return [t.team, null, t.box]; const pp = pitPoint(P, bu, world.center), pr = G.project(pp.x, pp.z); return [t.team, +pr.u.toFixed(2), +t.box.toFixed(2), +(pr.u - t.box).toFixed(2)]; }); }
     return JSON.stringify({ facility: G.facility || null, engineBoxes, plan: G.plan ? { built: G.plan.built, blocked: G.plan.blocked || null, folds: G.plan.folds || null } : null, cars: r.report,
       zones: zs.map((z) => ({ team: z.team, kind: z.kind, slot: z.slot, num: z.num, w: +z.w.toFixed(2), width: +z.width.toFixed(2), depth: +z.depth.toFixed(2), back: +(+z.back).toFixed(2), doorW: z.doorW && +z.doorW.toFixed(2), doorH: z.doorH && +z.doorH.toFixed(2), ceilingH: z.ceilingH && +z.ceilingH.toFixed(2), lowest: z.lowest, floorY: +z.floorY.toFixed(3), depthFrom: z.depthFrom, walk: z.walk, fits: z.carSpot?.fits ?? null, box: z.box || null })) });
+  },
+  // development (v0.49): the garage interior kit in the team bays – on / off (off: the teams' layer draws its own simple
+  // equipment, as before the kit: before / after pictures at the same camera); returns the kit's state
+  garageKit(on) {
+    if (on != null && !!on !== garageKitOn) { garageKitOn = !!on; clearPitTeams(); updatePitTeams(true); }
+    return JSON.stringify({ on: garageKitOn, kit: pitKit ? pitKit.state() : null });
   },
   // development: every bay of the pit building as built – its width, depth, back area, the building's depth behind it
   garageBays() {

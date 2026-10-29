@@ -74,7 +74,9 @@ export function checkCar(s, car, equip = [], { ground = 0, lowest = null, ignore
 // it), what it hits (red), the bay's structure (grey) –, and the report. drivers: the session's DriverList; season, date:
 // the model's. → { group (to add to the scene; dispose with it), report: [{ num, team, slot, kind, fits, why, carSpot,
 // extents: the model's measured box, …checkCar }] }
-export async function garageCheckScene({ G, zones, layer, teams = null, drivers = {}, season = null, date = null, park = true, boxes = true }) {
+// extra(s) (v0.49): more equipment boxes for bay s in its frame – the garage kit's (garagekit/pitkit.js boxesFor: its
+// merged meshes aren't instanced, so equipmentBoxes doesn't find them)
+export async function garageCheckScene({ G, zones, layer, teams = null, drivers = {}, season = null, date = null, park = true, boxes = true, extra = null }) {
   const { makeCar } = await import("./car3d.js"), { carExtents } = await import("./carbounds.js");
   const group = new THREE.Group(); group.name = "garageCheck";
   const line = (s, b, colour) => {
@@ -90,7 +92,7 @@ export async function garageCheckScene({ G, zones, layer, teams = null, drivers 
     const s = G.slots[z.slot], d = drivers[z.num] || {}, cs = z.carSpot;
     const model = makeCar({ teamName: d.TeamName || z.team, teamColour: d.TeamColour || "888888", number: z.num, season, date });
     const ext = carExtents(model), E = { length: ext.length, width: ext.width, height: ext.height, front: ext.front, back: ext.back };
-    const car = carBox(z.w, cs.d, cs.y - s.floor + ext.ground, E, "out"), equip = equipmentBoxes(layer, s);
+    const car = carBox(z.w, cs.d, cs.y - s.floor + ext.ground, E, "out"), equip = [...equipmentBoxes(layer, s), ...(extra?.(s) || [])];
     const r = checkCar(s, car, equip, { ground: cs.y - s.floor - 0.016 + ext.ground, lowest: z.lowest });
     report.push({ num: z.num, team: z.team, slot: z.slot, fits: cs.fits, why: cs.why, carSpot: { d: cs.d, w: z.w }, bay: { width: +s.width.toFixed(2), depth: +s.depth.toFixed(2), back: s.back, building: s.building, door: [+s.width.toFixed(2), +s.height.toFixed(2)], ceil: +s.ceil.toFixed(2), floor: +s.floor.toFixed(3), depthFrom: s.depthFrom },
       model: ext.key, extents: { length: ext.length, width: ext.width, height: ext.height }, ...r });

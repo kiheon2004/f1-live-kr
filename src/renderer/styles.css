@@ -555,6 +555,7 @@ body.game-on { grid-template-rows: auto 1fr; }
 /* ---- main menu over the 3D garage (menu.js) ---- */
 .gm-3d { position: absolute; inset: 0; background: radial-gradient(120% 90% at 55% 70%, color-mix(in srgb, var(--tc) 22%, #1a1e24) 0%, #0d0f12 70%); }
 .gm-3d[data-fallback=""] { background: #0d0f12; }
+.gm-3d[data-drawn="1"] ~ .gm-over .gm-fallback { display: none; }
 .gm-over { position: absolute; inset: 0; pointer-events: none; display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 24px; padding: 22px 24px; }
 .gm-over > * { pointer-events: auto; }
 .gm-fallback { grid-column: 2; grid-row: 1; align-self: center; justify-self: center; display: grid; justify-items: center; color: color-mix(in srgb, var(--tc) 60%, #fff); opacity: .5; pointer-events: none; }

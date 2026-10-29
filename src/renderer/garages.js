@@ -618,7 +618,9 @@ function atlas(rows) {
 const textOn = (hex) => { const n = parseInt(hex.slice(1), 16), l = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); return l > 150 ? "#111111" : "#ffffff"; };
 
 // The layer for one allocation: returns a THREE.Group owning its geometry, materials and label texture.
-export function teamLayer(garages, teams, drivers, season = null) {
+// opts.kit (v0.49): the garage interior kit (garagekit/pitkit.js) furnishes the team bays – this layer then leaves out its
+// own simple equipment and booms (both would draw); its lining, floors, ceiling strips, boards and pit wall stay.
+export function teamLayer(garages, teams, drivers, season = null, opts = {}) {
   const S = shared(), group = new THREE.Group(); group.name = "pitTeams";
   group.userData.covers = [];   // (the pit wall stands' canopies: no rain under them – weather3d.js)
   group.userData.wallStands = [];   // (each team's stand as built: standcheck.js)
@@ -769,7 +771,8 @@ export function teamLayer(garages, teams, drivers, season = null) {
       quad(panels, at(s, s.depth / 2 + 0.4, 0, s.ceil - 0.08), along.clone().multiplyScalar(s.width - 0.1), inw.clone().multiplyScalar(s.depth - 0.9), down, null, new THREE.Color(st.dark ? "#121417" : "#5d636a"));
       for (let d = 1.4; d < s.depth - 0.5; d += 1.8) quad(lights, at(s, d, 0, s.ceil - 0.1), along.clone().multiplyScalar(s.width * 0.7), inw.clone().multiplyScalar(0.12), down, null, null);
       const yaw = yawIn(s), sideRoom = (s.width - (role === "car" ? cw + 0.3 : 0)) / 2;
-      if (role === "car") {
+      if (opts.kit) { /* the kit furnishes this bay */ }
+      else if (role === "car") {
         // A car's bay. Overhead: the boom carrying the car's air, power and data lines out over it from the back wall,
         // its coiled lines hanging to the car (photos 2018, 2021: spiral lines from the ceiling to the car). By the walls:
         // tyre sets on their trolleys under blankets, the wheel guns on the wall, the front and rear jacks by the door,

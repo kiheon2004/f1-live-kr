@@ -33,13 +33,16 @@ async function showGarage(host) {
   const m = await garageModule();
   if (!m) { host.dataset.fallback = "1"; return; }
   if (MG.shown === key) { m.setFocus?.(focusNum); return; }
-  MG.shown = key; host.dataset.fallback = "";
+  MG.shown = key; host.dataset.fallback = ""; host.dataset.drawn = "";
   try {
     const W = host.offsetWidth || innerWidth, left = ($("gmLeft")?.offsetWidth || 300) + 36, right = ($("gmRight")?.offsetWidth || 320) + 36;
     m.setMotion?.(motionOf());
     const st = await m.show({ host, season: G.season, teamKey: G.teamKey, team: t.name, colour: t.colour, entries: entries.map((e) => ({ num: e.num, tla: e.tla, name: e.name })), focusNum, date: r?.date || null,
       safeLeft: Math.min(0.6, left / W), safeRight: Math.min(0.6, right / W) });
     if (st?.err) { MG.err = `3D 차고: ${st.err}`; }
+    // (the scene has drawn its first picture when show() resolves: the flat backdrop's big number and "3D 차고 준비 중…"
+    // painted before the module had loaded go – they showed half-transparent over the car)
+    else if (st?.shown) { host.dataset.drawn = "1"; document.querySelectorAll(".gm-fallback").forEach((el) => el.remove()); }
   } catch (e) { MG.err = String(e.message || e); MG.shown = null; host.dataset.fallback = "1"; }
 }
 // leaving the menu (to the strategy screen / the race): the scene stops drawing; closing the game: it is disposed
