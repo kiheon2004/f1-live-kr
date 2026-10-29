@@ -513,3 +513,51 @@ body.compact .home-left { grid-row: 1; } body.compact .home-lower { grid-templat
 body.compact .home-side { grid-row: 2; border-left: 0; border-top: 1px solid #1b2433; }
 body.compact .home-bar { flex-wrap: wrap; padding: 6px 8px; gap: 6px; } body.compact .home-meta { margin-left: 0; text-align: left; }
 body.compact.home-on .home-btn { padding: 4px 6px; }
+
+/* ---------- strategy game (game/gamehome.js): over the home screen; plain, readable ---------- */
+.home-game-btn { margin-left: 8px; padding: 5px 12px; border-radius: 7px; border: 1px solid #3a4452; background: #1d2530; color: var(--ink); font-weight: 700; cursor: pointer; }
+.home-game-btn:hover { border-color: var(--accent); }
+body.game-on #home { display: none !important; }
+body.game-on { grid-template-rows: auto 1fr; }
+.game { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; overflow: hidden; position: relative; z-index: 10; background: var(--bg); }
+.game-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid #1b2433; }
+.game-title { font-size: 14px; }
+.game-crumbs { display: flex; gap: 6px; color: var(--muted); font-size: 12px; } .game-crumbs .on { color: var(--ink); font-weight: 700; } .game-crumbs i { font-style: normal; opacity: .5; }
+.game-engine { margin-left: auto; font-size: 12px; color: var(--green); } .game-engine.bad { color: var(--muted); }
+.game-body { min-height: 0; overflow: auto; padding: 14px 16px; }
+.game-body[data-step="race"] { overflow: hidden; padding: 0; }
+.g-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.g-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.g-team, .g-race { text-align: left; display: grid; gap: 3px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); border-left: 5px solid var(--tc, #888); background: var(--panel); color: var(--ink); cursor: pointer; }
+.g-team:hover, .g-race:hover, .g-team.on, .g-race.on { border-color: #4a5566; background: var(--panel-2); }
+.g-team span, .g-race span, .g-team small, .g-race small { color: var(--muted); font-size: 12px; }
+.g-list { display: grid; gap: 8px; max-width: 720px; }
+.g-garage { max-width: 760px; border-left: 6px solid var(--tc); padding-left: 14px; } .g-garage h2 small { color: var(--muted); font-size: 13px; font-weight: 400; }
+.g-cars { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.g-car { display: grid; gap: 2px; padding: 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); } .g-car small { color: var(--muted); }
+.g-num { font: 700 30px/1 var(--mono); color: var(--tc); }
+.g-pre { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; align-items: start; }
+.g-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; } .g-card h3 { margin: 2px 0 8px; font-size: 14px; } .g-card h3 small { color: var(--muted); font-weight: 400; font-size: 12px; }
+.g-pre .g-row { grid-column: 1 / -1; }
+.g-pre .g-card { min-width: 0; } .g-pre .g-wide { grid-column: span 2; } .g-tbl small { font-size: 11px; }
+@media (max-width: 1280px) { .g-pre .g-wide { grid-column: 1 / -1; } }
+.g-pending { display: inline-block; padding: 1px 8px; border-radius: 5px; background: #23282f; color: #6c7682; font-size: 12px; }
+.g-seed { width: 80px; }
+.g-grid-list { columns: 2; margin: 0; padding-left: 0; list-style: none; font-size: 12px; } .g-grid-list li.mine { color: var(--yellow); font-weight: 700; } .g-grid-list b { display: inline-block; width: 26px; color: var(--muted); }
+.g-fc { display: flex; gap: 4px; } .g-fc span { flex: 1; display: grid; justify-items: center; font-size: 11px; color: var(--muted); }
+.g-fc i { display: block; width: 100%; height: 34px; border-radius: 4px; background: linear-gradient(to top, #3d7bd9 calc(var(--p) * 100%), #222831 0); }
+.g-tbl { border-collapse: collapse; width: 100%; font-size: 12px; } .g-tbl th { text-align: left; color: var(--muted); font-weight: 500; } .g-tbl td, .g-tbl th { padding: 3px 6px; border-bottom: 1px solid var(--line-2); }
+.g-tbl tr.mine td { color: var(--yellow); }
+.g-race-screen { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) auto auto; height: 100%; }
+.g-view { position: relative; min-height: 0; } .g-view > .map3d { position: absolute; inset: 0; }
+.g-side { grid-row: 1 / 4; grid-column: 2; overflow: auto; border-left: 1px solid var(--line); padding: 8px 10px; display: grid; align-content: start; gap: 10px; }
+.g-tower-h { font-size: 12px; color: var(--muted); margin-bottom: 4px; } .g-dev { color: var(--sc); }
+.g-tw tr.focus td { background: #263040; } .g-tw tr[data-num] { cursor: pointer; } .g-tw i { display: inline-block; width: 4px; height: 12px; margin-right: 5px; vertical-align: -1px; }
+.cmp { font-weight: 700; } .cmp-SOFT { color: #e8392f; } .cmp-MEDIUM { color: #f2c230; } .cmp-HARD { color: #e8ecf0; } .cmp-INTERMEDIATE { color: #3ccf6e; } .cmp-WET { color: #3d7bd9; }
+.g-drv { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; } .g-drv h4 { margin: 0 0 4px; font-size: 13px; } .g-st { font-weight: 400; color: var(--muted); font-size: 11px; }
+.g-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 3px 0; font-size: 12px; color: var(--muted); }
+.g-btns button, .g-speeds button { padding: 2px 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); cursor: pointer; font-size: 12px; }
+.g-btns button:hover, .g-speeds button:hover { border-color: #56637a; } .g-speeds button[aria-pressed="true"] { background: var(--ink); color: #111; }
+.g-bar { grid-column: 1; display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-top: 1px solid var(--line); font-size: 12px; }
+.g-speeds { display: flex; gap: 3px; } .g-clock .bad { color: var(--sc); } .g-auto { color: var(--muted); } .g-bar #gQuit { margin-left: auto; }
+.g-events { grid-column: 1; max-height: 96px; overflow: auto; padding: 4px 12px 8px; font-size: 12px; color: var(--muted); } .g-events p { margin: 1px 0; } .g-events .bad { color: var(--sc); }
