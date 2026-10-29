@@ -178,3 +178,31 @@ test("game store: scenarios listed from userData/game/scenarios with their own e
     assert.strictEqual(await st.loadGame("nothing"), null);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("runner + the real engine (British 2025 fixture): the same race at 1× / 30× / 60× and different frame rates as stepped directly; orders through the runner are the engine's (duplicate id refused)", async () => {
+  const file = path.join(__dirname, "../fixtures/game/2025-07-06_British_Grand_Prix_2025-07-06_Race.scenario.json");
+  if (!fs.existsSync(file)) return test.skip?.("no British 2025 scenario fixture");
+  const sc = JSON.parse(fs.readFileSync(file, "utf8"));
+  const E = await import("../../src/game/engine/engine.js");
+  const { GameRunner, orderId } = await import("../../src/renderer/game/runner.js");
+  const T = 25000;
+  const key = (r) => JSON.stringify(r.state.cars.map((c) => [c.num, c.s, c.v, c.where, c.pit.phase, c.tyre.wear]));
+  const results = [];
+  for (const [speed, fps] of [[1, 60], [30, 24], [60, 144]]) {
+    const c = clock(), race = E.createRace({ scenario: sc, seed: 3, userTeam: "McLaren" });
+    const R = new GameRunner(race, E, { now: c.now, budgetMs: 1e9 });
+    const id = orderId("pace");
+    assert.ok(R.command({ id, type: "pace", car: "4", team: "McLaren", args: { mode: "attack" }, by: "player" }).ok);
+    assert.ok(R.command({ id, type: "pace", car: "4", team: "McLaren", args: { mode: "attack" }, by: "player" }).dup);
+    R.setSpeed(speed);
+    while (race.state.t < T) { c.add(1000 / fps); R.frame(); }
+    const ref = E.createRace({ scenario: sc, seed: 3, userTeam: "McLaren" });
+    E.command(ref, { id: "x", type: "pace", car: "4", team: "McLaren", args: { mode: "attack" }, by: "player" });
+    while (ref.state.t < race.state.t) E.step(ref);
+    assert.strictEqual(key(race), key(ref), `${speed}× at ${fps} fps`);
+    results.push(race.state.t);
+    // the render time stays inside the snapshots and the snapshot carries the contract's fields the 3D view reads
+    const p = R.pair(), car = p.b.cars.find((x) => x.num === "4");
+    assert.ok(R.renderT <= R.latest().t && "wheelDist" in car && "pit" in car && "tyre" in car && car.where);
+  }
+});

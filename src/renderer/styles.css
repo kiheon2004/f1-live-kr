@@ -539,6 +539,8 @@ body.game-on { grid-template-rows: auto 1fr; }
 .g-pre { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; align-items: start; }
 .g-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; } .g-card h3 { margin: 2px 0 8px; font-size: 14px; } .g-card h3 small { color: var(--muted); font-weight: 400; font-size: 12px; }
 .g-pre .g-row { grid-column: 1 / -1; }
+.g-pre .g-card { min-width: 0; } .g-pre .g-wide { grid-column: span 2; } .g-tbl small { font-size: 11px; }
+@media (max-width: 1280px) { .g-pre .g-wide { grid-column: 1 / -1; } }
 .g-pending { display: inline-block; padding: 1px 8px; border-radius: 5px; background: #23282f; color: #6c7682; font-size: 12px; }
 .g-seed { width: 80px; }
 .g-grid-list { columns: 2; margin: 0; padding-left: 0; list-style: none; font-size: 12px; } .g-grid-list li.mine { color: var(--yellow); font-weight: 700; } .g-grid-list b { display: inline-block; width: 26px; color: var(--muted); }

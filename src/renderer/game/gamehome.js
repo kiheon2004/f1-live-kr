@@ -23,6 +23,8 @@ const ORDER_KO = { free: "자유 경쟁", hold: "순위 유지", swap: "순위 �
 const STATUS_KO = { run: "주행 중", pit: "피트", fin: "완주", dnf: "리타이어", grid: "출발 전" };
 const CMP_KO = { SOFT: "소프트", MEDIUM: "미디엄", HARD: "하드", INTERMEDIATE: "인터", WET: "웨트" };
 const PENDING = `<span class="g-pending">엔진 연결 전</span>`;
+// (what waits on the strategy estimator that comes with the AI work – the engine itself is connected)
+const NOEST = `<span class="g-pending">전략 추정 API 전</span>`;
 const fmtT = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""}${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
 
 const G = { on: false, step: "team", list: null, listErr: null, season: null, teamKey: null, sid: null, sc: null, seed: 1, plan: {}, engine: null, engineErr: null,
@@ -36,8 +38,8 @@ async function loadEngine() {
   G.engineErr = "checking";
   try {
     const m = await import("../../game/engine/engine.js");
-    if (["createRace", "step", "snapshot", "command"].every((k) => typeof m[k] === "function")) { G.engine = m; G.engineErr = null; }
-    else G.engineErr = "engine.js에 createRace / step / snapshot / command가 아직 없어요";
+    if (["createRace", "step", "snapshot", "command", "events", "results"].every((k) => typeof m[k] === "function")) { G.engine = m; G.engineErr = null; }
+    else G.engineErr = "engine.js에 createRace / step / snapshot / command / events / results가 아직 없어요";
   } catch { G.engineErr = "엔진 연결 전"; }
   paint();
 }
@@ -135,17 +137,25 @@ function paintPrerace() {
     <section class="g-card"><h3>출발 순위 <small>시나리오(경기 전 공개된 출발 순서)</small></h3>
       <ol class="g-grid-list">${slots.map((s) => { const e = ents.get(String(s.num)); return `<li class="${e?.teamKey === G.teamKey ? "mine" : ""}"><b>${s.pos}</b> ${esc(e?.tla || s.num)} <span style="color:${esc(e?.colour || "#888")}">■</span></li>`; }).join("")}${pl.map((x) => `<li><b>PL</b> ${esc(ents.get(String(x.num))?.tla || x.num)}</li>`).join("")}</ol></section>
     <section class="g-card"><h3>예상 날씨 <small>엔진의 예보(시드별 오차 포함) – 실제 날씨와 다를 수 있어요</small></h3>${fc}</section>
-    <section class="g-card"><h3>출발 타이어와 계획</h3>
+    <section class="g-card g-wide"><h3>출발 타이어와 계획</h3>
       <table class="g-tbl"><tr><th>드라이버</th><th>출발 타이어</th><th>계획 스틴트·피트 윈도</th><th>예상 피트 손실</th></tr>
-      ${mine.map((e) => `<tr><td><b>${esc(e.tla)}</b> #${esc(e.num)}</td><td><select data-start="${esc(e.num)}">${comps.map((c) => `<option value="${c}" ${G.plan[e.num].start === c ? "selected" : ""}>${CMP_KO[c] || c}</option>`).join("")}</select></td><td>${PENDING}</td><td>${PENDING}</td></tr>`).join("")}</table>
+      ${mine.map((e) => `<tr><td><b>${esc(e.tla)}</b> #${esc(e.num)}</td><td><select data-start="${esc(e.num)}">${comps.map((c) => `<option value="${c}" ${G.plan[e.num].start === c ? "selected" : ""}>${CMP_KO[c] || c}</option>`).join("")}</select></td><td>${planCell(sc, e.num)}</td><td>${pitLossCell(e.num)}</td></tr>`).join("")}</table>
       <p class="muted">출발 타이어 목록: 이 경기 기록에 나온 컴파운드. ${pit?.stats?.passSecMedian ? `피트레인 통과 시간(이 경기 자료 실측 중앙값, 정차 포함): ${pit.stats.passSecMedian.toFixed(1)}초 – 엔진의 예상 손실이 아니에요.` : ""}</p></section>
-    <section class="g-card"><h3>두 드라이버 전략 비교 · 규정·팀 내 피트 충돌</h3><p>${PENDING} <span class="muted">엔진의 전략 API(스틴트 계획·의무 타이어·동시 피트 검사)가 연결되면 여기에 보여요.</span></p></section>
+    <section class="g-card"><h3>두 드라이버 전략 비교 · 규정·팀 내 피트 충돌</h3><p>${G.engine ? NOEST : PENDING} <span class="muted">전략 추정(스틴트 비교·의무 타이어·동시 피트 검사)이 AI 작업과 함께 연결되면 여기에 보여요.</span></p></section>
     <div class="g-row"><button class="primary" id="gStart" ${G.engine ? "" : "disabled"}>레이스 시작</button>${G.engine ? "" : `<span class="muted">${esc(G.engineErr || "엔진 연결 전")} – 레이스는 실제 엔진으로만 시작해요.</span>`}<button class="ghost" data-go="races">← 경기 선택</button></div>
   </div>`;
 }
-// the engine's forecast at the start (weather.js forecastAt: blocks of rain probability, errors seeded per race)
+// the engine's forecast at the start – engine.forecast(race) on a race created for this seed (the teams' forecast,
+// never the truth); before the engine existed: weather.js forecastAt directly (the same function the engine uses)
 function forecast(sc) {
   try {
+    if (G.engine) {
+      const key = `${G.sid}|${G.seed}`;
+      if (G.fcFor !== key) { G.fcFor = key; G.fc = G.engine.forecast(G.engine.createRace({ scenario: sc, seed: G.seed, userTeam: G.teamKey })); }
+      const W0 = sc.weather?.cols, a0 = W0 ? W0.t.findIndex((t) => t >= 0) : -1;
+      return `<p>기온 ${a0 >= 0 ? W0.air[a0] : "?"}°C · 노면 ${a0 >= 0 ? W0.track[a0] : "?"}°C (출발 무렵 기록)</p><div class="g-fc">${G.fc.blocks.map((b) => `<span title="${fmtT(b.from)}–${fmtT(b.to)}" style="--p:${b.pRain}"><i></i>${Math.round(b.pRain * 100)}%</span>`).join("")}</div>
+        <p class="muted">엔진의 팀 예보: 15분 단위 비 확률(출발부터 2시간, 시드 ${G.seed}). 먼 시간일수록 오차가 커요.</p>`;
+    }
     const W = sc.weather?.cols; if (!W) return PENDING;
     const rec = W.t.map((t, i) => ({ t: t * 1000, rain: W.rain[i], airT: W.air[i], trackT: W.track[i], wind: W.windSpeed[i] }));
     const truth = weatherTruth(rec, { mode: "real", seed: G.seed, minutes: 240 }), f = forecastAt(truth, 0, G.seed, { hours: 2 });
@@ -153,6 +163,44 @@ function forecast(sc) {
     return `<p>기온 ${a?.airT ?? "?"}°C · 노면 ${a?.trackT ?? "?"}°C (출발 무렵 기록)</p><div class="g-fc">${f.blocks.map((b) => `<span title="${fmtT(b.from)}–${fmtT(b.to)}" style="--p:${b.pRain}"><i></i>${Math.round(b.pRain * 100)}%</span>`).join("")}</div>
       <p class="muted">15분 단위 비 확률(출발부터 2시간). 먼 시간일수록 오차가 커요.</p>`;
   } catch (e) { return `${PENDING} <span class="muted">${esc(e.message)}</span>`; }
+}
+
+// The expected pit loss from the ENGINE's own pit model (request §3): the same race twice (this seed, these plans) – once
+// with this car called in at the start (it stops at the end of lap 1), once without – stepped until the car has finished
+// lap 3; the difference is what the stop cost it there, entry/limiter/box/work/exit and the traffic it met included. One
+// sample of one situation, not a guarantee (traffic, SC and weather change it) – said so on screen.
+function pitLossCell(num) {
+  if (!G.engine) return PENDING;
+  const r = G.pitLoss?.[`${G.sid}|${G.seed}|${num}`];
+  if (!r) return `<button class="ghost small" data-pitloss="${esc(num)}">엔진으로 계산</button>`;
+  if (r.busy) return `<span class="muted">계산 중…</span>`;
+  if (r.err) return `<span class="muted">계산 실패: ${esc(r.err)}</span>`;
+  return `<b>${r.loss.toFixed(1)}초</b><br><small class="muted">엔진 피트 모델 · 1랩 끝 정차를 3랩까지 비교 · 교통 포함 · ${r.ms} ms</small>`;
+}
+// the plan the engine will race with for this car (engine.defaultPlan with the start tyre chosen here – plansOf); the
+// pit window / strategy estimate comes with the AI work and stays marked until then
+function planCell(sc, num) {
+  if (!G.engine) return PENDING;
+  const p = plansOf(sc)[num]; if (!p) return PENDING;
+  return `${p.stints.map((x, i) => `${CMP_KO[x.compound] || x.compound}${i < p.stints.length - 1 ? ` ~${x.toLap}랩` : ""}`).join(" → ")}<br><small class="muted">엔진 기본 계획 · 피트 윈도 추정 ${NOEST}</small>`;
+}
+async function computePitLoss(num) {
+  const E = G.engine, sc = G.sc, key = `${G.sid}|${G.seed}|${num}`; if (!E || !sc) return;
+  (G.pitLoss || (G.pitLoss = {}))[key] = { busy: true }; paint();
+  try {
+    const t0 = performance.now(), plans = plansOf(sc), cmp = plans[num]?.stints[1]?.compound || plans[num]?.stints[0]?.compound || "HARD";
+    const mk = () => E.createRace({ scenario: sc, seed: G.seed, userTeam: G.teamKey, plans });
+    const A = mk(), B = mk();
+    const ok = E.command(A, { id: "pitloss-" + num, type: "pit", car: String(num), team: G.teamKey, args: { compound: cmp }, by: "player" });
+    if (!ok.ok) throw new Error(ok.why || "pit refused");
+    const done = (R) => { const c = R.state.cars.find((x) => x.num === String(num)); return c.lap >= 3 || c.status === "dnf" || R.state.finished; };
+    const tAt = {}, run = (R, k) => new Promise((res) => { const go = () => { for (let i = 0; i < 2000 && !done(R); i++) E.step(R); if (done(R)) { tAt[k] = R.state.t; res(); } else setTimeout(go, 0); }; go(); });
+    await run(A, "a"); await run(B, "b");
+    const ca = A.state.cars.find((x) => x.num === String(num));
+    if (!ca.pit.stops) throw new Error("the car didn't stop in 3 laps");
+    G.pitLoss[key] = { loss: (tAt.a - tAt.b) / 1000, ms: Math.round(performance.now() - t0), steps: (tAt.a + tAt.b) / 50 };
+  } catch (e) { G.pitLoss[key] = { err: String(e.message || e) }; }
+  paint();
 }
 
 // ---------- the race ----------
@@ -164,11 +212,11 @@ async function startRace({ dev = false, devOpts = {} } = {}) {
     race = D.createDevRace(sc, devOpts); engine = { step: D.devStep, snapshot: D.devSnapshot, command: () => ({ ok: false, why: "개발용 스냅샷: 명령을 받지 않아요" }) };
   } else {
     const E = G.engine; if (!E) return;
-    race = E.createRace(sc, { seed: G.seed, playerTeam: G.teamKey, plan: G.plan });
+    race = E.createRace({ scenario: sc, seed: G.seed, userTeam: G.teamKey, weatherMode: "real", plans: plansOf(sc) });
     engine = { step: E.step, snapshot: E.snapshot, command: E.command, events: E.events, results: E.results };
   }
   G.dev = dev; G.events = []; G.orders = []; G.result = null;
-  G.run = new GameRunner(race, engine, { autoSlow: G.autoSlow ? { types: AUTO_SLOW, to: 1 } : null });
+  G.run = new GameRunner(race, engine, { autoSlow: G.autoSlow ? autoSlowRule() : null });
   G.run.listeners.add((ev) => { G.events.push(...ev); if (G.events.length > 400) G.events.splice(0, G.events.length - 400); });
   G.adapter = createGameAdapter({ scenario: sc, source: G.run, label: dev ? "개발용" : "게임" });
   G.adapter.ctx.setFocus(myCars(sc)[0]?.num || null);
@@ -180,7 +228,22 @@ async function startRace({ dev = false, devOpts = {} } = {}) {
   loop();
 }
 // the engine's events that may slow the clock (screen only; the engine is told nothing) – names as the engine logs them
-const AUTO_SLOW = new Set(["sc", "vsc", "red", "rainStart", "pitWindow", "teamPitClash", "incident"]);
+// (race control's and the weather's – SC/VSC/red/rain/incidents, as the engine will log them –, the chequered flag, a car
+// running out of fuel or battery, and the player's own cars committing to / entering the pit lane)
+const AUTO_SLOW = new Set(["sc", "vsc", "red", "rainStart", "incident", "chequered", "fuelEmpty", "ersEmpty"]);
+const MINE_SLOW = new Set(["pitCommitted", "pitEntry"]);
+const autoSlowRule = () => ({ to: 1, match: (e) => AUTO_SLOW.has(e.type) || (MINE_SLOW.has(e.type) && myCars(G.sc).some((x) => String(x.num) === String(e.car))) });
+// the player's plans for the engine: its default plan for each of the team's cars with the start tyre chosen here
+function plansOf(sc) {
+  const out = {};
+  for (const e of myCars(sc)) {
+    const base = G.engine.defaultPlan ? G.engine.defaultPlan(sc, e.num) : { stints: [{ compound: G.plan[e.num]?.start || "MEDIUM", toLap: sc.race.laps }] };
+    const st = base.stints.map((x) => ({ ...x }));
+    if (G.plan[e.num]?.start) st[0].compound = G.plan[e.num].start;
+    out[e.num] = { stints: st, by: "player" };
+  }
+  return out;
+}
 function loop() {
   cancelAnimationFrame(G.raf);
   const tick = () => {
@@ -189,7 +252,7 @@ function loop() {
     const now = performance.now();
     if (now - G.lastPaint > 200) { G.lastPaint = now; paintRace(); }
     const snap = G.run.latest();
-    if ((G.run.race.state.finished || snap?.flag === "chequered") && !G.result) finishRace();
+    if (G.run.race.state.finished && !G.result) finishRace();   // (the chequered flag is the leader's: the rest still run)
     G.raf = requestAnimationFrame(tick);
   };
   G.raf = requestAnimationFrame(tick);
@@ -227,7 +290,7 @@ function paintRace() {
   const cars = [...snap.cars].sort((a, b) => a.pos - b.pos);
   const tw = cars.map((c) => { const e = ents.get(String(c.num)), mine = e?.teamKey === G.teamKey;
     return `<tr class="${mine ? "mine" : ""} ${c.num === G.adapter?.ctx.focus ? "focus" : ""}" data-num="${esc(c.num)}"><td>${c.pos}</td><td><i style="background:${esc(e?.colour || "#888")}"></i>${esc(e?.tla || c.num)}</td>
-      <td>${c.gap != null ? (c.pos === 1 ? "선두" : "+" + c.gap.toFixed(1)) : ""}</td><td>${c.status === "pit" ? "피트" : c.status === "dnf" ? "리타이어" : c.status === "fin" ? "완주" : ""}</td>
+      <td>${c.pos === 1 ? "선두" : gapTxt(c, cars[0])}</td><td>${c.status === "pit" ? "피트" : c.status === "dnf" ? "리타이어" : c.status === "fin" ? "완주" : ""}</td>
       <td class="cmp cmp-${esc(c.tyre?.compound || "")}">${esc((c.tyre?.compound || "?")[0])}</td><td>${c.tyre?.age ?? ""}</td></tr>`; }).join("");
   $("gTower").innerHTML = `<div class="g-tower-h">랩 ${snap.leaderLap}/${snap.totalLaps ?? "?"} · ${flagKo(snap.flag)}${snap.dev ? ` · <b class="g-dev">${esc(snap.dev.label)}</b>` : ""}</div>
     <table class="g-tbl g-tw"><tr><th>#</th><th>드라이버</th><th>간격</th><th></th><th colspan="2">타이어</th></tr>${tw}</table>`;
@@ -237,8 +300,10 @@ function paintRace() {
   $("gClock").innerHTML = `경기 시각 ${fmtT(snap.t)} · 요청 ${R.paused ? "일시정지" : R.speed + "×"} · <b class="${R.behind ? "bad" : ""}">실제 ${ach.toFixed(1)}×</b>${R.behind ? " (계산이 따라가지 못해 실제 배속으로 진행)" : ""}${R.slowNote ? ` · 자동 감속: ${esc(R.slowNote.why)}` : ""}`;
   document.querySelectorAll("#gSpeeds [data-speed]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.speed === (R.paused ? 0 : R.speed))));
   $("gEvents").innerHTML = (G.orders.slice(-4).map((o) => `<p class="${o.ok ? "" : "bad"}">${fmtT(o.t)} 지시 ${esc(o.text)} → ${o.ok ? "접수" : "거부: " + esc(o.why || "")}</p>`).join("") +
-    G.events.slice(-8).reverse().map((e) => `<p>${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} ${esc(e.type)}${e.car ? ` #${esc(e.car)}` : ""}${e.cause ? ` · ${esc(e.cause)}` : ""}</p>`).join("")) || `<p class="muted">사건 없음${snap.dev ? " (개발용 스냅샷은 사건을 만들지 않아요)" : ""}</p>`;
+    G.events.slice(-8).reverse().map((e) => `<p>${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} ${esc(e.type)}${e.car ? ` #${esc(e.car)}` : ""}${e.effect ? ` · ${esc(e.effect)}` : e.cause ? ` · ${esc(e.cause)}` : ""}</p>`).join("")) || `<p class="muted">사건 없음${snap.dev ? " (개발용 스냅샷은 사건을 만들지 않아요)" : ""}</p>`;
 }
+// the gap to the leader as the engine gives it (s, same lap only), else laps down
+const gapTxt = (c, lead) => { const g = c.gap && typeof c.gap === "object" ? c.gap.leader : c.gap; if (Number.isFinite(g)) return "+" + g.toFixed(1); return lead && c.lap < lead.lap ? `+${lead.lap - c.lap}랩` : ""; };
 const flagKo = (f) => ({ grid: "출발 전", green: "녹색", yellow: "황색", vsc: "VSC", sc: "세이프티카", red: "적색기", chequered: "체커기" }[f] || f || "");
 // per-driver orders (pace, energy, box with a compound, cancel) and the team order – each an engine command with its own id
 function buildControls() {
@@ -265,9 +330,12 @@ function sendOrder(type, car, args, text) {
 }
 function finishRace() {
   const R = G.run, snap = R.latest();
-  const accounts = R.engine.results ? R.engine.results(R.race) : null;
-  G.result = { dev: G.dev, scenarioId: G.sid, seed: G.seed, team: G.teamKey, t: snap.t, classification: [...snap.cars].sort((a, b) => a.pos - b.pos).map((c) => ({ pos: c.pos, num: c.num, tla: c.tla, team: c.team, laps: c.lap, status: c.status })),
-    accounts, events: G.events.slice(-200), orders: G.orders };
+  const res = R.engine.results ? R.engine.results(R.race) : null;
+  const classification = res?.rows ? res.rows.map((r) => ({ pos: r.pos, num: r.num, tla: r.tla, team: r.team, laps: r.laps, gap: r.gap, lapsDown: r.lapsDown, status: r.status, stops: r.stops }))
+    : [...snap.cars].sort((a, b) => a.pos - b.pos).map((c) => ({ pos: c.pos, num: c.num, tla: c.tla, team: c.team, laps: c.lap, status: c.status }));
+  const accounts = res?.rows ? { cars: Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.acct || {}])), by: res.by || null } : null;
+  G.result = { dev: G.dev, scenarioId: G.sid, seed: G.seed, team: G.teamKey, t: snap.t, engine: G.dev ? null : G.engine?.ENGINE_VERSION || null, classification,
+    accounts, events: (R.engine.events ? R.engine.events(R.race, -1) : G.events).slice(-300), orders: G.orders, commandLog: R.race.state.commands?.log || null };
   if (!G.dev) window.api.game.saveResult(G.sid, { kind: "game-result", label: "게임 결과 (실제 기록 아님)", ...G.result }).then((r) => { G.result.saved = r?.file || null; paint(); }, (e) => { G.result.saveErr = String(e.message || e); paint(); });
   stopRace();
   go("results");
@@ -275,17 +343,17 @@ function finishRace() {
 function paintResults() {
   const r = G.result; if (!r) return `<p class="muted">결과가 없어요.</p>`;
   return `<div class="g-card"><h3>게임 결과 <small>엔진 계산 결과 · 실제 경기 기록이 아니에요${r.dev ? " · 개발용 스냅샷(엔진 아님)" : ""}</small></h3>
-    <table class="g-tbl"><tr><th>순위</th><th>드라이버</th><th>팀</th><th>랩</th><th>상태</th></tr>${r.classification.map((c) => `<tr class="${myCars(G.sc).some((e) => String(e.num) === c.num) ? "mine" : ""}"><td>${c.pos}</td><td>${esc(c.tla || c.num)}</td><td>${esc(teamKo(c.team))}</td><td>${c.laps}</td><td>${esc(STATUS_KO[c.status] || c.status)}</td></tr>`).join("")}</table></div>
+    <table class="g-tbl"><tr><th>순위</th><th>드라이버</th><th>팀</th><th>랩</th><th>차이</th><th>정차</th><th>상태</th></tr>${r.classification.map((c) => `<tr class="${myCars(G.sc).some((e) => String(e.num) === String(c.num)) ? "mine" : ""}"><td>${c.pos}</td><td>${esc(c.tla || c.num)}</td><td>${esc(teamKo(c.team))}</td><td>${c.laps}</td><td>${c.pos === 1 ? "" : Number.isFinite(c.gap) ? "+" + c.gap.toFixed(3) + "s" : c.lapsDown ? `+${c.lapsDown}랩` : ""}</td><td>${c.stops ?? ""}</td><td>${esc(STATUS_KO[c.status] || c.status)}</td></tr>`).join("")}</table></div>
     <div class="g-card"><h3>결과의 원인 <small>엔진의 시간 손실 계정(교통·피트·타이어·에너지·페널티·기타)</small></h3>${r.accounts ? accountsHtml(r.accounts) : PENDING}</div>
-    <div class="g-card"><h3>사건</h3>${r.events.length ? r.events.slice(-40).map((e) => `<p>${fmtT(e.t ?? 0)} ${esc(e.type)} ${e.car ? "#" + esc(e.car) : ""} ${esc(e.cause || "")}</p>`).join("") : `<p class="muted">기록된 사건 없음</p>`}</div>
+    <div class="g-card"><h3>사건</h3>${r.events.length ? r.events.slice(-40).map((e) => `<p>${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} ${esc(e.type)} ${e.car ? "#" + esc(e.car) : ""} ${esc(e.effect || e.cause || "")}</p>`).join("") : `<p class="muted">기록된 사건 없음</p>`}</div>
     <p class="muted">${r.saved ? `저장됨: ${esc(r.saved)}` : r.saveErr ? `저장 실패: ${esc(r.saveErr)}` : r.dev ? "개발용 결과는 저장하지 않아요." : "저장 중…"}</p>
     <div class="g-row"><button class="primary" data-go="garage">차고로</button></div>`;
 }
 // the engine's accounts as it gives them (per car: { traffic, pit, tyre, energy, penalty, other, approx: [...] } s)
 function accountsHtml(a) {
   const rows = Object.entries(a.cars || a).filter(([, v]) => v && typeof v === "object");
-  const keys = ["traffic", "pit", "tyre", "energy", "penalty", "other"], ko = { traffic: "교통", pit: "피트", tyre: "타이어", energy: "에너지·페이스", penalty: "페널티", other: "기타(분리 불가)" };
-  return `<table class="g-tbl"><tr><th>차</th>${keys.map((k) => `<th>${ko[k]}</th>`).join("")}</tr>${rows.map(([n, v]) => `<tr><td>${esc(n)}</td>${keys.map((k) => `<td>${Number.isFinite(v[k]) ? v[k].toFixed(1) + "s" + ((v.approx || []).includes(k) ? " ≈" : "") : "–"}</td>`).join("")}</tr>`).join("")}</table><p class="muted">≈: 엔진이 근사로 표시한 항목</p>`;
+  const all = ["traffic", "pit", "tyre", "energy", "penalty", "other"], have = new Set(rows.flatMap(([, v]) => Object.keys(v))), keys = all.filter((k) => have.has(k)), ko = { traffic: "교통", pit: "피트", tyre: "타이어", energy: "에너지·페이스", penalty: "페널티", other: "기타(분리 불가)" };
+  return `<table class="g-tbl"><tr><th>차</th>${keys.map((k) => `<th>${ko[k]}</th>`).join("")}</tr>${rows.map(([n, v]) => `<tr><td>${esc(n)}</td>${keys.map((k) => `<td>${Number.isFinite(v[k]) ? v[k].toFixed(1) + "s" + ((v.approx || []).includes(k) ? " ≈" : "") : "–"}</td>`).join("")}</tr>`).join("")}</table><p class="muted">엔진이 지금 계산하는 항목만 보여요(${keys.map((k) => ko[k]).join("·") || "없음"}) · ≈: 엔진이 근사로 표시한 항목 · 초</p>`;
 }
 
 // ---------- events ----------
@@ -296,7 +364,7 @@ $("game").addEventListener("change", (e) => {
   if (t.id === "gSeason") { G.season = +t.value; G.teamKey = null; paint(); }
   else if (t.id === "gSeed") { G.seed = Math.max(1, Math.min(999999, Math.round(+t.value) || 1)); paint(); }
   else if (t.dataset.start) { G.plan[t.dataset.start] = { ...(G.plan[t.dataset.start] || {}), start: t.value }; }
-  else if (t.id === "gAuto") { G.autoSlow = t.checked; if (G.run) G.run.autoSlow = G.autoSlow ? { types: AUTO_SLOW, to: 1 } : null; }
+  else if (t.id === "gAuto") { G.autoSlow = t.checked; if (G.run) G.run.autoSlow = G.autoSlow ? autoSlowRule() : null; }
 });
 $("game").addEventListener("click", async (e) => {
   const b = e.target.closest("button, tr[data-num]"); if (!b) return;
@@ -304,6 +372,7 @@ $("game").addEventListener("click", async (e) => {
   if (b.dataset.go) { go(b.dataset.go); return; }
   if (b.dataset.sid) { G.sid = b.dataset.sid; G.sc = null; G.plan = {}; go("prerace"); try { G.sc = await window.api.game.scenario(G.sid); } catch (err) { G.sc = null; G.listErr = String(err.message || err); } paint(); return; }
   if (b.id === "gStart") { startRace(); return; }
+  if (b.dataset.pitloss) { computePitLoss(b.dataset.pitloss); return; }
   if (b.id === "gQuit") { stopRace(); go("garage"); return; }
   if (b.dataset.speed != null) { G.run?.setSpeed(+b.dataset.speed); if (G.run) G.run.slowNote = null; paintRace(); return; }
   if (b.dataset.num) { G.adapter?.ctx.setFocus(b.dataset.num); paintRace(); return; }
@@ -311,7 +380,7 @@ $("game").addEventListener("click", async (e) => {
     const car = b.closest("[data-car]")?.dataset.car ?? null, type = b.dataset.cmd;
     if (type === "pit") { const cmp = b.parentNode.querySelector("[data-cmp]")?.value || null; sendOrder("pit", car, { compound: cmp }, `#${car} 박스 (${CMP_KO[cmp] || cmp})`); }
     else if (type === "pitCancel") sendOrder("pitCancel", car, {}, `#${car} 피트 취소`);
-    else if (type === "teamOrder") sendOrder("teamOrder", null, { order: b.dataset.v }, `팀 지시 ${ORDER_KO[b.dataset.v]}`);
+    else if (type === "teamOrder") sendOrder("teamOrder", null, { policy: b.dataset.v }, `팀 지시 ${ORDER_KO[b.dataset.v]}`);
     else sendOrder(type, car, { mode: b.dataset.v }, `#${car} ${type === "pace" ? "페이스" : "에너지"} ${(type === "pace" ? PACE_KO : ENERGY_KO)[b.dataset.v]}`);
   }
 });

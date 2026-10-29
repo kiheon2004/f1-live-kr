@@ -22,7 +22,7 @@ export class GameRunner {
     this.race = race; this.engine = engine; this.now = now;
     this.clock = new Runner(race, (r) => engine.step(r), { now, speed: 1, budgetMs });
     this.buf = []; this.keep = keep; this.renderT = race.state.t; this.lagMs = DT_MS; this.speed = 1;
-    this.autoSlow = autoSlow;   // null, or { types: Set of engine event types, to: speed } – screen only, never the engine
+    this.autoSlow = autoSlow;   // null, or { match(event) → bool, to: speed } – screen only, never the engine
     this.slowNote = null; this.evAt = race.state.t; this.listeners = new Set();
     this.stats = { frames: 0, steps: 0, stepMs: 0, worstFrameStepMs: 0, snapMs: 0 };
     this.push();
@@ -62,8 +62,8 @@ export class GameRunner {
   onEvents(ev) {
     for (const f of this.listeners) f(ev);
     if (!this.autoSlow || this.speed <= this.autoSlow.to) return;
-    const hit = ev.find((e) => this.autoSlow.types.has(e.type));
-    if (hit) { this.setSpeed(this.autoSlow.to); this.slowNote = { t: hit.t ?? this.race.state.t, type: hit.type, why: hit.cause || hit.type }; }
+    const hit = ev.find((e) => this.autoSlow.match(e));
+    if (hit) { this.setSpeed(this.autoSlow.to); this.slowNote = { t: hit.t ?? this.race.state.t, type: hit.type, why: [hit.type, hit.car ? "#" + hit.car : "", hit.effect || hit.cause || ""].filter(Boolean).join(" ") }; }
   }
   // the two snapshots around the render time (for adapter3d.frameCars)
   pair() {
