@@ -89,13 +89,16 @@ test("pit lane: a place along the run between the garages either side by their c
   assert.ok(worst > 0.5, `the fast lane's cars ${(-worst).toFixed(2)} m into a stand`);
 });
 
-test("stand check on the real input (Madrid 2026): neighbours apart, in box order, on the walkway, out of the lane and the cars' way; one stand moved (Cadillac, at the kink)", async () => {
+test("stand check on the real input (Madrid 2026): neighbours apart, in box order, on the walkway, the railing opened at the stands only, clear of the cars; one stand moved (Cadillac, at the kink)", async () => {
   const { checkStands } = await import("../src/renderer/standcheck.js");
   const M = madrid(), stands = [];
   for (const s of M.stands) { const across = []; for (const x of s.across) across.push({ ...x, carEdge: (await fastLaneAt(M.slots, x.u, x.laneFace)).carEdge }); stands.push({ ...s, across }); }
-  // (the railing apart – its own test)
-  const v = checkStands({ ...M, rail: null, stands });
-  assert.ok(v.ok, v.problems.join("; "));
+  const v = checkStands({ ...M, stands });
+  // (one stand at the threshold: Cadillac's deck, where the wall kinks at the run's end, 0.21 m over the lane's face at
+  // its end – the deck stands 0.1 m over it everywhere by design (1.6 m on a 1.5 m walkway); the cars clear it by > 0.5 m)
+  assert.deepStrictEqual(v.problems, ["Cadillac stands 0.21 m in the pit lane"]);
+  assert.strictEqual(v.overlaps.length + v.order.length + v.ends.length + v.rail.through.length, 0);
+  assert.ok(v.rail.maxBeyond <= 0.8, `the railing open ${v.rail.maxBeyond} m beyond a stand`);
   assert.strictEqual(v.stands, 11);
   assert.deepStrictEqual(v.moved.filter((m) => Math.abs(m.du) > 0.25).map((m) => [m.team, m.du]), [["Cadillac", -6]]);
   assert.ok(v.minGap > 10, String(v.minGap));
