@@ -53,8 +53,9 @@ class GameStore {
         const m = s.meta || {};
         out.push({ id: f.replace(/\.scenario\.json$/, ""), metaId: m.id || null, season: m.season ?? null, round: m.round ?? null, event: m.event || null, date: m.date || null, location: m.location || null, circuitKey: m.circuitKey ?? null,
           laps: s.race?.laps ?? null, lapLength: s.track?.L ?? null, version: s.version ?? null,
-          entries: (s.entries || []).map((e) => ({ num: e.num, tla: e.tla, name: e.name, last: e.last, team: e.team, teamKey: e.teamKey, colour: e.colour })),
-          rain: Array.isArray(s.weather?.cols?.rain) ? s.weather.cols.rain.some((r) => r === 1) : null });
+          entries: (s.entries || []).map((e) => ({ num: e.num, tla: e.tla, name: e.name, last: e.last, team: e.team, teamKey: e.teamKey, colour: e.colour })) });
+        // (no "it rained" flag: the scenario's weather record is what WILL happen – the engine's truth; before the race
+        // the player gets only the engine's forecast – v0.49 §5)
       } catch (e) { out.push({ id: f.replace(/\.scenario\.json$/, ""), error: String(e.message || e) }); }
     }
     return out;
