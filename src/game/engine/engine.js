@@ -15,9 +15,10 @@
 //   4. move: on the lap the car model (car.js), in the pit lane the pit model (pit.js); then tyres and energy from what
 //      the car actually did; line crossings (laps, sectors), the pit entry/exit;
 //   5. the order, race phase (start / finish), the log.
-// Interactions between cars (following, slipstream, dirty air, overtaking) are traffic.js's; race control's flags and
-// rules are control.js / rules.js's. Until those modules are wired, a car can't pass the car ahead on the lap: it follows
-// it (the queue rule below) – a real constraint, not a shortcut through the other car.
+// Interactions between cars (following, the wake, DRS / Active Aero / Overtake, passing, blue flags, team orders, the pit
+// entry side and the pit-exit merge, the lateral position d) are traffic.js's: trafficPre before the moves (decisions from
+// the step-start field), trafficEnv per car into the car model, trafficPost after all moves (lateral moves, detection
+// lines, passes). Race control's flags and rules are control.js / rules.js's (traffic reads them through race.hooks.control).
 import { loadTrack } from "./track.js";
 import { computeProfile, makeProfile, needsReprofile, REPROFILE } from "./profile.js";
 import { stepCar } from "./car.js";
@@ -29,6 +30,7 @@ import { weatherTruth, truthAt, forecastAt, newSurface, surfaceStep, waterAt, ru
 import { Streams } from "./rng.js";
 import { DT_MS, DT } from "./clock.js";
 import * as CMD from "./commands.js";
+import { newTraffic, trafficSetup, trafficPre, trafficEnv, trafficPost, trafficAccount, trafficEnd, pathFactor, mergeClear, onPitExit, gridLateral, snapTraffic } from "./traffic.js";
 import { newAiState, aiPrePlans, aiStep } from "./ai.js";
 import { carBase } from "../data/params/cars-base.js";
 import { energyParams } from "../data/params/energy.js";
@@ -45,7 +47,6 @@ import NOMINATIONS from "../data/tyres/nominations.js";
 
 export const ENGINE_VERSION = "0.48.0-engine.1";
 export const STATE_VERSION = 1;
-const CAR_LEN = 5.63;   // m – 2024–25 cars ≈ 5.6 m (TR Art. 3: no length rule; typical published 5.6–5.7 m); 2026 ≈ 5.3 m (est)
 
 // ---------- creation ----------
 
@@ -84,13 +85,14 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
       lap: 0, armed: false, dist: 0, lapT0: 0, laps: [], sector: 0, secT0: 0, secs: [],
       tyre: newTyre(race, start, w0.airT),
       energy: createEnergy(race.cache.ep, {}), driver: createDriver(dp), mode: { pace: "balanced", energy: "balanced" },
-      plan, pit: newPitState(), traffic: { state: "free", ahead: null, gap: null },
+      plan, pit: newPitState(), traffic: newTraffic(),
       pen: { pendingS: 0, finalS: 0, serve: [] }, acct: { traffic: 0, pit: 0, other: 0 } };
     // behind the line at the start: its first crossing starts lap 1 (not a lap done); ahead of it (some grids): armed
     car.armed = T.ahead(0, car.s) < T.L / 2;
     car.dist = car.armed ? car.s : car.s - T.L;
     state.cars.push(car);
   }
+  gridLateral(race);
   sortOrder(race);
   log(race, { type: "start", cause: "scenario", effect: `${state.cars.length} cars, ${state.totalLaps} laps, seed ${state.seed}` });
   return race;
@@ -115,10 +117,11 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   const alloc = nom ? { HARD: nom.H, MEDIUM: nom.M, SOFT: nom.S, INTERMEDIATE: "INTERMEDIATE", WET: "WET", est: false } : { ...DEFAULT_ALLOCATION, est: true };
   const tau = TRACK_TAU[sc.meta.id] ?? 1;
   race.cache = { T, PT, cars, drivers, profiles, alloc, tau, tauEst: !(sc.meta.id in TRACK_TAU), ep: energyParams(season), truth: weatherTruth(rec, { mode: race.state.weatherMode, seed: race.state.seed, minutes: 240 }),
-    surface: race.cache?.surface || null, w: {}, carById: null };
+    surface: race.cache?.surface || null, w: {}, carById: null, ghostProf: {} };
   if (!race.state.surface) race.state.surface = saveSurface(newSurface(T));
   race.cache.surface = loadSurface(race.state.surface);
   race.cache.carById = null;
+  trafficSetup(race);
 }
 
 // a set of tyres by its race name: the model's compound is the event's C-number; the name is kept for rules and screens
@@ -154,17 +157,24 @@ export function step(race) {
   // 2. weather (once a second, on the second)
   if (t % 1000 === 0) { truthAt(C.truth, t, C.w); surfaceStep(C.surface, C.w, 1); }
   else if (C.w.rain == null) truthAt(C.truth, t, C.w);
-  // 3. caps from the field as it is now (step start)
-  const caps = followCaps(race);
+  // 3. traffic decisions from the field as it is now (step start)
+  trafficPre(race, t);
+  const s0 = new Map(); for (const c of S.cars) if (c.status === "run" && c.where === "lap") s0.set(c.num, c.s);
+  // pit-lane starters: released from the field as it is at the step start (not half-moved by the loop below)
+  for (const c of S.cars.filter((x) => x.status === "pitstart")) pitStartWait(race, c, t);
   // 4. move
   for (const car of S.cars) {
     if (car.status === "fin" || car.status === "dnf") { car.v = 0; continue; }
-    if (car.status === "pitstart") { pitStartWait(race, car, t); continue; }
+    if (car.status === "pitstart") continue;
+    if (car.traffic.released === t) { car.traffic.released = null; continue; }   // (joined this step at the pit exit: moves from the next)
     const dr = car.driver; stepDriver(dr, race.rng.get("driver:" + car.num), DT);
     if (car.where === "pit") movePit(race, car, t);
-    else moveLap(race, car, t, caps.get(car.num) ?? Infinity);
+    else moveLap(race, car, t);
   }
   S.t = t; S.step++;
+  // lateral moves, detection lines, passes (after every car moved)
+  for (const c of S.cars) if (!(c.status === "run" && c.where === "lap")) s0.delete(c.num);
+  trafficPost(race, t, s0);
   // 5. order, finish
   sortOrder(race);
   finishCheck(race, t);
@@ -172,33 +182,18 @@ export function step(race) {
   if (S.ai) aiStep(race);
 }
 
-// the speed cap from the car ahead on the lap (same lane): keep a safe gap at its speed, braking distance included –
-// v² ≤ v_ahead² + 2·a·(gap − gMin), gMin = car length + 0.25 s of travel (est). The queue rule before traffic.js.
-function followCaps(race) {
-  const S = race.state, T = race.cache.T, caps = new Map();
-  const onLap = S.cars.filter((c) => c.where === "lap" && (c.status === "run"));
-  const bySt = onLap.slice().sort((a, b) => a.s - b.s);
-  const n = bySt.length;
-  for (let i = 0; i < n; i++) {
-    const c = bySt[i], a = bySt[(i + 1) % n]; if (n < 2) break;
-    const gap = T.ahead(c.s, a.s) - CAR_LEN; if (gap > 150) { c.traffic.ahead = null; c.traffic.gap = null; c.traffic.state = "free"; continue; }
-    const gMin = 1.0 + 0.25 * c.v, aB = 25;
-    const cap = Math.sqrt(Math.max(0, a.v * a.v + 2 * aB * Math.max(0, gap - gMin)));
-    caps.set(c.num, cap); c.traffic.ahead = a.num; c.traffic.gap = gap; c.traffic.state = cap < c.v + 1 ? "follow" : "free";
-  }
-  return caps;
-}
-
-function envFor(race, car) {
+// tv: traffic's energy scene (mode incl. ":scene", 2026 Overtake active) – the free reference power (P0) is the team mode's
+function envFor(race, car, tv = null) {
   const C = race.cache, T = C.T, w = C.w, cp = C.cars[car.num];
   const water = waterAt(C.surface, car.s), rubber = rubberAt(C.surface, car.s);
-  const mode = car.mode.energy, ep = C.ep;
-  const pIce = iceCap(car.energy, cp.P_ice, ep), pErs = ersCap(car.energy, ep, mode, car.v, false);
-  return { water, rubber: rubber * C.tau, m: cp.m_min + car.energy.fuel, pIce, pErs, P: pIce + pErs, rho: airDensity(w.airT ?? 25), muTyre: tyreGrip(car.tyre, water), util: utilisation(car.driver, water) };
+  const mode = tv?.mode || car.mode.energy, ep = C.ep;
+  const pIce = iceCap(car.energy, cp.P_ice, ep), pErs = ersCap(car.energy, ep, mode, car.v, !!tv?.ot);
+  const p0 = mode === car.mode.energy ? pErs : ersCap(car.energy, ep, car.mode.energy, car.v, false);
+  return { water, rubber: rubber * C.tau, m: cp.m_min + car.energy.fuel, pIce, pErs, P: pIce + pErs, P0: pIce + p0, rho: airDensity(w.airT ?? 25), muTyre: tyreGrip(car.tyre, water), util: utilisation(car.driver, water) };
 }
 
-function moveLap(race, car, t, capFollow) {
-  const S = race.state, C = race.cache, T = C.T, cp = C.cars[car.num], E = envFor(race, car);
+function moveLap(race, car, t) {
+  const S = race.state, C = race.cache, T = C.T, cp = C.cars[car.num], tv = trafficEnv(race, car), E = envFor(race, car, tv);
   // the envelope when its inputs moved (μ 0.3 %, mass 5 kg) – at most every 0.5 s – or every 2 s
   const pr = C.profiles[car.num], mu = cp.mu_mech * E.muTyre * E.rubber * E.util;
   if ((t - pr.at >= 500 && needsReprofile(pr.prof, mu, E.m)) || t - pr.at >= REPROFILE.everyMs) {
@@ -207,30 +202,63 @@ function moveLap(race, car, t, capFollow) {
     // (the 2 s refreshes staggered over the cars – not all 20 envelopes on one step: the frame-time spikes ui3d measured)
     pr.at = pr.at < -1e8 ? t - pr.phase : t;
   }
-  const vCap = Math.min(capFollow, lapCapForPit(car, T));
+  // (off the line the s-progress is v/pf: the traffic caps – set in s terms – scale with pf for the path speed)
+  const pf0 = pathFactor(race, car), vCap = Math.min(tv.vCap * pf0, lapCapForPit(car, T));
   const cs = { s: car.s, v: car.v, lap: 0, aLong: 0, aLat: 0, pDrive: 0, pBrake: 0, crossed: false, tCross: 0, limited: false, over: 0 };
   const s0 = car.s;
-  stepCar(cs, C.PT, pr.prof, cp, { m: E.m, P: E.P, rho: E.rho, mu: pr.prof.mu, vCap }, DT);
-  const moved = T.ahead(s0, cs.s) + (cs.crossed && cs.s >= s0 ? T.L : 0);
-  car.aLong = cs.aLong; car.aLat = cs.aLat; car.v = cs.v; car.s = cs.s; car.wheelDist += moved; car.d = T.at(T.line, car.s);
-  // traffic time account: while the follow cap held the car under its own envelope (∫ 1/v − 1/v_free ds – here with the
-  // envelope speed as v_free, an upper bound of the free speed this step: labelled approximate in results)
-  if (vCap < Infinity && cs.limited && capFollow < Infinity && car.v > 1) { const vf = Math.min(pr.prof.vb[T.idx(car.s)], 95); if (vf > car.v) car.acct.traffic += moved / car.v - moved / vf; }
+  stepCar(cs, C.PT, pr.prof, cp, { m: E.m, P: E.P, rho: E.rho, mu: pr.prof.mu, vCap, capArr: tv.capArr, cdaMul: tv.cdaMul, claMul: tv.claMul, aLift: tv.aLift }, DT);
+  let moved = T.ahead(s0, cs.s) + (cs.crossed && cs.s >= s0 ? T.L : 0);
+  car.wheelDist += moved;
+  // off the racing line the path is longer or shorter than the line's (traffic.pathFactor): progress along s scales
+  const pf = pathFactor(race, car);
+  if (pf !== 1) { const ms = moved / pf, raw = s0 + ms; cs.crossed = raw >= T.L; cs.s = T.wrap(raw); if (cs.crossed) cs.tCross = Math.min(DT, cs.tCross * pf); moved = ms; }
+  car.aLong = cs.aLong; car.aLat = cs.aLat; car.v = cs.v; car.s = cs.s;
   // tyres and energy from what the car did
   const [pi, pe] = splitPower(cs.pDrive, E.pIce, E.pErs);
-  stepTyre(car.tyre, { v: car.v, aLat: car.aLat, aLong: car.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver), Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
-  stepEnergy(car.energy, C.ep, { pIce: pi, pErs: pe, pBrake: cs.pBrake, iceFull: pi >= E.pIce * 0.999 && E.pIce > 0 }, DT, t);
+  stepTyre(car.tyre, { v: car.v, aLat: car.aLat, aLong: car.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver) * tv.heatMul, Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
+  stepEnergy(car.energy, C.ep, { pIce: pi, pErs: pe, pBrake: cs.pBrake, iceFull: pi >= E.pIce * 0.999 && E.pIce > 0, otLap: tv.otLap }, DT, t);
   // the surface: a car entering a new segment
   const sg0 = segOf(C.surface, s0), sg1 = segOf(C.surface, car.s); if (sg0 !== sg1) C.surface.passes[sg1] += 1;
   // the pit: commit / entry
   const pev = pitOnLap(car, T, s0, car.s, t);
-  if (pev === "entry") { car.where = "pit"; car.pit.refS = pitReference(race, car); log(race, { t, car: car.num, type: "pitEntry", cause: car.pit.call?.by || "call", effect: `box for ${car.pit.call?.compound || "same"}` }); }
+  if (pev === "entry") { car.where = "pit"; trafficEnd(race, car); car.pit.refS = pitReference(race, car); log(race, { t, car: car.num, type: "pitEntry", cause: car.pit.call?.by || "call", effect: `box for ${car.pit.call?.compound || "same"}` }); }
   if (pev === "committed") log(race, { t, car: car.num, type: "pitCommitted", cause: "call", effect: "past the commit point" });
   // line crossing
   lineCrossing(race, car, s0, car.s, cs.crossed, t - DT_MS + Math.round(cs.tCross * 1000));
   car.dist = car.armed ? car.lap * T.L + car.s : car.s - T.L;
+  // the traffic time account: a free "ghost" of this car (same envelope, power, mass, non-traffic caps; no traffic) runs
+  // beside it while traffic influences it – the loss is the time difference at the same distance (traffic.js)
+  trafficAccount(race, car, ghostModels(E));
   // plan: call the stop when the plan says (the team's plan – ai.js decides plans; executing them is the engine's)
   planCall(race, car, t);
+}
+
+// the traffic ghost's models (traffic.js trafficAccount): the same tyre / energy / envelope code as a real car, on the
+// ghost's own copies of the tyre and energy state (taken when the episode starts); its envelope is recomputed every 2 s
+// from its own grip and mass (inputs kept in gh.pin, so a restored race rebuilds the same one)
+function ghostModels(E) {
+  return {
+    start(race, car, gh) { gh.tyre = JSON.parse(JSON.stringify(car.tyre)); gh.energy = JSON.parse(JSON.stringify(car.energy)); gh.energy.events = []; gh.pat = -1e9; },
+    env(race, car, gh, t) {
+      const C = race.cache, T = C.T, cp = C.cars[car.num], gp = C.ghostProf[car.num] || (C.ghostProf[car.num] = { prof: makeProfile(T.n), pat: null });
+      const muTyre = tyreGrip(gh.tyre, E.water), m = cp.m_min + gh.energy.fuel;
+      // (rebuild the cached envelope if it isn't this ghost's – a restored race – then the car's own refresh rule)
+      if (gh.pin && (gp.pat !== gh.pat || gp.num !== car.num)) { computeProfile(C.PT, cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = gh.pat; gp.num = car.num; }
+      const mu = cp.mu_mech * muTyre * E.rubber * E.util;
+      if (!gh.pin || (t - gh.pat >= 500 && needsReprofile(gp.prof, mu, m)) || t - gh.pat >= REPROFILE.everyMs) {
+        gh.pin = { muTyre, muTrack: E.rubber, util: E.util, m, rho: E.rho }; gh.pat = t;
+        computeProfile(C.PT, cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = t; gp.num = car.num;
+      }
+      const pIce = iceCap(gh.energy, cp.P_ice, C.ep), pErs = ersCap(gh.energy, C.ep, car.mode.energy, gh.v, false);
+      return { prof: gp.prof, env: { m, P: pIce + pErs, rho: E.rho, mu: gp.prof.mu, vCap: lapCapForPit(car, T) }, pIce, pErs };
+    },
+    after(race, car, gh, gs, ge, t) {
+      const C = race.cache, cp = C.cars[car.num], [pi, pe] = splitPower(gs.pDrive, ge.pIce, ge.pErs);
+      stepTyre(gh.tyre, { v: gs.v, aLat: gs.aLat, aLong: gs.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver), Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
+      stepEnergy(gh.energy, C.ep, { pIce: pi, pErs: pe, pBrake: gs.pBrake, iceFull: pi >= ge.pIce * 0.999 && ge.pIce > 0 }, DT, t);
+      if (gs.crossed) { tyreLap(gh.tyre); energyLap(gh.energy); }
+    },
+  };
 }
 
 function movePit(race, car, t) {
@@ -238,9 +266,14 @@ function movePit(race, car, t) {
   const others = S.cars.filter((o) => o.where === "pit").map((o) => ({ num: o.num, team: o.teamKey, phase: o.pit.phase, u: o.pit.u, v: o.pit.v }));
   const sPrev = T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * T.ahead(T.pit.sIn, T.pit.sOut));
   const pen = car.pen.pendingS;
-  const ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others, penaltyS: pen,
+  let ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others, penaltyS: pen,
     stack: S.cars.some((o) => o !== car && o.teamKey === car.teamKey && o.pit.times?.release && t - o.pit.times.release < 30000),
     onWorkDone: (cc, cmp) => { cc.tyre = newTyre(race, cmp, C.w.airT ?? 25); C.profiles[cc.num].at = -1e9; } }, undefined);
+  // the merge: the car waits at the end of the exit road while joining would force a car on the lap to brake or move
+  if (ev === "exit" && !mergeClear(race, car)) {
+    const p = car.pit; p.phase = "exit"; p.u = T.pit.L - 0.01; p.v = Math.min(p.v, 10); delete p.times.exit; ev = null;
+    if (!p.mergeHeld) { p.mergeHeld = true; log(race, { t, car: car.num, type: "pitExitHold", cause: "traffic on the lap", effect: "waits at the blend line" }); }
+  }
   if (car.where === "pit") car.v = car.pit.v;
   if (ev === "work" && pen > 0 && car.pit.served >= pen) car.pen.pendingS = 0;
   if (ev) log(race, { t, car: car.num, type: "pit:" + ev, cause: ev === "work" && car.pit.err ? car.pit.err.causes.join(", ") || "crew" : "pit", effect: ev === "work" ? `stationary ${car.pit.workS?.toFixed(2)} s${car.pit.err ? ` (slow wheel +${car.pit.err.add.toFixed(1)} s)` : ""}` : ev });
@@ -248,7 +281,7 @@ function movePit(race, car, t) {
   stepTyre(car.tyre, { v: car.v, aLat: 0, aLong: 0, heat: 0, Tair: C.w.airT, Ttrack: C.w.trackT, water: 0, abrasion: 1 }, DT);
   car.wheelDist += car.v * DT;
   if (car.pit.phase === "none" && ev === "exit") {
-    car.where = "lap"; car.d = T.at(T.line, car.s);
+    car.where = "lap"; car.pit.mergeHeld = false; onPitExit(race, car);
     const tm = car.pit.times, lane = (tm.exit - tm.entry) / 1000;
     // the stop's loss: time from the branch to the merge minus the time the car would have taken on the lap over the same
     // stretch at its free reference pace (forward pass of its envelope at entry) – the parts: queue, stationary (penalty +
@@ -283,7 +316,7 @@ function pitStartWait(race, car, t) {
   const S = race.state, T = race.cache.T;
   const exitDist = T.pit.sOut < T.L / 2 ? T.pit.sOut : T.pit.sOut - T.L;   // the pit exit's place on the first lap
   const passed = S.cars.filter((o) => o.status === "run").every((o) => o.dist > exitDist + 30);
-  if (t > 3000 && passed) { car.status = "run"; car.where = "lap"; car.s = T.pit.sOut; car.armed = true; car.dist = car.s; car.lapT0 = t; log(race, { t, car: car.num, type: "pitLaneStart", cause: "start", effect: "released from the pit exit" }); }
+  if (t > 3000 && passed && mergeClear(race, car)) { car.status = "run"; car.where = "lap"; car.s = T.pit.sOut; car.armed = true; car.dist = car.s; car.lapT0 = t; onPitExit(race, car); car.traffic.released = t; log(race, { t, car: car.num, type: "pitLaneStart", cause: "start", effect: "released from the pit exit" }); }
 }
 
 function lineCrossing(race, car, s0, s1, crossed, tCross) {
@@ -376,8 +409,8 @@ export function snapshot(race) {
   return { t: S.t, scenarioId: S.scenarioId, totalLaps: S.totalLaps, leaderLap: S.leaderLap, flag: S.phase === "chequered" || S.phase === "finished" ? "chequered" : S.phase === "grid" ? "grid" : "green", sc: null,
     weather: { rain: w.rain ?? 0, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, water: avg(C.surface.hLine), est: !!w.est },
     cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.status === "pitstart" ? "grid" : c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
-      where: c.where, s: c.s, u: c.where === "pit" ? c.pit.u : null, d: c.d, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
-      aero: { open: 0, front: 0 }, drs: false, overtake: false,
+      where: c.where, s: c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
+      ...snapTraffic(c),
       tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: 0 }, fuel: c.energy.fuel,
       pit: { phase: c.pit.phase, u: c.pit.u, workT0: c.pit.times?.work ?? null, workT1: c.pit.workEnd ?? null, err: c.pit.err, compound: c.pit.call?.compound ?? null },
       gap: { leader: lead && c.lap === lead.lap ? gapSec(c, lead, T) : null, ahead: null } })) };
