@@ -36,6 +36,7 @@ import { PIT } from "../data/params/pit.js";
 import { WEATHER } from "../data/params/weather.js";
 import { airDensity } from "../data/params/physics.js";
 import { AI } from "../data/params/ai.js";
+import { INCIDENTS } from "../data/params/incidents.js";
 import R2024 from "../data/rules/2024.js";
 import R2025 from "../data/rules/2025.js";
 import R2026 from "../data/rules/2026.js";
@@ -164,7 +165,26 @@ function buildModel(race, team) {
     laneModel += 1 / v; vPrev = v;
   }
   const lanePrior = laneModel + AI.laneErrSd * errScale * r.normal();
-  return { team, nums: cars.map((c) => c.num), drivers, cp, muGrid, ltGrid, kFuel, fuelRef, fuel0, muTrack, pace, tm, belief, vs, av, A,
+  // the expected cost of a pace mode's driver errors (s/lap): the game's published error hazard (incidents params:
+  // λ = errRate·x², x from the grip used above the driver's balanced level) at the mode's utilisation with the driver's
+  // own variation, the share of a lap spent on the limit, and what an error costs by the run-off this circuit has
+  // (street: walls). Teams know attacking costs mistakes – here it is priced, not forbidden.
+  const IP = INCIDENTS, lapS0 = ltGrid[Math.round((0.95 - muGrid[0]) / 0.025)] || 90, runoff = isStreet(sc) ? "wall" : "paved";
+  const sev = IP.severity.v[runoff] || IP.severity.v.paved, d0 = drivers[num0] || DRIVER_DEFAULT;
+  const lossOf = (x) => { const k = 1 + IP.errSevere.v * x, w = { ...sev, spin: sev.spin * k, crash: sev.crash * k }, tot = w.moment + w.wide + w.spin + w.crash;
+    return (w.moment * AI.errLoss.moment + w.wide * AI.errLoss.wide + w.spin * AI.errLoss.spin + w.crash * AI.dnfCost) / tot; };
+  const risk = {};
+  for (const mode of MODES) {
+    let acc = 0; const N = 41;
+    for (let i = 0; i < N; i++) {   // (the driver's variation: a normal over ±3σ, trapezoid)
+      const z = -3 + 6 * i / (N - 1), wz = Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI) * (6 / (N - 1));
+      const over = Math.min(UTIL_MAX, d0.pace * PACE_MODES[mode].util) - d0.pace + d0.consistency * z;
+      const u = Math.min(1 + 0.5 * (1 - IP.errU0.v), IP.errU0.v + IP.errGain.v * over), x = u > IP.errU0.v ? (u - IP.errU0.v) / (1 - IP.errU0.v) : 0;
+      acc += wz * IP.errRate.v * x * x * lossOf(x);
+    }
+    risk[mode] = acc * AI.limShare * lapS0;
+  }
+  return { team, nums: cars.map((c) => c.num), drivers, cp, risk, muGrid, ltGrid, kFuel, fuelRef, fuel0, muTrack, pace, tm, belief, vs, av, A,
     lanePrior, laneModel, refPit: ref, boxU, errScale, street: isStreet(sc), Tair, Ttrack, rule: tyreRule(race),
     fuelPerLap: fuel0 / Math.max(1, S.totalLaps) * 0.97, scLapS: ltOfMu({ muGrid, ltGrid }, 0.95 * muTrack * pace) * 1.45 };
 }
@@ -210,7 +230,7 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
   const fresh = {};
   for (const c of dry) {
     const cost = new Float64Array(R + 1).fill(BIG), mode = new Array(R + 1).fill("balanced");
-    const pre = {}; for (const m of MODES) { const p = new Float64Array(R + 1); for (let a = 0; a < R; a++) p[a + 1] = p[a] + lapTime(M, est, st.num, c, m, a); pre[m] = p; }
+    const pre = {}; for (const m of MODES) { const p = new Float64Array(R + 1); for (let a = 0; a < R; a++) p[a + 1] = p[a] + lapTime(M, est, st.num, c, m, a) + (M.risk?.[m] ?? 0); pre[m] = p; }
     cost[0] = 0; for (let n = 1; n <= R; n++) for (const m of MODES) if (pre[m][n] < cost[n]) { cost[n] = pre[m][n]; mode[n] = m; }
     fresh[c] = { cost, mode };
   }
@@ -220,7 +240,7 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
   const multisets = []; const rec = (k, from, acc) => { multisets.push(acc.slice()); if (k === maxStops) return; for (let i = from; i < dry.length; i++) { acc.push(dry[i]); rec(k + 1, i, acc); acc.pop(); } }; rec(0, 0, []);
   for (const f of firsts) {
     const cur = new Float64Array(R + 1).fill(BIG), curMode = new Array(R + 1).fill("balanced");
-    { const pre = {}; for (const m of MODES) { const p = new Float64Array(R + 1); for (let a = 0; a < R; a++) p[a + 1] = p[a] + lapTime(M, est, st.num, f.name, m, f.age + a); pre[m] = p; }
+    { const pre = {}; for (const m of MODES) { const p = new Float64Array(R + 1); for (let a = 0; a < R; a++) p[a + 1] = p[a] + lapTime(M, est, st.num, f.name, m, f.age + a) + (M.risk?.[m] ?? 0); pre[m] = p; }
       for (let n = 1; n <= R; n++) for (const m of MODES) if (pre[m][n] < cur[n]) { cur[n] = pre[m][n]; curMode[n] = m; } }
     for (const ms of multisets) {
       if (ms.length > R - 1) continue;
@@ -321,7 +341,7 @@ export function evalCandidate(M, est, st, cand, scn, { fuel = M.fuelRef, burn = 
     const h = scn.water[L], underSc = scn.sc[L];
     // SC: the next planned stop comes forward if it was within the window (only when the SC is out on that lap)
     if (underSc && k < stops.length && !weatherMode && stops[k].lap - L <= AI.scWindow * plannedLen && stops[k].lap >= L && L < total) stops[k].lap = L;
-    cost += underSc ? M.scLapS : LT(name, mode, age, h, f, L);   // (SC laps: everyone at the SC's pace – the same for every candidate)
+    cost += underSc ? M.scLapS : LT(name, mode, age, h, f, L) + (M.risk?.[mode] ?? 0);   // (SC laps: everyone at the SC's pace – the same for every candidate)
     age++; f -= burn;
     let pitTo = null;
     if (k < stops.length && stops[k].lap === L && !weatherMode) { pitTo = stops[k].compound; mode = stops[k].mode; k++; }

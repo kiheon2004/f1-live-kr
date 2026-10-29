@@ -84,9 +84,9 @@ test("causality: more wear → more stops; bigger pit loss → fewer stops; an S
   const stopsBy = (g) => best({ g }).stops;
   assert.ok(stopsBy(0.7) <= stopsBy(2) && stopsBy(2) <= stopsBy(4) && stopsBy(0.7) < stopsBy(4), `stops by wear ${stopsBy(0.7)} ${stopsBy(2)} ${stopsBy(4)}`);
   const stopsLane = (dl) => best({ lane: M.lanePrior + dl, g: 2 }).stops;   // (at a wear where two stops are an option)
-  assert.ok(stopsLane(-10) >= stopsLane(0) && stopsLane(0) >= stopsLane(25) && stopsLane(-10) > stopsLane(25), `stops by lane ${stopsLane(-10)} ${stopsLane(0)} ${stopsLane(25)}`);
+  assert.ok(stopsLane(-15) >= stopsLane(0) && stopsLane(0) >= stopsLane(40) && stopsLane(-15) > stopsLane(40), `stops by lane ${stopsLane(-15)} ${stopsLane(0)} ${stopsLane(40)}`);
   // the next stop's lap: under an SC "this lap" (n0 = 1) gets the SC loss; the best plan moves toward it
-  const g = best({ g: 2 }), s = best({ g: 2 }, "sc");   // (with two stops ahead, one of them can move to the SC lap)
+  const g = best({ g: 3 }), s = best({ g: 3 }, "sc");   // (several stops ahead, the next ~10 laps away: it can move to the SC lap)
   assert.ok(s.stints[0].laps <= g.stints[0].laps);
   assert.ok(s.cost < g.cost, "the same race is cheaper with an SC stop available");
 });

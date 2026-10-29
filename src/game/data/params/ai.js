@@ -39,6 +39,11 @@ export const AI_TABLE = {
   minStint: est(5, "laps", "shortest fresh stint a plan may contain", "a 1–3-lap stint is never a strategy in dry running (weather switches are the crossover rule's)", [2, 10]),
   minGapS: est(0.6, "s", "how close a held car runs behind the car ahead in the lap-level forecast", "dirty air", [0.3, 1.2]),
   horizon: est(40, "laps", "laps the traffic forecast looks ahead (every stop of a candidate inside it counts)", "bounded work per decision (pace tables cached: ≈ 20 cars × 40 laps per candidate)", [5, 80]),
+  // ---- the cost of driver errors (pace modes) ----
+  limShare: est(0.5, "1", "share of a lap a car runs on its grip limit (where the error hazard applies)", "corners and braking zones; the straights are power-limited", [0.2, 0.8]),
+  errLoss: { moment: est(0.4, "s", "time a slow moment costs", "a lift for about a second", [0.1, 1.5]), wide: est(1.0, "s", "time running wide costs", "off the track for ~2 s at a capped speed", [0.3, 3]),
+    spin: est(15, "s", "time a spin costs (stopped, rejoin, cold tyres)", "", [6, 40]) },
+  dnfCost: est(600, "s", "race-time equivalent the team puts on a retirement (crash)", "losing the race; large enough that a crash risk is never worth a tenth", [120, 3000]),
   // ---- decisions ----
   mc: est(16, "scenarios", "Monte-Carlo scenarios per evaluation (forecast × wear error × SC)", "bounded work (≈ 1 ms)", [4, 64]),
   window: est(4, "laps", "a stop this many laps ahead or closer is 'in the window' (lap-by-lap timing check with traffic)", "", [2, 8]),
