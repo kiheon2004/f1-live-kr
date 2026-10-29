@@ -26,7 +26,7 @@ import * as Hud from "./racehud.js";
 import * as Res from "./results.js";
 
 const SETTINGS_KEY = "f1kr:game:settings";
-const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true };
+const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: false };
 function loadSettings() { try { return { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}) }; } catch { return { ...DEFAULT_SETTINGS }; } }
 
 export const G = {
@@ -164,7 +164,7 @@ export async function startRace({ dev = false, devOpts = {}, race = null, runOpt
   G.run = new GameRunner(race, engine, { autoSlow: G.settings.autoSlow ? autoSlowRule() : null });
   G.run.listeners.add((ev) => { G.events.push(...ev); if (G.events.length > 400) G.events.splice(0, G.events.length - 400); });
   G.adapter = createGameAdapter({ scenario: sc, source: G.run, label: dev ? "개발용" : "게임" });
-  G.adapter.prefs = { autoPitCam: G.settings.autoPitCam, reduceMotion: G.settings.reduceMotion };
+  applyRacePrefs();
   const mine = myCars(sc);
   G.sel = ui?.sel && mine.some((e) => String(e.num) === String(ui.sel)) ? String(ui.sel) : String(mine[0]?.num ?? "");
   G.adapter.ctx.setFocus(ui?.focus || G.sel || null);
@@ -174,10 +174,18 @@ export async function startRace({ dev = false, devOpts = {}, race = null, runOpt
   Hud.build();
   lendMap();
   window.Map3D?.game.attach(G.adapter);
+  applyRacePrefs();
   if (ui?.cam) window.Map3D?.game.setCam?.(ui.cam);
   if (ui) G.run.setSpeed(0); else G.run.setSpeed(1);   // (a loaded race waits paused: the player looks first)
   if (ui?.speed) G.run.speed = ui.speed;
   loop();
+}
+// the settings the race's view takes: the pit camera's auto-direction and auto-slow, the team's cars it follows (the
+// selected car first) – Map3D.game.pitcam (the pit helper's game/pitcam.js); absent: nothing to set
+export function applyRacePrefs() {
+  if (G.adapter) G.adapter.prefs = { autoPitCam: G.settings.autoPitCam, reduceMotion: G.settings.reduceMotion, pitSlow: G.settings.pitSlow };
+  const pc = window.Map3D?.game?.pitcam; if (!pc || !G.adapter) return;
+  try { pc.auto?.(!!G.settings.autoPitCam); pc.slow?.(!!G.settings.pitSlow); pc.cars?.([G.sel, ...myCars().map((e) => String(e.num))].filter((x, i, a) => x && a.indexOf(x) === i)); } catch { /* the view's own problem */ }
 }
 // the engine's events that may slow the clock (screen only; the engine is told nothing)
 const AUTO_SLOW = new Set(["sc", "vsc", "red", "rainStart", "incident", "chequered", "fuelEmpty", "ersEmpty"]);

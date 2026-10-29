@@ -15,7 +15,7 @@ export const CMP_1 = { SOFT: "S", MEDIUM: "M", HARD: "H", INTERMEDIATE: "I", WET
 export const FLAG_KO = { grid: "출발 전", green: "녹색기", yellow: "황색기", vsc: "VSC", sc: "세이프티카", red: "적색기", chequered: "체커기" };
 // the pit phases as the engine names them (pit.js) – what the player sees
 export const PIT_KO = { none: "", called: "박스 요청됨", committed: "피트 진입 확정", entry: "피트 진입", lane: "피트레인 주행", approach: "박스 접근",
-  penalty: "페널티 정지", queue: "앞차 정비 대기", work: "정비 중", release: "출발 대기", exit: "피트 출구" };
+  penalty: "페널티 정지", queue: "앞차 정비 대기", work: "정비 중", release: "출발 대기", laneOut: "피트레인 출구로", exit: "피트 출구" };
 export const PENDING = `<span class="g-pending">엔진 연결 전</span>`;
 
 // race clock "1:02:03" / "02:03"

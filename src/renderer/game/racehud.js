@@ -21,7 +21,7 @@ import { PACE, ENERGY, TEAM_ORDER } from "../../game/engine/commands.js";
 import * as SaveUI from "./saveui.js";
 
 const TOWER_KEY = "f1kr:game:towerW";
-const IN_LANE = new Set(["entry", "lane", "approach", "penalty", "queue", "work", "release", "exit"]);
+const IN_LANE = new Set(["entry", "lane", "approach", "penalty", "queue", "work", "release", "laneOut", "exit"]);
 const H = { built: false, pitCmp: {}, fuel: {}, ordersDirty: true, towerSlim: false, pp: null, ppTried: false, ppErr: null, lastEvN: -1 };
 
 
@@ -134,7 +134,7 @@ export function paint() {
   const sel = snap.cars.find((c) => String(c.num) === String(G.sel)), inLane = sel && sel.where === "pit" && IN_LANE.has(sel.pit?.phase);
   const pitEl = $("grPit"), evEl = $("grEvents");
   pitEl.hidden = !inLane; evEl.hidden = !!inLane;
-  if (inLane) pitPanel(pitEl, sel, T, snap); else paintEvents(evEl);
+  if (inLane) { pitPanel(pitEl, sel, T, snap); if (pitEl.hidden) { evEl.hidden = false; paintEvents(evEl); } } else paintEvents(evEl);
   const tl = G.book.last(null, ["teamOrder"]) || [...G.book.list].reverse().find((o) => o.type === "teamOrder");
   setH($("grTeamLast"), tl ? orderLine(tl, false) : "");
   const note = $("grNote"); if (G.saveNote) { note.hidden = false; note.className = `gr-note ${G.saveNote.ok ? "" : "bad"}`; setT(note, G.saveNote.text); } else note.hidden = true;
@@ -203,11 +203,12 @@ function fuelLaps(c, snap) {
 
 // the pit-work panel: the pit module's (pitpanel.js render(el, car, renderT, ctx)) when it is in this build; else the
 // phase and the elapsed time only – never the stop's future length, never a slow wheel before the work is over
-async function loadPitPanel() { if (H.ppTried) return; H.ppTried = true; try { const m = await import("./pitpanel.js"); if (typeof m.render === "function") H.pp = m; } catch (e) { H.ppErr = String(e.message || e); } }
+async function loadPitPanel() { if (H.ppTried) return; H.ppTried = true; try { const m = await import("./pitpanel.js"); const f = m.renderPitPanel || m.render; if (typeof f === "function") H.pp = { render: f }; } catch (e) { H.ppErr = String(e.message || e); } }
 function pitPanel(el, car, T, snap) {
   loadPitPanel();
   const e = G.sc.entries.find((x) => String(x.num) === String(car.num));
-  if (H.pp) { try { H.pp.render(el, car, T, { entry: e, snapshot: snap, scenario: G.sc, team: G.teamKey }); return; } catch (err) { H.ppErr = String(err.message || err); H.pp = null; } }
+  // (car: the adapter's render-time row – hudSnap; the pit module fills el and may hide it when the car isn't in the lane)
+  if (H.pp) { try { H.pp.render(el, car, T, { tla: e?.tla || null, colour: e?.colour || null, entry: e, snapshot: snap, scenario: G.sc, team: G.teamKey }); return; } catch (err) { H.ppErr = String(err.message || err); H.pp = null; } }
   const p = car.pit || {}, ph = p.phase;
   const done = Number.isFinite(p.workT1) && T >= p.workT1;
   setH(el, `<div class="gr-pit-h"><b>${esc(e?.tla || car.num)}</b> 피트 작업 <span class="gr-status">${esc(PIT_KO[ph] || ph)}</span></div>
@@ -262,7 +263,7 @@ export function onClick(act, b) {
   const num = b.dataset.num, v = b.dataset.v, R = G.run; if (!R) return;
   const tla = num ? G.sc.entries.find((e) => String(e.num) === String(num))?.tla || num : "";
   if (act === "speed") { R.setSpeed(+v); R.slowNote = null; paint(); return; }
-  if (act === "sel") { G.sel = String(num); paint(); return; }
+  if (act === "sel") { G.sel = String(num); import("./gamehome.js").then((m) => m.applyRacePrefs()); paint(); return; }
   if (act === "cam") { G.adapter?.ctx.setFocus(String(num)); if (G.adapter?.camAuto) G.adapter.camAuto = null; paint(); return; }
   if (act === "tower") { H.towerSlim = !H.towerSlim; build(); paint(); dispatchEvent(new Event("resize")); return; }
   if (act === "save") { SaveUI.savePrompt(); return; }

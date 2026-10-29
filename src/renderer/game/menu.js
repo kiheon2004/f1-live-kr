@@ -5,10 +5,12 @@
 // Which drivers: the entry list of ONE prepared race (the chosen one, else the team's latest prepared race of the
 // season) – said on screen ("참가 명단 기준"), since a team's drivers change during a season.
 //
-// The 3D garage: menugarage.js show({ el, season, teamKey, team, colour, entries, focusNum, safe, reduceMotion, orbit }) /
-// setFocus(num) / hide() / dispose(). Until that module is in this build (or if it fails) the menu works over a flat
-// team-colour backdrop – the hook below is the only place that knows about the scene.
-import { G, go, paint, seasons, teamsOf, racesOf, menuRace, toPrerace, saveSettings, autoSlowRule } from "./gamehome.js";
+// The 3D garage: the kit's menugarage.js – show({ season, teamKey, team, colour, entries, focusNum, date, host, safeLeft })
+// / setFocus(num) / setMotion("auto"|"on"|"off") / setSafeLeft(f) / hide() / dispose(). Until that module is in this
+// build (or if it fails) the menu works over a flat team-colour backdrop – the hook below is the only place that knows
+// about the scene. safeLeft: the share of the width the menu column covers (the scene frames the car in the rest);
+// safeRight (the driver cards' column) is passed too, for when the scene takes it.
+import { G, go, paint, seasons, teamsOf, racesOf, menuRace, toPrerace, saveSettings, autoSlowRule, applyRacePrefs } from "./gamehome.js";
 import { $, esc, teamKo, raceKo, fmtT } from "./ui.js";
 import * as API from "./gameapi.js";
 import * as SaveUI from "./saveui.js";
@@ -33,13 +35,17 @@ async function showGarage(host) {
   if (MG.shown === key) { m.setFocus?.(focusNum); return; }
   MG.shown = key; host.dataset.fallback = "";
   try {
-    // (safe: the part of the host the menu columns cover, px – the scene frames the car in the rest)
-    const left = $("gmLeft")?.offsetWidth || 320, right = $("gmRight")?.offsetWidth || 320;
-    await m.show({ el: host, season: G.season, teamKey: G.teamKey, team: t.name, colour: t.colour, entries, focusNum, raceId: r?.id || null,
-      safe: { left: left + 24, right: right + 24, top: 0, bottom: 0 }, reduceMotion: !!G.settings.reduceMotion, orbit: !!G.settings.garageOrbit && !G.settings.reduceMotion });
+    const W = host.offsetWidth || innerWidth, left = ($("gmLeft")?.offsetWidth || 300) + 36, right = ($("gmRight")?.offsetWidth || 320) + 36;
+    m.setMotion?.(motionOf());
+    const st = await m.show({ host, season: G.season, teamKey: G.teamKey, team: t.name, colour: t.colour, entries: entries.map((e) => ({ num: e.num, tla: e.tla, name: e.name })), focusNum, date: r?.date || null,
+      safeLeft: Math.min(0.6, left / W), safeRight: Math.min(0.6, right / W) });
+    if (st?.err) { MG.err = `3D 차고: ${st.err}`; }
   } catch (e) { MG.err = String(e.message || e); MG.shown = null; host.dataset.fallback = "1"; }
 }
 // leaving the menu (to the strategy screen / the race): the scene stops drawing; closing the game: it is disposed
+// the settings → the scene's camera drift: reduce motion → off; the slow drift on → "auto" (the OS's reduce-motion
+// setting still wins); off → off
+const motionOf = () => (G.settings.reduceMotion ? "off" : G.settings.garageOrbit ? "auto" : "off");
 export function hideGarage(dispose = false) {
   const m = MG.mod; if (!m) return;
   try { if (dispose) { m.dispose?.(); MG.shown = null; } else { m.hide?.(); MG.shown = null; } } catch { /* the scene's own problem: the menu goes on */ }
@@ -135,7 +141,8 @@ function settingsHtml() {
   return `${chk("autosave", "자동 저장", `${S.autosaveLaps}랩마다 '자동' 슬롯에 저장 (경기 계산에는 영향 없음)`)}
     <label class="gm-set"><span><b>자동 저장 간격</b><small>선두 기준 랩 수</small></span><select data-chg="menu:setLaps">${[1, 3, 5, 10].map((n) => `<option value="${n}" ${S.autosaveLaps === n ? "selected" : ""}>${n}랩</option>`).join("")}</select></label>
     ${chk("autoSlow", "중요 상황 자동 감속", "세이프티카·비·내 차 사고·피트 진입 때 1배속으로 (화면만 – 경기 결과는 같음)")}
-    ${chk("autoPitCam", "피트 자동 연출", "내 차가 피트에 들어오면 피트 카메라로 (카메라 담당 모듈이 지원할 때)")}
+    ${chk("autoPitCam", "피트 자동 연출", "내 차가 피트에 들어오면 피트 카메라가 장면을 골라요 (다른 시점을 직접 고르면 그게 우선)")}
+    ${chk("pitSlow", "피트 장면 자동 감속", "내 차의 정비 장면에서 잠시 1배속으로 – 끝나면 원래 배속 (경기 결과는 같음)")}
     ${chk("garageOrbit", "차고 카메라 천천히 회전", "메뉴 화면의 감상용 움직임")}
     ${chk("reduceMotion", "움직임 줄이기", "차고 회전과 화면 전환 효과를 끔")}
     <p class="muted">설정은 이 컴퓨터의 이 앱에만 저장돼요.</p>`;
@@ -154,8 +161,8 @@ export function onChange(act, t) {
   if (act === "set") {
     G.settings[t.dataset.k] = t.checked; saveSettings();
     if (t.dataset.k === "autoSlow" && G.run) G.run.autoSlow = G.settings.autoSlow ? autoSlowRule() : null;
-    if ((t.dataset.k === "reduceMotion" || t.dataset.k === "garageOrbit") && MG.mod) { MG.mod.setMotion?.({ reduceMotion: G.settings.reduceMotion, orbit: G.settings.garageOrbit && !G.settings.reduceMotion }); }
-    if (G.adapter) G.adapter.prefs = { autoPitCam: G.settings.autoPitCam, reduceMotion: G.settings.reduceMotion };
+    if ((t.dataset.k === "reduceMotion" || t.dataset.k === "garageOrbit") && MG.mod) MG.mod.setMotion?.(motionOf());
+    applyRacePrefs();
     paint(); return;
   }
   if (act === "setLaps") { G.settings.autosaveLaps = +t.value || 5; saveSettings(); paint(); return; }
