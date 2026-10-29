@@ -25,13 +25,15 @@ export const DT = 0.05; // s – the engine clock's fixed step (DESIGN §2); the
 export const makeCarState = (s = 0, v = 0) => ({ s, v, lap: 0, aLong: 0, aLat: 0, pDrive: 0, pBrake: 0, crossed: false, tCross: 0, limited: false, over: 0 });
 
 // env: { m, P (W available: ICE + ERS cap), rho, mu (the same μ_eff the envelope used), cdaMul, claMul (numbers),
-//   vCap (m/s, optional: an extra speed cap for this step – following, pit entry; the car brakes to it at its capacity) }
+//   vCap (m/s, optional: an extra speed cap for this step – following, pit entry; the car brakes to it at its capacity),
+//   capArr (optional Float64Array(n) per track sample, Infinity where unused: a constrained envelope over a look-ahead window
+//   – traffic.js's dirty air / lane share; applied at the sample boundaries exactly like the envelope itself) }
 // track: { n, ds, L, kappa, grade }; prof: from computeProfile (vb is the limit).
 export function stepCar(c, track, prof, car, env, dt = DT) {
   const m = env.m, rho = env.rho ?? 1.18, mu = env.mu, n = track.n, ds = track.ds, L = track.L, vb = prof.vb;
   const kd = 0.5 * rho * car.CdA * (env.cdaMul ?? 1) / m, kl = 0.5 * rho * car.ClA * (env.claMul ?? 1) / m;
   const P = env.P, kT = car.k_trac, fC = car.f_comb ?? 0, kB = car.k_brake, aBmax = car.a_brake_max, Crr = PHYS.Crr;
-  const v0 = c.v, vCap = env.vCap ?? Infinity;
+  const v0 = c.v, vCap = env.vCap ?? Infinity, capArr = env.capArr || null, aLift = env.aLift ?? 0;
   let s = c.s, v = v0, tLeft = dt, eDrive = 0, eBrake = 0, limited = false, over = 0;
   c.crossed = false;
   let guard = 0;
@@ -52,14 +54,19 @@ export function stepCar(c, track, prof, car, env, dt = DT) {
     const a1 = accel(Math.sqrt(w1), kap, gr, mu, kl, kd, P, m, kT, fC, Crr), d1 = _aDrive;
     w1 = v * v + len * (a0 + a1); if (w1 < 1e-4) w1 = 1e-4;
     let v1 = Math.sqrt(w1), aDrive = 0.5 * (d0 + d1), lim = j === 0 && sb >= L ? vb[0] : vb[j];
+    const limEnv = lim;
     if (lim > vCap) lim = vCap;   // (an extra cap for this step: following a car, the pit entry's braking – engine.js)
+    if (capArr !== null && capArr[j] < lim) lim = capArr[j];
     let capped = false;
     if (v1 > lim) {
       // above the envelope: follow it if it is reachable from here; else brake at capacity (car above the envelope)
       const v2 = v * v, aTot = mu * (G + kl * v2), f = comb(v2 * kap / aTot, fC);
-      const aB = Math.min(kB * aTot * f, aBmax) + kd * v2 + Crr * G + G * gr;
+      // (a traffic cap below the envelope: lifting off gives at least aLift – engine braking, and slowing relieves the
+      // friction ellipse – even at the lateral limit where the ellipse alone leaves no braking)
+      let aG = Math.min(kB * aTot * f, aBmax); if (lim < limEnv && aG < aLift) aG = aLift;
+      const aB = aG + kd * v2 + Crr * G + G * gr;
       const vMinB = Math.sqrt(Math.max(0, v2 - 2 * len * aB));
-      const vAtS = Math.min(vlimAt(prof, track, s), vCap);
+      let vAtS = Math.min(vlimAt(prof, track, s), vCap); if (capArr !== null && capArr[i] < vAtS) vAtS = capArr[i];
       v1 = v <= vAtS + 0.05 || lim >= vMinB ? lim : vMinB;
       if (v1 > lim) over = v1 - lim;
       capped = true; limited = true;
