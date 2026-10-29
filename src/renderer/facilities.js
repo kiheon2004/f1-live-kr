@@ -17,7 +17,7 @@ import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { disposeGroup } from "./dispose.js";
 import { entryAt } from "./venues.js";
-import { bayDepths, GARAGE_SPACE } from "./garagespace.js";
+import { bayDepths } from "./garagespace.js";
 import { pathFrame, garageLine, garageRun, genericOutline, fitLine, rayRing, GENERIC, PICK } from "./pitlane.js";
 
 // ---------- registry ----------
@@ -843,8 +843,9 @@ function pitBuilding(ctx, p) {
       slots.push({ k, u0, u1, uc: (u0 + u1) / 2, floor: fl, front: [fx, fz], along: [u[0], u[1]], inward, width: a1 - a0, height: hO, ceil, depth, bay: plan ? plan[k].bay : null,
         building: +foot.building.toFixed(2), inner: +bd.inner.toFixed(2), back: +bd.back.toFixed(2), depthFrom: p.garageDepth ? "facility" : foot.syn ? "made-up outline" : "map footprint" });
     }
-    // (how far in the garages reach at most – race bays and back areas: scenery.js keeps trees out of it)
-    depth = Math.max(0, ...slots.map((sl) => sl.depth + sl.back + (sl.back ? GARAGE_SPACE.partition : 0)));
+    // (how far in the built garages reach – the race bays, to their back partition: scenery.js lowers the terrain under
+    // them to that; the back areas behind aren't built, the building's own walls close them)
+    depth = Math.max(0, ...slots.map((sl) => sl.depth));
   }
   // The pit wall (p.pitWall): along the garages, where the track's measured edge is (ctx.trackEdge: metres from a
   // point to the edge of the tarmac) – a concrete wall with the catch fence over it on the track side, and behind it a
