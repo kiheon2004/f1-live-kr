@@ -5,7 +5,8 @@
 // world, cars, camera and a few of its drawing helpers – map3d.js `gameKit`).
 import { setCompound, setAero, setWheels, setCockpit, setSmear, setFlagLights, wheelParts, TYRE_COLOURS, lockFor, STEER_RATIO } from "../car3d.js";
 import { rollAngle, smearOf } from "../wheelspin.js";
-import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, stopSeed, CHANGE } from "../crew.js";
+import { CHANGE } from "../crew.js";
+import { updateGameCrews } from "./pitcrew.js";
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
@@ -118,59 +119,6 @@ export function updateGameCars(K, A, dt) {
   return fr;
 }
 
-// The crews (crew.js) driven by the engine's pit phases and its work times – the engine decides when the work starts and
-// ends (pit.workT0 / workT1, sim ms); the animation is fitted to them (crew.js stopClock: a stop shorter than the usual
-// 2.3 s plays faster, never under 0.6×; a longer one waits with the jacks up until just before the release) and never
-// decides anything. Per team: work (its car at the box, workT0 ≤ t), ready (a car of the team coming down the lane to the
-// box, or standing there before the work starts – a time penalty or the box being readied), back (walking back for 8 s
-// after the release); else in the garage.
-export function updateGameCrews(K, A, fr) {
-  const G = K.pitG(), world = K.world(), teams = K.pitTeams();
-  const was = K.lifted, now = new Set();
-  const done = () => { for (const num of was) if (!now.has(num)) { const c = K.cars.get(num); if (c) K.restoreCar(c); } was.clear(); for (const n of now) was.add(n); };
-  if (!G || !world || !teams) { world?.crews?.clear(); done(); return; }
-  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
-  const m = K.pitModelFor(G), list = [], loose = [], t = fr.t, byTeam = new Map(), P = A.scenario.track.pit;
-  for (const g of fr.cars) { const ph = g.pit?.phase; if (!ph || ph === "none" || ph === "called" || ph === "committed") continue; const a = byTeam.get(g.team) || []; a.push(g); byTeam.set(g.team, a); }
-  for (const [team, cs] of byTeam) {
-    const tm = teams.find((q) => q.team === team); if (tm?.box == null) continue;
-    const box = P?.boxes?.[cs[0].teamKey];
-    const work = cs.find((g) => g.pit.phase === "work" && g.pit.workT0 != null && t >= g.pit.workT0);
-    const hold = !work && cs.find((g) => ["work", "penalty"].includes(g.pit.phase) || (g.pit.phase === "approach" && box != null && g.u != null && box - g.u < 60) || g.pit.phase === "queue" || (["entry", "lane"].includes(g.pit.phase) && box != null && g.u != null && box - g.u < 160));
-    const back = !work && !hold && cs.find((g) => ["release", "laneOut", "exit"].includes(g.pit.phase) && g.pit.workT1 != null && t - g.pit.workT1 < 8000);
-    let phase = work ? "work" : hold ? "ready" : back ? "back" : null; if (!phase) continue;
-    const who = work || hold || back, car = K.cars.get(who.num);
-    // the box where the ENGINE stops this team's cars (its pit path at the team's box u → the pit building's frame), so the
-    // crew waits where the car will stand; the painted box (the garages' allocation, garages.js) may sit a few metres off
-    // it – K.boxDiag records by how much
-    let bu = tm.box;
-    if (P && box != null) { const pp = pitPoint(P, box, world.center), pr = G.project(pp.x, pp.z); if (pr && Number.isFinite(pr.u)) { bu = pr.u; (K.boxDiag || (K.boxDiag = {}))[team] = { engine: +pr.u.toFixed(2), painted: +tm.box.toFixed(2), off: +pr.off.toFixed(2) }; } }
-    const at = m.at(bu), s = at.slot;
-    const bx = s.front[0] + s.along[0] * (bu - s.uc) - s.inward[0] * at.boxC, bz = s.front[1] + s.along[1] * (bu - s.uc) - s.inward[1] * at.boxC;
-    const inBox = phase === "work" && car?.obj.visible;
-    // (the box's frame: the car's own while it is there, else facing the way the cars go – the engine's pit path heading)
-    const yaw = inBox ? car.yaw : (P ? pitPointYaw(P, box ?? 0) : Math.atan2(s.along[0], s.along[1]));
-    const where = inBox ? { x: car.pos.x, y: at.floor + 0.004, z: car.pos.z, yaw } : { x: bx, y: at.floor + 0.004, z: bz, yaw };
-    const left = Math.sign(Math.cos(yaw) * s.inward[0] - Math.sin(yaw) * s.inward[1]) || 1;
-    const dims = wheelParts(A.ctx.sessionYear(), team);
-    world.crews.wheels(dims);
-    const oldC = who.tyre?.compound || null, newC = who.pit.compound || null;
-    let L;
-    if (phase === "work") {
-      const D = Math.max(0.1, (who.pit.workT1 - who.pit.workT0) / 1000);
-      const plan = { kind: "tyres", from: "game", D, wait: 0, compound: newC, seed: stopSeed(who.num, who.pit.workT0) };
-      L = stopChoreo(plan, (t - who.pit.workT0) / 1000, dims, left);
-      if (car && inBox) { K.applyLift(car, L.car, dims); now.add(who.num); }
-    } else {
-      const f = phase === "back" ? 1 - ss(0, 8, (t - who.pit.workT1) / 1000) : 1;
-      L = changeWalk(phase, f, dims, at.boxC, left);
-    }
-    list.push(...crewAt(where, L.figures, "#" + (A.driverOf(who.num)?.TeamColour || "9aa0a6")));
-    loose.push(...kitAt(where, L.kits, { old: TYRE_COLOURS[oldC] || null, new: TYRE_COLOURS[newC] || null }));
-  }
-  world.crews.place(list, loose, K.camera.position);
-  done();
-}
 // the chase / onboard bar: the focused car's GAME state (labelled – none of it is telemetry)
 export function paintGameHud(hud, game, num) {
   const snap = game.snapshot(), g = snap?.cars.find((c) => c.num === num), d = game.driverOf(num);
@@ -185,4 +133,4 @@ export function paintGameHud(hud, game, num) {
   if (hud.dataset.html !== html) { hud.innerHTML = html; hud.dataset.html = html; }
 }
 const pitPointYaw = (P, u) => pitPoint(P, u, { x: 0, z: 0 }).yaw;
-export { CHANGE };
+export { CHANGE, updateGameCrews };
