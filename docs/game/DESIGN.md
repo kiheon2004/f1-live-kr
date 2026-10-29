@@ -225,6 +225,24 @@ SC/VSC는 속도 비율이 아니라: VSC는 차량별 델타 시간(최소 구�
   `s` 변환은 출발선 기준 비율(두 랩 라인 길이 차 보정).
 - 게임 종료(`detach`) 후 라이브 모드는 원래대로(회귀 테스트·실제 화면).
 
+### 13.1 스냅샷 계약 (엔진 → 화면)
+
+`snapshot(race)`는 렌더 프레임마다 호출해도 되는 가벼운 순수 객체를 돌려준다(엔진 상태를 바꾸지 않음).
+
+```js
+{ t, scenarioId, totalLaps, leaderLap, flag: "grid"|"green"|"yellow"|"vsc"|"sc"|"red"|"chequered",
+  sc: { s, d, v } | null,                     // 세이프티카 개체(트랙 위)
+  weather: { rain, airT, trackT, wind, water, est },   // 진실의 현재값(화면 = 엔진), water: 평균 수막 mm
+  cars: [{ num, teamKey, team, tla, color, status: "grid"|"run"|"pit"|"fin"|"dnf", pos, lap,
+           where: "lap"|"pit", s, u, d, v, a, steer,          // s: 랩 m(where lap), u: 피트 경로 m(where pit), d: 횡 m(+왼쪽)
+           wheelDist,                                        // 누적 주행 m(바퀴 회전 = 거리/반지름)
+           aero: { open, front }, drs, overtake,             // 게임 상태(실제 텔레메트리 아님)
+           tyre: { compound, wear, Ts, Tc, age }, energy: { soc, mode, deployKw }, fuel,
+           pit: { phase, u, workT0, workT1, err } }] }
+```
+화면은 마지막 두 스냅샷(t₀ < t₁)을 렌더 시각으로 보간한다(s는 감쌈 보간, 피트 단계·상태는 t₁ 값). 보간은 엔진에
+아무것도 쓰지 않는다.
+
 ## 14. 저장 (save.js)
 
 `{engineVersion, scenarioId+hash, rulesVersion, paramsVersion, t, step, rng: {스트림 상태}, cars: [전체 상태],
