@@ -70,12 +70,18 @@ test("bookkeeping: store change = harvested − deployed; fuel used = ICE energy
   assert.ok(Math.abs(es.fuelUsed - eIce / (ep.fuel.etaIce * ep.fuel.LHV)) < 1e-9);
 });
 
-test("seasons are data: 2026 tapers MGU-K power with speed (Overtake Mode moves the taper), ≤2025 doesn't; 2026 has more MGU-K power and no MGU-H", () => {
+test("seasons are data: 2026 caps MGU-K power by speed (Overtake moves the cap; rule formula), ≤2025 doesn't; 2026 has more MGU-K power and no MGU-H", () => {
   const e25 = X.energyP.energyParams(2025), e26 = X.energyP.energyParams(2026);
   const s25 = E.createEnergy(e25), s26 = E.createEnergy(e26);
   assert.strictEqual(E.ersCap(s25, e25, "push", 92), E.ersCap(s25, e25, "push", 60));
   assert.ok(E.ersCap(s26, e26, "push", 92) < E.ersCap(s26, e26, "push", 60));
   assert.ok(E.ersCap(s26, e26, "overtake", 90, true) > E.ersCap(s26, e26, "push", 90));
+  // the rule's own numbers: full 350 kW to 290 km/h; normal 0 from 340 km/h; Overtake full to 337.5, 0 at 355 km/h
+  assert.strictEqual(E.ersCap(s26, e26, "push", 289 / 3.6), 350e3);
+  assert.ok(E.ersCap(s26, e26, "push", 300 / 3.6) < 350e3);
+  assert.strictEqual(E.ersCap(s26, e26, "push", 341 / 3.6), 0);
+  assert.strictEqual(E.ersCap(s26, e26, "overtake", 337 / 3.6, true), 350e3);
+  assert.strictEqual(E.ersCap(s26, e26, "overtake", 356 / 3.6, true), 0);
   assert.ok(e26.ers.pK > e25.ers.pK && e26.ers.pH === 0 && e25.ers.pH > 0);
   // fuel flow caps ICE power (2026 energy-flow limit lower than ≤2025's)
   assert.ok(E.iceCap(s26, 1e6, e26) < E.iceCap(s25, 1e6, e25));

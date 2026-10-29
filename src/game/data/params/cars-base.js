@@ -12,11 +12,14 @@ const est = (v, unit, meaning, why, range, conf = "L") => P(v, unit, meaning, "g
 function base(season) {
   const is26 = season >= 2026;
   return {
-    // minimum car mass incl. driver, without fuel. 2024: 798 kg, 2025: 800 kg, 2026: 768 kg (FIA Technical Regulations
-    // Art. 4.1 of each year – values as the lead's research recalls them; not yet checked against a fetched copy here →
-    // est until docs/game/research/ confirms them).
+    // minimum car mass incl. driver, without fuel: 2024 798 kg (TR Art. 4.1, Issue 8), 2025 800 kg (TR Art. 4.1, Issue 3),
+    // 2026 724 kg + nominal tyre mass (C4.1) = 768 kg as F1.com announced (2024-06-06). Read from the FIA PDFs by the research
+    // helper on 2026-10-29: docs/game/research/rules-2024.md, rules-2025.md, rules-2026.md (URLs there).
     m_min: P(is26 ? 768 : season >= 2025 ? 800 : 798, "kg", "minimum mass of car + driver without fuel (the car runs at this mass + fuel)",
-      "FIA F1 Technical Regulations Art. 4.1 (season) – not yet verified against a fetched copy (research helper)", [740, 820], true, "M"),
+      is26 ? "FIA 2026 F1 Regulations Section C Iss 21 (2026-10-19) C4.1: 724 kg + nominal tyre mass; 768 kg per F1.com 2024-06-06 – via docs/game/research/rules-2026.md (2026-10-29)"
+        : season >= 2025 ? "FIA 2025 F1 Technical Regulations Iss 3 (2025-04-07) Art. 4.1 – https://www.fia.com/sites/default/files/documents/fia_2025_formula_1_technical_regulations_-_issue_03_-_2025-04-07.pdf (read 2026-10-29, docs/game/research/rules-2025.md)"
+        : "FIA 2024 F1 Technical Regulations Iss 8 (2024-10-17) Art. 4.1 – https://www.fia.com/sites/default/files/fia_2024_formula_1_technical_regulations_-_issue_8_-_2024-10-17.pdf (read 2026-10-29, docs/game/research/rules-2024.md)",
+      [740, 820], false),
     CdA: est(is26 ? 1.05 : 1.25, "m²", "drag area, wings in their normal (corner) setting",
       "F1 Cd ≈ 0.7–1.0 × frontal area ≈ 1.4–1.5 m²; fit to top speeds by calibrate.mjs. 2026 lower (FIA stated a drag reduction aim for the 2026 cars)", [0.8, 1.7], "M"),
     ClA: est(is26 ? 3.3 : 4.2, "m²", "downforce area (negative lift), wings closed",

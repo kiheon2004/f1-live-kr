@@ -5,8 +5,8 @@
 // the car runs on what is left in the battery, then coasts and stops (rolling resistance and drag) – an event.
 // ERS: state of charge in a window (J). Harvest from braking power (×regenEff, ≤ pK, ≤ per-lap harvest limit) and, ≤2025,
 // MGU-H while the ICE is at full power. Deploy ≤ pK·mode share, while SOC is above the mode's floor and the per-lap deploy
-// allowance (season data) is not used up; 2026 tapers the MGU-K power with speed, Overtake Mode adds allowance and moves
-// the taper (when the caller says the car is eligible). Empty store ⇒ deploy 0.
+// allowance (season data) is not used up; 2026 caps the MGU-K power by speed (rule formula), Overtake Mode adds allowance and moves
+// the cap (when the caller says the car is eligible). Empty store ⇒ deploy 0.
 export function createEnergy(ep, { fuel = ep.fuel.max, soc = 1 } = {}) {
   return { fuel: Math.max(0, Math.min(ep.fuel.max, fuel)), soc: Math.max(0, Math.min(1, soc)) * ep.ers.socWindow,
     lapDeploy: 0, lapHarvest: 0, fuelUsed: 0, deployed: 0, harvested: 0, fuelEmpty: false, ersEmpty: false, events: [] };
@@ -20,12 +20,13 @@ export function ersCap(es, ep, mode, v, otEligible = false) {
   const M = ep.modes[mode] || ep.modes.balanced, E = ep.ers;
   if (es.soc <= M.socFloor * E.socWindow || es.soc <= 0) return 0;
   const ot = mode === "overtake" && otEligible;
-  const allowance = E.deployLap * M.budget + (ot ? E.overtakeExtra : 0);
+  const allowance = E.deployLap * M.budget;
   if (es.lapDeploy >= allowance) return 0;
-  // normal: full power to taperV1, linear to 0 at taperV2; Overtake Mode: full power on to taperV2ot, then down to taperV2
-  const v2 = E.taperV2, v1 = ot ? Math.max(E.taperV1, E.taperV2ot) : E.taperV1;
-  const taper = v <= v1 ? 1 : v >= v2 ? 0 : (v2 - v) / (v2 - v1);
-  return E.pK * M.deployFrac * taper;
+  // 2026 speed cap (rule formula, season data): normal P ≤ capA − capB·v_kmh below capCut; Overtake P ≤ otA − otB·v_kmh
+  const vk = v * 3.6;
+  const cap = ot ? E.otA - E.otB * vk : vk >= E.capCut ? 0 : E.capA - E.capB * vk;
+  const pMax = Math.max(0, Math.min(E.pK, cap));
+  return pMax * M.deployFrac;
 }
 
 // split the tractive power the car used into ICE and ERS (ICE first: the ERS share is what the ICE alone couldn't give)
@@ -34,8 +35,9 @@ export function splitPower(pDrive, pIceCap, pErsCap) {
   return [ice, ers];
 }
 
-// one step: pIce / pErs used (W), pBrake (W braking), iceFull (ICE at its cap: MGU-H harvests ≤2025)
-export function stepEnergy(es, ep, { pIce = 0, pErs = 0, pBrake = 0, iceFull = false }, dt, t = 0) {
+// one step: pIce / pErs used (W), pBrake (W braking), iceFull (ICE at its cap: MGU-H harvests ≤2025), otLap (2026: this lap
+// started with Overtake active ⇒ +overtakeExtra recharge allowance, C5.2.10 iii)
+export function stepEnergy(es, ep, { pIce = 0, pErs = 0, pBrake = 0, iceFull = false, otLap = false }, dt, t = 0) {
   const F = ep.fuel, E = ep.ers;
   // fuel
   if (es.fuel > 0 && pIce > 0) {
@@ -53,7 +55,7 @@ export function stepEnergy(es, ep, { pIce = 0, pErs = 0, pBrake = 0, iceFull = f
   // harvest: braking (MGU-K, per-lap limited) + MGU-H at full ICE power (≤2025)
   let h = 0;
   if (pBrake > 0) {
-    const room = E.harvestLapK - es.lapHarvest;
+    const room = E.harvestLapK + (otLap ? E.overtakeExtra : 0) - es.lapHarvest;
     if (room > 0) { const pk = Math.min(pBrake * E.regenEff, E.pK); h = Math.min(pk * dt, room); es.lapHarvest += h; }
   }
   if (iceFull && E.pH > 0) h += E.pH * dt;
