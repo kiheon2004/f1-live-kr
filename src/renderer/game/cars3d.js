@@ -107,7 +107,7 @@ export function updateGameCars(K, A, dt) {
     c.game = { num: "SC", status: "run", where: "lap", s: sc.s, d: sc.d || 0, v: sc.v, pos: null };
     const w = map.sd(sc.s, sc.d || 0); F.at(w.s, w.d, P0, DIR); F.at(w.s - 3, w.d, PA); F.at(w.s + 3, w.d, PB);
     c.yaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]); c.pitch = 0; c.roll = 0;
-    c.obj.position.set(P0[0], P0[1] + K.ROAD_LIFT - 0.01, P0[2]); c.model.rotation.set(0, c.yaw, 0, "YXZ");
+    c.pos.set(P0[0], P0[1] + K.ROAD_LIFT - 0.01, P0[2]); c.obj.position.copy(c.pos); c.model.rotation.set(0, c.yaw, 0, "YXZ");
     c.speed = sc.v; c.onTrack = true; c.sample = F.sampleAt(w.s); c.worldS = w.s; c.has = true; c.obj.visible = true;
     setFlagLights(c.model, sc.lights ? "#ffb21a" : null);
     K.paintLabel(c.label, "SC", "#ffb21a", false);

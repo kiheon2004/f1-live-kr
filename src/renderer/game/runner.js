@@ -63,7 +63,7 @@ export class GameRunner {
     for (const f of this.listeners) f(ev);
     if (!this.autoSlow || this.speed <= this.autoSlow.to) return;
     const hit = ev.find((e) => this.autoSlow.match(e));
-    if (hit) { this.setSpeed(this.autoSlow.to); this.slowNote = { t: hit.t ?? this.race.state.t, type: hit.type, why: [hit.type, hit.car ? "#" + hit.car : "", hit.effect || hit.cause || ""].filter(Boolean).join(" ") }; }
+    if (hit) { this.setSpeed(this.autoSlow.to); this.slowNote = { t: hit.t ?? this.race.state.t, type: hit.type, why: [hit.type, hit.car ? "#" + hit.car : "", typeof hit.effect === "string" ? hit.effect : typeof hit.cause === "string" ? hit.cause : hit.effect?.kind || ""].filter(Boolean).join(" ") }; }
   }
   // the two snapshots around the render time (for adapter3d.frameCars)
   pair() {

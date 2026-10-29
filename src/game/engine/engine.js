@@ -24,7 +24,7 @@
 // the step-start field), trafficEnv per car into the car model, trafficPost after all moves (lateral moves, detection
 // lines, passes). Race control's flags and rules are control.js / rules.js's (traffic reads them through race.hooks.control).
 import { loadTrack } from "./track.js";
-import { computeProfile, makeProfile, needsReprofile, REPROFILE } from "./profile.js";
+import { computeProfile, makeProfile, needsReprofile, REPROFILE, vlimAt } from "./profile.js";
 import { stepCar } from "./car.js";
 import { createTyre, tyreGrip, stepTyre, tyreLap, fitTemp, windowFactor, windowTemp, compoundParams } from "./tyre.js";
 import { createEnergy, iceCap, ersCap, splitPower, stepEnergy, energyLap, socFrac } from "./energy.js";
@@ -139,7 +139,8 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   // what traffic asks race control (overtaking permission, DRS / Active Aero / Overtake availability) and where it reports
   // contacts (functions: never saved, set again on load)
   race.hooks = { control: { mayOvertake: CTL.mayOvertake, drsAllowed: CTL.drsAllowed, activeAeroAllowed: CTL.activeAeroAllowed, overtakeModeAllowed: CTL.overtakeModeAllowed }, incidents: { contact: INC.contact },
-    traffic: { yielding: (c, f) => c.traffic?.role === "yield" && c.traffic.with === f.num } };
+    // (complying with a blue flag: giving way – to any car –, or the lapping car already in the middle of its pass)
+    traffic: { yielding: (c, f) => c.traffic?.role === "yield" || (f.traffic?.with === c.num && ["att", "done"].includes(f.traffic.role)) } };
   trafficSetup(race);
 }
 
@@ -316,7 +317,10 @@ function moveLap(race, car, t, cap = null) {
   // the grip of its last refresh, so a tyre that cooled or a wetter patch since then adds to it
   const muNow = cp.mu_mech * E.muTyre * E.rubber, wf = windowFactor(compoundParams(car.tyre.compound), windowTemp(car.tyre));
   const over = pr.prof.mu / Math.max(1e-6, muNow) - car.driver.p.pace, IP = INCIDENTS;
-  car.incIn = { u: cs.limited ? Math.min(1 + 0.5 * (1 - IP.errU0.v), IP.errU0.v + IP.errGain.v * over) : 0, tyreOut: Math.min(1, (1 - wf) / 0.5), water: E.water, compound: car.tyre.name, braking: cs.aLong < -10 };
+  // (on the envelope = at its limit speed here: a car held back by a cap – the SC queue, a VSC delta, the car ahead – is
+  // within its margin whatever the ratio says)
+  const onEnv = cs.limited && car.v > 0.97 * vlimAt(pr.prof, C.PT, car.s);
+  car.incIn = { u: onEnv ? Math.min(1 + 0.5 * (1 - IP.errU0.v), IP.errU0.v + IP.errGain.v * over) : 0, tyreOut: Math.min(1, (1 - wf) / 0.5), water: E.water, compound: car.tyre.name, braking: cs.aLong < -10 };
   // tyres and energy from what the car did
   const [pi, pe] = splitPower(cs.pDrive, E.pIce, E.pErs);
   stepTyre(car.tyre, { v: car.v, aLat: car.aLat, aLong: car.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver) * tv.heatMul, Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);

@@ -263,8 +263,9 @@ async function startRace({ dev = false, devOpts = {} } = {}) {
 // (race control's and the weather's – SC/VSC/red/rain/incidents, as the engine will log them –, the chequered flag, a car
 // running out of fuel or battery, and the player's own cars committing to / entering the pit lane)
 const AUTO_SLOW = new Set(["sc", "vsc", "red", "rainStart", "incident", "chequered", "fuelEmpty", "ersEmpty"]);
+const MINE_INC = new Set(["driver error", "contact", "mechanical", "retired"]);   // (my cars' incidents slow the run too)
 const MINE_SLOW = new Set(["pitCommitted", "pitEntry"]);
-const autoSlowRule = () => ({ to: 1, match: (e) => AUTO_SLOW.has(e.type) || (MINE_SLOW.has(e.type) && myCars(G.sc).some((x) => String(x.num) === String(e.car))) });
+const autoSlowRule = () => ({ to: 1, match: (e) => AUTO_SLOW.has(e.type) || ((MINE_SLOW.has(e.type) || (MINE_INC.has(e.type) && e.effect?.kind !== "moment")) && myCars(G.sc).some((x) => String(x.num) === String(e.car) || (e.cars || []).map(String).includes(String(x.num)))) });
 // the player's plans for the engine: its default plan for each of the team's cars with the start tyre chosen here
 function plansOf(sc) {
   const out = {}, P = preEst(sc);
@@ -334,7 +335,7 @@ function paintRace() {
   $("gClock").innerHTML = `경기 시각 ${fmtT(snap.t)} · 요청 ${R.paused ? "일시정지" : R.speed + "×"} · <b class="${R.behind ? "bad" : ""}">실제 ${ach.toFixed(1)}×</b>${R.behind ? " (계산이 따라가지 못해 실제 배속으로 진행)" : ""}${R.slowNote ? ` · 자동 감속: ${esc(R.slowNote.why)}` : ""}`;
   document.querySelectorAll("#gSpeeds [data-speed]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.speed === (R.paused ? 0 : R.speed))));
   $("gEvents").innerHTML = (G.orders.slice(-4).map((o) => `<p class="${o.ok ? "" : "bad"}">${fmtT(o.t)} 지시 ${esc(o.text)} → ${o.ok ? "접수" : "거부: " + esc(o.why || "")}</p>`).join("") +
-    G.events.slice(-8).reverse().map((e) => `<p>${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} ${esc(e.type)}${e.car ? ` #${esc(e.car)}` : ""}${e.effect ? ` · ${esc(e.effect)}` : e.cause ? ` · ${esc(e.cause)}` : ""}</p>`).join("")) || `<p class="muted">사건 없음${snap.dev ? " (개발용 스냅샷은 사건을 만들지 않아요)" : ""}</p>`;
+    G.events.slice(-8).reverse().map(evLine).join("")) || `<p class="muted">사건 없음${snap.dev ? " (개발용 스냅샷은 사건을 만들지 않아요)" : ""}</p>`;
 }
 // the gap to the leader as the engine gives it (s, same lap only), else laps down
 const gapTxt = (c, lead) => { const g = c.gap && typeof c.gap === "object" ? c.gap.leader : c.gap; if (Number.isFinite(g)) return "+" + g.toFixed(1); return lead && c.lap < lead.lap ? `+${lead.lap - c.lap}랩` : ""; };
@@ -375,13 +376,17 @@ function finishRace() {
   stopRace();
   go("results");
 }
+// one event line: race control's / the stewards' messages as they are; an incident's structured effect in words
+const EV_KO = { "driver error": "실수", contact: "접촉", mechanical: "고장", rc: "레이스 컨트롤", stewards: "스튜어드", retired: "리타이어", sc: "세이프티카", vsc: "VSC", red: "적색기", green: "녹색기", chequered: "체커기" };
+const effText = (x) => x == null ? "" : typeof x === "string" ? x : [x.kind, x.outcome && x.outcome !== "none" ? x.outcome : x.outcome === "none" ? "no damage" : "", x.out ? `out (${x.out})` : "", x.stoppedS ? `${x.stoppedS}s stopped` : "", x.damage ? "damage" : "", x.fault ? `fault ${x.fault}` : ""].filter(Boolean).join(" · ");
+const evLine = (e) => { const cars = e.car ? [e.car] : e.cars || []; return `<p>${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} ${esc(EV_KO[e.type] || e.type)}${cars.length ? " " + cars.map((n) => "#" + esc(n)).join(" ") : ""}${e.effect ? ` · ${esc(effText(e.effect))}` : e.cause && typeof e.cause === "string" ? ` · ${esc(e.cause)}` : ""}</p>`; };
 function paintResults() {
   const r = G.result; if (!r) return `<p class="muted">결과가 없어요.</p>`;
   return `<div class="g-card"><h3>게임 결과 <small>엔진 계산 결과 · 실제 경기 기록이 아니에요${r.dev ? " · 개발용 스냅샷(엔진 아님)" : ""}</small></h3>
     <table class="g-tbl"><tr><th>순위</th><th>드라이버</th><th>팀</th><th>랩</th><th>차이</th><th>정차</th><th>점수</th><th>상태</th></tr>${r.classification.map((c) => `<tr class="${myCars(G.sc).some((e) => String(e.num) === String(c.num)) ? "mine" : ""}"><td>${c.pos ?? ""}</td><td>${esc(c.tla || c.num)}</td><td>${esc(teamKo(c.team))}</td><td>${c.laps}</td><td>${c.pos === 1 ? "" : Number.isFinite(c.gap) ? "+" + c.gap.toFixed(3) + "s" : c.lapsDown ? `+${c.lapsDown}랩` : ""}</td><td>${c.stops ?? ""}</td><td>${r.points?.[c.tla || c.num] || ""}</td><td>${esc(STATUS_KO[c.status] || c.status)}</td></tr>`).join("")}</table>
     ${r.stints ? `<p class="muted">내 차 스틴트: ${myCars(G.sc).map((e) => { const st = r.stints[e.tla] || []; return `${esc(e.tla)} ${st.map((x) => `${esc(x.compound)} ${x.laps}랩`).join(" → ") || "–"}`; }).join(" · ")}</p>` : ""}</div>
     <div class="g-card"><h3>결과의 원인 <small>엔진이 따로 셀 수 있는 손실만 – 내 차와 10위 안</small></h3>${r.accounts ? accountsHtml(r.accounts) : PENDING}</div>
-    <div class="g-card"><h3>사건</h3>${r.events.length ? r.events.slice(-40).map((e) => `<p>${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} ${esc(e.type)} ${e.car ? "#" + esc(e.car) : ""} ${esc(e.effect || e.cause || "")}</p>`).join("") : `<p class="muted">기록된 사건 없음</p>`}</div>
+    <div class="g-card"><h3>사건</h3>${r.events.length ? r.events.slice(-40).map(evLine).join("") : `<p class="muted">기록된 사건 없음</p>`}</div>
     <p class="muted">${r.saved ? `저장됨: ${esc(r.saved)}` : r.saveErr ? `저장 실패: ${esc(r.saveErr)}` : r.dev ? "개발용 결과는 저장하지 않아요." : "저장 중…"}</p>
     <div class="g-row"><button class="primary" data-go="garage">차고로</button></div>`;
 }
