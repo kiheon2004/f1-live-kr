@@ -63,8 +63,10 @@ export const SETS = {
 };
 
 // fitted coefficients (log space), their bounds from the PARAM ranges
-// k_low / k_mid (corner band factors) are NOT fitted while the corner curvature correction is on: per-corner factors and
-// per-speed-band factors can trade against each other (degenerate); the corner factors are the track's, so they win.
+// k_low / k_mid (corner band factors) are not fitted: in trial fits they ran to their bounds together with ClA (a speed-band
+// factor and ClA describe the same thing – grip that changes with speed). The per-corner curvature correction (--corners)
+// is OFF by default for the same reason: with one factor per corner the fit moved all speed dependence into the track and
+// ClA fell to its lower bound (2 m²) – unphysical. Both trials are in the report.
 export const FIT_KEYS = ["CdA", "ClA", "mu_mech", "P", "a_brake_max", "k_trac", "k_brake"];
 const PRIOR_SIGMA = 0.35, W_LAP = 25;
 // which curvature the driving model uses: "kappaLine" (the extract's racing-line estimate) or "kappa" (the field-averaged lap line)
@@ -91,6 +93,8 @@ const inZone = (s, z, L, pad = 0) => (z.end >= z.start ? s >= z.start - pad && s
 export function loadRace(dir, id, { drs = true, kappaCol = KAPPA_COL } = {}) {
   const S = JSON.parse(fs.readFileSync(path.join(dir, id + ".scenario.json"), "utf8"));
   const C = JSON.parse(fs.readFileSync(path.join(dir, id + ".calib.json"), "utf8"));
+  // calib v1 stores laps as rows with C.lapCols (older builds: objects) – turn rows into objects; pitIn/pitOut 0/1 → bool
+  if (C.lapCols) for (const D of Object.values(C.drivers || {})) D.laps = D.laps.map((row) => (Array.isArray(row) ? Object.fromEntries(C.lapCols.map((k, i) => [k, k === "pitIn" || k === "pitOut" ? !!row[i] : row[i]])) : row));
   const T = S.track, season = S.meta.season, N = S.race.laps;
   const track = { n: T.n, ds: T.ds, L: T.L, kappa: Float64Array.from(T.columns[kappaCol] || T.columns.kappa), grade: Float64Array.from(T.columns.grade) };
   const kappa0 = Float64Array.from(track.kappa);
@@ -102,12 +106,14 @@ export function loadRace(dir, id, { drs = true, kappaCol = KAPPA_COL } = {}) {
   const straight = (T.zones.straight || []).map((z) => ({ start: z.start, end: z.end }));
   let cd = null, drsSource = "none (season without DRS)";
   if (season <= 2025 && drsZones.length) { cd = drs ? cachedCarData(S.meta.sessionPath) : null; drsSource = cd ? "CarData channel 45 (cache, read-only)" : "assumed closed (no cache)"; }
-  const traces = [];
+  const traces = [], skipped = [];
   for (const [num, tr] of Object.entries(C.traces || {})) {
     const D = C.drivers[num], lapRec = D?.laps.find((l) => l.lap === tr.lap);
     if (!lapRec || !lapRec.compound || !COMPOUNDS[DEFAULT_ALLOCATION[lapRec.compound]]) continue;
     const kind = COMPOUNDS[DEFAULT_ALLOCATION[lapRec.compound]].kind; if (kind !== "slick") continue;
     const v = Float64Array.from(tr.v.map((x) => (x == null ? NaN : x)));
+    // a trace with holes says little and can be wrong where it exists (2026 Hungary: most bins empty) – need ≥ 85 % of bins
+    if (v.reduce((a, x) => a + (Number.isFinite(x) ? 1 : 0), 0) < 0.85 * v.length) { skipped.push(num); continue; }
     // DRS zones the car opened on this lap
     const open = [];
     if (cd && cd[num]) {
@@ -122,7 +128,7 @@ export function loadRace(dir, id, { drs = true, kappaCol = KAPPA_COL } = {}) {
       fuel: Math.max(1, BURN_PER_KM[season] * T.L / 1000 * (N - tr.lap) + 1), drsOpen: open });
   }
   // per-trace aero multiplier arrays are built on demand (they depend on the car's DRS/Straight Mode multipliers)
-  return { id, season, track, rho, air, tTrack, pMbar, N, drsZones, straight, drsSource, traces, prof: makeProfile(T.n), drivers: C.drivers, periods: C.periods, kappa0, corners: cornerRegions(track), cornerC: null };
+  return { id, season, track, rho, air, tTrack, pMbar, N, drsZones, straight, drsSource, traces, prof: makeProfile(T.n), drivers: C.drivers, periods: C.periods, skipped, kappa0, corners: cornerRegions(track), cornerC: null };
 }
 function lower(a, x) { let lo = 0, hi = a.length - 1; if (hi < 0 || a[0] > x) return 0; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (a[m] <= x) lo = m; else hi = m - 1; } return lo; }
 
@@ -257,12 +263,12 @@ function golden(f, a, b, it = 24) { const g = (Math.sqrt(5) - 1) / 2; let c = b 
 const traceLoss = (p) => p.mse + W_LAP * p.dLap * p.dLap;
 
 // ---------------------------------------------------------------------------------------------------------------------
-export function calibrate({ season, scen, rounds = 3, evals = 450, log = console.log, noCorners = false }) {
+export function calibrate({ season, scen, rounds = 3, evals = 450, log = console.log, noCorners = true }) {
   const set = SETS[season], base = carBase(season), B = bounds(season), t0 = theta0(season);
   const load = (ids) => ids.filter((id) => fs.existsSync(path.join(scen, id + ".calib.json"))).map((id) => loadRace(scen, id));
   const cal = load(set.calib), val = load(set.valid);
   log(`season ${season}: ${cal.length} calibration races, ${val.length} validation races (air density, DRS source per race below)`);
-  for (const r of [...cal, ...val]) log(`  ${r.id}: ρ ${r.rho.toFixed(3)} kg/m³ (air ${r.air.toFixed(1)} °C, ${r.pMbar.toFixed(0)} mbar), traces ${r.traces.length}, DRS: ${r.drsSource}`);
+  for (const r of [...cal, ...val]) log(`  ${r.id}: ρ ${r.rho.toFixed(3)} kg/m³ (air ${r.air.toFixed(1)} °C, ${r.pMbar.toFixed(0)} mbar), traces ${r.traces.length}${r.skipped.length ? ` (${r.skipped.length} skipped: < 85 % bins)` : ""}, DRS: ${r.drsSource}`);
   const teams = [...new Set(cal.flatMap((r) => r.traces.map((t) => t.team)))].sort();
   const tau = Object.fromEntries([...cal, ...val].map((r) => [r.id, 1]));
   const theta = Object.fromEntries(teams.map((t) => [t, { ...t0 }]));
@@ -299,7 +305,7 @@ export function calibrate({ season, scen, rounds = 3, evals = 450, log = console
   const tauMean = (races) => Object.fromEntries(races.map((r) => [r.id, golden((x) => r.traces.reduce((s, t) => s + (allMean[t.team] ? traceLoss(predict(r, t, allMean[t.team], x, base)) : 0), 0), 0.8, 1.2)]));
   const out = {
     season, date: new Date().toISOString().slice(0, 10), calibrationRaces: cal.map((r) => r.id), validationRaces: val.map((r) => r.id), excluded: set.excluded,
-    method: { curvature: KAPPA_COL, fitted: FIT_KEYS, loss: `mean speed² error over 10 m bins (km/h²) + ${W_LAP}·lap error² (s²) + log prior σ ${PRIOR_SIGMA}`, rounds, evals, burnPerKm: BURN_PER_KM[season], wearPerLap: WEAR_PER_LAP },
+    method: { curvature: KAPPA_COL, cornerCorrection: !noCorners, fitted: FIT_KEYS, loss: `mean speed² error over 10 m bins (km/h²) + ${W_LAP}·lap error² (s²) + log prior σ ${PRIOR_SIGMA}`, rounds, evals, burnPerKm: BURN_PER_KM[season], wearPerLap: WEAR_PER_LAP },
     tau, tauValidationFitted: tauV, theta, meanCar,
     cornerFactors: Object.fromEntries([...cal, ...val].filter((r) => r.cornerC).map((r) => [r.id, r.corners.map((c, j) => ({ s0: +(c.a * r.track.ds).toFixed(0), s1: +(c.b * r.track.ds).toFixed(0), peakR: +(1 / Math.abs(r.kappa0[c.peak])).toFixed(1), c: +r.cornerC[j].toFixed(3) }))])),
     errors: {
@@ -424,7 +430,10 @@ export function calibrateTyres({ season, scen, theta, tau, log = console.log }) 
   return res;
 }
 export function writeTyreParams(res, file) {
-  const e = res.errors, src = `calibrate.mjs stint fit ${res.date} on ${res.calibrationRaces.length} ${res.season} races; slope RMS calib ${e.calibration.rms.toFixed(3)} s/lap, validation ${e.validation.rms.toFixed(3)} s/lap (fuel-only ${e.validation_fuelOnly.rms.toFixed(3)}, constant ${e.validation_constantMeanSlope.rms.toFixed(3)}) on ${res.validationRaces.length} other races`;
+  const e = res.errors;
+  // adopt only if the fit predicts validation stints better than both baselines (else the physics default kw stays)
+  if (!(e.validation.rms < Math.min(e.validation_fuelOnly.rms, e.validation_constantMeanSlope.rms) - 0.002)) { try { fs.unlinkSync(file); } catch {} return false; }
+  const src = `calibrate.mjs stint fit ${res.date} on ${res.calibrationRaces.length} ${res.season} races; slope RMS calib ${e.calibration.rms.toFixed(3)} s/lap, validation ${e.validation.rms.toFixed(3)} s/lap (fuel-only ${e.validation_fuelOnly.rms.toFixed(3)}, constant ${e.validation_constantMeanSlope.rms.toFixed(3)}) on ${res.validationRaces.length} other races`;
   const L = [`// GENERATED by src/game/tools/calibrate.mjs (${res.date}) – tyre wear-rate multipliers by race compound name for ${res.season}.`,
     `// Multiplies the compound's kw (tyres.js, via the event allocation; this fit used ${JSON.stringify(res.method.allocation)}).`,
     `// Calibration races: ${res.calibrationRaces.join(", ")}`, `// Validation races: ${res.validationRaces.join(", ")}`,
@@ -432,6 +441,7 @@ export function writeTyreParams(res, file) {
   for (const [c, k] of Object.entries(res.kwScale)) L.push(`  ${c}: { kwScale: fit(${+k.toPrecision(4)}, ${JSON.stringify(`wear-rate multiplier for ${c} stints (${res.perCompound[c].calibStints} calibration stints)`)}) },`);
   L.push(`};`);
   fs.writeFileSync(file, L.join("\n") + "\n");
+  return true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -477,10 +487,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const tr = calibrateTyres({ season, scen, theta: prev.theta, tau: prev.tau, log });
     fs.writeFileSync(path.join(outDir, `tyres-${season}.json`), JSON.stringify(tr, null, 1));
     fs.writeFileSync(path.join(outDir, `tyres-${season}.log`), logLines.join("\n") + "\n");
-    if (!args["no-write"]) writeTyreParams(tr, path.join(paramsDir, `tyres-${season}.js`));
+    if (!args["no-write"]) log(writeTyreParams(tr, path.join(paramsDir, `tyres-${season}.js`)) ? `wrote tyres-${season}.js` : `tyres-${season}.js NOT written: the fit does not beat the fuel-only / constant-slope baselines on the validation stints`);
+    fs.writeFileSync(path.join(outDir, `tyres-${season}.log`), logLines.join("\n") + "\n");
     process.exit(0);
   }
-  const res = calibrate({ season, scen, rounds: +(args.rounds || 3), evals: +(args.evals || 450), log, noCorners: !!args["no-corners"] });
+  const res = calibrate({ season, scen, rounds: +(args.rounds || 3), evals: +(args.evals || 450), log, noCorners: !args.corners });
   const e = res.errors;
   for (const [k, v] of Object.entries(e)) log(`${k}: speed RMS ${v.rmsV.toFixed(2)} km/h, lap |err| ${v.mae.toFixed(3)} s (bias ${v.bias.toFixed(3)}), top speed |err| ${v.topSpeedAbsErr.toFixed(1)} km/h, slowest corner |err| ${v.slowestCornerAbsErr.toFixed(1)} km/h, ${v.traces} traces; by phase ${Object.entries(v.phases).map(([k, x]) => `${k} bias ${x.bias} rms ${x.rms}`).join(", ")}`);
   for (const [t, p] of Object.entries(res.perTeam)) log(`  ${t}: calib ${p.calibration.rmsV.toFixed(2)} | valid ${p.validationB.rmsV.toFixed(2)} (mean car ${p.validationB_meanCar.rmsV.toFixed(2)}) km/h  θ ${FIT_KEYS.map((k) => k + "=" + (+res.theta[t][k].toPrecision(4))).join(" ")}`);
