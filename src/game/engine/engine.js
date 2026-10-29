@@ -90,7 +90,7 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
     const start = plan.stints[0].compound;
     const car = { num: e.num, teamKey: e.teamKey, team: e.team, tla: e.tla, color: e.colour, driverId: e.num, grid: g?.pos ?? null,
       pitStart: pitStarters.has(e.num), status: "grid", out: null, where: "lap",
-      s: g ? T.wrap(g.s) : T.wrap(T.pit.sOut), d: g ? g.d : 0, v: 0, aLong: 0, aLat: 0, steer: 0, wheelDist: 0,
+      s: g && Number.isFinite(g.s) ? T.wrap(g.s) : T.wrap(T.pit.sOut), d: g?.d ?? 0, v: 0, aLong: 0, aLat: 0, steer: 0, wheelDist: 0,
       lap: 0, armed: false, dist: 0, lapT0: 0, laps: [], sector: 0, secT0: 0, secs: [],
       tyre: newTyre(race, start, w0.airT),
       energy: createEnergy(race.cache.ep, {}), driver: createDriver(dp), mode: { pace: "balanced", energy: "balanced" },
@@ -105,7 +105,8 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
   // until the field has passed the pit exit), and schedules the start: the lights, each driver's reaction and launch
   INC.newIncidents(race);
   CTL.newControl(race, T);
-  for (const c of state.cars) if (c.where === "pit") { c.s = T.pit.pitToLap(c.pit.u); c.armed = T.ahead(0, c.s) < T.L / 2; c.dist = c.armed ? c.s : c.s - T.L; }
+  // (every car's lap state from where race control put it: a slot the scenario couldn't measure is the rules' layout)
+  for (const c of state.cars) { if (c.where === "pit") c.s = T.pit.pitToLap(c.pit.u); c.armed = T.ahead(0, c.s) < T.L / 2; c.dist = c.armed ? c.s : c.s - T.L; }
   gridLateral(race);
   sortOrder(race);
   log(race, { type: "start", cause: "scenario", effect: `${state.cars.length} cars, ${state.totalLaps} laps, seed ${state.seed}` });
@@ -248,7 +249,15 @@ function resultRows(race, R) {
   for (const r of R.rows) {
     const c = byNum.get(r.num);
     r.gap = r.pos === 1 ? 0 : r.gap?.s ?? null; r.lapsDown = r.pos == null ? null : (R.rows[0].laps - r.laps);
-    r.time = Number.isFinite(r.totalMs) ? r.totalMs : null; r.stops = c.pit.stops; r.acct = { ...c.acct };
+    r.time = Number.isFinite(r.totalMs) ? r.totalMs : null; r.stops = c.pit.stops;
+    // the accounts that can be separated cleanly: traffic (the ghost – approximate), the pit stops' loss and its queue
+    // part (approximate: a free lap's pace as the reference), the penalties added; tyre management / energy use are not
+    // split out (no clean counterfactual)
+    const pq = (c.acct.pitParts || []).reduce((a, p) => a + p.queue, 0);
+    r.acct = { traffic: +c.acct.traffic.toFixed(2), pit: +c.acct.pit.toFixed(2), pitQueue: +pq.toFixed(2), penalty: r.penS || 0, approx: ["traffic", "pit", "pitQueue"], pitParts: c.acct.pitParts || [] };
+    // stints as run (from the lap records: compound per completed lap)
+    // (a new stint after an in-lap – the lap record's pit flag – or when the compound changes, e.g. a red-flag change)
+    r.stints = []; let prev = null; for (const l of c.laps) { const last = r.stints.at(-1); if (last && !prev?.pit && last.compound === l.compound) last.laps++; else r.stints.push({ compound: l.compound, laps: 1 }); prev = l; }
   }
   R.by = "rules.classify";
   return R;

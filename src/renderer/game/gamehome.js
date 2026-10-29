@@ -243,7 +243,8 @@ async function startRace({ dev = false, devOpts = {} } = {}) {
     const E = G.engine; if (!E) return;
     // every team on the team AI (ai.js); the player's two cars start on the plans shown here and the AI keeps their
     // defaults (pace/energy/plan) only until the player orders a car
-    race = E.createRace({ scenario: sc, seed: G.seed, userTeam: G.teamKey, weatherMode: "real", plans: plansOf(sc), ai: true });
+    G.runOpts = { seed: G.seed, userTeam: G.teamKey, weatherMode: "real", plans: plansOf(sc), ai: true };   // (kept with the result: run.mjs --replay rebuilds the race from them + the command log)
+    race = E.createRace({ scenario: sc, ...G.runOpts });
     engine = { step: E.step, snapshot: E.snapshot, command: E.command, events: E.events, results: E.results };
   }
   G.dev = dev; G.events = []; G.orders = []; G.result = null;
@@ -366,9 +367,10 @@ function finishRace() {
   const res = R.engine.results ? R.engine.results(R.race) : null;
   const classification = res?.rows ? res.rows.map((r) => ({ pos: r.pos, num: r.num, tla: r.tla, team: r.team, laps: r.laps, gap: r.gap, lapsDown: r.lapsDown, status: r.status, stops: r.stops }))
     : [...snap.cars].sort((a, b) => a.pos - b.pos).map((c) => ({ pos: c.pos, num: c.num, tla: c.tla, team: c.team, laps: c.lap, status: c.status }));
-  const accounts = res?.rows ? { cars: Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.acct || {}])), by: res.by || null } : null;
+  const accounts = res?.rows ? { cars: Object.fromEntries(res.rows.filter((r) => myCars(G.sc).some((e) => String(e.num) === String(r.num)) || (r.pos && r.pos <= 10)).map((r) => [r.tla || r.num, r.acct || {}])), by: res.by || null } : null;
   G.result = { dev: G.dev, scenarioId: G.sid, seed: G.seed, team: G.teamKey, t: snap.t, engine: G.dev ? null : G.engine?.ENGINE_VERSION || null, classification,
-    accounts, events: (R.engine.events ? R.engine.events(R.race, -1) : G.events).slice(-300), orders: G.orders, commandLog: R.race.state.commands?.log || null };
+    accounts, events: (R.engine.events ? R.engine.events(R.race, -1) : G.events).slice(-300), orders: G.orders, commandLog: R.race.state.commands?.log || null,
+    runOpts: G.dev ? null : G.runOpts, stints: res?.rows ? Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.stints || null])) : null, points: res?.rows ? Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.points ?? null])) : null };
   if (!G.dev) window.api.game.saveResult(G.sid, { kind: "game-result", label: "게임 결과 (실제 기록 아님)", ...G.result }).then((r) => { G.result.saved = r?.file || null; paint(); }, (e) => { G.result.saveErr = String(e.message || e); paint(); });
   stopRace();
   go("results");
@@ -376,8 +378,9 @@ function finishRace() {
 function paintResults() {
   const r = G.result; if (!r) return `<p class="muted">결과가 없어요.</p>`;
   return `<div class="g-card"><h3>게임 결과 <small>엔진 계산 결과 · 실제 경기 기록이 아니에요${r.dev ? " · 개발용 스냅샷(엔진 아님)" : ""}</small></h3>
-    <table class="g-tbl"><tr><th>순위</th><th>드라이버</th><th>팀</th><th>랩</th><th>차이</th><th>정차</th><th>상태</th></tr>${r.classification.map((c) => `<tr class="${myCars(G.sc).some((e) => String(e.num) === String(c.num)) ? "mine" : ""}"><td>${c.pos}</td><td>${esc(c.tla || c.num)}</td><td>${esc(teamKo(c.team))}</td><td>${c.laps}</td><td>${c.pos === 1 ? "" : Number.isFinite(c.gap) ? "+" + c.gap.toFixed(3) + "s" : c.lapsDown ? `+${c.lapsDown}랩` : ""}</td><td>${c.stops ?? ""}</td><td>${esc(STATUS_KO[c.status] || c.status)}</td></tr>`).join("")}</table></div>
-    <div class="g-card"><h3>결과의 원인 <small>엔진의 시간 손실 계정(교통·피트·타이어·에너지·페널티·기타)</small></h3>${r.accounts ? accountsHtml(r.accounts) : PENDING}</div>
+    <table class="g-tbl"><tr><th>순위</th><th>드라이버</th><th>팀</th><th>랩</th><th>차이</th><th>정차</th><th>점수</th><th>상태</th></tr>${r.classification.map((c) => `<tr class="${myCars(G.sc).some((e) => String(e.num) === String(c.num)) ? "mine" : ""}"><td>${c.pos ?? ""}</td><td>${esc(c.tla || c.num)}</td><td>${esc(teamKo(c.team))}</td><td>${c.laps}</td><td>${c.pos === 1 ? "" : Number.isFinite(c.gap) ? "+" + c.gap.toFixed(3) + "s" : c.lapsDown ? `+${c.lapsDown}랩` : ""}</td><td>${c.stops ?? ""}</td><td>${r.points?.[c.tla || c.num] || ""}</td><td>${esc(STATUS_KO[c.status] || c.status)}</td></tr>`).join("")}</table>
+    ${r.stints ? `<p class="muted">내 차 스틴트: ${myCars(G.sc).map((e) => { const st = r.stints[e.tla] || []; return `${esc(e.tla)} ${st.map((x) => `${esc(x.compound)} ${x.laps}랩`).join(" → ") || "–"}`; }).join(" · ")}</p>` : ""}</div>
+    <div class="g-card"><h3>결과의 원인 <small>엔진이 따로 셀 수 있는 손실만 – 내 차와 10위 안</small></h3>${r.accounts ? accountsHtml(r.accounts) : PENDING}</div>
     <div class="g-card"><h3>사건</h3>${r.events.length ? r.events.slice(-40).map((e) => `<p>${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} ${esc(e.type)} ${e.car ? "#" + esc(e.car) : ""} ${esc(e.effect || e.cause || "")}</p>`).join("") : `<p class="muted">기록된 사건 없음</p>`}</div>
     <p class="muted">${r.saved ? `저장됨: ${esc(r.saved)}` : r.saveErr ? `저장 실패: ${esc(r.saveErr)}` : r.dev ? "개발용 결과는 저장하지 않아요." : "저장 중…"}</p>
     <div class="g-row"><button class="primary" data-go="garage">차고로</button></div>`;
@@ -385,8 +388,8 @@ function paintResults() {
 // the engine's accounts as it gives them (per car: { traffic, pit, tyre, energy, penalty, other, approx: [...] } s)
 function accountsHtml(a) {
   const rows = Object.entries(a.cars || a).filter(([, v]) => v && typeof v === "object");
-  const all = ["traffic", "pit", "tyre", "energy", "penalty", "other"], have = new Set(rows.flatMap(([, v]) => Object.keys(v))), keys = all.filter((k) => have.has(k)), ko = { traffic: "교통", pit: "피트", tyre: "타이어", energy: "에너지·페이스", penalty: "페널티", other: "기타(분리 불가)" };
-  return `<table class="g-tbl"><tr><th>차</th>${keys.map((k) => `<th>${ko[k]}</th>`).join("")}</tr>${rows.map(([n, v]) => `<tr><td>${esc(n)}</td>${keys.map((k) => `<td>${Number.isFinite(v[k]) ? v[k].toFixed(1) + "s" + ((v.approx || []).includes(k) ? " ≈" : "") : "–"}</td>`).join("")}</tr>`).join("")}</table><p class="muted">엔진이 지금 계산하는 항목만 보여요(${keys.map((k) => ko[k]).join("·") || "없음"}) · ≈: 엔진이 근사로 표시한 항목 · 초</p>`;
+  const all = ["traffic", "pit", "pitQueue", "tyre", "energy", "penalty", "other"], have = new Set(rows.flatMap(([, v]) => Object.keys(v))), keys = all.filter((k) => have.has(k)), ko = { traffic: "교통", pit: "피트 손실", pitQueue: "그중 피트 대기", tyre: "타이어", energy: "에너지·페이스", penalty: "페널티", other: "기타(분리 불가)" };
+  return `<table class="g-tbl"><tr><th>차</th>${keys.map((k) => `<th>${ko[k]}</th>`).join("")}</tr>${rows.map(([n, v]) => `<tr><td>${esc(n)}</td>${keys.map((k) => `<td>${Number.isFinite(v[k]) ? v[k].toFixed(1) + "s" + ((v.approx || []).includes(k) ? " ≈" : "") : "–"}</td>`).join("")}</tr>`).join("")}</table><p class="muted">엔진이 지금 계산하는 항목만 보여요(${keys.map((k) => ko[k]).join("·") || "없음"}) · ≈: 엔진이 근사로 표시한 항목 · 초 · 타이어 관리·에너지 운용으로 잃거나 얻은 시간은 교통·피트처럼 깨끗하게 떼어낼 수 없어서 따로 숫자로 보여주지 않아요(스틴트와 사건 기록으로 보세요)</p>`;
 }
 
 // ---------- events ----------

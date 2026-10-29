@@ -117,7 +117,7 @@ function placeGrid(race, T, P) {
   // rules' layout (16 m rows, staggered) behind the line
   const meas = new Map((race.scenario?.grid?.slots || []).map((g) => [g.num, g]));
   onGrid.forEach((c, i) => {
-    const m = meas.get(c.num), g = m ? { s: T.wrap(m.s), d: m.d ?? 0, dist: T.ahead(0, m.s) < T.L / 2 ? T.wrap(m.s) : T.wrap(m.s) - T.L } : gridSlot(race, T, i + 1, P);
+    const m = meas.get(c.num), g = m && Number.isFinite(m.s) ? { s: T.wrap(m.s), d: m.d ?? 0, dist: T.ahead(0, m.s) < T.L / 2 ? T.wrap(m.s) : T.wrap(m.s) - T.L } : gridSlot(race, T, i + 1, P);
     Object.assign(c, { s: g.s, d: g.d, dist: g.dist, v: 0, where: "lap", status: "grid" });
   });
   for (const c of S.cars) if (c.pitStart && c.status !== "dnf" && c.status !== "pitstart" && T.pit) {
