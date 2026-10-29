@@ -10,7 +10,8 @@ const require = createRequire(import.meta.url);
 const { parseStream, flattenTracks, flattenCarData, TOPICS } = require("../../main/archive.js");
 export const RK = require("../../renderer/replay.js");
 
-export const CACHE = path.join(os.homedir(), "Library/Application Support/f1-live-kr/cache");
+// (the app's prepare worker passes the cache the app itself uses – F1KR_GAME_CACHE; tools: the default)
+export const CACHE = process.env.F1KR_GAME_CACHE || path.join(os.homedir(), "Library/Application Support/f1-live-kr/cache");
 // the archive's cache file name for a topic of a session ("2025/2025-07-06_British_Grand_Prix/2025-07-06_Race/")
 const fileOf = (cache, sessionPath, topic) => path.join(cache, `${sessionPath}${topic}.jsonStream`.replace(/[^A-Za-z0-9._-]+/g, "_"));
 export const normPath = (p) => (String(p).replace(/^\/+/, "").replace(/\/*$/, "/"));

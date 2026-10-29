@@ -102,3 +102,36 @@ test("render time: the engine records each car's discrete changes with their sim
   assert.ok(seen.some((e) => e.set.where === "pit") && seen.some((e) => e.set.where === "lap"), "into the lane and out");
   assert.ok(tyreAt != null && workDone != null && tyreAt === workDone, `new tyre recorded at the work's end (${tyreAt} vs ${workDone})`);
 });
+
+// v0.49 §16: the game's files – saves to one slot written one after the other through their own temporary files, a slot
+// list from small meta files, scenarios only when they are scenarios, nothing outside the game folder
+test("game store: concurrent saves of one slot end with the last one, no stray temporary files; slot list; import checks the file", async () => {
+  const os = require("node:os");
+  const { GameStore } = require("../../src/main/gamestore.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f1kr-game-")), st = new GameStore(dir);
+  try {
+    await Promise.all(Array.from({ length: 12 }, (_, i) => st.saveGame("slot1", { n: i, meta: { scenarioId: "x", t: i * 1000 } })));
+    assert.strictEqual((await st.loadGame("slot1")).n, 11, "the last save wins");
+    assert.deepStrictEqual(fs.readdirSync(path.join(dir, "saves")).sort(), ["slot1.json", "slot1.meta.json"]);
+    await st.saveGame("slot2", { n: 0, meta: { scenarioId: "y", t: 5 } });
+    const L = await st.listSaves(); assert.deepStrictEqual(L.map((m) => m.slot).sort(), ["slot1", "slot2"]); assert.strictEqual(L.find((m) => m.slot === "slot1").t, 11000);
+    await st.removeSave("slot2"); assert.deepStrictEqual((await st.listSaves()).map((m) => m.slot), ["slot1"]);
+    await assert.rejects(st.saveGame("../evil", {}), /bad game slot/);
+    const bad = path.join(dir, "bad.json"); fs.writeFileSync(bad, JSON.stringify({ hello: 1 }));
+    await assert.rejects(st.importScenario(bad), /시나리오 파일이 아니에요/);
+    const good = path.join(dir, "good.json"); fs.writeFileSync(good, JSON.stringify(SC));
+    const r = await st.importScenario(good); assert.strictEqual(r.id, SC.meta.id);
+    assert.ok((await st.listScenarios()).some((s) => s.id === SC.meta.id));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("prepare: the cache's race sessions and their scenario ids as the builder names them", async () => {
+  const os = require("node:os");
+  const { cachedRaces, idOf } = require("../../src/main/gameprep.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "f1kr-cache-"));
+  try {
+    for (const f of ["2025_2025-08-03_Hungarian_Grand_Prix_2025-08-03_Race_TimingData.jsonStream", "2025_2025-08-03_Hungarian_Grand_Prix_2025-08-02_Qualifying_TimingData.jsonStream", "2025_2025-08-03_Hungarian_Grand_Prix_2025-08-03_Race_CarData.z.jsonStream"]) fs.writeFileSync(path.join(dir, f), "x");
+    assert.deepStrictEqual(cachedRaces(dir), ["2025/2025-08-03_Hungarian_Grand_Prix/2025-08-03_Race/"]);
+    assert.strictEqual(idOf("2025/2025-08-03_Hungarian_Grand_Prix/2025-08-03_Race/"), SC.meta.id);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
