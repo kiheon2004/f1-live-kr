@@ -101,6 +101,22 @@ src/renderer/game/
 - **추월 공간**: 표본별 `pass` 지표 = (폭 − 2 × 차폭 − 여유) ≥ 0 이고, 앞선 직선 길이와 뒤 제동 구간이 있는 곳.
   추월 판단은 이 지표와 실제 속도 차로 한다(§8).
 
+### 4.1 track.js 공개 인터페이스 (계약)
+
+```js
+const T = loadTrack(scenario.track)
+T.L            // 랩 길이 m (출발선 기준), T.n 표본 수, T.ds 표본 간격 m
+T.s, T.x, T.y, T.z, T.hdg, T.kappa, T.grade, T.wL, T.wR, T.line   // Float64Array(n)
+T.zone         // Uint32Array(n) 비트: ZONE.BRAKE, ZONE.DRS, ZONE.STRAIGHT_MODE, ZONE.PIT_ENTRY, ZONE.PIT_EXIT, ZONE.COVER, ZONE.SECTOR1/2/3
+T.wrap(s)      // [0, L)
+T.idx(s)       // 랩 s의 표본 번호(내림, 감쌈)
+T.at(arr, s)   // 배열 arr를 s에서 선형 보간
+T.ahead(a, b)  // a에서 b까지 앞쪽 거리(감쌈, 0..L)
+T.zones        // { drs: [{detect, start, end}], straight: [{start, end}], sectors: [s1end, s2end], cover: [[a, b]] }
+T.pit          // { L, u (경로 거리 배열), x, y, z, hdg, sIn, sOut, limStart, limEnd, speedLimit (m/s), boxes: { [teamKey]: u },
+               //   lapToPit(s) → u | null (분기 구간에서만), pitToLap(u) → 근사 랩 s (화면·간격 계산용) }
+```
+
 ## 5. 차량·속도 (profile.js, car.js)
 
 단위 SI. 점질량 준정적 모델(공개 자료로 식별 가능한 수준).
