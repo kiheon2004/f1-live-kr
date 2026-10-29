@@ -6,6 +6,9 @@
 //        sensitivity with every team on the AI: tyre wear ×0.6/1/1.6 → stops; pit-lane limit 60/80/100 km/h (bigger /
 //        smaller pit loss) → stops; a rain spell with the real forecast vs a forecast forced dry → when inters go on; a short
 //        shower with a dry forecast → slicks kept?; one team on attack all race vs balanced (default plan) → its cost.
+//   node src/game/tools/aival.mjs solo [--races a,b] [--seeds 1,2] [--teams 3] [--out dir]
+//        the same sensitivities with ONE team alone on the track (its two cars – clean air, so the strategy's causality is
+//        seen without the follow-only traffic of the base engine): wear, pit-lane limit, attack all race, rain forecast.
 // Writes <out>/<mode>.json and prints a summary (the log is the console output: tee it).
 import fs from "node:fs";
 import path from "node:path";
@@ -65,6 +68,47 @@ if (mode === "ab") {
   const allD = res.flatMap((r) => r.all.map((c) => { const b = r.base.find((x) => x.num === c.num); return c.time != null && b.time != null ? c.time - b.time : null; }));
   log(`All teams on the AI vs all on the default plan, per car race time: ${fmt(stats(allD))}`);
   log(`Wall time per race: base ${fmt(stats(res.map((r) => r.baseMs / 1000)))}; all-AI ${fmt(stats(res.map((r) => r.allMs / 1000)))}`);
+}
+
+// a scenario with only this team's cars (grid slots kept: the same start places)
+function alone(sc, team) {
+  const s = JSON.parse(JSON.stringify(sc)), keep = new Set(s.entries.filter((e) => e.teamKey === team).map((e) => e.num));
+  s.entries = s.entries.filter((e) => keep.has(e.num));
+  if (s.grid) { s.grid.slots = (s.grid.slots || []).filter((g) => keep.has(g.num)); s.grid.order = (s.grid.order || []).filter((n) => keep.has(n)); s.grid.pitLane = (s.grid.pitLane || []).filter((x) => keep.has(typeof x === "object" ? x.num : x)); }
+  return s;
+}
+if (mode === "solo") {
+  const res = { wear: [], pit: [], attack: [], rain: [] }, dryFc = (race) => { const t0 = Math.floor(race.state.t / 300000) * 300000; return { issued: t0, blocks: Array.from({ length: 8 }, (_, j) => ({ from: t0 + j * 900000, to: t0 + (j + 1) * 900000, pRain: 0.05 })) }; };
+  for (const id of races) {
+    const sc = load(id), teams = [...new Set(sc.entries.map((e) => e.teamKey))].slice(0, K);
+    for (const team of teams) for (const seed of seeds) {
+      const s1 = alone(sc, team), st = (r) => r.cars.map((c) => c.stops);
+      for (const k of [0.6, 1, 1.6]) { const r = run(s1, seed, { ai: true, tyreWear: k }); res.wear.push({ race: id, team, seed, k, stops: st(r), time: r.cars.map((c) => c.time) }); }
+      for (const kmh of [60, 80, 100]) { const s2 = JSON.parse(JSON.stringify(s1)); s2.track.pit.speedLimit = kmh / 3.6; const r = run(s2, seed, { ai: true }); res.pit.push({ race: id, team, seed, kmh, stops: st(r) }); }
+      const nums = s1.entries.map((e) => e.num);
+      const atk = run(s1, seed, { userTeam: team }, { init: (race) => { for (const n of nums) CMD.submit(race.state.commands, 0, { id: "atk" + n, type: "pace", car: n, args: { mode: "attack" }, by: "player" }); } });
+      const bal = run(s1, seed, { userTeam: team });
+      for (const n of nums) res.attack.push({ race: id, team, seed, num: n, dTime: +(atk.cars.find((c) => c.num === n).time - bal.cars.find((c) => c.num === n).time).toFixed(2) });
+      // A/B in clean air: the AI vs the fixed default plan for the same two cars
+      const ai = run(s1, seed, { ai: true });
+      for (const n of nums) (res.ab ||= []).push({ race: id, team, seed, num: n, dTime: +(ai.cars.find((c) => c.num === n).time - bal.cars.find((c) => c.num === n).time).toFixed(2), stops: ai.cars.find((c) => c.num === n).stops });
+      // rain spell 40–75 min written into the record; the real forecast vs one forced dry – the same truth
+      const wet = JSON.parse(JSON.stringify(s1)); { const c = wet.weather.cols; c.rain = c.t.map((t) => (t >= 2400 && t < 4500 ? 1 : 0)); }
+      for (const fc of ["real", "dry"]) {
+        let rainLap = null; const r = run(wet, seed, { ai: true }, { init: (race) => { if (fc === "dry") race.cache.forecastFn = dryFc; }, step: (race) => { if (rainLap == null && race.state.t >= 2400000) rainLap = race.state.leaderLap; } });
+        res.rain.push({ race: id, team, seed, forecast: fc, rainLap, interLaps: r.cars.map((c) => (c.interLap == null ? null : c.interLap - rainLap)), time: r.cars.map((c) => c.time) });
+      }
+      log(`${id} ${team} seed ${seed} done`);
+      fs.writeFileSync(path.join(out, "solo.json"), JSON.stringify(res));
+    }
+  }
+  const flat = (a, f) => a.flatMap(f);
+  log("\nSolo (one team alone – clean air), per car:");
+  for (const k of [0.6, 1, 1.6]) log(`  wear ×${k}: stops ${fmt(stats(flat(res.wear.filter((w) => w.k === k), (w) => w.stops)))}`);
+  for (const kmh of [60, 80, 100]) log(`  pit limit ${kmh} km/h: stops ${fmt(stats(flat(res.pit.filter((w) => w.kmh === kmh), (w) => w.stops)))}`);
+  log(`  attack all race − balanced, race time s: ${fmt(stats(res.attack.map((a) => a.dTime)))}`);
+  log(`  AI − default plan (clean air), race time s: ${fmt(stats(res.ab.map((a) => a.dTime)))}; AI stops ${fmt(stats(res.ab.map((a) => a.stops)))}`);
+  for (const fc of ["real", "dry"]) { const x = res.rain.filter((r) => r.forecast === fc); log(`  rain spell, forecast ${fc}: first wet-tyre lap − rain lap ${fmt(stats(flat(x, (r) => r.interLaps)))}; cars never on wet tyres ${flat(x, (r) => r.interLaps).filter((v) => v == null).length}/${flat(x, (r) => r.interLaps).length}; race time ${fmt(stats(flat(x, (r) => r.time)))}`); }
 }
 
 if (mode === "sens") {
