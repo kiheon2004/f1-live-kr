@@ -34,7 +34,7 @@ export const AI_TABLE = {
   passDelta: est(0.9, "s/lap", "pace advantage a car needs to pass in the lap-level traffic forecast (start value)", "DRS-era passing needs ~0.5–1 s/lap", [0.3, 3]),
   passDeltaStreet: est(2.5, "s/lap", "the same at a street circuit", "Monaco/Singapore: nearly impossible", [1, 6]),
   passLearn: est(3, "laps", "laps of observed on-track passes after which the team trusts its own count", "learned from the public order", [3, 30]),
-  kHoldMax: est(2.5, "×", "bound on the calibration of the traffic forecast by the own cars' measured traffic loss (each way)", "the engine's traffic account is itself approximate – a bounded correction, not a free factor", [1, 6]),
+  kHoldMax: est(2.0, "×", "bound on the calibration of the traffic forecast by the own cars' measured traffic loss (each way)", "traffic.js measures the loss against a free ghost of the car (slipstream can make a lap's loss negative – counted as 0); on full races the per-team factors came out 0.3–2.5 around 1 (Hungary/Suzuka 2025): a bounded correction, not a free factor", [1, 6]),
   holdTau: est(10, "laps", "the traffic forecast's hold k laps ahead counts × exp(−k/holdTau)", "a lap-level forecast of 20 cars' pace and stops loses accuracy fast; far-ahead holds are guesses (the retuned tyres' longer stints made 40-lap holds dominate plans)", [3, 40]),
   minStint: est(5, "laps", "shortest fresh stint a plan may contain", "a 1–3-lap stint is never a strategy in dry running (weather switches are the crossover rule's)", [2, 10]),
   minGapS: est(0.6, "s", "how close a held car runs behind the car ahead in the lap-level forecast", "dirty air", [0.3, 1.2]),
