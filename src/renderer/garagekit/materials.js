@@ -13,7 +13,7 @@
 //   clearcoat-like sheen via MeshPhysical; plastic bins 0.55.
 import * as THREE from "../vendor/three.module.js";
 import { Parts } from "./parts.js";
-import { BUILD } from "./equipment.js";
+import { BUILD, boom as boomParts } from "./equipment.js";
 import { brushedRough, rubberMap, quiltMap, carbonMap, screensAtlas, contactTexture, floorTextures, panelTexture, signTexture } from "./textures.js";
 import { mix, lum } from "./style.js";
 
@@ -52,7 +52,14 @@ export function createKitLibrary() {
     T, M, modules,
     module(kind, lod, opts = {}, variant = "") {
       const key = `${kind}|${lod}|${variant}`;
-      if (!modules.has(key)) { const P = new Parts(); (BUILD[kind] || (() => {}))(P, lod, opts); modules.set(key, P); }
+      if (!modules.has(key)) { const P = new Parts(); (BUILD[kind] || (() => {}))(P, lod, opts); modules.set(key, P.consolidate()); }
+      return modules.get(key);
+    },
+    // the overhead gantry for a run of L m between heights y0…y1 (cached by its rounded sizes; built from z = 0 – the caller
+    // moves it to its z0): its tubes are the dearest thing to make
+    boom(lod, o) {
+      const L = Math.round((o.z1 - o.z0) * 20) / 20, y0 = Math.round(o.y0 * 20) / 20, y1 = Math.round(o.y1 * 20) / 20, key = `boom|${lod}|${o.kind}|${L}|${y0}|${y1}`;
+      if (!modules.has(key)) { const P = new Parts(); boomParts(P, lod, { z0: 0, z1: L, y0, y1, kind: o.kind }); modules.set(key, P.consolidate()); }
       return modules.get(key);
     },
     stats() { let tris = 0; for (const P of modules.values()) tris += P.triangles; return { materials: Object.keys(M).length, textures: Object.values(T).filter(Boolean).length, modules: modules.size, moduleTriangles: Math.round(tris) }; },
@@ -75,7 +82,7 @@ export function blanketMaterial(lib, accent) {
 // The team's materials for one bay – owned by it (freed with it). style: teamGarageStyle. Slots: accent (the team's
 // colour: stripes, a jack's rails, the hoses' one coloured line), fabricAccent (blankets – or the black fabric), drawer,
 // cab, wall (lining, a panel texture with the team's band), floor (one texture over the floor), sign.
-export function teamMaterials(lib, style, { floor = null, signs = [] } = {}) {
+export function teamMaterials(lib, style, { floor = null, signs = [], wall = true } = {}) {
   const own = [];
   const mk = (m) => { own.push(m); return m; };
   const accent = mk(std({ color: style.accent, metalness: 0.15, roughness: 0.42 }));
@@ -91,7 +98,8 @@ export function teamMaterials(lib, style, { floor = null, signs = [] } = {}) {
     if (ft.map) textures.push(ft.map, ft.rough);
     M.floor = mk(std({ color: ft.map ? 0xffffff : style.floor, map: ft.map, roughness: ft.rough ? 1 : 0.6, roughnessMap: ft.rough, metalness: 0 }));
   }
-  const pt = panelTexture(style.wall.base, style.accent, style.wall.band, style.dark, style.seed);
+  // (the wall lining's texture only for a room of the kit's own – a circuit bay's walls are the teams' layer's)
+  const pt = wall ? panelTexture(style.wall.base, style.accent, style.wall.band, style.dark, style.seed) : null;
   if (pt) textures.push(pt);
   M.wall = mk(std({ color: pt ? 0xffffff : style.wall.base, map: pt, roughness: 0.55, metalness: 0.05 }));
   M.wallPlain = mk(std({ color: style.wall.base, roughness: 0.6, metalness: 0.05 }));

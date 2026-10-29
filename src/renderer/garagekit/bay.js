@@ -18,7 +18,6 @@ import * as THREE from "../vendor/three.module.js";
 import { Parts } from "./parts.js";
 import { normZone, planBay, frameMatrix, footprint } from "./layout.js";
 import { teamMaterials } from "./materials.js";
-import { boom } from "./equipment.js";
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _one = new THREE.Vector3(1, 1, 1);
 const place = (x, y, z, ry) => _m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(0, ry, 0)), _one).clone();
@@ -32,7 +31,8 @@ export function buildBayInterior(zone, style, opts = {}) {
   const lod = Math.max(0, Math.min(2, opts.lod ?? 0)), plan = planBay(n, style, { car: opts.car, carZ0: opts.carZ0, noCar: opts.noCar, keep: opts.keep });
   const W = n.width, D = n.depth, H = n.ceilingH, shell = opts.shell === true ? { floor: true, walls: ["left", "right", "back"], ceiling: true, header: true } : opts.shell || null;
   const signs = opts.signs === false ? [] : [{ slot: "sign", text: style.name, sub: opts.signSub || "" }];
-  const TM = teamMaterials(lib, style, { floor: shell?.floor ? { w: W, d: D, car: plan.car } : null, signs });
+  // (opts.tm: the team's materials made once for all its bays – circuit.js – so its bays can be merged per material)
+  const TM = opts.tm || teamMaterials(lib, style, { floor: shell?.floor ? { w: W, d: D, car: plan.car } : null, signs, wall: !!shell });
   const P = new Parts(), fixtures = [];
   // the equipment, each module's pieces (shared, per lod) cloned into place
   for (const it of plan.items) {
@@ -45,7 +45,7 @@ export function buildBayInterior(zone, style, opts = {}) {
       const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0); g.rotateX(-Math.PI / 2); P.add("contact", g, (x0 + x1) / 2, 0.004, (z0 + z1) / 2);
     }
   }
-  if (plan.overhead) { const o = plan.overhead; boom(P, lod, o); for (const x of o.kind === "twin" ? [-0.55, 0.55] : [0]) fixtures.push({ kind: "boom", x, y: o.y1 - 0.53, z: (o.z0 + o.z1) / 2, len: (o.z1 - o.z0) * 0.62 }); }
+  if (plan.overhead) { const o = plan.overhead; P.merge(lib.boom(lod, o), new THREE.Matrix4().makeTranslation(0, 0, o.z0)); for (const x of o.kind === "twin" ? [-0.55, 0.55] : [0]) fixtures.push({ kind: "boom", x, y: o.y1 - 0.53, z: (o.z0 + o.z1) / 2, len: (o.z1 - o.z0) * 0.62 }); }
   // the floor's tape: the car's work place outlined (lines 5 cm wide), the door line
   if (plan.car?.fits && lod < 2) {
     const c = plan.car, x = c.width / 2 + 0.35, z0 = c.z0 - 0.35, z1 = c.z1 + 0.35, t = 0.05, y = 0.003;

@@ -169,3 +169,39 @@ test("garage kit in the garage helper's zones: garageZones → plan → its chec
   assert.ok(B.report.every((r) => (r.team === "McLaren" ? r.lod === 0 : r.lod === 2)));
   lib.dispose();
 });
+
+test("garage kit in a circuit's pit row (pitkit): near teams in full, every other team in one masked far merge, one unshadowed light, nothing shared written", async () => {
+  const GZ = await import("../src/renderer/garages.js"), { createPitKit } = await import("../src/renderer/garagekit/pitkit.js"), { disposeGroup } = await import("../src/renderer/dispose.js");
+  const slot = (k, uc) => ({ k, u0: uc - 4, u1: uc + 4, uc, front: [uc, 0], along: [1, 0], inward: [0, 1], width: 7.98, height: 4.25, ceil: 4.6, depth: 9.63, back: 3, floor: 0.2, depthFrom: "facility" });
+  const G = { slots: Array.from({ length: 12 }, (_, i) => slot(i, i * 8.5)) };
+  const names = ["McLaren", "Ferrari", "Mercedes", "Williams"];
+  const teams = names.map((t, i) => ({ team: t, colour: ["#ff8000", "#e8002d", "#27f4d2", "#64c4ff"][i], slots: [i * 3, i * 3 + 1, i * 3 + 2], drivers: [{ num: String(i * 2 + 1) }, { num: String(i * 2 + 2) }], spaces: [{ slot: i * 3, num: String(i * 2 + 1), w: 0 }, { slot: i * 3 + 2, num: String(i * 2 + 2), w: 0 }] }));
+  const zones = GZ.garageZones(G, teams), lit = [];
+  const k = createPitKit({ G, zones, teams, season: 2025, near: new Set(["McLaren"]), onMaterial: (m) => lit.push(m) });
+  const far = k.group.getObjectByName("garageKitFar"), near = () => k.group.getObjectByName("garageKitNear");
+  // one far mesh per material for the whole row, each vertex tagged with its team
+  const farMeshes = far.children.filter((o) => o.isMesh);
+  assert.ok(farMeshes.length > 3 && farMeshes.length <= 14, String(farMeshes.length));
+  assert.ok(farMeshes.every((m) => m.geometry.attributes.kitTeam && m.userData.kit === "far" && !m.castShadow));
+  // near: McLaren's three bays, their own materials; the check found no kit box in a car
+  assert.deepStrictEqual(k.state().near, ["McLaren"]); assert.deepStrictEqual(k.state().hits, []);
+  const nearMats = new Set(); near().traverse((o) => { if (o.isMesh) nearMats.add(o.material); });
+  assert.ok([...nearMats].some((m) => m.color?.getHexString() === "ff8000"), "McLaren's accent on its near bays");
+  // the far merge is kept across focus changes (no rebuild); the near group switches; the light is the same object
+  const light = k.group.getObjectByName("garageKitKey");
+  assert.strictEqual(light.castShadow, false);
+  k.update({ near: new Set(["Ferrari"]), cam: { x: 3 * 8.5, y: 1.5, z: -10 }, focus: "3" });
+  assert.strictEqual(k.group.getObjectByName("garageKitFar"), far);
+  assert.deepStrictEqual(k.state().near, ["Ferrari"]);
+  assert.strictEqual(k.group.getObjectByName("garageKitKey"), light);
+  assert.ok(light.intensity > 0 && k.state().key.bay === 3, "lit: the camera is 10 m from Ferrari #3's door");
+  k.update({ near: new Set(["Ferrari"]), cam: { x: 0, y: 200, z: -400 }, focus: "3" });
+  assert.strictEqual(light.intensity, 0, "dark from far away");
+  let lights = 0; k.group.traverse((o) => { if (o.isLight) lights++; }); assert.strictEqual(lights, 1);
+  // every kit material went through the night-light hook once
+  assert.ok(lit.length > 5 && new Set(lit).size === lit.length);
+  // boxes for the garage check: per slot, in its frame
+  assert.ok(k.boxesFor(0).length > 3 && k.boxesFor(0).every((b) => b.name.startsWith("kit ")));
+  // freeing the kit frees its library: the far clones and near materials disposed, the library marked
+  disposeGroup(k.group);
+});

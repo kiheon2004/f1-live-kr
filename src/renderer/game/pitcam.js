@@ -80,9 +80,12 @@ export function createPitCam(K) {
   let occ = null, occFor = null;
   const occluders = () => {
     const w = K.world(), g = K.pitTeamsGroup?.();
-    if (occFor && occFor.w === w && occFor.g === g) return occ;
-    occ = (w?.occluders || []).slice(); g?.traverse((o) => { if (o.isMesh && !o.isInstancedMesh) occ.push(o); });
-    occFor = { w, g }; return occ;
+    // (v0.49: the garage kit inside the layer is rebuilt when its near teams change – its revision is part of the key; its
+    // far merge, one mesh across the whole pit building at low detail, is left out: a ray would test all of it)
+    const rev = g?.getObjectByName("garageKit")?.userData.rev ?? null;
+    if (occFor && occFor.w === w && occFor.g === g && occFor.rev === rev) return occ;
+    occ = (w?.occluders || []).slice(); g?.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && o.userData.kit !== "far") occ.push(o); });
+    occFor = { w, g, rev }; return occ;
   };
   const boxOfRow = (A, g) => A.scenario.track.pit?.boxes?.[g.teamKey];
   const toWorld = (B, [a, b, h], out) => { const c = Math.cos(B.yaw), s = Math.sin(B.yaw), bb = b * B.left; return out.set(B.x + s * a + c * bb, B.y + h, B.z + c * a - s * bb); };

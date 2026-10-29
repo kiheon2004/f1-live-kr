@@ -74,6 +74,16 @@ export class Parts {
     this.slots.clear();
     return out;
   }
+  // each slot's pieces merged into one (UVs untouched – bake() projects them later): a cached module is then cloned into a
+  // bay as a handful of geometries instead of hundreds of small ones (the circuit's pit row builds ~30 bays)
+  consolidate() {
+    for (const [slot, list] of this.slots) {
+      if (list.length < 2) { for (const g of list) tidy(g); continue; }
+      const m = mergeGeometries(list.map(tidy), false); for (const g of list) g.dispose();
+      this.slots.set(slot, [m]);
+    }
+    return this;
+  }
   // triangles so far (dev)
   get triangles() { let n = 0; for (const list of this.slots.values()) for (const g of list) n += (g.index ? g.index.count : g.attributes.position.count) / 3; return n; }
 }
