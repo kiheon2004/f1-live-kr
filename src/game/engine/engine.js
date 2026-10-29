@@ -31,6 +31,7 @@ import { Streams } from "./rng.js";
 import { DT_MS, DT } from "./clock.js";
 import * as CMD from "./commands.js";
 import { newTraffic, trafficSetup, trafficPre, trafficEnv, trafficPost, trafficAccount, trafficEnd, pathFactor, mergeClear, onPitExit, gridLateral, snapTraffic } from "./traffic.js";
+import { newAiState, aiPrePlans, aiStep } from "./ai.js";
 import { carBase } from "../data/params/cars-base.js";
 import { energyParams } from "../data/params/energy.js";
 import { airDensity } from "../data/params/physics.js";
@@ -49,9 +50,22 @@ export const STATE_VERSION = 1;
 
 // ---------- creation ----------
 
-export function createRace({ scenario, seed = 1, userTeam = null, weatherMode = "real", carParams = null, driverParams = null, plans = null }) {
+// ai: false (default – every car on its given/default plan), true (every team run by ai.js; the player's team too until
+// the player orders a car) or { teams: [teamKey…] } (only those). The AI's pre-race plans are computed on a throw-away race
+// of the same seed and given to the race like the player's pre-race plans (plans passed here win for their cars).
+export function createRace(opts) {
+  const { ai = false, ...rest } = opts;
+  if (!ai) return createRace0(rest);
+  const teams = ai === true ? null : ai.teams || null;
+  const pre = aiPrePlans(createRace0({ ...rest, plans: null }), teams);
+  const race = createRace0({ ...rest, plans: { ...pre, ...(rest.plans || {}) } });
+  race.state.ai = newAiState(race, { teams });
+  for (const team in race.state.ai.teams) for (const num in race.state.ai.teams[team].cars) { const p = pre[num]; if (p && !rest.plans?.[num]) race.state.ai.teams[team].cars[num].modes = p.stints.map((s, i) => ({ toLap: s.toLap, mode: p.modes[i] })); }
+  return race;
+}
+function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real", carParams = null, driverParams = null, plans = null, tyreWear = 1 }) {
   const sc = scenario, season = sc.meta.season;
-  const state = { v: STATE_VERSION, engine: ENGINE_VERSION, t: 0, step: 0, seed: seed >>> 0, scenarioId: sc.meta.id, season,
+  const state = { v: STATE_VERSION, engine: ENGINE_VERSION, t: 0, step: 0, seed: seed >>> 0, scenarioId: sc.meta.id, season, tyreWear,
     userTeam, weatherMode, totalLaps: sc.race.laps, phase: "grid", finished: false, leaderLap: 0, chequeredAt: null,
     cars: [], order: [], boxes: null, commands: CMD.newCommandState(), teamOrders: {}, log: [], results: null };
   const race = { state, scenario: sc, cache: null, rng: new Streams(seed) };
@@ -112,7 +126,7 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
 
 // a set of tyres by its race name: the model's compound is the event's C-number; the name is kept for rules and screens
 function newTyre(race, name, airT) {
-  const C = race.cache, code = C.alloc[name] || name, ty = createTyre(code, { T0: fitTemp(race.state.season, code, airT ?? 25) });
+  const C = race.cache, code = C.alloc[name] || name, ty = createTyre(code, { T0: fitTemp(race.state.season, code, airT ?? 25), kwScale: race.state.tyreWear ?? 1 });   // (tyreWear: a sensitivity knob, 1 = the model)
   ty.name = name; return ty;
 }
 
@@ -122,13 +136,12 @@ function weatherRecord(W) {
   return c.t.map((ts, i) => ({ t: ts * 1000, rain: c.rain?.[i] ?? 0, airT: c.air?.[i], trackT: c.track?.[i], wind: c.windSpeed?.[i] }));
 }
 
-// a plain team plan when none is given: start on the harder of the two most-used dry compounds, one stop near half
-// distance onto the other – what a team without its own strategist would do. ai.js replaces it with real strategy.
+// a plain team plan when none is given: one stop near half distance, MEDIUM → HARD – the two harder of the event's three
+// nominated dry compounds (known before the race; NOT the compounds the real race happened to use – scenario.tyres.
+// compoundsSeen comes from the race's own stints and is never an engine input, DESIGN §0.6). ai.js replaces it.
 export function defaultPlan(sc, num) {
-  const seen = (sc.tyres?.compoundsSeen || ["MEDIUM", "HARD"]).filter((c) => c === "SOFT" || c === "MEDIUM" || c === "HARD");
-  const a = seen.includes("MEDIUM") ? "MEDIUM" : seen[0] || "MEDIUM", b = seen.includes("HARD") ? "HARD" : seen.find((x) => x !== a) || "HARD";
   const L = sc.race.laps;
-  return { stints: [{ compound: a, toLap: Math.round(L * 0.45) }, { compound: b, toLap: L }], by: "default" };
+  return { stints: [{ compound: "MEDIUM", toLap: Math.round(L * 0.45) }, { compound: "HARD", toLap: L }], by: "default" };
 }
 
 // ---------- the step ----------
@@ -165,6 +178,8 @@ export function step(race) {
   // 5. order, finish
   sortOrder(race);
   finishCheck(race, t);
+  // 6. the team AI (only orders – applied from the next step, like the player's)
+  if (S.ai) aiStep(race);
 }
 
 // tv: traffic's energy scene (mode incl. ":scene", 2026 Overtake active) – the free reference power (P0) is the team mode's
@@ -249,7 +264,7 @@ function ghostModels(E) {
 function movePit(race, car, t) {
   const S = race.state, C = race.cache, T = C.T;
   const others = S.cars.filter((o) => o.where === "pit").map((o) => ({ num: o.num, team: o.teamKey, phase: o.pit.phase, u: o.pit.u, v: o.pit.v }));
-  const sPrev = T.pit.pitToLap(car.pit.u);
+  const sPrev = T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * T.ahead(T.pit.sIn, T.pit.sOut));
   const pen = car.pen.pendingS;
   let ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others, penaltyS: pen,
     stack: S.cars.some((o) => o !== car && o.teamKey === car.teamKey && o.pit.times?.release && t - o.pit.times.release < 30000),
@@ -277,8 +292,10 @@ function movePit(race, car, t) {
     log(race, { t, car: car.num, type: "pitExit", cause: "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s − free ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
     car.pit.times = {};
   }
-  // the timing line inside the pit lane
-  const sNow = car.where === "pit" ? T.pit.pitToLap(car.pit.u) : car.s;
+  // the timing line inside the pit lane; the lap position of a pit car runs from the branch to the merge in proportion to
+  // the path (pitToLap is clamped near the ends – a distance that stalled there let a car seem behind the car that left
+  // the lane after it: the control report)
+  const span = T.ahead(T.pit.sIn, T.pit.sOut), sNow = car.where === "pit" ? T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * span) : car.s;
   if (car.where === "pit") { const crossed = T.ahead(sPrev, sNow) < T.L / 2 && sNow < sPrev; lineCrossing(race, car, sPrev, sNow, crossed, t); car.s = sNow; }
   car.dist = car.armed ? car.lap * T.L + (car.where === "pit" ? sNow : car.s) : (car.where === "pit" ? sNow : car.s) - T.L;
 }

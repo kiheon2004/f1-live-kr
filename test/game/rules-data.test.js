@@ -18,7 +18,15 @@ for (const y of [2024, 2025, 2026]) {
     for (const d of Object.values(o.docs)) assert.match(d.url, /^https:\/\/www\.fia\.com\//, "season documents are FIA originals");
     for (const [k, v] of entries(o)) {
       assert.ok("value" in v, `${k}: value`);
-      assert.equal(v.implemented, false, `${k}: starts unimplemented (the engine flips it when it enforces the rule)`);
+      // implemented: false until the engine really enforces the rule; true only with the engine module that does it
+      // (impl names an existing src/game/engine file); a partly done rule stays false and says what is done (implPartial)
+      assert.equal(typeof v.implemented, "boolean", `${k}: implemented flag`);
+      if (v.implemented) {
+        assert.ok(typeof v.impl === "string" && v.impl.length > 8, `${k}: implemented → impl names where`);
+        const f = v.impl.match(/engine\/[a-z0-9]+\.js/)?.[0];
+        assert.ok(f && require("node:fs").existsSync(path.join(__dirname, "../../src/game", f)), `${k}: ${f} exists`);
+      }
+      if (v.implPartial) assert.equal(v.implemented, false, `${k}: partial is not implemented`);
       assert.equal(typeof v.verified, "boolean", `${k}: verified flag`);
       assert.ok(v.src && typeof v.src.doc === "string" && v.src.doc.length > 3, `${k}: src.doc`);
       assert.ok(typeof v.src.art === "string", `${k}: src.art`);

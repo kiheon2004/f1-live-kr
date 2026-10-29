@@ -9,7 +9,7 @@ test.before(async () => { X = await physics(); T = X.tyre; });
 const DT = 0.05;
 // constant running conditions for t seconds
 function run(ty, s, inp) { for (let k = 0; k < Math.round(s / DT); k++) T.stepTyre(ty, inp, DT); return ty; }
-const racing = { v: 55, aLat: 11, aLong: 4, heat: 1, Tair: 25, Ttrack: 35, water: 0 }; // ≈ a dry racing lap's mean tyre work (Q ≈ 800 m²/s³, measured in solo runs)
+const racing = { v: 55, aLat: 15, aLong: 5, heat: 1, Tair: 25, Ttrack: 35, water: 0 }; // ≈ a dry racing lap's mean tyre work on the real tracks (Q ≈ 1100 m²/s³, measured in engine runs; the generic track gives ≈ 800)
 
 test("racing load heats a set from the blanket into the window; grip rises as it warms (out-lap)", () => {
   const ty = T.createTyre("C3", { T0: T.fitTemp(2025, "C3", 25) });
@@ -41,9 +41,10 @@ test("overheating loses grip REVERSIBLY: after cooling the grip comes back (minu
 });
 
 test("overheating accelerates irreversible wear (same tyre work, hotter track ⇒ more wear)", () => {
-  const a = T.createTyre("C3", { T0: 100 }), b = T.createTyre("C3", { T0: 100 });
+  // (a soft: on the real tracks' mean load a C3 stays in its window even on a 60 °C track)
+  const a = T.createTyre("C5", { T0: 100 }), b = T.createTyre("C5", { T0: 100 });
   run(a, 300, racing); run(b, 300, { ...racing, Ttrack: 60, Tair: 38 });
-  assert.ok(T.windowTemp(b) > T.compoundParams("C3").winHi, "hot day overheats: " + T.windowTemp(b));
+  assert.ok(T.windowTemp(b) > T.compoundParams("C5").winHi, "hot day overheats: " + T.windowTemp(b));
   assert.ok(b.wear > a.wear * 1.05, `hot ${b.wear} vs normal ${a.wear}`);
 });
 

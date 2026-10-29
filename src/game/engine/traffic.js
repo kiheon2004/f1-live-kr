@@ -36,6 +36,7 @@ import { computeProfile, makeProfile, comb, vlimAt } from "./profile.js";
 import { PHYS } from "../data/params/physics.js";
 import { DT, DT_MS } from "./clock.js";
 import { stepCar } from "./car.js";
+import { waterAt } from "./weather.js";
 import RULES_2024 from "../data/rules/2024.js";
 import RULES_2025 from "../data/rules/2025.js";
 import RULES_2026 from "../data/rules/2026.js";
@@ -166,9 +167,16 @@ function ctlOt(race, T, car) {
   const h = race.hooks?.control; if (h?.overtakeModeAllowed) return h.overtakeModeAllowed(race, T, car).ok;
   return !!race.cache.tc.rules.overtakeMode && race.cache.tc.otOn && race.state.phase === "racing" && (race.cache.w.rain ?? 0) < 0.1;
 }
-function contact(race, cand) {
-  const S = race.state; (S.tstats ||= newStats()).contacts++; S.tstats.byKind = S.tstats.byKind || {}; S.tstats.byKind[cand.kind] = (S.tstats.byKind[cand.kind] || 0) + 1;
-  const h = race.hooks?.incidents; if (h?.onContact) h.onContact(race, cand);
+// a contact candidate: counted by kind; a battle in a braking zone (the turn-in decision) and an unavoidable rear contact are
+// handed to incidents.js in its event shape { a (behind), b, overlap (0 nose at the rear wheels … 1 alongside), dv,
+// braking, latGap (m), water (mm) } via race.hooks.incidents.contact(race, T, ev) – once per battle; it decides
+// consequences (damage, retirement, stewards). A squeeze is only counted.
+function contact(race, cand, a = null, b = null) {
+  const S = race.state, C = race.cache, T = C.T, tc = C.tc; (S.tstats ||= newStats()).contacts++; S.tstats.byKind = S.tstats.byKind || {}; S.tstats.byKind[cand.kind] = (S.tstats.byKind[cand.kind] || 0) + 1;
+  const h = race.hooks?.incidents; if (!h?.contact || !a || !b) return;
+  const rel = T.delta(b.s, a.s), overlap = Math.max(0, Math.min(1, (tc.len + rel) / tc.len));   // a behind b: rel ≤ 0
+  h.contact(race, T, { a, b, overlap: cand.kind === "rearContact" ? 0.05 : overlap, dv: Math.max(0, a.v - b.v), braking: true,
+    latGap: Math.max(0, Math.abs(a.d - b.d) - tc.wid), water: C.surface ? waterAt(C.surface, a.s) : 0, kind: cand.kind });
 }
 const newStats = () => ({ passes: 0, lapping: 0, aborts: 0, defends: 0, blue: 0, contacts: 0, overlaps: 0, byCorner: {} });
 function log(race, e) { race.state.log.push({ t: e.t ?? race.state.t, lap: race.state.leaderLap, ...e }); }
@@ -351,8 +359,9 @@ function decide(race, c, tr, ctx) {
             const keeper = rel > len / 2 ? c : rel < -len / 2 ? w : inside;
             tr.keep = keeper.num;
             if (race.debugKeep) race.debugKeep(c, w, k, rel, keeper === c, inside === c);
+            const behind = rel <= 0 ? c : w, ahead = behind === c ? w : c;
+            contact(race, { t, a: behind.num, b: ahead.num, s: c.s, kind: Math.abs(rel) < len / 2 ? "turnInLevel" : "turnIn", dv: behind.v - ahead.v, why: "alongside at turn-in" }, behind, ahead);
             if (keeper === w) abort(race, c, tr, w, t, rel < -len / 2 ? "more than half a length behind at turn-in" : "level on the outside at turn-in");
-            else if (Math.abs(rel) < len / 2) contact(race, { t, a: c.num, b: w.num, s: c.s, kind: "turnInLevel", dv: c.v - w.v, why: "side by side at turn-in" });
           }
         } else if (tr.keep == null && !k) tr.keep = null;
         // the corner passed with nobody keeping it (no corner data): re-aim at the next one
@@ -660,7 +669,7 @@ export function trafficPost(race, t, s0of) {
     if (last != null && t - last < 3000) continue;
     S.tstats.overlaps++;
     log(race, { t, car: x.num, type: "contact", cause: `closing ${dv.toFixed(1)} m/s on ${y.tla} (${x.traffic.state})`, effect: "light contact – behind it at its speed", on: y.num, s: +x.s.toFixed(1), dv: +dv.toFixed(2) });
-    contact(race, { t, a: x.num, b: y.num, s: x.s, kind: "rearContact", dv, why: "could not slow in time" });
+    contact(race, { t, a: x.num, b: y.num, s: x.s, kind: "rearContact", dv, why: "could not slow in time" }, x, y);
   }
 }
 

@@ -37,6 +37,19 @@ test("save at 3 min → load → continue: the same race as never saved (RNG, ty
   assert.deepStrictEqual(b.state.log.slice(-5), a.state.log.slice(-5));
 });
 
+test("save/restore with the team AI on: AI state (estimates, tendencies, pending events) and its orders continue exactly", async () => {
+  const E = await load();
+  const a = E.createRace({ scenario: SC, seed: 6, ai: true });
+  for (let i = 0; i < 4000; i++) E.step(a);
+  const saved = E.saveRace(a);
+  for (let i = 0; i < 5000; i++) E.step(a);
+  const b = E.loadRace(saved, SC); for (let i = 0; i < 5000; i++) E.step(b);
+  assert.strictEqual(fingerprint(b), fingerprint(a));
+  assert.deepStrictEqual(b.state.ai, a.state.ai);
+  assert.deepStrictEqual(b.state.commands.log, a.state.commands.log);
+  assert.ok(a.state.commands.log.some((c) => c.by.startsWith("ai:")), "the AI gave orders");
+});
+
 test("orders: the same id twice acts once; a pit call stops the car and fits the new tyres only at the end of the work; a player can't order another team's car", async () => {
   const E = await load();
   const r = E.createRace({ scenario: SC, seed: 2, userTeam: "Ferrari" });

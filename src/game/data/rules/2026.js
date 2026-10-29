@@ -28,21 +28,21 @@ export default {
           C: { title: "2026 F1 Regulations – Section C Technical", issue: 21, date: "2026-10-19", url: C } },
 
   // ---------- points & classification ----------
-  points: R({ race: [25, 18, 15, 12, 10, 8, 6, 4, 2, 1], sprint: [8, 7, 6, 5, 4, 3, 2, 1], fastestLap: null }, a("A2.2.1, A2.2.2")),
+  points: R({ race: [25, 18, 15, 12, 10, 8, 6, 4, 2, 1], sprint: [8, 7, 6, 5, 4, 3, 2, 1], fastestLap: null }, a("A2.2.1, A2.2.2"), { implemented: true, impl: "engine/rules.js classify", implNote: "race points (the game has no sprint races)" }),
   pointsShortened: R({ minLeaderLaps: 2, minGreenLapsForReducedScale: 2, greenLapsMustBeConsecutive: true,
       bands: [{ fracMin: 0, scale: [6, 4, 3, 2, 1] }, { fracMin: 0.25, scale: [13, 10, 8, 6, 5, 4, 3, 2, 1] },
               { fracMin: 0.5, scale: [19, 14, 12, 10, 8, 6, 4, 3, 2, 1] }, { fracMin: 0.75, scale: [25, 18, 15, 12, 10, 8, 6, 4, 2, 1] }],
       sprintMinFrac: 0.5 }, a("A2.2.1a–d, A2.2.2"),
-    { note: "2026 wording: no points unless 'two complete and consecutive laps' by the leader without SC/VSC" }),
-  classification: R({ order: "laps completed desc, then order of crossing the Control Line", minFracOfWinnerLaps: 0.9, round: "down" }, b("B2.5.5")),
-  resultIfNotResumed: R({ takeAt: "end of the penultimate lap before the lap in which the suspension signal was given" }, b("B5.14.2")),
-  finishSignal: R({ rule: "chequered flag at the Control Line ON THE TRACK (not the pit lane) when the leader has covered the distance; early flag → last crossing before it; late flag → when it should have ended" }, b("B5.16.1–B5.16.2")),
+    { implemented: true, impl: "engine/rules.js classify", note: "2026 wording: no points unless 'two complete and consecutive laps' by the leader without SC/VSC" }),
+  classification: R({ order: "laps completed desc, then order of crossing the Control Line", minFracOfWinnerLaps: 0.9, round: "down" }, b("B2.5.5"), { implemented: true, impl: "engine/rules.js classify" }),
+  resultIfNotResumed: R({ takeAt: "end of the penultimate lap before the lap in which the suspension signal was given" }, b("B5.14.2"), { implemented: true, impl: "engine/control.js endUnderRed + rules.js classify" }),
+  finishSignal: R({ rule: "chequered flag at the Control Line ON THE TRACK (not the pit lane) when the leader has covered the distance; early flag → last crossing before it; late flag → when it should have ended" }, b("B5.16.1–B5.16.2"), { implemented: true, impl: "engine/control.js (chequered flag at the leader's crossing; each car at its next crossing on the track)", implNote: "the flag is never shown early or late in the game" }),
 
   // ---------- distance & time ----------
   distance: R({ raceMinKm: 305, monacoMinKm: 260, sprintMinKm: 100, laps: "least number of complete laps exceeding the distance" }, b("B2.5.2, B2.3.2")),
   timeLimit: R({ raceMs: 2 * 3600e3, raceMaxWithSuspensionMs: 3 * 3600e3,
       endRule: "leader shown the flag at the end of the lap FOLLOWING the lap in which the period ended (never beyond the scheduled laps)", suspensionAddsToPeriod: true },
-    b("B2.5.3a–b")),
+    b("B2.5.3a–b"), { implemented: true, impl: "engine/control.js controlStep", implNote: "the 3 h clock from an SC start does not apply: the game has no SC start" }),
   scStartLapReduction: R({ rule: "laps reduced by (laps behind the safety car − 1) when the formation lap starts behind the SC" }, b("B2.5.2a, B5.10.7")),
 
   // ---------- tyres ----------
@@ -52,7 +52,7 @@ export default {
     b("B6.2.4, B6.3.4"), { note: "'Alternative Format' = sprint weekend; ICTT = in-competition tyre testing weekend" }),
   mandatoryDryCompounds: R({ minDistinctDrySpecs: 2, atLeastOneMandatorySpec: true, exemptIfInterOrWetUsed: true,
       penalty: "disqualification", ifSuspendedAndNotRestarted: "+30 s to elapsed time", monaco: null }, b("B6.3.6"),
-    { note: "the 2025 Monaco 3-set rule is NOT in Section B Iss 09 (B6.3.6 has no Monaco clause)" }),
+    { implemented: true, impl: "engine/rules.js tyreRuleCheck", implNote: "the FIA mandatory specification comes from scenario.tyres.mandatory when known (none → any two dry specifications)", note: "the 2025 Monaco 3-set rule is NOT in Section B Iss 09 (B6.3.6 has no Monaco clause)" }),
   tyreUsedWhen: R({ pitLane: "when the transponder shows the car left the pit lane with them", grid: "when the car leaves its grid slot under its own power" }, b("B6.3.2")),
   wrongTyres: R({ maxLineCrossings: 2, penalty: "stop-and-go" }, b("B6.3.1")),
   wetTyresBehindSc: R({ rule: "wet-weather tyres compulsory until the SC orange lights go out and it returns to the pit lane, when the formation (B5.10.1a) or resumption (B5.15.2a) behind the SC is declared 'WET WEATHER TYRES MUST BE USED'; other spec meanwhile = stop-and-go" },
@@ -68,7 +68,7 @@ export default {
 
   // ---------- pit lane & pit stops ----------
   pitSpeedLimit: R({ defaultKmh: 80, perEvent: "Race Director may amend", penaltyInRace: "5 s / 10 s / drive-through / stop-and-go" }, b("B1.6.3a"),
-    { note: "per-event values MEASURED from the read-only session cache (CarData speed plateaus ≥3 s within ±1 km/h, 50–100 km/h: f1kr-work/v048/research/pitspeed_probe.py → pitspeed_probe.log); races not cached: default unless an event note says otherwise",
+    { implemented: true, impl: "engine/rules.js stewardsStep (speeding → 5 s, stewards' practice)", note: "per-event values MEASURED from the read-only session cache (CarData speed plateaus ≥3 s within ±1 km/h, 50–100 km/h: f1kr-work/v048/research/pitspeed_probe.py → pitspeed_probe.log); races not cached: default unless an event note says otherwise",
       measuredKmh: { default: 80, "Monaco": 60 } /* all 16 cached 2026 races: 80 except Monaco */ }),
   pitLaneLayout: R({ workOnlyIn: "inner lane (fast lane only at the end of the pit lane for pit-lane starters / suspensions)", noPoweredLifting: true,
       noReversingUnderPower: true, pitStopPositionsPerTeam: 1, pitStopCamera: "one per team above the pit stop position" }, b("B1.6.1, B1.6.3b–c")),
@@ -77,11 +77,11 @@ export default {
   unsafeRelease: R({ releasedWhen: "rear axle has passed the position the front axle occupied while stationary in the pit stop position (or out of the garage area)",
       forbidden: "unsafe situation, endangering personnel or another driver, clear and immediate risk of contact, likely damage; also releasing in an unsafe CONDITION",
       penaltyInRace: "stop-and-go", continuingKnowinglyUnsafe: "additional penalty" }, b("B1.6.2"),
-    { note: "release point is NEW in 2026 (2024/25: 'completely cleared its pit stop position')" }),
+    { implemented: true, impl: "engine/rules.js onUnsafeRelease (pit.js reports it)", implNote: "a release into another car's path: 5 s (stewards' practice); the stop-and-go of 34.14d / B1.6.2 is for an unsafe CONDITION, not modelled", note: "release point is NEW in 2026 (2024/25: 'completely cleared its pit stop position')" }),
   pitEntryClosed: R({ allowed: "only essential, evident repairs", penalty: "stop-and-go" }, b("B1.6.4")),
-  pitExit: R({ rule: "leave only on the green light; blue flag/flashing blue light in the pit exit road warns of cars on track" }, b("B1.6.3e")),
-  pitEntryUnderSc: R({ rule: "no car may enter the pits under SC unless to change tyres (except when all cars are routed through the pit lane)" }, b("B5.13.3")),
-  pitEntryUnderVsc: R({ rule: "no car may enter the pits under VSC unless to change tyres" }, b("B5.12.3")),
+  pitExit: R({ rule: "leave only on the green light; blue flag/flashing blue light in the pit exit road warns of cars on track" }, b("B1.6.3e"), { implemented: true, impl: "engine/control.js pitCtx / pitOpen (exit light: red flag, SC queue passing, pit-lane starters)" }),
+  pitEntryUnderSc: R({ rule: "no car may enter the pits under SC unless to change tyres (except when all cars are routed through the pit lane)" }, b("B5.13.3"), { implemented: true, impl: "engine/control.js pitOpen" }),
+  pitEntryUnderVsc: R({ rule: "no car may enter the pits under VSC unless to change tyres" }, b("B5.12.3"), { implemented: true, impl: "engine/control.js pitOpen" }),
 
   // ---------- penalties ----------
   penalties: R({
@@ -92,7 +92,7 @@ export default {
       notUnderScVsc: "drive-through / stop-and-go may not be served under VSC or after SC deployed (unless already in pit entry road/pit lane); laps behind SC/VSC added to the crossings",
       lastThreeLaps: { driveThrough: 20, stopGo: 30, maxLineCrossings: 3, unit: "s added", note: "2026: only DT/S&G convert in the last 3 laps (5/10 s are served or added as usual)" },
       afterSession: { fiveSec: 5, tenSec: 10, driveThrough: 20, stopGo: 30, unit: "s added" },
-      unservable: "grid penalty at next race (stewards' discretion)" }, b("B1.9.5a–d, B1.9.6")),
+      unservable: "grid penalty at next race (stewards' discretion)" }, b("B1.9.5a–d, B1.9.6"), { implemented: true, impl: "engine/rules.js penalise / onPitEntry / pitCtx / onPitExit / stewardsStep", implNote: "an unserved drive-through / stop-and-go → disqualification (game choice for the 'further penalty' of SR 54.4e / B1.9)" }),
 
   // ---------- safety car ----------
   safetyCar: R({ deploy: "SC joins with orange lights regardless of the leader's position", queueMaxGap: "10 car lengths (RD may set 20 in low visibility)",
@@ -103,11 +103,11 @@ export default {
       scIn: "'SAFETY CAR IN THIS LAP', lights out; leader dictates pace and may fall back; no erratic acceleration/braking; NO part of a car alongside any part of the car ahead until the SC enters the pit entry road (NEW 2026)",
       lapsCount: true, lastLap: "SC enters the pit lane at the end of the last lap, cars take the flag without overtaking (boards/yellows stay) – or RD keeps the SC out and it leads across the line",
       pitLaneUse: "RD may route all cars + SC through the pit lane (drive-through if a car does not)" },
-    b("B5.13.1–B5.13.8")),
+    b("B5.13.1–B5.13.8"), { implemented: true, impl: "engine/control.js (SC car, queue, wave-by, unlapping, SC in this lap, restart, last lap)", implNote: "not done: race control routing all cars through the pit lane; 'OVERTAKING WILL NOT BE PERMITTED'" }),
   virtualSafetyCar: R({ minTime: "above the FIA ECU minimum time once in each marshalling sector and at both SC lines; also when panels turn green",
       overtaking: "none, except pit entry after SC line 1 / pit exit before SC line 2 / within pit lane / car with obvious problem",
       ending: "'VSC ENDING' then 10–15 s later panels turn green, racing resumes immediately (green extinguished after 30 s)", lapsCount: true },
-    b("B5.12.1–B5.12.5")),
+    b("B5.12.1–B5.12.5"), { implemented: true, impl: "engine/control.js (per-car minimum time per marshalling sector, VSC ENDING 10–15 s)", implNote: "marshalling sectors are equal-length (est) – the real light-panel positions are not in the scenario" }),
 
   // ---------- red flag ----------
   redFlag: R({ onSignal: "'RED FLAG – RACE SUSPENDED'; no overtaking; pit exit closed; all cars slowly into the pit lane, first car to the pit exit (or another point set by the RD) in the fast lane, others queue in order of pit entry",
@@ -117,16 +117,16 @@ export default {
       tyreChange: "free (permitted work); wheels fitted at the 5-min signal; changing them before first leaving after resumption = stop-and-go",
       resume: "≥10 min notice; lapped cars + cars between SC and leader leave 2 min early for an extra lap; SC goes out BEFORE the 1-min signal to a resumption position (default: end of the first timing sector); at resumption the pit exit opens and cars drive round to meet it; then STANDING START RESUMPTION (grid) or ROLLING START RESUMPTION by RD decision",
       noOvertakeUntil: "rolling: the Control Line after the SC entered the pit entry road; no car alongside the car ahead from SC lights out until then" },
-    b("B5.14.2–B5.14.4, B5.15.1–B5.15.5")),
+    b("B5.14.2–B5.14.4, B5.15.1–B5.15.5"), { implemented: true, impl: "engine/control.js (pit-lane queue in resumption order, free tyre change, season resumption procedure, standing / rolling)", implNote: "repairs of accident damage during the suspension are not modelled" }),
 
   // ---------- flags / lapping ----------
   blueFlags: R({ preWarningGapS: 3.0, blueGapS: 1.2, rule: "lapped driver must allow the faster car past at the first available opportunity (ISC)" },
     { doc: "2025 Dutch GP Race Director's Event Notes (2025 value)", art: "3", accessed: AT,
       url: "https://www.fia.com/system/files/decision-document/2025_dutch_grand_prix_-_race_directors_event_notes_.pdf" },
-    { verified: false, note: "no 2026 event notes fetched; the 3.0 s / 1.2 s marshalling thresholds are the 2025 figures" }),
+    { implemented: true, impl: "engine/rules.js stewardsStep / yieldRequest", verified: false, note: "no 2026 event notes fetched; the 3.0 s / 1.2 s marshalling thresholds are the 2025 figures" }),
   trackLimits: R({ trackEdge: "white lines are track, kerbs are not; a car has left the track when no part touches it",
       raceSanction: "stewards' penalty guidelines – not in the regulations" }, b("B1.8.6"),
-    { verified: false, note: "count → penalty ladder not verified in an FIA document (see rules-2026.md)" }),
+    { implemented: true, impl: "engine/rules.js trackLimits (+ incidents.js 'wide')", implNote: "the ladder (B&W flag at 3, 5 s at 4 and each later) is the stewards' practice read from FIA race control messages – data/params/stewards.js", verified: false, note: "count → penalty ladder not verified in an FIA document (see rules-2026.md)" }),
 
   // ---------- start ----------
   start: R({ grid: "staggered 1×1, rows 16 m apart", formation: "pole leads; pit-lane speed limit until past pole; no practice starts; overtaking only to restore order",
@@ -135,8 +135,8 @@ export default {
       falseStart: "must be stationary from the THIRD red light until lights out → 5 s / 10 s / drive-through / stop-and-go",
       abortedStart: "cars stay in their grid slots; restart from the 10-min signal; race shortened by 1 lap; the cause starts from the pit lane",
       extraFormationLap: "race shortened by 1 lap each time", scStart: "formation behind SC (wets mandatory if declared at the 10-min signal); standing or rolling start; laps reduced by SC laps − 1",
-      mguKAtStart: "MGU-K may propel only after 50 km/h at a standing start (FIA-ECU safety net excepted)" },
-    { ...b("B5.1.2, B5.5–B5.11"), also: c("C5.2.12") }),
+      mguKMinKmh: 50, mguKAtStart: "MGU-K may propel only after 50 km/h at a standing start (FIA-ECU safety net excepted)" },
+    { ...b("B5.1.2, B5.5–B5.11"), also: c("C5.2.12") }, { implPartial: "engine/control.js: grid slots, lights, seeded reactions and launch inputs, false-start detection, pit-lane starters – NOT: formation lap, aborted start, extra formation lap, SC start" }),
 
   // ---------- DRS ----------
   drs: null, // DRS no longer exists in 2026 – replaced by Active Aero (wings) and Overtake (electrical): different systems.
@@ -149,7 +149,7 @@ export default {
       transitionMaxMs: 400, failSafe: "returns to Corner Mode", deployOnlyIn: "Activation Zone or stationary",
       afterStandingStart: "enabled after Turn 1 (per event notes)" },
     { ...b("B7.1.1–B7.1.2, B1.5.11"), also: c("C3.10.10 n–w, C3.11.6 c–k") },
-    { note: "'after Turn 1' and per-circuit zones come from FIA event documents summarised in the v0.44 notes (not re-fetched)" }),
+    { implPartial: "engine/control.js activeAeroAllowed: availability only (after Turn 1, partial in low grip) – the wings and zones are the aero model's", note: "'after Turn 1' and per-circuit zones come from FIA event documents summarised in the v0.44 notes (not re-fetched)" }),
 
   // ---------- Overtake (electrical) ----------
   overtakeMode: R({ detection: "car less than the Detection Gap behind ANOTHER car at the Detection Line → Overtake activated at the Activation Line; deactivated at the next Activation Line if not",
@@ -159,7 +159,7 @@ export default {
                 fullPowerUpToKmh: { withOvertake: 337.5, without: 290 } },
       notTheWings: true },
     { ...b("B7.2.1b ii/v/vii–ix, B7.2.2, B7.2.3"), also: c("C5.2.8 ii, C5.2.10 iii") },
-    { note: "fullPowerUpToKmh is arithmetic on C5.2.8 (350 kW cap): 1800−5v=350 → v=290; 7100−20v=350 → v=337.5. The FIA may adjust the curves per circuit (B7.2.1b i–ii)." }),
+    { implPartial: "engine/control.js overtakeModeAllowed: availability only (leader past the Detection Line, off under SC until all crossed the Line, low grip) – the detection gap and the power curve are the energy model's", note: "fullPowerUpToKmh is arithmetic on C5.2.8 (350 kW cap): 1800−5v=350 → v=290; 7100−20v=350 → v=337.5. The FIA may adjust the curves per circuit (B7.2.1b i–ii)." }),
 
   // ---------- power unit / energy ----------
   ers: R({ mguKMaxKw: 350, mguKMaxNm: 500, mguH: null, socWindowMJ: 4,
