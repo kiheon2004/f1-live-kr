@@ -69,3 +69,12 @@ test("ranges after 10 min: speeds, tyre wear/temperatures, fuel, energy all fini
     assert.ok(c.dist > dist0.get(c.num) + 4000, `car ${c.num} moved ${c.dist - dist0.get(c.num)} m`);
   }
 });
+
+test("a pit-lane starter (Hungary 2025: car 22) starts from the pit lane behind the field, not ahead of it", async () => {
+  const E = await load();
+  const r = E.createRace({ scenario: SC, seed: 1 });
+  const tsu = () => r.state.cars.find((c) => c.num === "22");
+  assert.strictEqual(tsu().pitStart, true);
+  for (let i = 0; i < 20 * 40; i++) E.step(r);   // 40 s
+  assert.strictEqual(r.state.order[r.state.order.length - 1], "22", `last after 40 s: ${r.state.order.join(",")}`);
+});

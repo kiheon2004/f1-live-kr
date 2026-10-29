@@ -33,6 +33,13 @@ import { carBase } from "../data/params/cars-base.js";
 import { energyParams } from "../data/params/energy.js";
 import { airDensity } from "../data/params/physics.js";
 import { DEFAULT_ALLOCATION } from "../data/params/tyres.js";
+import { values } from "../data/params/param.js";
+import { CARS_2025_TABLE, TRACK_TAU_2025 } from "../data/params/cars-2025.js";
+import { CARS_2026_TABLE, TRACK_TAU_2026 } from "../data/params/cars-2026.js";
+// per-team fitted car coefficients by season (calibrate.mjs; 2024 has none – one wet race – so the base car); per-race
+// track grip factor τ where the calibration fitted one (from THAT race's speed traces – a circuit/conditions property,
+// not its result), else 1 (estimate: the validation showed ±3 s/lap without it – reported as a limit)
+const TEAM_CARS = { 2025: CARS_2025_TABLE, 2026: CARS_2026_TABLE }, TRACK_TAU = { ...TRACK_TAU_2025, ...TRACK_TAU_2026 };
 import NOMINATIONS from "../data/tyres/nominations.js";
 
 export const ENGINE_VERSION = "0.48.0-engine.1";
@@ -50,7 +57,7 @@ export function createRace({ scenario, seed = 1, userTeam = null, weatherMode = 
   buildCache(race, { carParams, driverParams });
   const T = race.cache.T, w0 = truthAt(race.cache.truth, 0);
   const slots = new Map((sc.grid?.slots || []).map((g) => [g.num, g]));
-  const pitStarters = new Set(sc.grid?.pitLane || []);
+  const pitStarters = new Set((sc.grid?.pitLane || []).map((x) => (typeof x === "object" ? x.num : x)));
   const teams = [...new Set(sc.entries.map((e) => e.teamKey))];
   state.boxes = newBoxes(teams);
   for (const e of sc.entries) {
@@ -83,7 +90,8 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   const PT = { n: T.n, ds: T.ds, L: T.L, kappa: T.kappaLine || T.kappa, grade: T.grade };
   const base = carBase(season), cars = {}, drivers = {}, profiles = {};
   for (const e of sc.entries) {
-    cars[e.num] = { ...base, ...(carParams?.[e.teamKey] || {}) };
+    const fitted = TEAM_CARS[season]?.[e.teamKey];
+    cars[e.num] = { ...base, ...(fitted ? values(fitted) : {}), ...(carParams?.[e.teamKey] || {}) };
     drivers[e.num] = driverParams?.[e.num] || {};
     profiles[e.num] = { prof: makeProfile(T.n), at: -1e9 };
   }
@@ -91,7 +99,8 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   // race names (SOFT/MEDIUM/HARD) → the C-number Pirelli nominated for this event (research data; else the defaults, est)
   const nomKey = sc.meta.id.replace(/_\d{4}-\d{2}-\d{2}_Race$/, ""), nom = NOMINATIONS.races[nomKey];
   const alloc = nom ? { HARD: nom.H, MEDIUM: nom.M, SOFT: nom.S, INTERMEDIATE: "INTERMEDIATE", WET: "WET", est: false } : { ...DEFAULT_ALLOCATION, est: true };
-  race.cache = { T, PT, cars, drivers, profiles, alloc, ep: energyParams(season), truth: weatherTruth(rec, { mode: race.state.weatherMode, seed: race.state.seed, minutes: 240 }),
+  const tau = TRACK_TAU[sc.meta.id] ?? 1;
+  race.cache = { T, PT, cars, drivers, profiles, alloc, tau, tauEst: !(sc.meta.id in TRACK_TAU), ep: energyParams(season), truth: weatherTruth(rec, { mode: race.state.weatherMode, seed: race.state.seed, minutes: 240 }),
     surface: race.cache?.surface || null, w: {}, carById: null };
   if (!race.state.surface) race.state.surface = saveSurface(newSurface(T));
   race.cache.surface = loadSurface(race.state.surface);
@@ -170,7 +179,7 @@ function envFor(race, car) {
   const water = waterAt(C.surface, car.s), rubber = rubberAt(C.surface, car.s);
   const mode = car.mode.energy, ep = C.ep;
   const pIce = iceCap(car.energy, cp.P_ice, ep), pErs = ersCap(car.energy, ep, mode, car.v, false);
-  return { water, rubber, m: cp.m_min + car.energy.fuel, pIce, pErs, P: pIce + pErs, rho: airDensity(w.airT ?? 25), muTyre: tyreGrip(car.tyre, water), util: utilisation(car.driver, water) };
+  return { water, rubber: rubber * C.tau, m: cp.m_min + car.energy.fuel, pIce, pErs, P: pIce + pErs, rho: airDensity(w.airT ?? 25), muTyre: tyreGrip(car.tyre, water), util: utilisation(car.driver, water) };
 }
 
 function moveLap(race, car, t, capFollow) {
