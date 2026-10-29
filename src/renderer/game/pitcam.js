@@ -151,8 +151,8 @@ export function createPitCam(K) {
     const shot = SHOTS[S.shot || "idle"], car = K.cars.get(num);
     // what it looks at: a point of the box's frame, or the car (its middle, a little up)
     const target = shot.look === "car" && car?.obj.visible ? v3(K).copy(car.pos).setY(car.pos.y + 0.5) : toWorld(B, shot.look === "car" ? [0, 0, 0.45] : shot.look, v3(K));
-    // the spot: re-checked on a cut and every 0.3 s (cars and crew move), kept while it holds
-    if (!S.spot || now - S.spotWall > 300) {
+    // the spot: re-checked on a cut and every 1 s (cars and crew move; a check costs ~3 ms – v0.49 perf run), kept while it holds
+    if (!S.spot || now - S.spotWall > 1000) {
       const t0 = performance.now();
       const sp = place(B, shot, target, team, num, camera);
       S.stats.evalMs += performance.now() - t0; S.stats.evals++;
