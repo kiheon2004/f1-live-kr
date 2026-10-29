@@ -18,7 +18,7 @@ import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
-import { LANES, laneCells, crossSection } from "./pitlane.js";
+import { LANES, laneCells, crossSection, laneSectionAt } from "./pitlane.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
@@ -292,11 +292,10 @@ function pitModelFor(G) {
     const wall = G.wallFace ? G.wallFace(s.uc) : null;
     return { s, cs: crossSection({ wall, edge }), edge, floor: s.floor };
   });
-  const at = (u) => {
-    const f = Math.max(0, Math.min(st.length - 1, (u - G.gStart) / G.pitch - 0.5)), i = Math.min(st.length - 2, Math.floor(f)), t = st.length > 1 ? f - Math.max(0, i) : 0;
-    const a = st[Math.max(0, i)], b = st[Math.min(st.length - 1, Math.max(0, i) + 1)], L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
-    return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor: a.floor + (b.floor - a.floor) * t, slot: t < 0.5 ? a.s : b.s };
-  };
+  // (between the garages either side of u by their centres – a run's garages can have a gap, Madrid 2026 –, the wall's
+  // face the facility's own at u, within the run: laneSectionAt)
+  const us = st.map((x) => x.s.uc), wf = G.wallFace ? (u) => G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, u))) : null;
+  const at = (u) => laneSectionAt(st, us, u, wf);
   m = { G, st, at, ok: st.filter((x) => x.cs.ok).length, wallFrom: [...new Set(st.map((x) => x.cs.wallFrom))] };
   pitModels.set(G, m);
   return m;
@@ -4393,7 +4392,11 @@ window.Map3D = {
     const targets = [world.real?.group.getObjectByName("barriers"), world.real?.group.getObjectByName("facilities"), world.group.getObjectByName("syntheticWalls")].filter(Boolean);
     const secs = [];
     for (const t of pitTeams.teams) {
-      const L = (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
+      // (its length as built – the layer's record: pitTeams.teams is re-derived on every update without t.wallStand, so
+      // v0.46 measured every stand as 6 seats, 5.4 m – a 4-seat stand's phantom ends met the walkway's railing once it
+      // opened only in front of the stand: v0.47 run/stands)
+      const built = (pitTeams.group?.userData.wallStands || []).find((q) => q.team === t.team);
+      const L = built ? built.L : (t.wallStand?.seats ?? 6) * 0.8 + 0.6, w = t.box != null && G.wallAt?.(t.box, L / 2); if (!w) continue;
       // (where the stand is – it may stand a little along the wall from its box: facilities.js wallAt)
       const uc = G.project(w.p[0], w.p[2]).u, s = G.slots.reduce((p, q) => (Math.abs(q.uc - uc) < Math.abs(p.uc - uc) ? q : p)), out = [-s.inward[0], -s.inward[1]], across = [];
       // (across the stand's length every 0.5 m, from 0.25 m in at either end – not one line at its middle: a line through
@@ -4434,6 +4437,52 @@ window.Map3D = {
     const [s] = world.grid.nearest(w[2], w[3], 6), y = s ? s.p.y : 0;
     // (returns the camera as a Map3D.look call too: the same view in another build – before / after pictures)
     const v = [w[2], y + h, w[3] + back, w[2], y, w[3], fov].map((x) => +x.toFixed(2)); this.look(...v); return `${JSON.stringify(w)} Map3D.look(${v.join(", ")})`;
+  },
+  // development (v0.47): the teams' stands against each other – overlaps, order, the walkway's ends, the railing opened
+  // in front of them, the lane and the cars' path (standcheck.js judges; each stand as garages.js built it). dump: the
+  // plain input too (a test fixture)
+  async standCheck(detail = false, dump = false) {
+    const G = pitTeams.G; if (!G || !pitTeams.teams) return JSON.stringify({ ok: false, why: "no garages" });
+    const { checkStands, PARTS } = await import("./standcheck.js"), { CREW_ROOM } = await import("./pitlane.js");
+    const u0 = G.project(0, 0).u, ux = G.project(1, 0).u - u0, uz = G.project(0, 1).u - u0, axis = { o: [-u0 * ux, -u0 * uz], u: [ux, uz] };
+    const m = pitModelFor(G), lane = world.pitLane, r3 = (x) => +x.toFixed(3);
+    const feedOff = (u) => { if (!lane) return null; let best = 6, off = null; for (const q of lane.pts) { const pr = G.project(q.x, q.z), d = Math.abs(pr.u - u); if (d < best) { best = d; off = pr.off; } } return off; };
+    // (the stands as the layer built them – pitTeams.teams is re-derived on every update, the layer only when the allocation changes)
+    const built = pitTeams.group?.userData.wallStands || [], boxes = built.map((t) => [t.box - 2.87, t.box + 2.87, t.boxOff + 1.17]);
+    const stands = [];
+    for (const w of built) {
+      const t = w;
+      const parts = PARTS(w.L, w.enclosed).filter((q) => q.low), across = [];
+      // (across its length every 0.25 m, the step's end included: the lane side of what stands there – deck, step, posts)
+      if (!w.upper) for (let a = -w.L / 2 - 0.05; a <= w.L / 2 + 0.55; a += 0.25) {
+        const o = Math.max(...parts.filter((q) => Math.abs(a - q.a) <= q.la / 2 + 1e-6).map((q) => q.o + q.lo / 2)); if (!Number.isFinite(o)) continue;
+        const x = w.p[0] + w.along[0] * a + w.out[0] * o, z = w.p[1] + w.along[1] * a + w.out[1] * o, pr = G.project(x, z), u = pr.u, uu = Math.max(G.gStart, Math.min(G.gEnd, u));
+        const cs = m.at(uu), f = feedOff(u), car = laneOffsetOf({ lane: "fast", w: 0 }, cs, f ?? cs.fastC, u, G.gStart, G.gEnd), bx = boxes.filter((b) => u >= b[0] && u <= b[1]);
+        const dk = Math.abs(a) <= w.L / 2 - 0.25 + 1e-6 ? G.project(w.p[0] + w.along[0] * a + w.out[0] * 0.85, w.p[1] + w.along[1] * a + w.out[1] * 0.85).off : null;
+        across.push({ a: r3(a), u: r3(u), standLane: r3(pr.off), deckLane: dk == null ? null : r3(dk), laneFace: G.wallFace ? r3(G.wallFace(uu)) : null, carEdge: r3(car + CREW_ROOM.carHalf), boxEdge: bx.length ? r3(Math.max(...bx.map((b) => b[2]))) : null, feedEdge: f == null ? null : r3(f + CREW_ROOM.carHalf) });
+      }
+      stands.push({ team: t.team, box: r3(t.box), L: w.L, p: w.p.map(r3), along: w.along.map((x) => +x.toFixed(5)), out: w.out.map((x) => +x.toFixed(5)), enclosed: w.enclosed, upper: w.upper, across });
+    }
+    // (the walkway railing as drawn: the rail mesh's quads out at the lane's face – the building's balustrades share the
+    // mesh –, each shown or left out of its index; not railU, which says what openRail meant to do)
+    const railDrawn = () => {
+      const rm = pitTeams.facility?.getObjectByName("rail"); if (!rm) return [];
+      const pos = rm.geometry.attributes.position, ix = rm.geometry.index, shown = new Set(), out = [];
+      if (ix) for (let k = 0; k < ix.count; k += 6) shown.add(Math.floor(ix.getX(k) / 6));
+      for (let q = 0; q < pos.count / 6; q++) {
+        let u0 = Infinity, u1 = -Infinity, off = 0;
+        for (let k = 0; k < 6; k++) { const pr = G.project(pos.getX(q * 6 + k), pos.getZ(q * 6 + k)); u0 = Math.min(u0, pr.u); u1 = Math.max(u1, pr.u); off += pr.off / 6; }
+        const wf = G.wallFace?.(Math.max(G.gStart, Math.min(G.gEnd, (u0 + u1) / 2)));
+        if (wf != null && Math.abs(off - wf) < 0.6 && u1 - u0 > 0.05) out.push([r3(u0), r3(u1), !ix || shown.has(q) ? 1 : 0]);
+      }
+      return out.sort((a, b) => a[0] - b[0]);
+    };
+    const input = { axis: { o: axis.o.map(r3), u: axis.u.map((x) => +x.toFixed(6)) }, wall: G.railU?.length ? [r3(G.railU[0][0]), r3(G.railU[G.railU.length - 1][1])] : null, run: [r3(G.gStart), r3(G.gEnd)],
+      rail: railDrawn(), spans: (pitTeams.group?.userData.standSpans || []).map(([a, b]) => [r3(a), r3(b)]), stands };
+    const v = checkStands(input);
+    return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, bad: v.problems.length, problems: v.problems, nMoved: v.nMoved, maxMove: v.maxMove, minGap: v.minGap, minCarGap: v.minCarGap,
+      rail: v.rail && { segments: v.rail.segments, open: v.rail.open, openM: v.rail.openM, maxBeyond: v.rail.maxBeyond, beyond: detail ? v.rail.beyond : undefined, through: v.rail.through },
+      tight: v.tight, overlaps: v.overlaps, order: v.order, ends: v.ends, moved: detail ? v.moved : v.moved.filter((q) => Math.abs(q.du) > 0.25), gaps: detail ? v.gaps : undefined, lane: detail ? v.lane : undefined, ...(dump ? { input, model: { pitch: r3(G.pitch), slots: m.st.map((x) => [r3(x.s.uc), x.cs.wall == null ? null : r3(x.cs.wall), x.cs.fastC == null ? null : r3(x.cs.fastC)]) } } : {}) });
   },
   // development: the pit lane's per-frame cost (pitFrame: every pit car's state; the crews), average over the frames
   pitCostMs(reset = false) { const r = { avgMs: +(pitCost.ms / Math.max(1, pitCost.frames)).toFixed(3), frames: pitCost.frames }; if (reset) { pitCost.ms = 0; pitCost.frames = 0; } return JSON.stringify(r); },

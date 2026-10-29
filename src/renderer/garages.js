@@ -567,6 +567,7 @@ const textOn = (hex) => { const n = parseInt(hex.slice(1), 16), l = 0.299 * (n >
 export function teamLayer(garages, teams, drivers, season = null) {
   const S = shared(), group = new THREE.Group(); group.name = "pitTeams";
   group.userData.covers = [];   // (the pit wall stands' canopies: no rain under them – weather3d.js)
+  group.userData.wallStands = [];   // (each team's stand as built: standcheck.js)
   group.userData.standSpans = [];   // (along the garages, each stand with its step: the walkway's railing opens there – facilities.js openRail)
   if (!teams.length) return group;
   const bySlot = new Map(garages.slots.map((s) => [s.k, s]));
@@ -651,6 +652,8 @@ export function teamLayer(garages, teams, drivers, season = null) {
     if (seat.enclosed) for (const a of [-L / 2 - 0.02, L / 2 + 0.02]) boxQ(panels, at(a, 0.05, deck + 1.5), A, up, O, 0.03, 2.4, 1.7, dark, 12);
     if (!w.upper) { const uc = garages.project(p.x, p.z).u; group.userData.standSpans.push([uc - L / 2 - 0.3, uc + L / 2 + 0.6]); }
     t.wallStand = { seats: N, from: seat.from };
+    // (where it stands, as built – map3d.js standCheck measures the neighbours against each other: standcheck.js)
+    group.userData.wallStands.push({ team: t.team, box: t.box, boxOff: t.boxOff, p: [p.x, p.z], y: p.y, along: [...w.along], out: [...w.out], L, enclosed: !!seat.enclosed, upper: !!w.upper });
   };
   const inst = { tyres: [], cabinet: [], jack: [], bench: [], screens: [], boom: [], trolley: [], gun: [], monitor: [] }, boards = [];
   const floor = { pos: [], col: [], nor: [] }, lights = { pos: [], nor: [] };
