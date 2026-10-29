@@ -258,8 +258,11 @@ SC/VSC는 속도 비율이 아니라: VSC는 차량별 델타 시간(최소 구�
            wheelDist,                                        // 누적 주행 m(바퀴 회전 = 거리/반지름)
            aero: { open, front }, drs, overtake,             // 게임 상태(실제 텔레메트리 아님)
            tyre: { compound, wear, Ts, Tc, age }, energy: { soc, mode, deployKw }, fuel,
-           pit: { phase, u, workT0, workT1, err } }] }
+           pit: { phase, u, workT0, workT1, err, compound },     // compound: 이 정차에서 끼울 타이어(작업 중 크루가 들고 있는 것)
+           gap: { leader, ahead } }] }                       // 초(랩 다운이면 leader는 null, lapsDown 별도)
 ```
+`steer`: 앞바퀴 조향각(rad), +는 왼쪽. 추가 API: `events(race, sinceT)` → 그 이후 사건(로그·자동 감속용),
+`results(race)` → 분류 + 차량별 시간 손실 계정(§12).
 화면은 마지막 두 스냅샷(t₀ < t₁)을 렌더 시각으로 보간한다(s는 감쌈 보간, 피트 단계·상태는 t₁ 값). 보간은 엔진에
 아무것도 쓰지 않는다.
 

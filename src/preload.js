@@ -46,6 +46,15 @@ contextBridge.exposeInMainWorld("api", {
     // cloud cover at (lat, lon) round a moment (main/clouds.js) – { ok, hours: [[utcMs, 0–1]…], source } | { ok: false, reason }
     clouds: (lat, lon, utc, live) => ipcRenderer.invoke("weather:clouds", lat, lon, utc, live),
   },
+  // the strategy game's files (main/gamestore.js: userData/game – apart from the session cache)
+  game: {
+    scenarios: () => ipcRenderer.invoke("game:scenarios"),
+    scenario: (id) => ipcRenderer.invoke("game:scenario", id),
+    saveResult: (id, result) => ipcRenderer.invoke("game:saveResult", id, result),
+    results: (id) => ipcRenderer.invoke("game:results", id),
+    save: (slot, data) => ipcRenderer.invoke("game:save", slot, data),
+    load: (slot) => ipcRenderer.invoke("game:load", slot),
+  },
   compactWindow: (on) => ipcRenderer.invoke("win:compact", on),
   pinWindow: (on) => ipcRenderer.invoke("win:pin", on),
   notify: (title, body) => ipcRenderer.invoke("notify", title, body),

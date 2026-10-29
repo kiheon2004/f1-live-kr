@@ -9,6 +9,7 @@ const { getCircuit } = require("./circuit");
 const { Scenes } = require("./scene");
 const { GoogleTiles } = require("./google");
 const { Clouds } = require("./clouds");
+const { GameStore } = require("./gamestore");
 const geo = require("./geo");
 const V = require("./validate");
 const { pathToFileURL } = require("node:url");
@@ -130,6 +131,14 @@ app.whenReady().then(() => {
   handle("geo:googleKey", (_e, key) => { if (typeof key !== "string" || key.length > 300) throw new Error("bad key"); return google.setKey(key); });
   handle("weather:clouds", (_e, lat, lon, utc, live) => clouds.get(lat, lon, utc, live === true));
   handle("geo:googleAttribution", (_e, zoom, n, s, eLon, w) => google.attribution(V.tileArgs(zoom, 0, 0)[0], num(n), num(s), num(eLon), num(w)).catch(() => "Google"));
+  // the strategy game's own folder (gamestore.js: userData/game – scenarios, results, saves; never the session cache)
+  const games = new GameStore(path.join(data, "game"));
+  handle("game:scenarios", () => games.listScenarios());
+  handle("game:scenario", (_e, sid) => games.loadScenario(sid));
+  handle("game:saveResult", (_e, sid, result) => games.saveResult(sid, result));
+  handle("game:results", (_e, sid) => games.listResults(sid));
+  handle("game:save", (_e, slot, d) => games.saveGame(slot, d));
+  handle("game:load", (_e, slot) => games.loadGame(slot));
   handle("live:start", () => { live.start(); });
   handle("live:stop", () => { live.stop(); });
   handle("auth:status", () => auth.status());

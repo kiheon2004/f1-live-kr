@@ -65,6 +65,7 @@
     <label class="home-season" id="homeSeasonWrap">시즌 <select id="homeSeason" aria-label="시즌"></select></label>
     <button id="homeAll" class="ghost small" aria-pressed="false" title="앱이 이미 확인한 시즌의 개최지를 한꺼번에 봐요 (새로 받지 않아요)">전체 개최지</button>
     <span id="homeMeta" class="home-meta muted" aria-live="polite"></span>
+    <button id="homeGameBtn" class="home-game-btn" title="실제 팀을 골라 두 드라이버를 운영하는 싱글플레이 전략 게임 (라이브 타이밍과 분리된 게임 엔진)">🏁 전략 게임</button>
   </div>
   <div class="home-main">
     <div class="home-left">
@@ -85,6 +86,13 @@
       <p id="homeEmpty" class="empty" hidden>검색 결과가 없어요.</p>
     </aside>
   </div>
+</section>
+
+<!-- The strategy game (game/gamehome.js): over the home screen; game state, results and saves are the game's own -->
+<section id="game" class="game" aria-label="전략 게임" hidden>
+  <div class="game-bar"><b class="game-title">전략 게임</b><nav id="gameCrumbs" class="game-crumbs"></nav><span id="gameEngine" class="game-engine"></span>
+    <button id="gameExit" class="ghost small" title="게임을 닫고 라이브 타이밍(홈)으로 돌아가요">라이브 타이밍으로 ←</button></div>
+  <div id="gameBody" class="game-body"></div>
 </section>
 
 <section class="status-bar">
@@ -262,5 +270,6 @@
 <script src="app.js"></script>
 <script type="module" src="home.js"></script>
 <script type="module" src="map3d.js"></script>
+<script type="module" src="game/gamehome.js"></script>
 </body>
 </html>
