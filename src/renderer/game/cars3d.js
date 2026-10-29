@@ -157,5 +157,18 @@ export function updateGameCrews(K, A, fr) {
   world.crews.place(list, loose, K.camera.position);
   done();
 }
+// the chase / onboard bar: the focused car's GAME state (labelled – none of it is telemetry)
+export function paintGameHud(hud, game, num) {
+  const snap = game.snapshot(), g = snap?.cars.find((c) => c.num === num), d = game.driverOf(num);
+  if (!g || !d) { hud.hidden = true; return; }
+  hud.hidden = false;
+  const e = (x) => String(x ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  const colour = /^[0-9a-f]{6}$/i.test(d.TeamColour || "") ? d.TeamColour : "888", KO = window.KO;
+  const tyre = g.tyre ? `${e(g.tyre.compound || "?")} ${g.tyre.age ?? 0}랩 · 마모 ${Math.round((g.tyre.wear || 0) * 100)}%` : "";
+  const html = `<span class="bar" style="background:#${colour}"></span><b class="p">P${e(g.pos)}</b><b>${e(KO?.surname ? KO.surname(d.Tla, d.LastName) : d.Tla)}</b><span class="t">${e(d.Tla)} · ${e(KO?.TEAMS?.[d.TeamName] || d.TeamName)}</span>
+    <span class="g">랩 ${e(g.lap)}/${e(snap.totalLaps ?? "?")}</span>${tyre ? `<span class="g">${tyre}</span>` : ""}${g.energy?.soc != null ? `<span class="g">배터리 ${Math.round(g.energy.soc * 100)}%</span>` : ""}${g.pit?.phase && g.pit.phase !== "none" ? `<span class="g">피트: ${e(g.pit.phase)}</span>` : ""}
+    <span class="tel"><b>${Math.round((g.v || 0) * 3.6)}</b><small>km/h</small></span><span class="g">게임 데이터</span>`;
+  if (hud.dataset.html !== html) { hud.innerHTML = html; hud.dataset.html = html; }
+}
 const pitPointYaw = (P, u) => pitPoint(P, u, { x: 0, z: 0 }).yaw;
 export { CHANGE };

@@ -42,7 +42,7 @@ import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, zoneAt, estimateZon
 import { footing } from "./footing.js";
 import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, timeJump, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
-import { updateGameCars } from "./game/cars3d.js";
+import { updateGameCars, paintGameHud } from "./game/cars3d.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -3682,19 +3682,8 @@ function gameNote(fr) {
   else if (note.dataset.game) note.hidden = true;
   note.dataset.game = msg ? "1" : "";
 }
-// the chase / onboard bar: the focused car's GAME state (labelled – none of it is telemetry)
-function gameHud(hud) {
-  const num = app().focus || leader(), snap = game.snapshot(), g = snap?.cars.find((c) => c.num === num), d = game.driverOf(num);
-  if (!g || !d) { hud.hidden = true; return; }
-  hud.hidden = false;
-  const e = (x) => String(x ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-  const colour = /^[0-9a-f]{6}$/i.test(d.TeamColour || "") ? d.TeamColour : "888", KO = window.KO;
-  const tyre = g.tyre ? `${e(g.tyre.compound || "?")} ${g.tyre.age ?? 0}랩 · 마모 ${Math.round((g.tyre.wear || 0) * 100)}%` : "";
-  const html = `<span class="bar" style="background:#${colour}"></span><b class="p">P${e(g.pos)}</b><b>${e(KO?.surname ? KO.surname(d.Tla, d.LastName) : d.Tla)}</b><span class="t">${e(d.Tla)} · ${e(KO?.TEAMS?.[d.TeamName] || d.TeamName)}</span>
-    <span class="g">랩 ${e(g.lap)}/${e(snap.totalLaps ?? "?")}</span>${tyre ? `<span class="g">${tyre}</span>` : ""}${g.energy?.soc != null ? `<span class="g">배터리 ${Math.round(g.energy.soc * 100)}%</span>` : ""}${g.pit?.phase && g.pit.phase !== "none" ? `<span class="g">피트: ${e(g.pit.phase)}</span>` : ""}
-    <span class="tel"><b>${Math.round((g.v || 0) * 3.6)}</b><small>km/h</small></span><span class="g">게임 데이터</span>`;
-  if (hud.dataset.html !== html) { hud.innerHTML = html; hud.dataset.html = html; }
-}
+// the chase / onboard bar: the focused car's game state (game/cars3d.js paintGameHud – labelled game data, no telemetry)
+function gameHud(hud) { paintGameHud(hud, game, app().focus || leader()); }
 // The teams at their boxes in game mode: the boxes as allocated (pitorder.js – the previous season's constructors' order
 // along the lane, the circuit's measured boxes), for the scenario's own entry list; no inference from positions. The pit
 // wall's screens show the game's tower, marked as the game's.
