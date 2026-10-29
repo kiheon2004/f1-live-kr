@@ -555,6 +555,7 @@ export function snapshot(race) {
     control: { phase: cs.phase, drs: cs.drs, overtake: cs.overtake, yellows: cs.yellows, msgs: cs.msgs },
     weather: { rain: w.rain ?? 0, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, water: avg(C.surface.hLine), est: !!w.est },
     cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
+      mode: { pace: c.mode.pace, energy: c.mode.energy },   // (the orders in force – the HUD shows them)
       trans: c.trans ? c.trans.slice() : [],   // (discrete changes with their sim times – adapter3d applies them at render time)
       pen: { pendingS: c.pen.pendingS ?? 0, open: (c.pen.serve || []).filter((x) => !x.served).map((x) => x.kind) }, inc: c.inc && c.inc.until > S.t ? c.inc.kind : null, dmg: c.dmg || null, out: c.out || null, vscDelta: CTL.vscDelta(race, T, c),
       // (s null: not on the track any more – retired in the garage, or 3 s past its chequered flag: the cool-down lap
