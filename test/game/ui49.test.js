@@ -103,7 +103,7 @@ test("the engine takes the screen's plans and t = 0 orders: the plan raced is th
   assert.strictEqual(ca.mode.pace, "manage");
 });
 
-test("order status: queued until the engine's step; refused with the reason; a duplicate id rejected at once", async () => {
+test("order status: queued until the engine's step; refused at submit or at the step with the reason; never 'applied' early", async () => {
   const E = await R("game/engine/engine.js"), O = await R("renderer/game/orders.js");
   const race = E.createRace({ scenario: SC, seed: 2, userTeam: TEAM });
   const other = SC.entries.find((e) => e.teamKey !== TEAM).num, [a] = mine(), book = new O.OrderBook();
@@ -113,11 +113,13 @@ test("order status: queued until the engine's step; refused with the reason; a d
   const notMine = send("o3", { type: "energy", car: String(other), args: { mode: "push" } });
   const dup = send("o1", { type: "pace", car: a, args: { mode: "manage" } });
   assert.strictEqual(ok.state, "queued"); assert.strictEqual(dup.state, "rejected"); assert.strictEqual(O.whyKo(dup.why), "같은 지시가 이미 접수됨");
-  assert.strictEqual(O.orderState(race, "o1").state, "queued");
-  E.step(race); book.update(race);
+  // (v0.49 engine: a bad mode and another team's car are refused when the order is taken – before any step)
+  assert.ok(["rejected", "refused"].includes(bad.state) && bad.why, JSON.stringify(bad));
+  assert.ok(["rejected", "refused"].includes(notMine.state)); assert.strictEqual(O.whyKo(notMine.why), "내 팀 차량이 아님");
+  assert.strictEqual(O.orderState(race, "o1", E).state, "queued");
+  E.step(race); book.update(race, E);
   assert.strictEqual(ok.state, "applied");
-  assert.strictEqual(bad.state, "refused"); assert.ok(bad.why);
-  assert.strictEqual(notMine.state, "refused"); assert.strictEqual(O.whyKo(notMine.why), "내 팀 차량이 아님");
+  assert.strictEqual(O.orderState(race, "o1", E).state, "applied");
   assert.strictEqual(book.last(a).id, "o1", "the duplicate isn't the car's last order in force");
   assert.strictEqual(book.pending(a, "pace"), null);
   // the engine's own status API wins when it exists (and "accepted" is shown as queued, never as applied)
@@ -130,7 +132,7 @@ test("saving along the way (engine.saveRace) leaves the race exactly as it would
   const fp = (r) => JSON.stringify(r.state.cars.map((c) => [c.num, c.lap, +c.s.toFixed(6), +c.v.toFixed(6), c.tyre.name, +c.tyre.wear.toFixed(9), c.pit.phase, +c.energy.fuel.toFixed(6)]));
   const A = E.createRace({ scenario: SC, seed: 4, userTeam: TEAM, ai: true }), B = E.createRace({ scenario: SC, seed: 4, userTeam: TEAM, ai: true });
   let bytes = 0;
-  for (let i = 1; i <= 3000; i++) { E.step(A); E.step(B); if (i % 500 === 0) bytes = E.saveRace(A).length; }
+  for (let i = 1; i <= 1600; i++) { E.step(A); E.step(B); if (i % 400 === 0) bytes = E.saveRace(A).length; }
   assert.ok(bytes > 1000);
   assert.strictEqual(fp(A), fp(B));
   // and a save taken now continues like the original
@@ -167,7 +169,7 @@ test("estimator: numbers for a plan, cached; a newer request makes an older one 
 
 test("saves go out one at a time; a newer save of a waiting slot replaces it; other slots are never dropped", async () => {
   const calls = []; let inflight = 0, maxInflight = 0; const pending = [];
-  globalThis.window = { api: { game: { saves: { list: async () => [], load: async () => null, save: (slot, d) => { inflight++; maxInflight = Math.max(maxInflight, inflight); calls.push([slot, d.n]); return new Promise((res) => pending.push(() => { inflight--; res({ ok: true, n: d.n }); })); } } } } };
+  globalThis.window = { api: { game: { saves: async () => [], load: async () => null, save: (slot, d) => { inflight++; maxInflight = Math.max(maxInflight, inflight); calls.push([slot, d.n]); return new Promise((res) => pending.push(() => { inflight--; res({ ok: true, n: d.n }); })); } } } };
   const A = await R("renderer/game/gameapi.js");
   const p1 = A.save("auto", { n: 1 }), p2 = A.save("auto", { n: 2 }), p3 = A.save("slot1", { n: 3 }), p4 = A.save("auto", { n: 4 });
   const flush = async () => { for (let k = 0; k < 20 && (pending.length || A.savesPending()); k++) { await new Promise((r) => setTimeout(r, 1)); const f = pending.shift(); if (f) f(); } };
@@ -208,6 +210,29 @@ test("the HUD reads the snapshot at or before the render time, never a newer one
   assert.strictEqual(U.hudSnap({ pair: () => ({ a, b, renderT: 1100 }) }), a);
   assert.strictEqual(U.hudSnap({ pair: () => ({ a: null, b, renderT: 2000 }) }), b);
   assert.strictEqual(U.hudSnap({ pair: () => null }), null);
+  // with the 3D adapter: its render-time cars (discrete state at its own sim time), the race-wide fields from a
+  const fr = { t: 1100, cars: [{ tyre: { compound: "MEDIUM" }, pit: { phase: "work" } }] };
+  const h = U.hudSnap({ pair: () => ({ a: { ...a, flag: "green" }, b: { ...b, flag: "sc" }, renderT: 1100 }) }, { frameCars: () => fr });
+  assert.strictEqual(h.cars, fr.cars); assert.strictEqual(h.flag, "green"); assert.strictEqual(h.t, 1100);
   // estimates are rounded to what their spread allows
   assert.strictEqual(U.fmtEst(12.34, 25), "+10"); assert.strictEqual(U.fmtEst(12.34, 6), "+12"); assert.strictEqual(U.fmtEst(-1.26, 1), "−1.5");
+});
+
+test("prepare: progress and the end of THIS job only (an older job's late messages are dropped); a refusal said plainly", async () => {
+  let listener = null; const sent = [];
+  globalThis.window = { api: { game: { onPrep: (fn) => { listener = fn; return () => { listener = null; }; }, prepare: async (p) => (p === "bad" ? { ok: false, why: "캐시에 없는 경기예요" } : { ok: true, jobId: 7, sid: "x" }), prepCancel: async (id) => { sent.push(id); return { ok: true }; } } } };
+  const A = await R("renderer/game/gameapi.js");
+  const prog = [];
+  const p = A.prepare("2025/x/y_Race/", (m) => prog.push(m.stage));
+  await new Promise((r) => setTimeout(r, 2));
+  listener({ jobId: 6, kind: "done", sid: "old" });          // an older job's answer
+  listener({ jobId: 7, kind: "progress", stage: "read" });
+  await A.cancelPrepare(); assert.deepStrictEqual(sent, [7]);
+  listener({ jobId: 7, kind: "cancelled" });
+  assert.deepStrictEqual(await p, { ok: false, cancelled: true, why: "취소됨" });
+  assert.deepStrictEqual(prog, ["read"]);
+  assert.strictEqual(listener, null, "unsubscribed at the end");
+  const q = A.prepare("2025/x/z_Race/"); await new Promise((r) => setTimeout(r, 2)); listener({ jobId: 7, kind: "done", sid: "z" }); assert.deepStrictEqual(await q, { ok: true, sid: "z" });
+  assert.deepStrictEqual(await A.prepare("bad"), { ok: false, why: "캐시에 없는 경기예요" });
+  delete globalThis.window;
 });

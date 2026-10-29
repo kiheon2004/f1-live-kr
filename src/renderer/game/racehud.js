@@ -10,8 +10,9 @@
 // Both cards keep their controls whichever car is selected or filmed.
 //
 // What is shown is what the engine gives at the RENDER time (the newest snapshot at or before it – never a later one: no
-// tyre change or pit release shown before the 3D view shows it). Fuel in kg. No deploy power (the snapshot's deployKw is
-// a placeholder 0 in this engine). "Laps of fuel" only as an estimate from the fuel this car really used per lap so far.
+// tyre change or pit release shown before the 3D view shows it – ui.js hudSnap). Fuel in kg. ERS deploy power as the engine
+// gives it (snapshot energy.deployKw, real since v0.49). "Laps of fuel" only as an estimate from the fuel this car really
+// used per lap so far.
 import { G, paint as paintAll, myCars, sendOrder, leaveRace } from "./gamehome.js";
 import { SPEEDS } from "./runner.js";
 import { $, esc, raceKo, PACE_KO, ENERGY_KO, ORDER_KO, CMP_KO, FLAG_KO, PIT_KO, STATUS_KO, fmtT, pct, cmpChip, compoundsFor, NO_INVENTORY, hudSnap } from "./ui.js";
@@ -73,6 +74,7 @@ function card(e, cmp) {
       <div class="gr-tyre"><span data-f="cmp"></span><span class="gr-kv"><b data-f="age">–</b><small>랩 사용</small></span>
         <span class="gr-meter" title="타이어 마모율: 0% 새 타이어 → 100% 완전 마모 (남은 상태가 아니에요)"><small>마모율</small><i><em data-f="wearbar"></em></i><b data-f="wear">–</b></span></div>
       <div class="gr-energy"><span class="gr-meter soc" title="배터리 충전 상태 (SoC)"><small>배터리</small><i><em data-f="socbar"></em></i><b data-f="soc">–</b></span>
+        <span class="gr-kv" title="지난 계산 단계의 ERS 출력 (엔진)"><small>ERS</small><b data-f="deploy">–</b></span>
         <span class="gr-kv" title="연료 (kg)"><small>연료</small><b data-f="fuel">–</b><small data-f="fuelLaps"></small></span></div>
     </div>
     <div class="gr-ctl">
@@ -103,7 +105,7 @@ const setH = (el, s) => { if (el && el._h !== s) { el._h = s; el.innerHTML = s; 
 export function paint() {
   const R = G.run; if (!R || G.step !== "race") return;
   if (!H.built) build();
-  const snap = hudSnap(R); if (!snap) return;
+  const snap = hudSnap(R, G.adapter); if (!snap) return;
   const sc = G.sc, ents = new Map(sc.entries.map((e) => [String(e.num), e])), T = R.renderT;
   // ---- top bar ----
   setT($("grLap"), `${Math.min(snap.leaderLap || 0, snap.totalLaps ?? Infinity)}/${snap.totalLaps ?? "?"}`);
@@ -158,6 +160,7 @@ function paintCard(e, snap, T) {
   // energy (SoC) and fuel (kg) – the fuel estimate from this car's own use so far
   const soc = Number.isFinite(c.energy?.soc) ? c.energy.soc : null;
   setT(f(root, "soc"), soc == null ? "–" : pct(soc)); const sb = f(root, "socbar"); if (sb) sb.style.width = `${Math.round((soc ?? 0) * 100)}%`;
+  setT(f(root, "deploy"), Number.isFinite(c.energy?.deployKw) ? `${Math.round(c.energy.deployKw)} kW` : "–");
   setT(f(root, "fuel"), Number.isFinite(c.fuel) ? `${c.fuel.toFixed(1)} kg` : "–");
   setT(f(root, "fuelLaps"), fuelLaps(c, snap));
   // modes: the one in force (the engine's), an order still waiting shown as waiting – never as in force
@@ -269,7 +272,7 @@ export function onClick(act, b) {
     H.pitCmp[num] = v;
     // (a call already standing: the new tyre goes to the engine as a fresh pit order – commands.js / pit.js change the
     // standing call's compound; otherwise only the choice is remembered for the 박스 button)
-    const c = hudSnap(R)?.cars.find((x) => String(x.num) === String(num));
+    const c = hudSnap(R, G.adapter)?.cars.find((x) => String(x.num) === String(num));
     if (c?.pit?.phase === "called") sendOrder("pit", num, { compound: v }, `${tla} 피트 타이어 → ${CMP_KO[v] || v}`);
     paint(); return;
   }

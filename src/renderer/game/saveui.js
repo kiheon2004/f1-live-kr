@@ -24,7 +24,7 @@ export function onSheet(which) {
 export function paintRaces({ standalone = false } = {}) {
   const rs = standalone ? [] : racesOf(G.season, G.teamKey), caps = API.caps();
   const list = rs.length ? `<div class="g-list">${rs.map((r) => `<button class="g-race ${r.id === G.sid ? "on" : ""}" data-act="save:pick" data-sid="${esc(r.id)}"><b>${esc(raceKo(r.event))}</b><span>${esc(r.date || "")} · ${esc(r.location || "")}</span>
-      <small>${r.laps ?? "?"}랩 · 랩 ${r.lapLength ? (r.lapLength / 1000).toFixed(3) + " km" : "?"}${r.rain ? " · 기록상 비 있었음(사후 기록)" : ""}</small></button>`).join("")}</div>`
+      <small>${r.laps ?? "?"}랩 · 랩 ${r.lapLength ? (r.lapLength / 1000).toFixed(3) + " km" : "?"}</small></button>`).join("")}</div>`
     : standalone ? "" : `<p class="muted">이 팀이 참가한 ${G.season} 시즌 준비된 경기가 없어요.</p>`;
   const bad = (G.list || []).filter((s) => s.error);
   return `${list}
@@ -43,7 +43,7 @@ function paintPrepare() {
   if (S.prepListErr) return `${prog}<p class="g-warn">세션 목록을 읽지 못했어요: ${esc(S.prepListErr)}</p>`;
   if (!S.prepList) return `${prog}<p class="muted">${S.prepBusy ? "이 컴퓨터의 세션 기록을 확인하는 중…" : ""}</p><button class="ghost small" data-act="save:prepList">세션 기록 확인</button>`;
   const have = new Set(okList().flatMap((s) => [s.id, s.metaId]));
-  const todo = S.prepList.filter((s) => !have.has(API.scenarioIdOf(s.path)));
+  const todo = S.prepList.filter((s) => !s.prepared && !have.has(s.id || API.scenarioIdOf(s.path)));
   return `${prog}${todo.length ? `<div class="g-list g-prep-list">${todo.slice(0, 40).map((s) => `<div class="g-prep-item"><span><b>${esc(raceKo(s.name))}</b> <small class="muted">${esc(s.season)} · ${esc(s.date || "")}</small></span>
       <button class="ghost small" data-act="save:prepare" data-path="${esc(s.path)}" data-name="${esc(s.name)}" ${caps.prepare && !(P?.state === "running") ? "" : "disabled"}>준비</button></div>`).join("")}</div>`
     : `<p class="muted">이 컴퓨터에 있는 결승 세션은 모두 준비돼 있어요 (${S.prepList.length}개 확인).</p>`}
@@ -51,15 +51,16 @@ function paintPrepare() {
 }
 async function refreshPreparable() {
   S.prepBusy = true; S.prepListErr = null; paint();
-  try { const ys = [...new Set([...seasons(), 2024, 2025, 2026])]; S.prepList = await API.preparable(ys); } catch (e) { S.prepListErr = String(e.message || e); }
+  try { S.prepList = await API.preparable(); } catch (e) { S.prepListErr = String(e.message || e); }
   S.prepBusy = false; paint();
 }
 async function prepareOne(path, name) {
   const me = S.prep = { state: "running", path, name, frac: 0, text: "시작하는 중…" }; paint();
-  const r = await API.prepare(path, (p) => { if (S.prep !== me) return; me.frac = p.total ? p.done / p.total : p.frac ?? me.frac; me.text = p.text || p.stage || me.text; paint(); });
+  // (the worker reports stages, not a fraction: the bar moves by stage – start, read, build)
+  const r = await API.prepare(path, (p) => { if (S.prep !== me) return; me.frac = { start: 0.1, read: 0.4, build: 0.75 }[p.stage] ?? me.frac; me.text = p.text || p.stage || me.text; paint(); });
   if (S.prep !== me) return;   // (a newer prepare or a cancel: this answer is stale)
   if (r.stale) return;
-  if (r.ok) { me.state = "done"; await refreshList(); }
+  if (r.ok) { me.state = "done"; S.prepList = null; await refreshList(); refreshPreparable(); }
   else { me.state = r.cancelled ? "cancelled" : "failed"; me.why = r.why || r.error || "?"; }
   paint();
 }
@@ -80,7 +81,7 @@ async function refreshSaves() {
   S.savesAt = Date.now(); paint();
 }
 // what a slot shows (a full save → its header; a bridge listing → as given)
-const summary = (slot, d) => ({ slot, savedAt: d.savedAt, label: d.label, scenarioId: d.scenarioId, team: d.team, lap: d.lap, totalLaps: d.totalLaps, engine: d.engine, stateVersion: d.stateVersion, season: d.season, event: d.event });
+const summary = (slot, d) => ({ slot, ...(d.meta || {}), savedAt: d.meta?.savedAt || d.savedAt });
 export function continueInfo() {
   if (!S.saves && !S.savesAt) { refreshSaves(); return { ok: false, text: "저장 확인 중…" }; }
   const s = latest(); if (!s) return { ok: false, text: S.savesErr ? "저장 목록 오류" : "저장된 경기 없음" };
@@ -109,7 +110,10 @@ export function paintSaves() {
 export function buildSave(slot) {
   const R = G.run, E = G.engine, sc = G.sc; if (!R || !E?.saveRace || G.dev) return null;
   const st = R.race.state;
-  return { kind: "f1kr-game-save", format: 1, slot, label: slot === "auto" ? "자동 저장" : "", savedAt: new Date().toISOString(),
+  // (meta: what the slot list shows without reading the whole save – the store keeps it in a small file beside it)
+  const meta = { scenarioId: G.sid, scenarioMetaId: sc.meta.id, season: G.season, event: sc.meta.event, team: G.teamKey, lap: st.leaderLap, totalLaps: st.totalLaps, t: st.t,
+    engine: E.ENGINE_VERSION, stateVersion: E.STATE_VERSION, label: slot === "auto" ? "자동 저장" : "" };
+  return { kind: "f1kr-game-save", format: 1, slot, meta, label: meta.label, savedAt: new Date().toISOString(),
     engine: E.ENGINE_VERSION, stateVersion: E.STATE_VERSION, scenarioId: G.sid, scenarioMetaId: sc.meta.id, scenarioBuiltAt: sc.meta.builtAt || null, scenarioVersion: sc.version ?? null,
     season: G.season, event: sc.meta.event, team: G.teamKey, seed: G.seed, lap: st.leaderLap, totalLaps: st.totalLaps, t: st.t, runOpts: G.runOpts || null,
     ui: { sel: G.sel, focus: G.adapter?.ctx.focus || null, speed: R.speed || 1, cam: (() => { try { return JSON.parse(window.Map3D?.game.state?.() || "{}").cam || null; } catch { return null; } })() },
@@ -185,7 +189,7 @@ export function paintModal() {
 export async function onClick(act, b) {
   if (act === "pick") { G.sid = b.dataset.sid; G.sc = null; G.sheet = null; paint(); return; }
   if (act === "refresh") { await refreshList(); S.prepList = null; refreshPreparable(); return; }
-  if (act === "import") { S.importNote = { ok: true, text: "가져오는 중…" }; paint(); const r = await API.importScenario(); S.importNote = r?.ok ? { ok: true, text: `가져왔어요${r.id ? ": " + r.id : ""}` } : r?.cancelled ? null : { ok: false, text: `가져오지 못했어요: ${r?.why || "?"}` }; if (r?.ok) await refreshList(); paint(); return; }
+  if (act === "import") { S.importNote = { ok: true, text: "가져오는 중…" }; paint(); const r = await API.importScenario(); S.importNote = r?.ok ? { ok: true, text: `가져왔어요${r.id ? ": " + r.id : ""}` } : r?.cancelled || r?.canceled ? null : { ok: false, text: `가져오지 못했어요: ${r?.why || "?"}` }; if (r?.ok) await refreshList(); paint(); return; }
   if (act === "prepList") { refreshPreparable(); return; }
   if (act === "prepare") { prepareOne(b.dataset.path, b.dataset.name); return; }
   if (act === "cancelPrep") { const P = S.prep; API.cancelPrepare(); if (P) { P.state = "cancelled"; S.prep = { ...P }; } paint(); return; }

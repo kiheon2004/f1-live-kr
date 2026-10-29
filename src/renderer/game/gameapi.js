@@ -1,66 +1,66 @@
-// The game screens' one door to the main process (preload.js api.game – main/gamestore.js): a thin wrapper so the screens
-// don't care which names the bridge has. v0.49 (the lead's backend): list / scenario / prepare (+ progress events) /
-// cancelPrepare / importScenario / saves.{list, save, load, remove}; v0.48: scenarios / scenario / save / load / saveResult.
-// A function the bridge lacks answers { ok: false, missing: true } – the screen says "준비 중인 기능", never pretends.
+// The game screens' one door to the main process (preload.js api.game – main/gamestore.js, main/gameprep.js): a thin
+// wrapper so the screens don't care about the bridge's exact names. v0.49 bridge (the lead's): scenarios / scenario /
+// prepList / prepare (→ jobId; progress and the end through onPrep) / prepCancel(jobId) / importScenario (a file dialog)
+// / saves / save(slot, { meta, … }) / load / removeSave / saveResult / results. A function the bridge lacks answers
+// { ok: false, missing: true } – the screen says "연결 전", never pretends.
 //
-// Saves go out one at a time (a second save while one is being written waits; a third replaces the waiting second – the
-// newest state is what matters), so two writes never race on the same file from this page.
+// Saves go out one at a time from this page (a newer save of a slot that is still waiting replaces the waiting one –
+// the newest state is what matters); the store also serialises writes per slot.
 const g = () => window.api?.game || {};
 const missing = (what) => ({ ok: false, missing: true, why: `${what}: 앱에 아직 연결되지 않은 기능` });
-const has = (path) => { let o = g(); for (const k of path.split(".")) { o = o?.[k]; if (o == null) return false; } return typeof o === "function"; };
+const has = (name) => typeof g()[name] === "function";
 
 export const caps = () => ({
-  list: has("list") || has("scenarios"), prepare: has("prepare"), cancelPrepare: has("cancelPrepare"), importScenario: has("importScenario"),
-  saves: has("saves.list") && has("saves.save") && has("saves.load"), savesRemove: has("saves.remove"), legacySave: has("save") && has("load"),
-  preparable: has("preparable"), saveResult: has("saveResult"), results: has("results"),
+  list: has("scenarios"), prepare: has("prepare") && has("onPrep"), cancelPrepare: has("prepCancel"), importScenario: has("importScenario"),
+  saves: has("saves") && has("save") && has("load"), savesRemove: has("removeSave"), preparable: has("prepList"), saveResult: has("saveResult"), results: has("results"),
 });
 
-// prepared races: [{ id, metaId, season, event, date, location, laps, lapLength, entries, rain, version, error? }]
-export async function listScenarios() { const G = g(); return G.list ? G.list() : G.scenarios ? G.scenarios() : []; }
+// prepared races: [{ id, metaId, season, event, date, location, laps, lapLength, entries, version, error? }]
+export async function listScenarios() { const G = g(); return G.scenarios ? G.scenarios() : []; }
 export async function loadScenario(id) { return g().scenario(id); }
 
-// the sessions in the local cache that could be prepared (read-only listing: the app's own archive index and the cache's
-// files – nothing is fetched or written): [{ path, season, name, cached }] – the bridge's own list when it has one
-export async function preparable(seasons) {
-  if (has("preparable")) return g().preparable();
-  const A = window.api, out = [];
-  if (!A?.listSessionsMeta || !A?.cachedSessions) return out;
-  for (const y of seasons) {
-    const m = await A.listSessionsMeta(y, true).catch(() => null);
-    const races = (m?.sessions || []).filter((s) => /_Race\/?$/.test(s.path || ""));
-    if (!races.length) continue;
-    const c = await A.cachedSessions(races.map((s) => s.path)).catch(() => ({}));
-    for (const s of races) if (c[s.path]?.core) out.push({ path: s.path, season: y, name: s.meeting || s.name || s.path, date: s.date || null, cached: true });
-  }
-  return out;
+// the race sessions in the local cache that could be prepared: [{ path, id, season, name, date, prepared }] (the main
+// process lists the cache's own files – read only)
+export async function preparable() {
+  const G = g(); if (!G.prepList) return [];
+  return (await G.prepList()).map((s) => ({ path: s.sessionPath, id: s.id, season: s.season, name: s.event, date: s.date, prepared: !!s.prepared }));
 }
 // the scenario id a session path gives ("2025/2025-08-03_Hungarian_Grand_Prix/2025-08-03_Race/" → "2025-08-03_Hungarian_Grand_Prix_2025-08-03_Race")
 export const scenarioIdOf = (path) => String(path || "").split("/").filter(Boolean).slice(1).join("_");
 
-// prepare a race from the cache. onProgress({ stage, done, total, text }) while it runs; resolves { ok, id?, why? }.
-// A later call or cancelPrepare() makes an earlier answer stale: its result is dropped (gen).
-let prepGen = 0;
-export async function prepare(sessionPath, onProgress) {
-  const G = g(); if (!G.prepare) return missing("경기 준비");
-  const gen = ++prepGen;
-  const off = typeof G.onPrepareProgress === "function" ? G.onPrepareProgress((p) => { if (gen === prepGen) onProgress?.(p); }) : null;
-  try {
-    const r = await G.prepare(sessionPath);
-    if (gen !== prepGen) return { ok: false, stale: true, why: "취소됨" };
-    return r && typeof r === "object" ? r : { ok: !!r };
-  } catch (e) { return gen === prepGen ? { ok: false, why: String(e?.message || e) } : { ok: false, stale: true, why: "취소됨" }; }
-  finally { if (typeof off === "function") off(); }
+// prepare a race from the cache. onProgress({ stage, text }) while it runs; resolves { ok, sid?, why?, cancelled? } when
+// the job ends. Messages of any other job (an older one, one cancelled) are dropped by their job id.
+const STAGE_KO = { start: "준비 시작", read: "세션 기록 읽는 중", build: "경기 데이터 만드는 중" };
+let job = null;
+export function prepare(sessionPath, onProgress) {
+  const G = g(); if (!G.prepare || !G.onPrep) return Promise.resolve(missing("경기 준비"));
+  return new Promise((resolve) => {
+    let me = null; const early = [];
+    const finish = (r) => { off?.(); if (job === me) job = null; resolve(r); };
+    const handle = (m) => {
+      if (m.kind === "progress") onProgress?.({ stage: m.stage, text: STAGE_KO[m.stage] || m.stage });
+      else if (m.kind === "done") finish({ ok: true, sid: m.sid });
+      else if (m.kind === "cancelled") finish({ ok: false, cancelled: true, why: "취소됨" });
+      else if (m.kind === "error") finish({ ok: false, why: m.why || "알 수 없는 오류" });
+    };
+    const off = G.onPrep((m) => { if (!m) return; if (!me) { early.push(m); return; } if (m.jobId === me.id) handle(m); });
+    Promise.resolve().then(() => G.prepare(sessionPath)).then((r) => {
+      if (!r?.ok) { finish({ ok: false, why: r?.why || "시작하지 못했어요" }); return; }
+      me = job = { id: r.jobId, sid: r.sid };
+      for (const m of early.splice(0)) if (m.jobId === me.id) handle(m);
+    }, (e) => finish({ ok: false, why: String(e?.message || e) }));
+  });
 }
-export async function cancelPrepare() { prepGen++; const G = g(); return G.cancelPrepare ? G.cancelPrepare() : missing("준비 취소"); }
-export async function importScenario() { const G = g(); return G.importScenario ? G.importScenario() : missing("시나리오 가져오기"); }
+export async function cancelPrepare() { const G = g(); if (!G.prepCancel) return missing("준비 취소"); if (!job) return { ok: false, why: "준비 중인 경기가 없어요" }; return G.prepCancel(job.id); }
+export async function importScenario() {
+  const G = g(); if (!G.importScenario) return missing("시나리오 가져오기");
+  try { const r = await G.importScenario(); return r && typeof r === "object" ? r : { ok: false, cancelled: true }; }
+  catch (e) { return { ok: false, why: String(e?.message || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, "") }; }
+}
 
 // ---------- saves ----------
-// slot list: [{ slot, savedAt, label, scenarioId, team, lap, totalLaps, engine, bytes, error? }]
-export async function listSaves() {
-  const G = g();
-  if (G.saves?.list) return G.saves.list();
-  return null;   // (v0.48 bridge: no list – the screen shows the one known slot it can try to load)
-}
+// slot list: [{ slot, savedAt, …the meta the save carried (scenarioId, team, lap, totalLaps, engine, stateVersion, label…) }]
+export async function listSaves() { const G = g(); return G.saves ? G.saves() : null; }
 let saving = false;
 const queue = [];   // [{ slot, job, promise, resolve }] – waiting saves, one per slot
 function pump() {
@@ -69,8 +69,8 @@ function pump() {
   w.job().then((r) => { saving = false; w.resolve(r); pump(); });
 }
 export function save(slot, data) {
-  const G = g(), fn = G.saves?.save || G.save; if (!fn) return Promise.resolve(missing("저장"));
-  const job = () => Promise.resolve().then(() => fn.call(G.saves?.save ? G.saves : G, slot, data)).then((r) => (r && typeof r === "object" ? r : { ok: true }), (e) => ({ ok: false, why: String(e?.message || e) }));
+  const G = g(), fn = G.save; if (!fn) return Promise.resolve(missing("저장"));
+  const job = () => Promise.resolve().then(() => fn(slot, data)).then((r) => (r && typeof r === "object" ? r : { ok: true }), (e) => ({ ok: false, why: String(e?.message || e) }));
   // a save of a slot that is already waiting replaces that one (both callers get the newer one's answer)
   const w = queue.find((x) => x.slot === slot);
   if (w) { w.job = job; return w.promise; }
@@ -79,8 +79,8 @@ export function save(slot, data) {
   return promise;
 }
 export const savesPending = () => saving || queue.length > 0;
-export async function load(slot) { const G = g(), fn = G.saves?.load || G.load; if (!fn) return missing("불러오기"); return fn.call(G.saves?.load ? G.saves : G, slot); }
-export async function removeSave(slot) { const G = g(); return G.saves?.remove ? G.saves.remove(slot) : missing("저장 삭제"); }
+export async function load(slot) { const G = g(); if (!G.load) return missing("불러오기"); return G.load(slot); }
+export async function removeSave(slot) { const G = g(); return G.removeSave ? G.removeSave(slot) : missing("저장 삭제"); }
 export async function saveResult(sid, result) { const G = g(); return G.saveResult ? G.saveResult(sid, result) : missing("결과 저장"); }
 export async function listResults(sid) { const G = g(); return G.results ? G.results(sid) : []; }
 

@@ -18,7 +18,10 @@ const WHY = [
   [/^for this lap/, "이번 랩에 진입"], [/^too late for this lap/, "이번 랩은 늦음 – 다음 랩에 진입"],
   [/^not suspended/, "적색기 중단 상태가 아님"], [/^not stopped in the pit lane/, "피트레인에 정지해 있지 않음"],
   [/^after the 5-minute signal/, "5분 신호 이후 (타이어 교체 불가)"], [/^finished/, "경기 종료"],
-  [/^unknown compound|^bad compound|^compound/, "쓸 수 없는 타이어"], [/^missing car|^car required|^no car/, "차량 지정 없음"],
+  [/^compound .* not offered/, "이 경기에서 쓸 수 없는 타이어"], [/^compound must be a name/, "타이어 이름이 아님"], [/: no car$/, "차량 지정 없음"], [/^no car /, "그런 차량이 없음"],
+  [/^no team /, "그런 팀이 없음"], [/^race finished/, "경기 종료"], [/^not an order/, "올바른 지시가 아님"], [/^internal error/, "엔진 내부 오류"],
+  [/^plan ends at lap (\d+), before the finish \((\d+)\)/, "계획이 경기 끝 전에 끝남"], [/^plan: stint (\d+) ends at lap/, "스틴트 종료 랩 순서 오류"],
+  [/^plan: stint \d+ has no compound/, "타이어 없는 스틴트"], [/^plan: stint \d+ end lap not a whole number/, "종료 랩이 정수가 아님"], [/^plan: no stints/, "스틴트 없음"],
 ];
 export function whyKo(why) {
   if (why == null || why === "") return "";
@@ -32,7 +35,7 @@ export function orderState(race, id, engine = null) {
   if (engine?.commandStatus) {
     try {
       const r = engine.commandStatus(race, id);
-      if (r && r.state) return { state: r.state === "accepted" ? "queued" : r.state, why: r.why ?? null, tEff: r.tEff ?? r.t ?? null };
+      if (r && r.state) return { state: r.state === "accepted" ? "queued" : r.state, why: r.why ?? null, tEff: r.tEff ?? r.t ?? null, stage: r.stage ?? null };
     } catch { /* fall back to the state */ }
   }
   const cs = race?.state?.commands; if (!cs) return { state: "unknown", why: null, tEff: null };
