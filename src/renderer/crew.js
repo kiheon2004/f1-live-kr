@@ -152,7 +152,7 @@ const CARRY = { gun: [0.56, 0.95], wheel: [0.5, 0.86] };
 export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   const { w, k: pace, dropAt, down } = stopClock(plan, s, C), H = hubsOf(d), figures = [], kits = [];
   const liftF = C.lift * ss(C.liftF[0], C.liftF[1], w) * (1 - down), liftR = C.lift * ss(C.liftR[0], C.liftR[1], w) * (1 - down);
-  const off = [false, false, false, false], fitted = [false, false, false, false];
+  const off = [false, false, false, false], fitted = [false, false, false, false], nutDone = [false, false, false, false];
   const standUp = ss(dropAt, dropAt + 0.3, s), WT = wheelTimes(plan.seed, C);
   // a slow wheel (game mode: the engine names the wheel and the time it adds – plan.slow { wheel, add }): that wheel's nut
   // won't do up – its gunner stays on the hub and its new-wheel man holds on for the time added, done before the jacks
@@ -208,7 +208,7 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
       const k = { kind: "new", axle: h.axle, a: lerp(ha, h.a, fit), b: lerp(hb, h.b, fit), h: lerp(CARRY.wheel[1], hubH, fit), yaw: nYaw * (1 - fit), flip, by: ni };
       kits.push(k); nFig[5] = wheelGrips(k, h.r, h.w, na, nb, nFace);
     } else if (back < 1) nFig[5] = wheelGrips({ a: h.a, b: h.b, h: hubH, yaw: 0, flip }, h.r, h.w, na, nb, nFace, 1 - back);   // (letting go of it on the car)
-    off[i] = t >= C.off[0] && t < C.on[1]; fitted[i] = t >= C.on[1];
+    off[i] = t >= C.off[0] && t < C.on[1]; fitted[i] = t >= C.on[1]; nutDone[i] = tn >= C.signal;
   });
   // The front jack (formula1.com, "Anatomy of a pit stop", 2 Mar 2025 – 2024–25 cars): the nose meets it just before
   // the car stands, the car is up by ~0.3 s; at ~0.8 s its man "engages the swivel and steps aside" – the car still up,
@@ -258,7 +258,7 @@ export function stopChoreo(plan, s, d, left = 1, C = CHANGE) {
   // right; the garages' side is the working rear jack's way in; L)
   const sa = d.RZ - 2.0, sb = -left * 1.75, sf = left * Math.PI / 2, sj = { kind: "jack", a: sa + Math.cos(sf) * 0.52, b: sb + Math.sin(sf) * 0.52, h: 0, yaw: sf + Math.PI, tilt: JACKS.upright, by: figures.length };
   kits.push(sj); figures.push([sa, sb, sf, "stand", null, jackGripsAB(sj, sf)]);
-  return { figures, kits, car: { lift: [liftF, liftR], off, fitted } };
+  return { figures, kits, car: { lift: [liftF, liftR], off, fitted, done: nutDone } };
 }
 // A planted pose stepping (shuffle) along its root's straight way from (a0, b0) to (a1, b1) in the box's frame, k of the way
 // there – for a figure facing f (its forward (cos f, sin f), its right (sin f, −cos f))

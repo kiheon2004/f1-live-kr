@@ -118,3 +118,41 @@ test("the crew walks out as the car comes (no popping into place) and moves in a
   }
   assert.ok(worst < 0.15, `no figure jumps more than 15 cm in a frame (worst ${worst.toFixed(3)} m)`);
 });
+
+test("pit panel: elapsed time, never the work's end before it comes; the hold's count-down; a slow wheel only once it shows; a held release said so", async () => {
+  const { pitPanelModel } = await import("../../src/renderer/game/pitpanel.js");
+  const g = row("4", { phase: "work", w0: 0, w1: 6400, err: { kind: "slow wheel", add: 4, wheel: 2, causes: ["rain"] } });
+  const at = (T) => pitPanelModel(g, T);
+  assert.strictEqual(at(1000).stoodS, 1);
+  assert.strictEqual(at(1000).issue, null, "not shown before it shows");
+  assert.ok(at(3000).issue && at(3000).issue.wheel === 2 && /왼쪽 뒤/.test(at(3000).issue.text) && /비/.test(at(3000).issue.text));
+  // nothing in the model is the work's end or a remaining time
+  for (const T of [500, 1500, 3000, 5000]) assert.ok(!JSON.stringify(at(T)).includes("6.4") && !JSON.stringify(at(T)).includes("6400"));
+  const pen = row("4", { phase: "penalty", hold: 5000 });
+  assert.deepStrictEqual(pitPanelModel(pen, 2000).hold, { leftS: 3, totalS: 5 });
+  const h = row("4", { phase: "release", w0: 0, w1: 2430, held: true });
+  assert.ok(/안전 출발 대기/.test(pitPanelModel(h, 3000).release));
+  const clean = row("4", { phase: "work", w0: 0, w1: 2430 });
+  assert.strictEqual(pitPanelModel(clean, 2000).issue, null);
+  assert.strictEqual(pitPanelModel(row("4", { phase: "none" }), 0), null);
+});
+
+test("pit camera: shots from the pit state at render time (approach → wide → close → release → end), the selected car first and kept", async () => {
+  const { shotFor, pickSubject, PITCAM } = await import("../../src/renderer/game/pitcam.js");
+  assert.strictEqual(shotFor(row("4", { phase: "lane", u: BOXU - 100, stop: null }), -8000, BOXU), "approach");
+  assert.strictEqual(shotFor(row("4", { phase: "approach", u: BOXU - 10, stop: null }), -1000, BOXU), "wide");
+  const w = row("4", { phase: "work", w0: 0, w1: 2430 });
+  assert.strictEqual(shotFor(w, 300, BOXU), "wide"); assert.strictEqual(shotFor(w, 1500, BOXU), "close");
+  // the work's end is used only once render time reaches it
+  assert.strictEqual(shotFor(w, 2400, BOXU), "close");
+  assert.strictEqual(shotFor(row("4", { phase: "release", w0: 0, w1: 2430, rel: 2450 }), 2500, BOXU), "release");
+  assert.strictEqual(shotFor(row("4", { phase: "release", w0: 0, w1: 2430, held: true }), 3000, BOXU), "wide");
+  assert.strictEqual(shotFor(row("4", { phase: "penalty", hold: 5000 }), 2000, BOXU), "wide");
+  assert.strictEqual(shotFor(row("4", { phase: "laneOut", u: BOXU + PITCAM.releaseGone + 1, w0: 0, w1: 2430, rel: 2450 }), 4000, BOXU), "end");
+  // two cars: the selected (first in order) taken, kept while its visit lasts even when the other is nearer its box
+  const a = row("4", { phase: "lane", u: BOXU - 150, stop: null }), b = row("81", { phase: "approach", u: BOXU - 20, stop: null });
+  assert.strictEqual(pickSubject(null, [a, b], ["4", "81"], () => BOXU, -5000), "4");
+  assert.strictEqual(pickSubject("4", [a, b], ["81", "4"], () => BOXU, -5000), "4", "kept – no switching back and forth");
+  const aGone = row("4", { phase: "laneOut", u: BOXU + 60, w0: 0, w1: 2430, rel: 2450 });
+  assert.strictEqual(pickSubject("4", [aGone, b], ["4", "81"], () => BOXU, 6000), "81", "then the other");
+});

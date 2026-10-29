@@ -518,6 +518,7 @@ body.compact.home-on .home-btn { padding: 4px 6px; }
 .home-game-btn { margin-left: 8px; padding: 5px 12px; border-radius: 7px; border: 1px solid #3a4452; background: #1d2530; color: var(--ink); font-weight: 700; cursor: pointer; }
 .home-game-btn:hover { border-color: var(--accent); }
 body.game-on #home { display: none !important; }
+body:not(.game-on) .game-only { display: none !important; }
 body.game-on { grid-template-rows: auto 1fr; }
 .game { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; overflow: hidden; position: relative; z-index: 10; background: var(--bg); }
 .game-bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid #1b2433; }
@@ -561,3 +562,17 @@ body.game-on { grid-template-rows: auto 1fr; }
 .g-bar { grid-column: 1; display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-top: 1px solid var(--line); font-size: 12px; }
 .g-speeds { display: flex; gap: 3px; } .g-clock .bad { color: var(--sc); } .g-auto { color: var(--muted); } .g-bar #gQuit { margin-left: auto; }
 .g-events { grid-column: 1; max-height: 96px; overflow: auto; padding: 4px 12px 8px; font-size: 12px; color: var(--muted); } .g-events p { margin: 1px 0; } .g-events .bad { color: var(--sc); }
+/* the pit-work panel (game/pitpanel.js – the race HUD places it) */
+.pp { background: rgba(14,16,19,.86); color: #e3e8ee; border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.45; min-width: 200px; }
+.pp-h { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.pp-bar { width: 4px; height: 14px; border-radius: 2px; display: inline-block; }
+.pp-t b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.pp-hold { color: #ffb21a; }
+.pp-wheels { display: grid; grid-template-columns: 14px 14px; gap: 3px 22px; margin: 4px 0; }
+.pp-wheels i { width: 14px; height: 18px; border-radius: 3px; background: #3a4048; }
+.pp-wheels i.done { background: #3fbf6a; }
+.pp-wheels i.slow { background: #e8483a; }
+.pp-steps { margin: 2px 0 0; padding-left: 18px; color: #8d96a0; }
+.pp-steps li.done { color: #e3e8ee; }
+.pp-issue { color: #ff8a7a; font-weight: 600; }
+.pp-rel { color: #9fd3ff; }
