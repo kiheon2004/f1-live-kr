@@ -45,6 +45,14 @@ test("driver error: counts follow the hazard – none with margin, more at the l
   assert.equal(e.type, "driver error"); assert.ok(e.cause.u > 0.97 && e.cause.tyreOut === 0.8 && e.cause.runoff && Number.isFinite(e.t) && e.cars.length === 1);
 });
 
+test("driver error: consistency acts through u – the same mean grip use with a wider (AR(1)) spread crosses the margin more often", async () => {
+  const { errorHazard } = await I(), { streamFor } = await H0.imp("engine/rng.js");
+  const expected = (sd) => { const r = streamFor(9, "u"), rho = Math.exp(-0.05 / 5); let x = 0, sum = 0; const N = 200000;
+    for (let i = 0; i < N; i++) { x = rho * x + sd * Math.sqrt(1 - rho * rho) * r.normal(); sum += errorHazard({ u: 0.965 + x }).lambda; } return sum / N; };
+  const steady = expected(0.002), erratic = expected(0.008);
+  assert.ok(steady < erratic * 0.2, `mean hazard steady ${steady.toExponential(2)} vs erratic ${erratic.toExponential(2)}`);
+});
+
 test("driver error: what it becomes depends on what is beside the track – walls turn more errors into crashes than paved run-off", async () => {
   const inp = { u: 1.02, tyreOut: 0.6 };
   const paved = await errorsAt(inp, { N: 15000 }), wall = await errorsAt(inp, { N: 15000, scenario: { circuit: { street: true } } });

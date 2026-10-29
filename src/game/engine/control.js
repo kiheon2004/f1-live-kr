@@ -26,6 +26,9 @@
 // the order and times of every car completing lap k+1 – the classification reads it), messages.
 import { CONTROL } from "../data/params/control.js";
 import { DT } from "./clock.js";
+import R2024 from "../data/rules/2024.js";
+import R2025 from "../data/rules/2025.js";
+import R2026 from "../data/rules/2026.js";
 
 const G = 9.81;
 const BIT = { green: 1, yellow: 2, vsc: 4, sc: 8, red: 16 };
@@ -35,7 +38,13 @@ export const lapPos = (car, T) => (car.where === "pit" && car.pit && T.pit ? T.p
 export const lapsOf = (car, T) => (car.dist >= 0 ? Math.floor(car.dist / T.L + 1e-9) : 0);
 const onTrack = (c) => c.status === "run" && c.where !== "pit";
 const live = (c) => c.status === "run" || c.status === "grid";
-const season = (race) => race.rules?.season ?? race.state.rulesSeason ?? 2025;
+const RULES = { 2024: R2024, 2025: R2025, 2026: R2026 };
+// the season's rules data: race.rules if the engine set one (tests patch copies), else by the race's season
+export function seasonRules(race) {
+  if (!race.rules) { const y = race.state.season ?? race.state.rulesSeason ?? race.scenario?.meta?.season; race.rules = RULES[y] || RULES[2025]; }
+  return race.rules;
+}
+const season = (race) => seasonRules(race).season;
 
 // A speed profile around the lap for a point-mass car: corner limit from lateral grip (with downforce: a_lat = aLat·(1 + kDown·v²)),
 // then braking (backward) and acceleration (forward, falling to 0 at vMax) passes, twice round for the wrap. Used for the
@@ -55,8 +64,9 @@ export function speedProfile(T, { aLat, vMax, aBrake, aAcc, kDown = 0 }) {
 function tables(race, T, P = CONTROL) {
   const c = race.cache || (race.cache = {});
   if (c.ctl && c.ctl.T === T) return c.ctl;
-  const sc = speedProfile(T, { aLat: P.scALat.v * G, vMax: P.scVMax.v, aBrake: P.scABrake.v * G, aAcc: P.scAAcc.v * G });
-  const R = P.refCar.v, ref = c.refV && c.refV.length === T.n ? c.refV : speedProfile(T, { aLat: R.aLat * G, kDown: R.kDown, vMax: R.vMax, aBrake: R.aBrake * G, aAcc: R.aAcc * G });
+  const TK = T.kappaLine ? { ...T, kappa: T.kappaLine } : T;   // (the racing line's curvature where the track has it)
+  const sc = speedProfile(TK, { aLat: P.scALat.v * G, vMax: P.scVMax.v, aBrake: P.scABrake.v * G, aAcc: P.scAAcc.v * G });
+  const R = P.refCar.v, ref = c.refV && c.refV.length === T.n ? c.refV : speedProfile(TK, { aLat: R.aLat * G, kDown: R.kDown, vMax: R.vMax, aBrake: R.aBrake * G, aAcc: R.aAcc * G });
   const slow = 1 + P.minTimeSlow.v, n = T.n, PT = new Float64Array(n + 1);
   for (let i = 0; i < n; i++) PT[i + 1] = PT[i] + (T.ds / Math.max(1, ref[i])) * slow;
   const N = Math.max(4, Math.round(T.L / P.marshalSector.v)), secLen = T.L / N;
@@ -103,8 +113,14 @@ export function gridSlot(race, T, k, P = CONTROL) {
 function placeGrid(race, T, P) {
   const S = race.state; let np = 0;
   const onGrid = S.cars.filter((c) => !c.pitStart && c.grid != null && c.status !== "dnf").sort((a, b) => a.grid - b.grid);
-  onGrid.forEach((c, i) => { const g = gridSlot(race, T, i + 1, P); Object.assign(c, { s: g.s, d: g.d, dist: g.dist, v: 0, where: "lap", status: "grid" }); });
-  for (const c of S.cars) if (c.pitStart && c.status !== "dnf" && T.pit) {
+  // the scenario's grid slots (measured positions before the start, data/scenario builder) when it has them, else the
+  // rules' layout (16 m rows, staggered) behind the line
+  const meas = new Map((race.scenario?.grid?.slots || []).map((g) => [g.num, g]));
+  onGrid.forEach((c, i) => {
+    const m = meas.get(c.num), g = m ? { s: T.wrap(m.s), d: m.d ?? 0, dist: T.ahead(0, m.s) < T.L / 2 ? T.wrap(m.s) : T.wrap(m.s) - T.L } : gridSlot(race, T, i + 1, P);
+    Object.assign(c, { s: g.s, d: g.d, dist: g.dist, v: 0, where: "lap", status: "grid" });
+  });
+  for (const c of S.cars) if (c.pitStart && c.status !== "dnf" && c.status !== "pitstart" && T.pit) {
     c.where = "pit"; c.status = "run"; c.v = 0;
     c.pit = c.pit || {}; Object.assign(c.pit, { phase: "laneOut", u: Math.max(0, T.pit.limEnd - P.redHead.v - np * P.redSlotGap.v), v: 0 });
     c.dist = T.pit.pitToLap(c.pit.u); np++;   // (a pit-lane starter's first line crossing completes its lap 1 – DESIGN note in the report)
@@ -120,7 +136,7 @@ function scheduleStart(race, T, t, why, P = CONTROL) {
   const lights = [1, 2, 3, 4, 5].map((i) => t + pre + Math.round(i * P.lightGap.v * 1000));
   const g = R.get("control:start"), [a, b] = P.lightsOut.v, out = lights[4] + Math.round((a + (b - a) * g.next()) * 1000);
   const go = {}, launch = {}, fs = [];
-  const mguK = race.rules?.start?.value?.mguKMinKmh ?? (yr >= 2026 ? 50 : 100);
+  const mguK = seasonRules(race).start?.value?.mguKMinKmh ?? (yr >= 2026 ? 50 : 100);
   for (const c of S.cars) {
     if (c.status !== "grid") continue;
     const r = R.get("start:" + c.num + (why === "race" ? "" : ":" + why + ":" + t)), q = P.reaction.v;
@@ -133,6 +149,14 @@ function scheduleStart(race, T, t, why, P = CONTROL) {
   }
   ctl.start = { why, lights, out, go, launch, fs, done: false };
   ctl.phase = "grid";
+}
+
+// the pit-lane speed limit (m/s): the track's, else the season's default (rules pitSpeedLimit, per-event measured values)
+export function pitLimit(race, T = race.cache?.ctl?.T) {
+  if (T?.pit?.speedLimit) return T.pit.speedLimit;
+  const v = seasonRules(race).pitSpeedLimit?.value, ev = race.scenario?.meta?.event || "";
+  const k = Object.keys(v?.measuredKmh || {}).find((x) => x !== "default" && ev.includes(x));
+  return ((k ? v.measuredKmh[k] : v?.defaultKmh) ?? 80) / 3.6;
 }
 
 // ---------- messages / log ----------
@@ -204,12 +228,20 @@ function deployRed(race, T, cause, P) {
   const order = raceOrder(race, T).filter((c) => c.status === "run").map((c) => c.num);
   const lapsAt = leaderLaps(race);
   ctl.flag = "red"; ctl.vsc = null; ctl.sc = null; ctl.drs.on = false; ctl.ot.on = false; ctl.ot.wait = "start";
-  const slots = {}; order.forEach((n, k) => (slots[n] = k));
-  const lapped = order.filter((n) => lapsAt > lapsOf(S.cars.find((x) => x.num === n), T));
+  // the fast-lane line: 2024–25 SR 57.3 – cars "arranged in the order they occupied before" the suspension (= the
+  // resumption order); 2026 B5.14.2 – "in the order they entered the Pit Lane" (slots given on arrival; the resumption
+  // order is re-established on the laps behind the SC, B5.15.3e). Cars already in the lane keep their place first.
+  const arrive = season(race) >= 2026;
+  const slots = {};
+  if (!arrive) order.forEach((n, k) => (slots[n] = k));
+  else S.cars.filter((c) => c.status === "run" && c.where === "pit").sort((a, b) => b.pit.u - a.pit.u).forEach((c, k) => (slots[c.num] = k));
+  // lapped by the leader at the suspension: a full lap or more behind it in race distance (not merely a completed lap
+  // fewer – the leader may have just crossed the line ahead of a car right behind it)
+  const lead = leaderCar(race), lapped = order.filter((n) => lead && lead.dist - S.cars.find((x) => x.num === n).dist >= T.L);
   const clearAt = Math.max(ctl.clearAt, t);
-  ctl.red = { t0: t, phase: "in", order, slots, lapsAt, lapped, clearAt, resumeAt: Math.max(t + P.redMinMs.v, clearAt + P.redNoticeMs.v),
+  ctl.red = { t0: t, phase: "in", order, slots, arrive, nArr: Object.keys(slots).length, lapsAt, lapped, clearAt, resumeAt: Math.max(t + P.redMinMs.v, clearAt + P.redNoticeMs.v),
     proc: ctl.env.wet ? "rolling" : "standing", early: false, scOut: false, open: false, changed: {} };
-  for (const c of S.cars) { const cc = ctl.cars[c.num]; cc.ok = false; cc.perm = null; cc.slot = slots[c.num] ?? null; }
+  for (const c of S.cars) { const cc = ctl.cars[c.num]; cc.ok = false; cc.perm = null; cc.slot = slots[c.num] ?? null; cc.res = order.indexOf(c.num); if (cc.res < 0) cc.res = null; }
   anchorAll(race, T);
   if (ctl.phase === "grid") { ctl.start = null; ctl.phase = "racing"; }
   msg(race, "RED FLAG - RACE SUSPENDED", { cause });
@@ -260,7 +292,7 @@ export function controlStep(race, T, env = {}, P = CONTROL) {
   if (ctl.flag === "red" && ctl.red) redStep(race, T, K, P);
   ctl.yellows = ctl.yellows.filter((y) => y.until > t);
   // 4. time limit (2 h + suspensions, at most 3 h – SR 5.4c–d / B2.5.3) → the flag at the end of the lap after the one in which it expired
-  const TL = race.rules?.timeLimit?.value;
+  const TL = seasonRules(race).timeLimit?.value;
   if (TL && ctl.t0 != null && ctl.flag !== "red" && !ctl.fin.flagT) {
     const lim = ctl.t0 + Math.min(TL.raceMs + ctl.suspMs, TL.raceMaxWithSuspensionMs);
     ctl.timeLimitAt = lim;
@@ -291,7 +323,8 @@ function crossings(race, T, K, c, P) {
   const moved = T.ahead(cc.p0, pos), mv = moved < T.L / 2 ? moved : 0;
   const crossed = (x) => mv > 0 && T.ahead(cc.p0, x) > 0 && T.ahead(cc.p0, x) <= mv;
   // pit exit → may overtake / be overtaken until SC line 2 (SR 55.8d / B5.13)
-  if (cc.w0 === "pit" && c.where !== "pit") { cc.pitL2 = true; cc.sec = null; }
+  // (rejoining at the merge: the exception lasts only while SC line 2 is still ahead – with line 2 at the merge, not at all)
+  if (cc.w0 === "pit" && c.where !== "pit") { const d2 = T.ahead(pos, K.line2); cc.pitL2 = d2 > 0 && d2 < T.L / 4; cc.sec = null; }
   if (crossed(K.line2)) cc.pitL2 = false;
   if (ctl.flag === "sc" && crossed(K.line1)) cc.l1++;
   if (!cc.t1 && c.dist >= K.sT1) cc.t1 = true;
@@ -324,9 +357,8 @@ function crossings(race, T, K, c, P) {
 function minTimeApplies(race, c, cc) {
   const ctl = race.state.control;
   if (ctl.flag === "vsc" || ctl.flag === "red") return true;
-  // SC: until the car crosses SC line 1 the second time (SR 55.7 / B5.13); cars passing the SC (waved, unlapping) and
-  // driving round to the back keep the minimum-time pace too ("at an appropriate speed")
-  if (ctl.flag === "sc") return cc.l1 < 2 || cc.perm != null;
+  // SC: until the car crosses SC line 1 the second time (SR 55.7 / B5.13), and while waved past the SC
+  if (ctl.flag === "sc") return cc.l1 < 2 || cc.perm === "wave";
   return false;
 }
 
@@ -338,7 +370,10 @@ function onLine(race, T, K, c, cc, k, tc, P) {
   // after the SC: overtaking from the Line (SR 55.8 – after the SC returned to the pits; B5.13 – after it entered the pit entry road)
   if (!cc.ok && ctl.sc && (ctl.sc.st === "pit" || ctl.sc.st === "gone") && scReturned(race)) {
     cc.ok = true; cc.fromLap = k;
-    if (isLead && !ctl.sc.lastLap && !ctl.sc.standing) { ctl.flag = "green"; ctl.drs.from = k; ctl.red = null; ctl.ot.detFrom = c.dist; msg(race, "TRACK CLEAR – GREEN FLAG"); }
+    if (isLead && !ctl.sc.lastLap && !ctl.sc.standing) {
+      ctl.flag = "green"; ctl.drs.from = k; ctl.red = null; ctl.ot.detFrom = c.dist; msg(race, "TRACK CLEAR – GREEN FLAG");
+      for (const x of S.cars) if (ctl.cars[x.num].perm) ctl.cars[x.num].perm = null;
+    }
   }
   // the finish: the leader at the target lap takes the chequered flag; everyone else at their next crossing on the track
   if (!ctl.fin.flagT && isLead && k >= ctl.fin.target && ctl.phase === "racing" && ctl.flag !== "red") {
@@ -346,9 +381,12 @@ function onLine(race, T, K, c, cc, k, tc, P) {
   }
   if (ctl.fin.flagT != null && tc >= ctl.fin.flagT && c.status === "run" && c.where !== "pit") { c.status = "fin"; c.fin = { t: tc, laps: k }; }
 }
+// B5.13 (2026): from the Control Line after the SC entered the pit entry road (= passed SC line 1). SR 55.8 (2024–25):
+// "after the safety car has returned to the pits" – read the same way (SC line 1 starts the pit entry road; the pit
+// lane's limiter line can lie after the Control Line on some layouts, which would make the leader's crossing ambiguous)
 function scReturned(race) {
   const sc = race.state.control.sc; if (!sc) return true;
-  return season(race) >= 2026 ? sc.inT != null : sc.retT != null;
+  return sc.inT != null;
 }
 
 // ---------- start ----------
@@ -391,7 +429,7 @@ function scStep(race, T, K, P) {
   if (sc.st === "wait") { if (t >= sc.joinAt) { sc.st = "out"; sc.s = T.pit ? T.pit.sOut : 0; sc.v = 15; } else return; }
   if (sc.st === "gone") return;
   if (sc.st === "pit") {   // down the pit lane at the limiter, then parked (out of the race)
-    const lim = T.pit.speedLimit; sc.v = Math.min(lim, sc.v + 3 * dt); sc.u += sc.v * dt;
+    const lim = T.pit.speedLimit ?? pitLimit(race); sc.v = Math.min(lim, sc.v + 3 * dt); sc.u += sc.v * dt;
     if (sc.retT == null && sc.u >= T.pit.limStart) sc.retT = t;
     if (sc.u >= T.pit.limStart + 30) sc.st = "gone";
     return;
@@ -432,7 +470,7 @@ function scStep(race, T, K, P) {
     if (!sc.lastLap && season(race) >= 2026) ctl.ot.wait = "allLine";
   }
   // lapped cars may unlap (SR 55.14 / B5.13): once every car's status is known and the track is clear
-  if (sc.st === "out" && !sc.unlap && race.rules?.safetyCar?.value?.lappedCars && !sc.noUnlap && t >= ctl.clearAt && sc.caught) {
+  if (sc.st === "out" && !sc.unlap && seasonRules(race).safetyCar?.value?.lappedCars && !sc.noUnlap && t >= ctl.clearAt && sc.caught) {
     const cs = S.cars.filter(onTrack), known = cs.every((c) => ctl.cars[c.num].lapped !== null), lapped = cs.filter((c) => ctl.cars[c.num].lapped);
     const left = ctl.fin.target - (lead ? lapsOf(lead, T) : 0);
     if (known && lapped.length && left >= P.unlapMinLapsLeft.v) {
@@ -460,7 +498,7 @@ function scLine(race, T, K, P) {
   const lead = leaderCar(race);
   const passed = S.cars.every((c) => !onTrack(c) || !["wave", "unlap"].includes(ctl.cars[c.num].perm));
   const ready = S.t >= ctl.clearAt && sc.caught && passed && (sc.noUnlap || (sc.unlap && sc.line > sc.unlap.line)) && (sc.unlap || allQueued(race, T, K));
-  const unlapPending = !sc.noUnlap && !sc.unlap && race.rules?.safetyCar?.value?.lappedCars;
+  const unlapPending = !sc.noUnlap && !sc.unlap && seasonRules(race).safetyCar?.value?.lappedCars;
   if (!ready || unlapPending) return;
   sc.st = "in"; sc.lights = false;
   const g = race.rng.get("control:restart"), [a, b] = P.restartGo.v;
@@ -468,8 +506,9 @@ function scLine(race, T, K, P) {
   if (ctl.red && ctl.red.phase === "run" && ctl.red.proc === "standing") {
     sc.standing = true; msg(race, "STANDING START – SAFETY CAR IN THIS LAP");
     // grid slots for the restart, in the queue order (= the resumption order, kept by the no-overtaking rule)
-    const order = raceOrder(race, T).filter((c) => c.status === "run");
-    order.forEach((c, i) => { ctl.cars[c.num].gridS = gridSlot(race, T, i + 1, P).s; });
+    const R = ctl.red, run = S.cars.filter((c) => c.status === "run");
+    const rk = (c) => { const cc = ctl.cars[c.num]; return cc.redLap ? 1000 + cc.slot : cc.res ?? 500 + cc.slot; };   // (the cars that did the extra lap at the back, in the order they came back)
+    run.sort((a, b) => rk(a) - rk(b)).forEach((c, i) => { ctl.cars[c.num].gridS = gridSlot(race, T, i + 1, P).s; });
   } else msg(race, "SAFETY CAR IN THIS LAP");
 }
 
@@ -478,6 +517,7 @@ function redStep(race, T, K, P) {
   const S = race.state, ctl = S.control, R = ctl.red, t = S.t;
   if (R.phase === "run") return;
   forceRedPit(race, T);
+  if (R.arrive) for (const c of S.cars) { const cc = ctl.cars[c.num]; if (c.status === "run" && c.where === "pit" && cc.slot == null && !cc.redLap) cc.slot = R.nArr++; }
   R.clearAt = Math.max(R.clearAt, ctl.clearAt); R.resumeAt = Math.max(R.resumeAt, R.clearAt + P.redNoticeMs.v);
   if (R.phase === "in" && S.cars.every((c) => c.status !== "run" || (c.where === "pit" && (c.pit.v ?? 0) < 0.2 && (c.pit.phase === "lane" || c.pit.phase === "laneOut")))) {
     R.phase = "stopped"; msg(race, `ALL CARS IN THE PIT LANE – RACE WILL RESUME AT +${Math.round((R.resumeAt - R.t0) / 60000)} MIN`);
@@ -485,14 +525,15 @@ function redStep(race, T, K, P) {
   // lapped cars leave 2 min early for a lap and rejoin the back of the line in the fast lane (B5.15.2c; est for 2024–25 timing)
   if (!R.early && t >= R.resumeAt - P.redLappedEarlyMs.v) {
     R.early = true;
-    const base = R.order.length;
-    R.lapped.forEach((n, i) => { const cc = ctl.cars[n]; cc.slot = base + i; cc.redLap = 1; });
+    R.lapped.forEach((n) => { ctl.cars[n].redLap = 1; });
+    R.back = 0;
     if (R.lapped.length) msg(race, `LAPPED CARS MAY LEAVE THE PIT LANE: ${R.lapped.join(", ")}`, { cars: R.lapped });
   }
   for (const n of R.lapped) {   // back on the lap after their exit: into the pit lane again at the next entry
     const c = S.cars.find((x) => x.num === n), cc = ctl.cars[n];
     if (cc.redLap === 1 && c.where !== "pit") cc.redLap = 2;
-    if (cc.redLap === 2 && c.where === "pit") cc.redLap = 3;
+    // back in the lane: the next free place at the end of the line, in the order they come back
+    if (cc.redLap === 2 && c.where === "pit") { cc.redLap = 3; cc.slot = R.order.length + R.back++; }   // (beyond every first-arrival slot)
   }
   // the SC: 2026 – out before the 1-min signal to the resumption position (end of sector 1) and waits; 2024–25 – leads out of the pit exit
   if (!R.scOut && ((season(race) >= 2026 && t >= R.resumeAt - P.redScOutMs.v) || t >= R.resumeAt)) {
@@ -533,7 +574,7 @@ export function redTyreChange(race, T, car, compound, apply, P = CONTROL) {
 
 // ---------- availability: DRS (≤ 2025), Overtake (2026) ----------
 function availability(race, T, K, P) {
-  const S = race.state, ctl = S.control, R = race.rules;
+  const S = race.state, ctl = S.control, R = seasonRules(race);
   if (R?.drs) {
     const n = R.drs.value.enabledAfterLaps ?? 1;
     const on = ctl.phase === "racing" && ctl.flag === "green" && !ctl.env.wet && leaderLaps(race) - ctl.drs.from >= n;
@@ -551,7 +592,7 @@ function availability(race, T, K, P) {
 }
 
 export function drsAllowed(race, T, car) {
-  const R = race.rules, ctl = race.state.control;
+  const R = seasonRules(race), ctl = race.state.control;
   if (!R?.drs) return { ok: false, why: "no DRS this season" };
   if (!ctl.drs.on) return { ok: false, why: ctl.env.wet ? "disabled (wet)" : ctl.flag !== "green" ? `disabled (${ctl.flag})` : "not yet enabled" };
   const cc = ctl.cars[car.num], n = R.drs.value.enabledAfterLaps ?? 1;
@@ -562,7 +603,7 @@ export function drsAllowed(race, T, car) {
   return { ok: true };
 }
 export function overtakeModeAllowed(race, T, car) {
-  const R = race.rules, ctl = race.state.control;
+  const R = seasonRules(race), ctl = race.state.control;
   if (!R?.overtakeMode) return { ok: false, why: "no Overtake system this season" };
   if (!ctl.ot.on) return { ok: false, why: ctl.env.lowGrip ? "low grip conditions" : ctl.flag !== "green" ? `disabled (${ctl.flag})` : "not yet enabled" };
   return { ok: true, detectionGapS: R.overtakeMode.value.detectionGapS };
@@ -570,7 +611,7 @@ export function overtakeModeAllowed(race, T, car) {
 // Active Aero (2026 wings): any driver, any lap, only in an activation zone (the aero model checks the zone);
 // after a standing start only past Turn 1; in Low Grip Conditions only the partial mode (front wing).
 export function activeAeroAllowed(race, T, car) {
-  const R = race.rules, ctl = race.state.control;
+  const R = seasonRules(race), ctl = race.state.control;
   if (!R?.activeAero) return { ok: false, mode: "none", why: "no Active Aero this season" };
   if (ctl.phase === "grid") return { ok: false, mode: "none", why: "before the start" };
   if (!ctl.cars[car.num].t1) return { ok: false, mode: "none", why: "after Turn 1 at a standing start" };
@@ -592,11 +633,11 @@ export function mayOvertake(race, T, a, b) {
   if (!isSC && b.status === "fin") return { ok: true, why: "finished" };
   if (ctl.phase === "grid") return { ok: false, why: "before the start" };
   if (ctl.phase === "finished") return { ok: false, why: "finished" };
-  if (ctl.flag === "red") {
-    // laps behind the SC at a resumption: only to re-establish the resumption order (B5.15.3e)
-    const R = ctl.red, cb = isSC ? null : ctl.cars[b.num];
-    if (R && R.phase === "run" && cb && ca.slot != null && cb.slot != null && ca.slot < cb.slot) return { ok: true, why: "re-establishing the resumption order" };
-    return { ok: false, why: "red flag" };
+  if (ctl.flag === "red") return { ok: false, why: "red flag" };
+  // laps behind the SC at a resumption: only to re-establish the resumption order (B5.15.3e; 2024–25 lines are already in it)
+  if (ctl.flag === "sc" && ctl.red && ctl.red.phase === "run" && !isSC) {
+    const cb = ctl.cars[b.num];
+    if (ca.res != null && cb.res != null && ca.res < cb.res && !ca.redLap && !cb.redLap) return { ok: true, why: "re-establishing the resumption order" };
   }
   // pit entry after SC line 1 / pit exit before SC line 2 (SR 55.8c–d / 56)
   if ((ctl.flag === "sc" || ctl.flag === "vsc") && a.pit && (a.pit.phase === "committed" || a.pit.phase === "entry") && T.ahead(K.line1, lapPos(a, T)) < T.L / 4) return { ok: true, why: "entering the pits after SC line 1" };
@@ -624,6 +665,16 @@ export function alongsideOk(race, T, a, b) {
   const ctl = race.state.control;
   if (season(race) >= 2026 && ctl.flag === "sc" && ctl.sc && ctl.sc.st === "in") return { ok: false, why: "no running alongside after SAFETY CAR IN THIS LAP (2026)" };
   return mayOvertake(race, T, a, b);
+}
+
+// What traffic needs to know about a car under race control, beyond mayOvertake: its SC permission ("wave": waved past
+// the SC; "unlap": a lapped car passing the queue and the SC; "toQueue": driving round to the back, no overtaking), and
+// whether it must hold the racing line because lapped cars are passing (SR 55.14 / B5.13: "the cars on the lead lap must
+// always stay on the racing line unless deviating from it is unavoidable").
+export function scRole(race, car) {
+  const ctl = race.state.control, cc = ctl.cars[car.num], sc = ctl.sc;
+  const unlapping = ctl.flag === "sc" && race.state.cars.some((c) => ctl.cars[c.num]?.perm === "unlap");
+  return { perm: cc?.perm ?? null, holdLine: unlapping && cc?.perm !== "unlap", behindSc: ctl.flag === "sc" && !!sc && !cc?.ok, noAlongside: season(race) >= 2026 && ctl.flag === "sc" && sc?.st === "in" };
 }
 
 // ---------- per-step cache: track order of the cars on the lap and the SC ----------
@@ -670,6 +721,8 @@ export function caps(race, T, car, P = CONTROL) {
   }
   const f = ctl.flag;
   if (f === "vsc" || f === "red" || (f === "sc" && minTimeApplies(race, car, cc))) lim(ghostCap(race, T, K, car, cc, pos, P), f === "vsc" ? "VSC delta" : "minimum sector time");
+  // unlapping / driving round to the back of the queue: "an appropriate speed" – quicker than the queue so it gets there
+  if (f === "sc" && (cc.perm === "unlap" || cc.perm === "toQueue")) lim(K.sc[T.idx(pos)] * P.passPace.v, "passing the queue at an appropriate speed");
   if (f === "sc" || f === "red") {
     const sc = ctl.sc;
     const toGrid = cc.gridS != null && (!sc || sc.st === "pit" || sc.st === "gone");
@@ -720,6 +773,15 @@ export function pitCtx(race, T, car, P = CONTROL) {
   const p = car.pit, u = p.u;
   const hold = (x, why) => { if (out.holdU == null || x < out.holdU) { out.holdU = x; out.why = why; } };
   if (car.pitStart && !ctl.pitStartOpen) hold(u, "pit-lane start: until the field has passed the pit exit");
+  // the fast lane is one lane: never closer than a car length + 2 m to the car ahead in it (pit.js moves each car alone)
+  const FAST = new Set(["entry", "lane", "laneOut", "exit"]);
+  const arranging = ctl.flag === "red" && ctl.red && !ctl.red.open && !ctl.red.arrive;   // (SR 57.3: arranged by the marshals)
+  const leaving = cc.redLap === 1;   // (a lapped car released for its extra lap pulls out of the line – B5.15.2c / B5.15.3a)
+  if (FAST.has(p.phase) && !arranging && !leaving) {
+    let near = null;
+    for (const c of race.state.cars) if (c !== car && c.where === "pit" && FAST.has(c.pit.phase) && c.pit.u > u && ctl.cars[c.num].redLap !== 1 && (!near || c.pit.u < near.pit.u)) near = c;
+    if (near) hold(near.pit.u - P.carLen.v - 2, "fast lane: the car ahead");
+  }
   const R = ctl.red;
   const busy = ["approach", "queue", "penalty", "work", "release"].includes(p.phase);
   if (p.call?.red && !busy) out.noBox = true;   // (called in by the red flag: the fast lane, not the box – tyres are changed there)
@@ -729,10 +791,22 @@ export function pitCtx(race, T, car, P = CONTROL) {
     if (!early) hold(Math.max(0, L.limEnd - P.redHead.v - (cc.slot ?? 0) * P.redSlotGap.v), "red flag: queue at the pit exit");
   }
   // the exit light: red while the SC / the queue is passing the pit exit (est), and during a suspension
-  if (ctl.flag === "sc" && ctl.sc && (ctl.sc.st === "out" || ctl.sc.st === "in") && u < L.limEnd) {
-    const K = tables(race, T, P), near = (s) => T.ahead(s, L.sOut) < P.pitExitHold.v;
+  // behind the SC (also at a red-flag resumption, when the field leaves the lane after the SC): one at a time – a car
+  // waits at the exit light until the merge is clear of the SC and the car that left before it (est: P.mergeClear)
+  if (ctl.flag === "sc" && u < L.limEnd + 1) {
+    const clear = (s) => { const d = T.ahead(L.sOut, s); return d > P.mergeClear.v && d < T.L / 2 ? true : T.ahead(s, L.sOut) > 60 && T.ahead(s, L.sOut) < T.L / 2; };
+    const blocked = (ctl.sc && ["out", "in", "hold"].includes(ctl.sc.st) && !clear(ctl.sc.s)) || race.state.cars.some((c) => c !== car && c.status === "run" && c.where !== "pit" && !clear(lapPos(c, T)))
+      || race.state.cars.some((c) => c !== car && c.where === "pit" && c.pit.u > u && (c.pit.phase === "exit"));
+    const ahead = race.state.cars.filter((c) => c !== car && c.where === "pit" && c.pit.u > u && c.pit.u < L.limEnd).length;
+    if (blocked) hold(L.limEnd - 1 - ahead * P.redSlotGap.v, "pit exit: waiting for the merge to clear");
+  }
+  // (not when the field is leaving the pit lane behind the SC at a red-flag resumption)
+  if (ctl.flag === "sc" && ctl.sc && (ctl.sc.st === "out" || ctl.sc.st === "in") && u < L.limEnd && !(R && R.phase === "run")) {
+    const near = (s) => T.ahead(s, L.sOut) < P.pitExitHold.v;
     const queueNear = race.state.cars.some((c) => onTrack(c) && near(lapPos(c, T)) && !ctl.cars[c.num].perm);
-    if (near(ctl.sc.s) || queueNear) hold(L.limEnd - 1, "pit exit closed: the field is passing");
+    // queued at the light one behind the other (the cars already waiting ahead of this one in the lane)
+    const ahead = race.state.cars.filter((c) => c !== car && c.where === "pit" && c.pit.u > u && c.pit.u < L.limEnd).length;
+    if (near(ctl.sc.s) || queueNear) hold(L.limEnd - 1 - ahead * P.redSlotGap.v, "pit exit closed: the field is passing");
   }
   return out;
 }

@@ -17,17 +17,18 @@ export const CONTROL = {
   // the reference the minimum sector times are built on when the engine doesn't pass its own envelope (race.cache.refV):
   // a point-mass F1 car, a_lat = aLat·(1 + kDown·v²). Only the SHAPE matters much (slow corners slow, straights fast);
   // the level is set by minTimeSlow.
-  refCar: { v: { aLat: 1.6, kDown: 0.0034, vMax: 92, aBrake: 4.0, aAcc: 1.1 }, unit: "g, 1/(m/s)², m/s, g, g", est: true, range: null, why: "reference car for the minimum-time profile (game estimate; kDown ≈ ClA·ρ/(2m) ≈ 4.5·1.2/1600)" },
+  refCar: { v: { aLat: 1.4, kDown: 0.0005, vMax: 85, aBrake: 4.0, aAcc: 1.0 }, unit: "g, 1/(m/s)², m/s, g, g", est: true, range: null, why: "reference car for the minimum-time profile when the engine passes none (race.cache.refV – a real car envelope is better). Fitted (grid search) so its lap ≈ 0.98 × the median green-flag race lap of the 2025 Suzuka / Monaco / Hungaroring / Monza fixture tracks: 1.045 / 0.954 / 0.991 / 0.940 – a calibration of the reference's level only (research/control/sc_pace_check.mjs → logs/control_sc_pace.log)" },
   // ---- queueing behind the SC / under red
   queueGap: { v: 18, unit: "m", est: true, range: [8, 56], why: "the gap drivers keep in the queue (rules: no more than ten car lengths – drivers weave and keep closer)" },
   queueMax: { v: 10, unit: "car lengths", est: false, range: [10, 20], why: "rules maximum gap in the SC queue", src: "SR 55.7 / 55.10 (2024–25), B5.13 / B5.15.2f (2026): ten car lengths (twenty in low visibility)" },
   queueBrake: { v: 1.2, unit: "g", est: true, range: [0.6, 2.0], why: "deceleration a queued driver plans with when closing on the car ahead (comfortable, not a stop)" },
   // ---- minimum sector times (VSC, and SC until a car crosses SC line 1 the second time)
   marshalSector: { v: 250, unit: "m", est: true, range: [150, 400], why: "length of a marshalling sector (between FIA light panels) – circuits have ~20–30 panels; the real panel positions are not in the scenario, so the lap is cut in equal sectors of about this length" },
-  minTimeSlow: { v: 0.40, unit: "fraction", est: true, range: [0.30, 0.55], why: "the ECU minimum time of a sector = reference racing time × (1 + this); VSC laps are ~30–50 % slower than racing laps. The FIA's per-circuit values are not public" },
+  minTimeSlow: { v: 0.35, unit: "fraction", est: true, range: [0.28, 0.42], why: "the ECU minimum time of a sector = reference racing time × (1 + this). The FIA's per-circuit values are not public; measured instead: laps run entirely under the VSC are 1.34× the race's median green lap (8 races with ≥3 such laps, p10–p90 1.28–1.41: f1kr-work/v048/logs/control_neutral_laps.log, research/control/neutral_laps_probe.mjs over the read-only cache)" },
   ghostGain: { v: 25, unit: "m", est: true, range: [10, 60], why: "a driver keeping the delta: speed = the minimum-time pace × (1 + metres behind the delta ghost / this) – catches up after a slow corner, backs off when ahead" },
   vscGraceSectors: { v: 1, unit: "sectors", est: true, range: [0, 2], why: "the sector in which the VSC / SC is declared is not checked (the driver needs it to slow down)" },
   vscEndDelay: { v: [10, 15], unit: "s", est: false, range: [10, 15], why: "'VSC ENDING' → green: drawn uniformly (seeded) in the rules' window", src: "SR 56.7 / B5.12: 10–15 s; RCM probe: 32 VSC endings 10.1–14.9 s, " + PROBE },
+  passPace: { v: 1.3, unit: "× SC pace", est: true, range: [1.1, 1.6], why: "cars unlapping or driving round to the back of the SC queue: 'an appropriate speed' (SR 55.14 / B5.13) – quicker than the queue" },
   // ---- restarts
   restartGo: { v: [150, 700], unit: "m before the line", est: true, range: [50, 1500], why: "where the leader chooses to accelerate when the SC has gone in (seeded per restart within this window)" },
   restartPace: { v: 1.0, unit: "× SC pace", est: true, range: [0.7, 1.2], why: "the leader's pace before he goes (backs the field up at about the SC's speed)" },
@@ -52,6 +53,7 @@ export const CONTROL = {
   launchQ: { v: [0.92, 1.0], unit: "fraction", est: true, range: [0.85, 1.0], why: "launch quality (clutch / wheelspin) – a multiplier on the traction the car model can use for the launch, seeded per driver" },
   // ---- pit exit, DRS, flags
   pitExitHold: { v: 150, unit: "m", est: true, range: [50, 400], why: "under the SC the pit exit light is red while the SC or the queue is this close before the exit" },
+  mergeClear: { v: 30, unit: "m", est: true, range: [10, 80], why: "behind the SC a car leaves the pit lane only when the SC / the car ahead is this far past the merge (one at a time, no pile-up at the exit)" },
   wetDrsWater: { v: 0.5, unit: "mm", est: true, range: [0.2, 1.5], why: "mean water on the racing line above which race control keeps DRS disabled (rules: RD may disable in poor visibility / wet)" },
   yellowUtil: { v: { single: 0.97, double: 0.90 }, unit: "× grip use", est: true, range: [0.85, 1.0], why: "drivers lift under a local yellow (single: reduce speed, double: be prepared to stop) – applied to the driver's grip utilisation inside the zone, not to a lap time" },
   yellowLen: { v: 350, unit: "m", est: true, range: [150, 800], why: "length of a local yellow zone around an incident (the marshalling sector(s) concerned)" },

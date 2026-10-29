@@ -31,8 +31,9 @@ function makeTrack(L = 5000, ds = 2) {
   return T;
 }
 
-async function makeRace({ n = 10, season = 2025, seed = 1, totalLaps = 20, paces = null, pitStart = [], rulesPatch = null, P = null, scenario = {} } = {}) {
+async function makeRace({ n = 10, season = 2025, seed = 1, totalLaps = 20, paces = null, pitStart = [], rulesPatch = null, P = null, scenario = {}, fixture = null } = {}) {
   const { Streams } = await imp("engine/rng.js"), pit = await imp("engine/pit.js"), C = await imp("engine/control.js");
+  if (fixture) return makeRealRace({ fixture, n, seed, totalLaps, paces, rulesPatch, P, Streams, pit, C });
   const rules = structuredCloneRules((await imp(`data/rules/${season}.js`)).default);
   if (rulesPatch) rulesPatch(rules);
   const teams = "abcdefghij".split("");
@@ -51,6 +52,22 @@ async function makeRace({ n = 10, season = 2025, seed = 1, totalLaps = 20, paces
   race.cache.prof = C.speedProfile(T, { aLat: 1.7 * 9.81, kDown: 0.0036, vMax: 93, aBrake: 4.5 * 9.81, aAcc: 1.3 * 9.81 });
   race.cache.boxes = pit.newBoxes(teams);
   return { race, T, C, pit };
+}
+// the same cars on a real scenario's track (test/fixtures/game/<id>.scenario.json – loadTrack, its grid slots, its boxes)
+async function makeRealRace({ fixture, n, seed, totalLaps, paces, rulesPatch, P, Streams, pit, C }) {
+  const fs = require("node:fs"), sc = JSON.parse(fs.readFileSync(path.join(__dirname, "../fixtures/game", fixture + ".scenario.json"), "utf8"));
+  const { loadTrack } = await imp("engine/track.js"), T = loadTrack(sc.track);
+  if (!T.pit.speedLimit) T.pit.speedLimit = 80 / 3.6;
+  const rules = structuredCloneRules((await imp(`data/rules/${sc.meta.season}.js`)).default); if (rulesPatch) rulesPatch(rules);
+  const slots = (sc.grid?.slots || []).slice(0, n), teams = Object.keys(T.pit.boxes);
+  const cars = slots.map((g, i) => { const e = sc.entries.find((x) => x.num === g.num) || {}; return { num: g.num, teamKey: teams.includes(e.teamKey) ? e.teamKey : teams[i % teams.length], tla: e.tla, grid: g.pos, pitStart: false,
+    status: "grid", out: null, where: "lap", s: 0, d: 0, v: 0, dist: 0, lap: 0, pit: pit.newPitState(), pen: { pendingS: 0, finalS: 0, serve: [] }, pace: paces ? paces[i] : 1 - i * 0.002, tyre: { compound: "MEDIUM" }, laps: [] }; });
+  const race = { state: { v: 1, t: 0, step: 0, seed, season: sc.meta.season, totalLaps: totalLaps ?? sc.race.laps, finished: false, cars, order: cars.map((c) => c.num), log: [] }, rules, rng: new Streams(seed), cache: {}, scenario: sc };
+  C.newControl(race, T, P || undefined);
+  const TK = T.kappaLine ? { ...T, kappa: T.kappaLine } : T;
+  race.cache.prof = C.speedProfile(TK, { aLat: 1.45 * 9.81, kDown: 0.0006, vMax: 88, aBrake: 4.5 * 9.81, aAcc: 1.1 * 9.81 });
+  race.cache.boxes = pit.newBoxes(teams);
+  return { race, T, C, pit, sc };
 }
 function structuredCloneRules(r) { return JSON.parse(JSON.stringify(r)); }
 
@@ -74,8 +91,12 @@ function step(H, { env = {}, hooks = {} } = {}) {
       const ev = pit.pitStep(c, T, { t: S.t, dt, team: c.teamKey, boxes: race.cache.boxes, rng: race.rng.get("pit:" + c.teamKey), wet: false, others, penaltyS: pen, noWork: hooks.noWork?.(c), noBox: ctx.noBox || hooks.noBox?.(c), holdU: ctx.holdU,
         onWorkDone: (car, cmp) => { car.tyre = { compound: cmp }; hooks.onWorkDone?.(car, cmp); } });
       if (ev) hooks.pitEvent?.(c, ev);
-      if (c.pit.phase === "none") { c.where = "lap"; const d = T.ahead(lp0, c.s); c.dist += d < T.L / 2 ? d : 0; }
-      else { c.v = c.pit.v; c.dist += T.ahead(lp0, C.lapPos(c, T)) < 100 ? T.ahead(lp0, C.lapPos(c, T)) : 0; }
+      // race distance in the lane advances with u (pit path m → lap m over the stretch it runs beside) – not via pitToLap,
+      // which is clamped at the end of the path (a car accelerating out there would stall in distance and be "passed")
+      const span = T.ahead(T.pit.sIn, T.pit.sOut);
+      if (c.dIn == null) c.dIn = c.dist - T.ahead(T.pit.sIn, lp0);
+      if (c.pit.phase === "none") { c.where = "lap"; c.dist = c.dIn + span + T.ahead(T.pit.sOut, c.s); c.dIn = null; }
+      else { c.v = c.pit.v; c.dist = c.dIn + Math.min(span, c.pit.u * span / T.pit.L); }
       continue;
     }
     const util = cap.util ?? 1;
@@ -94,7 +115,7 @@ function step(H, { env = {}, hooks = {} } = {}) {
     if (sc && ["out", "in", "hold"].includes(sc.st)) { const g = T.ahead(c.s, sc.s); if (g < 60 && !C.mayOvertake(race, T, c, "SC").ok && mv > g - 6) { mv = Math.max(0, g - 6); c.v = Math.min(c.v, mv / dt); } }
     const s0 = c.s; c.s = T.wrap(c.s + mv); c.dist += mv;
     const ev = pit.pitOnLap(c, T, s0, c.s, S.t);
-    if (ev === "entry") { c.where = "pit"; hooks.pitEvent?.(c, "entry"); }
+    if (ev === "entry") { c.where = "pit"; c.dIn = c.dist - T.ahead(T.pit.sIn, c.s); hooks.pitEvent?.(c, "entry"); }
   }
   S.order = C.raceOrder(race, T).map((c) => c.num);
   hooks.afterCars?.(H);

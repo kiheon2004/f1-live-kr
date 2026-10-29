@@ -72,6 +72,8 @@ test("SC: a car on the track; the leader closes up to it, the field queues and t
   assert.deepEqual(S.control.infr, [], "everyone kept the minimum sector times");
   // overtaking is allowed again for a car that has passed the Line after the SC came in
   const [a, b] = [S.cars.find((c) => c.num === S.order[1]), S.cars.find((c) => c.num === S.order[0])];
+  if (!S.control.cars[a.num].ok) assert.ok(!H.C.mayOvertake(H.race, H.T, a, b).ok, "not before it crossed the Line itself");
+  runTo(H, () => S.control.cars[a.num].ok, 60e3);
   assert.ok(H.C.mayOvertake(H.race, H.T, a, b).ok);
 });
 
@@ -320,3 +322,58 @@ test("determinism: the same seed and inputs → the same control state; a save/l
   H0.run(a, 3 * 60e3); H0.run(r2, 3 * 60e3);
   assert.equal(JSON.stringify(r2.race.state), JSON.stringify(a.race.state));
 });
+
+// the same procedures on real tracks (scenario fixtures: the lap line, the pit path, the measured grid)
+for (const fx of ["2025-08-03_Hungarian_Grand_Prix_2025-08-03_Race", "2025-05-25_Monaco_Grand_Prix_2025-05-25_Race", "2025-09-07_Italian_Grand_Prix_2025-09-07_Race"]) {
+  test(`real track ${fx.slice(11, 30)}: start from the measured grid, SC queue without overtaking, VSC lap ≈ (1 + minTimeSlow) × reference, red flag into the pit lane in order, restart`, async () => {
+    const H = await H0.makeRace({ fixture: fx, n: 12, totalLaps: 40, paces: Array.from({ length: 12 }, (_, i) => 1 - i * 0.003) }), S = H.race.state, T = H.T;
+    const slots = H.sc.grid.slots.slice(0, 12);
+    assert.ok(S.cars.every((c, i) => Math.abs(T.ahead(c.s, T.wrap(slots[i].s))) < 1e-6 || Math.abs(T.ahead(T.wrap(slots[i].s), c.s)) < 1e-6), "the measured slots");
+    assert.ok(S.cars.every((c) => c.dist < 0 || c.dist < T.L / 2), "behind (or just past) the line");
+    H0.run(H, 4 * 60e3);
+    assert.ok(S.cars.every((c) => c.status === "run" && c.dist > T.L), "racing");
+    // SC
+    const ord = H0.trackOrder(H).join(","); let changes = 0;
+    H.C.neutralise(H.race, H.T, "sc", { clearMs: 90e3 });
+    runTo(H, () => { if (S.control.flag === "sc" && H0.trackOrder(H).join(",") !== ord) changes++; return S.control.flag === "green"; }, 30 * 60e3);
+    assert.equal(S.control.flag, "green"); assert.equal(changes, 0, "no overtaking under the SC");
+    // VSC: a lap's time under it vs the reference lap
+    H0.run(H, 2 * 60e3);
+    H.C.neutralise(H.race, H.T, "vsc", { clearMs: 400e3 });
+    const K = H.race.cache.ctl, refLap = K.PT[T.n] / K.slow, c = S.cars[3];
+    const times = [];
+    runTo(H, () => { for (const x of S.control.stepCross) if (x.num === c.num && S.t - S.control.vsc.t0 > 20e3) times.push(x.t); return times.length >= 2; }, 8 * 60e3);
+    assert.equal(S.control.flag, "vsc");
+    const vscLap = (times[1] - times[0]) / 1000;
+    assert.ok(vscLap / refLap > 1.25 && vscLap / refLap < 1.5, `VSC lap ${vscLap.toFixed(1)} s / reference ${refLap.toFixed(1)} s = ${(vscLap / refLap).toFixed(3)}`);
+    assert.deepEqual(S.control.infr, []);
+    runTo(H, () => S.control.flag === "green", 10 * 60e3);
+    // red
+    const order = S.order.slice();
+    H.C.neutralise(H.race, H.T, "red", { clearMs: 60e3 });
+    runTo(H, () => S.control.red?.phase === "stopped", 15 * 60e3);
+    assert.deepEqual(S.cars.slice().sort((a, b) => b.pit.u - a.pit.u).map((x) => x.num), order, "fast-lane queue in the resumption order");
+    runTo(H, () => H0.msgs(H).includes("LIGHTS OUT – RACE RESUMED") || S.control.flag === "green" && !S.control.red, 60 * 60e3);
+    assert.equal(S.control.flag, "green");
+    assert.ok(S.cars.every((c) => Number.isFinite(c.dist) && Number.isFinite(c.v)));
+  });
+}
+
+for (const season of [2025, 2026]) {
+  test(`red flag ${season}: a lapped car leaves 2 min early for a lap, rejoins the back of the line and regains the lap; ${season >= 2026 ? "pit-entry order, then the resumption order behind the SC" : "line arranged in the resumption order"}`, async () => {
+    const H = await H0.makeRace({ n: 5, season, totalLaps: 60, paces: [1, 0.995, 0.99, 0.985, 0.8] }), S = H.race.state;
+    runTo(H, () => S.cars[0].dist - S.cars[4].dist > 5000 + 800, 40 * 60e3);
+    const slow = S.cars[4], behind0 = S.cars[0].dist - slow.dist;
+    H.C.neutralise(H.race, H.T, "red", { clearMs: 60e3 });
+    const R = S.control.red, order = R.order.slice();
+    assert.deepEqual(R.lapped, ["5"]);
+    let leftEarly = null, back = null;
+    runTo(H, () => { if (leftEarly == null && R.early && slow.where === "lap") leftEarly = S.t; if (leftEarly && back == null && slow.where === "pit") back = S.t; return R.open; }, 60 * 60e3);
+    assert.ok(leftEarly && leftEarly >= R.resumeAt - 2 * 60e3 && back && back < R.resumeAt, `left ${leftEarly}, back ${back}, resume ${R.resumeAt}`);
+    assert.ok(S.cars.every((c) => c === slow || c.pit.u > slow.pit.u), "at the back of the line");
+    runTo(H, () => H0.msgs(H).includes("LIGHTS OUT – RACE RESUMED") || (S.control.flag === "green" && !S.control.red), 30 * 60e3);
+    assert.ok(S.cars[0].dist - slow.dist < behind0 - 4000, "one lap regained");
+    const grid = S.cars.slice().sort((a, b) => b.dist - a.dist).map((c) => c.num);
+    assert.deepEqual(grid, order.filter((n) => n !== "5").concat(["5"]), "restart in the resumption order, the unlapped car last");
+  });
+}

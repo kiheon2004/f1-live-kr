@@ -15,7 +15,7 @@
 //   yieldRequest(race, car)      – blue flag shown to this car: the faster car it must let by (traffic acts on it).
 //   classify(race, T)            – the final classification and points (also the unserved penalties and the tyre rule).
 import { STEWARDS } from "../data/params/stewards.js";
-import { lapsOf, lapPos } from "./control.js";
+import { lapsOf, lapPos, seasonRules, pitLimit } from "./control.js";
 
 const DRY = new Set(["SOFT", "MEDIUM", "HARD", "C0", "C1", "C2", "C3", "C4", "C5", "C6"]);
 const WET = new Set(["INTERMEDIATE", "INTER", "WET"]);
@@ -44,7 +44,7 @@ const recalc = (p) => { p.pendingS = p.serve.filter((x) => !x.served && (x.kind 
 // 2024–25 (SR 54.3): 5 s → +5, 10 s → +10, DT → +20, S&G → +30; 2026 (B1.9.5): in the last three laps only DT → +20 and
 // S&G → +30 (5/10 s served or added as usual), after the session all four.
 export function penalise(race, T, car, kind, why, { at = null } = {}) {
-  const S = race.state, ctl = S.control, R = race.rules.penalties.value, p = ensurePen(car), W = stw(race);
+  const S = race.state, ctl = S.control, R = seasonRules(race).penalties.value, p = ensurePen(car), W = stw(race);
   if (kind === "dsq") { p.dsq = why; msg(race, `FIA STEWARDS: CAR ${car.num} DISQUALIFIED – ${why}`, [car.num], why); return { kind }; }
   const after = ctl.phase !== "racing" && ctl.phase !== "grid";
   const last3 = !after && ctl.fin.target - leaderLapsDone(race, T) <= 3;
@@ -100,7 +100,7 @@ export function stewardsStep(race, T, P = STEWARDS) {
     else if (r.kind === "vsc" || r.kind === "sc") { if (r.short > P.vscTol.v) penalise(race, T, car, P.vscInfringement.v, `${r.kind === "vsc" ? "VSC" : "SAFETY CAR"} INFRINGEMENT – ${r.short.toFixed(2)} S UNDER THE MINIMUM TIME`); }
   }
   // line crossings: DT / S&G must be served within maxLineCrossings (crossings behind the SC / under the VSC don't count)
-  const maxX = race.rules.penalties.value.driveThrough?.maxLineCrossings ?? 2;
+  const maxX = seasonRules(race).penalties.value.driveThrough?.maxLineCrossings ?? 2;
   for (const x of ctl.stepCross) {
     const car = S.cars.find((c) => c.num === x.num), p = ensurePen(car);
     for (const it of p.serve) if (!it.served && (it.kind === "dt" || it.kind === "sg") && x.t > it.given && ctl.flag === "green" && !x.pit) {
@@ -111,7 +111,7 @@ export function stewardsStep(race, T, P = STEWARDS) {
   // pit-lane speeding (SR 34.7 / B1.6.3a): over the limit inside the limiter zone, once per visit
   if (T.pit) for (const c of S.cars) {
     if (c.where !== "pit" || c.status !== "run") { if (W.speeding[c.num]) W.speeding[c.num] = false; continue; }
-    const u = c.pit.u, v = c.pit.v, lim = T.pit.speedLimit + P.pitSpeedTol.v / 3.6;
+    const u = c.pit.u, v = c.pit.v, lim = pitLimit(race, T) + P.pitSpeedTol.v / 3.6;
     const limited = c.pit.phase === "lane" || c.pit.phase === "approach" || c.pit.phase === "queue" || c.pit.phase === "laneOut";
     if (limited && u >= T.pit.limStart && u <= T.pit.limEnd && v > lim + 1e-9 && !W.speeding[c.num]) {
       W.speeding[c.num] = true; penalise(race, T, c, P.pitSpeeding.v, `SPEEDING IN THE PIT LANE (${(v * 3.6).toFixed(1)} KM/H)`);
@@ -125,7 +125,7 @@ export function stewardsStep(race, T, P = STEWARDS) {
 // pre-warning gap (3.0 s) it is told; inside 1.2 s the blue flag is shown and it must let the faster car by at the first
 // opportunity (data/rules blueFlags: marshalling-system thresholds). Ignoring it: black-and-white flag, then a penalty.
 function blueFlags(race, T, P) {
-  const S = race.state, ctl = S.control, W = stw(race), B = race.rules.blueFlags?.value;
+  const S = race.state, ctl = S.control, W = stw(race), B = seasonRules(race).blueFlags?.value;
   if (!B) return;
   const live = S.cars.filter((c) => c.status === "run" && c.where !== "pit");
   for (const c of live) {
@@ -184,7 +184,7 @@ export function tyresUsed(race, car) {
   return { compounds: [...set], sets };
 }
 export function tyreRuleCheck(race, car) {
-  const M = race.rules.mandatoryDryCompounds?.value; if (!M) return { ok: true };
+  const M = seasonRules(race).mandatoryDryCompounds?.value; if (!M) return { ok: true };
   const u = tyresUsed(race, car), suspended = !!race.state.control.redEnd;
   if (M.exemptIfInterOrWetUsed && u.compounds.some((c) => WET.has(c))) return { ok: true, why: "intermediate / wet tyres used" };
   const dry = u.compounds.filter((c) => DRY.has(c)), mand = race.scenario?.tyres?.mandatory;
@@ -202,7 +202,7 @@ export function tyreRuleCheck(race, car) {
 // after a red flag, at the end of the penultimate lap before the suspension lap (SR 58.14 / B5.14.2).
 export function finalizePenalties(race, T) {
   const W = stw(race), ctl = race.state.control; if (W.final) return; W.final = true;
-  const R = race.rules.penalties.value, conv = R.afterSession || R.lastThreeLapsOrAfter;
+  const R = seasonRules(race).penalties.value, conv = R.afterSession || R.lastThreeLapsOrAfter;
   for (const c of race.state.cars) {
     const p = ensurePen(c);
     for (const x of p.serve) if (!x.served) {
@@ -218,7 +218,7 @@ export function finalizePenalties(race, T) {
 }
 
 export function classify(race, T) {
-  const S = race.state, ctl = S.control, R = race.rules;
+  const S = race.state, ctl = S.control, R = seasonRules(race);
   finalizePenalties(race, T);
   const cap = ctl.redEnd ? ctl.redEnd.lap : Infinity;
   const at = {};   // num → { laps, t (ms of its last counted crossing), order (crossing index on that lap) }
