@@ -119,13 +119,12 @@ function weatherRecord(W) {
   return c.t.map((ts, i) => ({ t: ts * 1000, rain: c.rain?.[i] ?? 0, airT: c.air?.[i], trackT: c.track?.[i], wind: c.windSpeed?.[i] }));
 }
 
-// a plain team plan when none is given: start on the harder of the two most-used dry compounds, one stop near half
-// distance onto the other – what a team without its own strategist would do. ai.js replaces it with real strategy.
+// a plain team plan when none is given: one stop near half distance, MEDIUM → HARD – the two harder of the event's three
+// nominated dry compounds (known before the race; NOT the compounds the real race happened to use – scenario.tyres.
+// compoundsSeen comes from the race's own stints and is never an engine input, DESIGN §0.6). ai.js replaces it.
 export function defaultPlan(sc, num) {
-  const seen = (sc.tyres?.compoundsSeen || ["MEDIUM", "HARD"]).filter((c) => c === "SOFT" || c === "MEDIUM" || c === "HARD");
-  const a = seen.includes("MEDIUM") ? "MEDIUM" : seen[0] || "MEDIUM", b = seen.includes("HARD") ? "HARD" : seen.find((x) => x !== a) || "HARD";
   const L = sc.race.laps;
-  return { stints: [{ compound: a, toLap: Math.round(L * 0.45) }, { compound: b, toLap: L }], by: "default" };
+  return { stints: [{ compound: "MEDIUM", toLap: Math.round(L * 0.45) }, { compound: "HARD", toLap: L }], by: "default" };
 }
 
 // ---------- the step ----------
@@ -221,7 +220,7 @@ function moveLap(race, car, t, capFollow) {
 function movePit(race, car, t) {
   const S = race.state, C = race.cache, T = C.T;
   const others = S.cars.filter((o) => o.where === "pit").map((o) => ({ num: o.num, team: o.teamKey, phase: o.pit.phase, u: o.pit.u, v: o.pit.v }));
-  const sPrev = T.pit.pitToLap(car.pit.u);
+  const sPrev = T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * T.ahead(T.pit.sIn, T.pit.sOut));
   const pen = car.pen.pendingS;
   const ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others, penaltyS: pen,
     stack: S.cars.some((o) => o !== car && o.teamKey === car.teamKey && o.pit.times?.release && t - o.pit.times.release < 30000),
@@ -244,8 +243,10 @@ function movePit(race, car, t) {
     log(race, { t, car: car.num, type: "pitExit", cause: "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s − free ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
     car.pit.times = {};
   }
-  // the timing line inside the pit lane
-  const sNow = car.where === "pit" ? T.pit.pitToLap(car.pit.u) : car.s;
+  // the timing line inside the pit lane; the lap position of a pit car runs from the branch to the merge in proportion to
+  // the path (pitToLap is clamped near the ends – a distance that stalled there let a car seem behind the car that left
+  // the lane after it: the control report)
+  const span = T.ahead(T.pit.sIn, T.pit.sOut), sNow = car.where === "pit" ? T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * span) : car.s;
   if (car.where === "pit") { const crossed = T.ahead(sPrev, sNow) < T.L / 2 && sNow < sPrev; lineCrossing(race, car, sPrev, sNow, crossed, t); car.s = sNow; }
   car.dist = car.armed ? car.lap * T.L + (car.where === "pit" ? sNow : car.s) : (car.where === "pit" ? sNow : car.s) - T.L;
 }
