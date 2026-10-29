@@ -445,6 +445,11 @@ export function buildPit(ctx, idx, L, { circuitKey, season, teams }) {
   const zs = sm(pz, 10), xs = sm(px, 1), ys = sm(py, 1);
   const hdg = new Float64Array(np + 1); for (let i = 0; i <= np; i++) { const a = Math.max(0, i - 1), b = Math.min(np, i + 1); hdg[i] = Math.atan2(ys[b] - ys[a], xs[b] - xs[a]); }
   const PP = Array.from(xs, (x, i) => [x, ys[i]]), pcum = polyCum(PP);
+  // positions along the path in the path's OWN unit u = i·dsp (what the engine and the screen read: sample index × ds) –
+  // not the smoothed polyline's arc length, which is shorter wherever the raw positions zig-zag (v0.48 garage audit: boxes
+  // up to 11 m off at Silverstone 2025)
+  const toU = (a) => { let i = 0; while (i < pcum.length - 2 && pcum[i + 1] < a) i++; const l = pcum[i + 1] - pcum[i] || 1; return (i + Math.min(1, Math.max(0, (a - pcum[i]) / l))) * dsp; };
+  const alongU = (x, y) => { const a = alongPoly(PP, pcum, x, y); return { u: toU(a.u), d: a.d }; };
   // the branch and the merge on the lap: where the path's ends project; each pit sample's approximate lap s (for gaps
   // and the screen): its own projection while the lane runs beside the lap line (≤ 40 m), else interpolated in u
   const pa = idx.project(xs[0], ys[0]), pb = idx.project(xs[np], ys[np]);
@@ -455,12 +460,12 @@ export function buildPit(ctx, idx, L, { circuitKey, season, teams }) {
     sLap[i] = pr && pr.dist < 40 && Math.abs(wrapS(pr.s - lin + L / 2, L) - L / 2) < 150 ? pr.s : lin;
   }
   for (let i = 1; i <= np; i++) if (wrapS(sLap[i] - sLap[i - 1] + L / 2, L) - L / 2 < 0) sLap[i] = sLap[i - 1];   // (never backwards)
-  let onU = median(ends.map((e) => alongPoly(PP, pcum, e.on.x, e.on.y).u)), offU = median(ends.map((e) => alongPoly(PP, pcum, e.off.x, e.off.y).u));
-  const mad = (k) => { const v = ends.map((e) => alongPoly(PP, pcum, e[k].x, e[k].y).u), m = median(v); return +median(v.map((x) => Math.abs(x - m))).toFixed(1); };
+  let onU = median(ends.map((e) => alongU(e.on.x, e.on.y).u)), offU = median(ends.map((e) => alongU(e.off.x, e.off.y).u));
+  const mad = (k) => { const v = ends.map((e) => alongU(e[k].x, e[k].y).u), m = median(v); return +median(v.map((x) => Math.abs(x - m))).toFixed(1); };
   // the limiter lines from this session when enough passes agree; else startdata.js's (medians over the app's race
   // sessions at this circuit), its points projected onto this path
   let limFrom = `this session: medians over ${ends.length} passes`, madOn = mad("on"), madOff = mad("off");
-  const sdLim = (() => { if (!sd0?.path?.length || sd0.limitOn == null) return null; const SP = sd0.path.map((q) => [q[0] * DM, q[1] * DM]), sc = polyCum(SP), at = (u) => { let j = 0; while (j < SP.length - 2 && sc[j + 1] < u) j++; const l = sc[j + 1] - sc[j] || 1, f = Math.min(1, Math.max(0, (u - sc[j]) / l)); return [SP[j][0] + (SP[j + 1][0] - SP[j][0]) * f, SP[j][1] + (SP[j + 1][1] - SP[j][1]) * f]; }; const a = at(sd0.limitOn), b = at(sd0.limitOff), pa = alongPoly(PP, pcum, a[0], a[1]), pb = alongPoly(PP, pcum, b[0], b[1]); return pa.d < 15 && pb.d < 15 ? { on: pa.u, off: pb.u, limit: sd0.limit } : null; })();
+  const sdLim = (() => { if (!sd0?.path?.length || sd0.limitOn == null) return null; const SP = sd0.path.map((q) => [q[0] * DM, q[1] * DM]), sc = polyCum(SP), at = (u) => { let j = 0; while (j < SP.length - 2 && sc[j + 1] < u) j++; const l = sc[j + 1] - sc[j] || 1, f = Math.min(1, Math.max(0, (u - sc[j]) / l)); return [SP[j][0] + (SP[j + 1][0] - SP[j][0]) * f, SP[j][1] + (SP[j + 1][1] - SP[j][1]) * f]; }; const a = at(sd0.limitOn), b = at(sd0.limitOff), pa = alongU(a[0], a[1]), pb = alongU(b[0], b[1]); return pa.d < 15 && pb.d < 15 ? { on: pa.u, off: pb.u, limit: sd0.limit } : null; })();
   if ((ends.length < 5 || madOn > 20 || madOff > 20 || !(offU - onU > 100)) && sdLim) { onU = sdLim.on; offU = sdLim.off; limFrom = `startdata.js (${sd0.session}; this session: ${ends.length} usable passes, MAD ${madOn}/${madOff} m)`; }
   // team boxes: pitorder.js's measured places (m along START_DATA's pit path) → points → this path
   const boxes = {}, boxInfo = [], sd = START_DATA[circuitKey]?.pit;
@@ -468,7 +473,7 @@ export function buildPit(ctx, idx, L, { circuitKey, season, teams }) {
   if (ob && sd) {
     const SP = sd.path.map((p) => [p[0] * DM, p[1] * DM]), scum = polyCum(SP);
     const pointAt = (u) => { let j = 0; while (j < SP.length - 2 && scum[j + 1] < u) j++; const l = scum[j + 1] - scum[j] || 1, f = Math.min(1, Math.max(0, (u - scum[j]) / l)); return [SP[j][0] + (SP[j + 1][0] - SP[j][0]) * f, SP[j][1] + (SP[j + 1][1] - SP[j][1]) * f]; };
-    for (const b of ob) { const [x, y] = pointAt(b.u), a = alongPoly(PP, pcum, x, y); const k = teamKey(b.team); if (a.d < 15) { boxes[k] = +a.u.toFixed(1); boxInfo.push({ team: b.team, teamKey: k, u: +a.u.toFixed(1), off: +a.d.toFixed(1), rank: b.rank, how: b.how, season: b.season, sameSeason: b.sameSeason, from: b.from }); } else boxInfo.push({ team: b.team, teamKey: k, u: null, off: +a.d.toFixed(1), why: "measured box is off this path" }); }
+    for (const b of ob) { const [x, y] = pointAt(b.u), a = alongU(x, y); const k = teamKey(b.team); if (a.d < 15) { boxes[k] = +a.u.toFixed(1); boxInfo.push({ team: b.team, teamKey: k, u: +a.u.toFixed(1), off: +a.d.toFixed(1), rank: b.rank, how: b.how, season: b.season, sameSeason: b.sameSeason, from: b.from }); } else boxInfo.push({ team: b.team, teamKey: k, u: null, off: +a.d.toFixed(1), why: "measured box is off this path" }); }
   }
   const laneTimes = ends.map((e) => (e.p.seg[e.p.seg.length - 1].t - e.p.seg[0].t) / 1000);
   return { pit: {

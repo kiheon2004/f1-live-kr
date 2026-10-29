@@ -24,7 +24,7 @@
 // the step-start field), trafficEnv per car into the car model, trafficPost after all moves (lateral moves, detection
 // lines, passes). Race control's flags and rules are control.js / rules.js's (traffic reads them through race.hooks.control).
 import { loadTrack } from "./track.js";
-import { computeProfile, makeProfile, needsReprofile, REPROFILE } from "./profile.js";
+import { computeProfile, makeProfile, needsReprofile, REPROFILE, vlimAt } from "./profile.js";
 import { stepCar } from "./car.js";
 import { createTyre, tyreGrip, stepTyre, tyreLap, fitTemp, windowFactor, windowTemp, compoundParams } from "./tyre.js";
 import { createEnergy, iceCap, ersCap, splitPower, stepEnergy, energyLap, socFrac } from "./energy.js";
@@ -90,7 +90,7 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
     const start = plan.stints[0].compound;
     const car = { num: e.num, teamKey: e.teamKey, team: e.team, tla: e.tla, color: e.colour, driverId: e.num, grid: g?.pos ?? null,
       pitStart: pitStarters.has(e.num), status: "grid", out: null, where: "lap",
-      s: g ? T.wrap(g.s) : T.wrap(T.pit.sOut), d: g ? g.d : 0, v: 0, aLong: 0, aLat: 0, steer: 0, wheelDist: 0,
+      s: g && Number.isFinite(g.s) ? T.wrap(g.s) : T.wrap(T.pit.sOut), d: g?.d ?? 0, v: 0, aLong: 0, aLat: 0, steer: 0, wheelDist: 0,
       lap: 0, armed: false, dist: 0, lapT0: 0, laps: [], sector: 0, secT0: 0, secs: [],
       tyre: newTyre(race, start, w0.airT),
       energy: createEnergy(race.cache.ep, {}), driver: createDriver(dp), mode: { pace: "balanced", energy: "balanced" },
@@ -105,7 +105,8 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
   // until the field has passed the pit exit), and schedules the start: the lights, each driver's reaction and launch
   INC.newIncidents(race);
   CTL.newControl(race, T);
-  for (const c of state.cars) if (c.where === "pit") { c.s = T.pit.pitToLap(c.pit.u); c.armed = T.ahead(0, c.s) < T.L / 2; c.dist = c.armed ? c.s : c.s - T.L; }
+  // (every car's lap state from where race control put it: a slot the scenario couldn't measure is the rules' layout)
+  for (const c of state.cars) { if (c.where === "pit") c.s = T.pit.pitToLap(c.pit.u); c.armed = T.ahead(0, c.s) < T.L / 2; c.dist = c.armed ? c.s : c.s - T.L; }
   gridLateral(race);
   sortOrder(race);
   log(race, { type: "start", cause: "scenario", effect: `${state.cars.length} cars, ${state.totalLaps} laps, seed ${state.seed}` });
@@ -138,7 +139,8 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   // what traffic asks race control (overtaking permission, DRS / Active Aero / Overtake availability) and where it reports
   // contacts (functions: never saved, set again on load)
   race.hooks = { control: { mayOvertake: CTL.mayOvertake, drsAllowed: CTL.drsAllowed, activeAeroAllowed: CTL.activeAeroAllowed, overtakeModeAllowed: CTL.overtakeModeAllowed }, incidents: { contact: INC.contact },
-    traffic: { yielding: (c, f) => c.traffic?.role === "yield" && c.traffic.with === f.num } };
+    // (complying with a blue flag: giving way – to any car –, or the lapping car already in the middle of its pass)
+    traffic: { yielding: (c, f) => c.traffic?.role === "yield" || (f.traffic?.with === c.num && ["att", "done"].includes(f.traffic.role)) } };
   trafficSetup(race);
 }
 
@@ -248,7 +250,15 @@ function resultRows(race, R) {
   for (const r of R.rows) {
     const c = byNum.get(r.num);
     r.gap = r.pos === 1 ? 0 : r.gap?.s ?? null; r.lapsDown = r.pos == null ? null : (R.rows[0].laps - r.laps);
-    r.time = Number.isFinite(r.totalMs) ? r.totalMs : null; r.stops = c.pit.stops; r.acct = { ...c.acct };
+    r.time = Number.isFinite(r.totalMs) ? r.totalMs : null; r.stops = c.pit.stops;
+    // the accounts that can be separated cleanly: traffic (the ghost – approximate), the pit stops' loss and its queue
+    // part (approximate: a free lap's pace as the reference), the penalties added; tyre management / energy use are not
+    // split out (no clean counterfactual)
+    const pq = (c.acct.pitParts || []).reduce((a, p) => a + p.queue, 0);
+    r.acct = { traffic: +c.acct.traffic.toFixed(2), pit: +c.acct.pit.toFixed(2), pitQueue: +pq.toFixed(2), penalty: r.penS || 0, approx: ["traffic", "pit", "pitQueue"], pitParts: c.acct.pitParts || [] };
+    // stints as run (from the lap records: compound per completed lap)
+    // (a new stint after an in-lap – the lap record's pit flag – or when the compound changes, e.g. a red-flag change)
+    r.stints = []; let prev = null; for (const l of c.laps) { const last = r.stints.at(-1); if (last && !prev?.pit && last.compound === l.compound) last.laps++; else r.stints.push({ compound: l.compound, laps: 1 }); prev = l; }
   }
   R.by = "rules.classify";
   return R;
@@ -307,7 +317,10 @@ function moveLap(race, car, t, cap = null) {
   // the grip of its last refresh, so a tyre that cooled or a wetter patch since then adds to it
   const muNow = cp.mu_mech * E.muTyre * E.rubber, wf = windowFactor(compoundParams(car.tyre.compound), windowTemp(car.tyre));
   const over = pr.prof.mu / Math.max(1e-6, muNow) - car.driver.p.pace, IP = INCIDENTS;
-  car.incIn = { u: cs.limited ? Math.min(1 + 0.5 * (1 - IP.errU0.v), IP.errU0.v + IP.errGain.v * over) : 0, tyreOut: Math.min(1, (1 - wf) / 0.5), water: E.water, compound: car.tyre.name, braking: cs.aLong < -10 };
+  // (on the envelope = at its limit speed here: a car held back by a cap – the SC queue, a VSC delta, the car ahead – is
+  // within its margin whatever the ratio says)
+  const onEnv = cs.limited && car.v > 0.97 * vlimAt(pr.prof, C.PT, car.s);
+  car.incIn = { u: onEnv ? Math.min(1 + 0.5 * (1 - IP.errU0.v), IP.errU0.v + IP.errGain.v * over) : 0, tyreOut: Math.min(1, (1 - wf) / 0.5), water: E.water, compound: car.tyre.name, braking: cs.aLong < -10 };
   // tyres and energy from what the car did
   const [pi, pe] = splitPower(cs.pDrive, E.pIce, E.pErs);
   stepTyre(car.tyre, { v: car.v, aLat: car.aLat, aLong: car.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver) * tv.heatMul, Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
@@ -497,7 +510,9 @@ export function snapshot(race) {
     weather: { rain: w.rain ?? 0, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, water: avg(C.surface.hLine), est: !!w.est },
     cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
       pen: { pendingS: c.pen.pendingS ?? 0, open: (c.pen.serve || []).filter((x) => !x.served).map((x) => x.kind) }, inc: c.inc && c.inc.until > S.t ? c.inc.kind : null, dmg: c.dmg || null, out: c.out || null, vscDelta: CTL.vscDelta(race, T, c),
-      where: c.where, s: c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
+      // (s null: not on the track any more – retired in the garage, or 3 s past its chequered flag: the cool-down lap
+      // isn't simulated, so a finished car leaves the picture instead of standing on the line)
+      where: c.where, s: c.where === "garage" || (c.status === "fin" && S.t - (c.finT ?? S.t) > 3000) ? null : c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
       ...snapTraffic(c),
       tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: 0 }, fuel: c.energy.fuel,
       pit: { phase: c.pit.phase, u: c.pit.u, workT0: c.pit.times?.work ?? null, workT1: c.pit.workEnd ?? null, err: c.pit.err, compound: c.pit.call?.compound ?? null },

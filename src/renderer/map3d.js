@@ -42,7 +42,7 @@ import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, zoneAt, estimateZon
 import { footing } from "./footing.js";
 import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, timeJump, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
-import { updateGameCars, paintGameHud } from "./game/cars3d.js";
+import { updateGameCars, paintGameHud, pitPoint } from "./game/cars3d.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -3701,7 +3701,15 @@ function gamePitTeams(force) {
   { const snap = game.snapshot(), rows = (snap?.cars || []).slice().sort((a, b) => a.pos - b.pos).slice(0, 10).map((c) => [String(c.pos), drivers[c.num]?.Tla || c.num, "", "#" + (drivers[c.num]?.TeamColour || "888888")]);
     paintPitScreens(rows, snap ? `GAME LAP ${snap.leaderLap}${snap.totalLaps ? "/" + snap.totalLaps : ""}` : null); }
   const pub = orderedBoxes(A.circuitKey?.(), A.sessionYear?.(), Object.values(drivers).map((d) => d?.TeamName).filter(Boolean)) || [];
-  const o = {}, places = pub.map((b) => { pitLaneAt(b.u, o); const pr = G.project(o.x, o.z); return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: true, how: b.how, season: b.season }; });
+  // each team's box where the ENGINE stops its cars (the scenario's pit path at its box u), not re-centred on the garages
+  // (published: false) – so the painted box, the crew and the stopped car are one place; the published order only for a
+  // team the scenario has no box for (v0.48 garage audit A2)
+  const P = game.scenario?.track?.pit, ent = new Map((game.scenario?.entries || []).map((e) => [e.team, e.teamKey]));
+  const o = {}, places = pub.map((b) => {
+    const bu = P?.boxes?.[ent.get(b.team)];
+    if (bu != null && world) { const pp = pitPoint(P, bu, world.center || { x: 0, z: 0 }), pr = G.project(pp.x, pp.z); if (pr && Number.isFinite(pr.u)) return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: false, how: "engine box (scenario pit path)", season: b.season }; }
+    pitLaneAt(b.u, o); const pr = G.project(o.x, o.z); return { team: b.team, u: pr.u, off: LANES.box, from: "box", ok: true, own: {}, published: true, how: b.how, season: b.season };
+  });
   const plan = planOverrides(G, drivers);
   const teams = allocatePlaces(G.slots, G.pitch, drivers, places, plan.length ? plan : overridesFor(G.facility, A.sessionYear?.() || null, session));
   { const pm = pitModelFor(G); for (const t of teams) if (t.box != null) t.boxOff = pm.at(t.box).boxC; }
@@ -4779,7 +4787,7 @@ window.Map3D = {
   // in the label atlas, the layer's distance LOD, which way it faces, what stands between it and the camera, its size
   // on screen). → { facility, plan, layer, drivers: [{ num, code, team, status, reason, slot, px, hit }] }
   boardsDiag() { updatePitTeams(true); return JSON.stringify(boardsDiag()); },
-  pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: pitTeams.info?.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
+  pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: !Array.isArray(pitTeams.info?.evidence) ? pitTeams.info?.evidence ?? null : pitTeams.info.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
   facilityState() {
     const g = world?.real?.group; let n = 0; g?.traverse((o) => { if (o.userData?.facility) n++; });
     return JSON.stringify({ facilities: n, info: world?.real?.info?.facilities, mem: renderer?.info.memory, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles });

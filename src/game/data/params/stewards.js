@@ -10,7 +10,7 @@ export const STEWARDS = {
   unsafeRelease: { v: "5s", est: false, why: "a release into the path of another car (34.14a) – the stop-and-go of 34.14d is for a car released in an unsafe CONDITION (e.g. a loose wheel)", src: "practice 2× 5 s 'UNSAFE RELEASE' (" + PROBE + "); SR 34.14a/d" },
   collision: { v: "10s", est: false, why: "causing a collision", src: "practice 17× 10 s, 4× 5 s (" + PROBE + ")" },
   vscInfringement: { v: "5s", est: false, why: "below the VSC / SC minimum time in a sector", src: "SR 55.7 / 56.5 (stewards' choice); practice 1× 5 s 'VSC INFRINGEMENT' (" + PROBE + ")" },
-  vscTol: { v: 0.1, unit: "s", est: true, range: [0, 0.5], why: "how far under the minimum sector time still counts as kept (ECU resolution; not published)" },
+  vscTol: { v: 0.3, unit: "s", est: true, range: [0, 0.5], why: "how far under the minimum sector time still counts as kept (ECU resolution; not published) – v0.48: 0.1 gave ~2 penalties per SC for 0.1–0.15 s, far more than the cached races show (SC/VSC infringement penalties are rare)" },
   // track limits: each time a car leaves the track its lap is deleted (SR 33.3 + event notes); the ladder below is the
   // stewards' guideline, not a regulation – the counts are those seen in the FIA's own messages
   trackLimits: { v: { flagAt: 3, penaltyAt: 4, penalty: "5s", eachAfter: "5s" }, est: false,
