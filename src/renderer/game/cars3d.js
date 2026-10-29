@@ -12,9 +12,10 @@ const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 const ss = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 // the phases in which the car is at (or pulling into / out of) its own box – drawn across the lane into it
 const AT_BOX = new Set(["approach", "penalty", "work", "release"]);
+const SC_DRIVER = { TeamName: "", TeamColour: "C8C8C8", Tla: "SC", LastName: "Safety Car" };
 
 // a point of the engine's pit path at u (m): scene x, z, the path's heading as a scene yaw, and the lap s it lies by
-function pitPoint(P, u, c0) {
+export function pitPoint(P, u, c0) {
   const C = P.columns, f = Math.max(0, Math.min(P.n - 1, u / P.ds)), i = Math.min(P.n - 2, Math.floor(f)), w = f - i;
   const X = C.x[i] + (C.x[i + 1] - C.x[i]) * w, Y = C.y[i] + (C.y[i + 1] - C.y[i]) * w;
   const h = C.hdg[i] + wrap(C.hdg[i + 1] - C.hdg[i]) * w;
@@ -32,7 +33,7 @@ export function updateGameCars(K, A, dt) {
   const jumped = A.lastT != null && (fr.t < A.lastT - 50 || fr.t - A.lastT > 5000); A.lastT = fr.t;
   for (const g of fr.cars) {
     const d = A.driverOf(g.num); if (!d) continue;
-    if (g.status === "dnf" && g.where !== "pit" && g.s == null) continue;
+    if ((g.status === "dnf" || g.status === "fin") && g.where !== "pit" && g.s == null) continue;   // (out of the race / past the flag: not drawn)
     const c = K.carFor(g.num, d); seen.add(g.num);
     c.game = g;
     const v = c.pos;
@@ -97,6 +98,19 @@ export function updateGameCars(K, A, dt) {
     c.label.sp.userData.own = inCockpit;
     K.paintLabel(c.label, `${g.pos || ""} ${d.Tla}`.trim(), "#" + (d.TeamColour || "888"), g.num === focusNum);
     c.label.sp.material.opacity = g.status === "dnf" || g.status === "fin" ? 0.5 : 1;
+  }
+  // the safety car: race control's object on the track (snapshot.sc – control.js drives it), drawn as a car labelled SC
+  // (a placeholder model: the car model in a plain livery, amber lights while they are on)
+  const sc = fr.snap.sc;
+  if (sc && sc.s != null) {
+    const c = K.carFor("SC", SC_DRIVER); seen.add("SC");
+    c.game = { num: "SC", status: "run", where: "lap", s: sc.s, d: sc.d || 0, v: sc.v, pos: null };
+    const w = map.sd(sc.s, sc.d || 0); F.at(w.s, w.d, P0, DIR); F.at(w.s - 3, w.d, PA); F.at(w.s + 3, w.d, PB);
+    c.yaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]); c.pitch = 0; c.roll = 0;
+    c.obj.position.set(P0[0], P0[1] + K.ROAD_LIFT - 0.01, P0[2]); c.model.rotation.set(0, c.yaw, 0, "YXZ");
+    c.speed = sc.v; c.onTrack = true; c.sample = F.sampleAt(w.s); c.worldS = w.s; c.has = true; c.obj.visible = true;
+    setFlagLights(c.model, sc.lights ? "#ffb21a" : null);
+    K.paintLabel(c.label, "SC", "#ffb21a", false);
   }
   for (const [num, c] of K.cars) if (!seen.has(num)) { c.obj.visible = false; c.has = false; }
   K.scaleForView();

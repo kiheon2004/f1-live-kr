@@ -497,7 +497,9 @@ export function snapshot(race) {
     weather: { rain: w.rain ?? 0, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, water: avg(C.surface.hLine), est: !!w.est },
     cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
       pen: { pendingS: c.pen.pendingS ?? 0, open: (c.pen.serve || []).filter((x) => !x.served).map((x) => x.kind) }, inc: c.inc && c.inc.until > S.t ? c.inc.kind : null, dmg: c.dmg || null, out: c.out || null, vscDelta: CTL.vscDelta(race, T, c),
-      where: c.where, s: c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
+      // (s null: not on the track any more – retired in the garage, or 3 s past its chequered flag: the cool-down lap
+      // isn't simulated, so a finished car leaves the picture instead of standing on the line)
+      where: c.where, s: c.where === "garage" || (c.status === "fin" && S.t - (c.finT ?? S.t) > 3000) ? null : c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
       ...snapTraffic(c),
       tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: 0 }, fuel: c.energy.fuel,
       pit: { phase: c.pit.phase, u: c.pit.u, workT0: c.pit.times?.work ?? null, workT1: c.pit.workEnd ?? null, err: c.pit.err, compound: c.pit.call?.compound ?? null },
