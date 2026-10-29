@@ -117,7 +117,8 @@ export function paint() {
   setH($("grAch"), R.paused ? `<b>일시정지</b>` : `실제 <b class="${R.behind ? "bad" : ""}">${ach.toFixed(1)}×</b>${R.behind ? ` <small class="bad" title="계산이 따라가지 못해 실제로 낼 수 있는 배속으로 진행 중">계산 한계</small>` : ""}${R.slowNote ? ` <small title="${esc(R.slowNote.why)}">자동 감속됨</small>` : ""}`);
   document.querySelectorAll(".gr-speeds [data-v]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.v === (R.paused ? 0 : R.speed))));
   // ---- tags: selected vs camera ----
-  const focus = G.adapter?.ctx.focus, auto = G.adapter?.camAuto;
+  // (the car on screen: the automatic camera's subject while it directs, else the chosen focus)
+  const focus = G.adapter?.ctx.focus, auto = G.adapter?.camAuto, onCam = String(auto?.num ?? focus ?? "");
   const tla = (n) => ents.get(String(n))?.tla || n || "–";
   setH($("grSelTag"), `<small>조작 선택</small> <b>${esc(tla(G.sel))}</b>`);
   setH($("grCamTag"), `<small>카메라</small> <b>${esc(tla(auto?.num ?? focus))}</b> <small>${auto ? `자동 연출${auto.why ? " · " + esc(auto.why) : ""}` : "직접 선택"}</small>`);
@@ -125,11 +126,11 @@ export function paint() {
   const cars = [...snap.cars].sort((a, b) => a.pos - b.pos);
   setT($("grTowerSub"), snap.dev ? "개발용" : "");
   setH($("grTw"), `<table class="gr-tw-t">${cars.map((c) => { const e = ents.get(String(c.num)), mine = e?.teamKey === G.teamKey;
-    return `<tr class="${mine ? "mine" : ""} ${String(c.num) === String(focus) ? "focus" : ""} ${c.status === "dnf" ? "out" : ""}" data-act="hud:cam" data-num="${esc(c.num)}" title="카메라로 보기"><td class="p">${c.pos}</td><td class="n"><i style="background:${esc(e?.colour || "#888")}"></i>${esc(e?.tla || c.num)}</td>
+    return `<tr class="${mine ? "mine" : ""} ${String(c.num) === onCam ? "focus" : ""} ${c.status === "dnf" ? "out" : ""}" data-act="hud:cam" data-num="${esc(c.num)}" title="카메라로 보기"><td class="p">${c.pos}</td><td class="n"><i style="background:${esc(e?.colour || "#888")}"></i>${esc(e?.tla || c.num)}</td>
       <td class="g">${c.pos === 1 ? "선두" : gapTxt(c, cars[0])}</td><td class="s">${c.status === "pit" ? `<em class="pit">PIT</em>` : c.status === "dnf" ? "OUT" : c.status === "fin" ? "🏁" : c.pen?.open?.length ? `<em class="pen" title="${esc(c.pen.open.join(", "))}">P</em>` : ""}</td>
       <td class="t">${cmpChip(c.tyre?.compound)}<small>${c.tyre?.age ?? ""}</small></td></tr>`; }).join("")}</table>`);
   // ---- the cards ----
-  for (const e of myCars(sc)) paintCard(e, snap, T);
+  for (const e of myCars(sc)) paintCard(e, snap, T, onCam);
   // ---- middle: the selected car's pit work, else the events ----
   const sel = snap.cars.find((c) => String(c.num) === String(G.sel)), inLane = sel && sel.where === "pit" && IN_LANE.has(sel.pit?.phase);
   const pitEl = $("grPit"), evEl = $("grEvents");
@@ -142,16 +143,16 @@ export function paint() {
 }
 const gapTxt = (c, lead) => { const g = c.gap && typeof c.gap === "object" ? c.gap.leader : c.gap; if (Number.isFinite(g)) return "+" + g.toFixed(1); return lead && c.lap < lead.lap ? `+${lead.lap - c.lap}랩` : ""; };
 
-function paintCard(e, snap, T) {
+function paintCard(e, snap, T, onCam) {
   const root = document.querySelector(`.gr-card[data-car="${CSS.escape(String(e.num))}"]`); if (!root) return;
   const c = snap.cars.find((x) => String(x.num) === String(e.num)); if (!c) return;
   const stc = G.run.race.state.cars.find((x) => x.num === String(e.num));
   root.classList.toggle("sel", String(G.sel) === String(e.num));
-  root.classList.toggle("cam", String(G.adapter?.ctx.focus) === String(e.num));
+  root.classList.toggle("cam", onCam === String(e.num));
   root.classList.toggle("out", c.status === "dnf" || c.status === "fin");
   setT(f(root, "pos"), c.pos ? `P${c.pos}` : "–");
   setT(f(root, "status"), c.status === "pit" ? PIT_KO[c.pit?.phase] || "피트" : STATUS_KO[c.status] || c.status || "");
-  setT(f(root, "cam"), String(G.adapter?.ctx.focus) === String(e.num) ? "카메라 ●" : "카메라");
+  setT(f(root, "cam"), onCam === String(e.num) ? (G.adapter?.camAuto ? "카메라 ● 자동" : "카메라 ●") : "카메라");
   // tyre
   setH(f(root, "cmp"), `${cmpChip(c.tyre?.compound)}<small>${esc(CMP_KO[c.tyre?.compound] || c.tyre?.compound || "?")}</small>`);
   setT(f(root, "age"), String(c.tyre?.age ?? "–"));
