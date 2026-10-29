@@ -59,6 +59,26 @@ src/renderer/game/
     adapter3d.js    엔진 스냅샷 → map3d 게임 모드 입력(명시적 경계, §13)
 ```
 
+### 1.1 엔진 상태 형태 (계약)
+
+경기 상태 `race.state`는 JSON으로 저장 가능한 평범한 객체다(파생 캐시 — 트랙 배열, 포락선 — 는 `race.cache`에 두고
+복원 때 다시 만든다).
+
+```js
+state = { v: STATE_VERSION, t /* ms */, step, seed, scenarioId, rulesSeason, totalLaps, finished,
+  cars: [car], order: [num…] /* 현재 순위 */, control: {...control.js}, surface: {...weather.js},
+  boxes: {...pit.js}, commands: {...commands.js}, ai: { [teamKey]: {...} }, log: [event], results: null }
+car = { num, teamKey, team, tla, driverId, grid /* 출발 슬롯 1.. 또는 null */, pitStart,
+  status: "grid"|"run"|"pit"|"fin"|"dnf", out: null | { cause, t, lap },
+  where: "lap"|"pit", s, d, v, aLong, aLat, steer, wheelDist,
+  lap /* 완료 랩 */, dist /* 출발선 기준 경주 거리 m(그리드는 음수) */, lapT0, laps: [{ n, t, sectors, compound, pit, flag }],
+  tyre: {...tyre.js}, energy: {...energy.js}, driver: {...driver.js}, mode: { pace, energy },
+  plan: { stints: [{ compound, toLap }] }, pit: {...pit.js}, traffic: {...traffic.js},
+  pen: { pendingS /* 피트에서 서비스할 시간 */, finalS /* 결과에 더할 시간 */, serve: [{ kind, given }] },
+  acct: { traffic, pit, tyre, energy, penalty, other } /* 초, §12 */ }
+```
+순위: `status` 완주/진행 차량은 `dist` 내림차순(같은 랩 내 위치), 피트 차량은 `pit.pitToLap(u)`로 환산. 리타이어는 뒤.
+
 ## 2. 시간
 
 - **세 시계.** 벽시계(사용자 시간, 화면 쪽에서만 `performance.now()`), 시뮬레이션 시각 `t`(정수 ms, 엔진 상태),
