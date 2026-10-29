@@ -405,7 +405,11 @@ function movePit(race, car, t, ctx = {}) {
   }
   if (car.where === "pit") car.v = car.pit.v;
   if (ev === "unsafeRelease") RULES.onUnsafeRelease(race, T, car);
-  if (ev) log(race, { t, car: car.num, type: "pit:" + ev, cause: ev === "work" && car.pit.err ? car.pit.err.causes.join(", ") || "crew" : "pit", effect: ev === "work" ? `stationary ${car.pit.workS?.toFixed(2)} s${car.pit.err ? ` (slow wheel +${car.pit.err.add.toFixed(1)} s)` : ""}` : ev });
+  // (the work's length and a slow wheel are logged when the work ENDS – at its start the log would tell the screens the
+  // future: v0.49 §15, the stop's time is shown as it elapses)
+  const done = ev === "workDone" && car.pit.times?.work != null;
+  if (ev) log(race, { t, car: car.num, type: "pit:" + ev, cause: done && car.pit.err ? car.pit.err.causes.join(", ") || "crew" : "pit",
+    effect: done ? `stationary ${((t - car.pit.times.work) / 1000).toFixed(2)} s${car.pit.err ? ` (slow wheel +${car.pit.err.add.toFixed(1)} s)` : ""}` : ev === "work" ? "work started" : ev });
   // tyres cool in the lane (slow, no load), energy: the limiter (no deploy)
   stepTyre(car.tyre, { v: car.v, aLat: 0, aLong: 0, heat: 0, Tair: C.w.airT, Ttrack: C.w.trackT, water: 0, abrasion: 1 }, DT);
   car.wheelDist += car.v * DT;
@@ -563,8 +567,19 @@ export function snapshot(race) {
       where: c.where, s: c.where === "garage" || (c.status === "fin" && S.t - (c.finT ?? S.t) > 3000) ? null : c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
       ...snapTraffic(c),
       tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: c.where === "lap" && c.status === "run" ? Math.round((c.deployW || 0) / 1000) : 0 }, fuel: c.energy.fuel,
-      pit: { phase: c.pit.phase, u: c.pit.u, workT0: c.pit.times?.work ?? null, workT1: c.pit.workEnd ?? null, err: c.pit.err, compound: c.pit.call?.compound ?? null },
+      pit: snapPit(c.pit),
       gap: { leader: lead && c.lap === lead.lap ? gapSec(c, lead, T) : null, ahead: null } })) };
+}
+// the pit state for the screen. workT1 is the engine's planned end of the work (the crew animation is fitted to it); a
+// screen must not show it as a number before render time reaches it (request §15: no future stationary time shown).
+// times: the phases' start times so far (entry, stop, queue, queueEnd, penEnd, work, workEnd – once done –, release);
+// holdT1: a penalty hold's end (its length is the stewards' published 5 / 10 s); noWork: a stop-and-go (nobody touches
+// the car); held: in "release" and held for a car coming down the fast lane (safe release)
+function snapPit(p) {
+  const tm = p.times || {};
+  return { phase: p.phase, u: p.u, workT0: tm.work ?? null, workT1: tm.work != null ? p.workEnd ?? null : null, err: tm.work != null ? p.err : null, compound: p.call?.compound ?? null,
+    times: { entry: tm.entry ?? null, stop: tm.stop ?? null, queue: tm.queue ?? null, queueEnd: tm.queueEnd ?? null, penEnd: tm.penEnd ?? null, work: tm.work ?? null, workEnd: tm.workEnd ?? null, release: tm.release ?? null },
+    holdT1: p.phase === "penalty" ? p.holdUntil ?? null : null, noWork: !!p.noWork, held: p.phase === "release" && !!p.unsafeRolled };
 }
 const avg = (a) => { let s = 0; for (const x of a) s += x; return a.length ? s / a.length : 0; };
 // the front wheels' steer for the screen: the path's curvature × wheelbase (kinematic, rad, + left)

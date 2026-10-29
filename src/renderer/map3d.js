@@ -43,6 +43,7 @@ import { footing } from "./footing.js";
 import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, timeJump, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
 import { updateGameCars, paintGameHud, pitPoint } from "./game/cars3d.js";
+import { createPitCam } from "./game/pitcam.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -521,7 +522,8 @@ function updateCrews(frame) {
   const was = new Set(liftedCars); liftedCars.clear();
   const done = () => { for (const num of was) if (!liftedCars.has(num)) { const c = cars.get(num); if (c) restoreCar(c); } };
   if (!G || !world || !frame) { world?.crews?.clear(); done(); pitWorkNote(null); return; }
-  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
+  // (v0.49: the crews lit by the night's floodlights like the pit building – they were near black at night races)
+  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); world.crews.group.traverse((o) => nightLit(o.material)); }
   const A = app(), src = A.src, m = pitModelFor(G), drivers = src?.state.DriverList || {}, list = [], loose = [], byTeam = new Map();
   const policy = pitWorkPolicy();
   let shown = null;
@@ -2441,6 +2443,8 @@ function carNoteFor(num, c) {
 function updateCamera(dt) {
   const A = app();
   if (camMode === "inspect") return;
+  // the game's pit view: posed by game/pitcam.js (its shots, occlusion checks and director); the live view never has it
+  if (camMode === "pit") { if (game) { gamePitView(dt); return; } setCam("chase"); }
   const num = A.focus || leader(), c = cars.get(num), shown = !!c?.obj.visible;
   // (a seek – the session's time jumping, or going back – starts the chase rig's swing and height over too)
   const t = A.t, jumped = camFor.t != null && (t < camFor.t - 50 || t - camFor.t > 2000);
@@ -2589,6 +2593,9 @@ function initLook() {
 }
 
 function setCam(mode) {
+  if (mode === "pit" && !game) return;
+  // (the viewer's own choice in game mode – not the pit director's – wins over the director: game/pitcam.js)
+  if (game && !pitCamDirecting) gamePitCam.userCam(mode);
   if (mode === camMode) return;
   resetLook();
   camera.up.copy(UP); chase.init = false;
@@ -2603,7 +2610,7 @@ function setCam(mode) {
     } else heli.follow = false;
   }
   camMode = mode; camInit = false; resetPace();
-  try { localStorage.setItem("f1kr:cam3d", JSON.stringify(mode)); } catch {}
+  if (mode !== "pit") try { localStorage.setItem("f1kr:cam3d", JSON.stringify(mode)); } catch {}
   paintCamButtons();
 }
 function paintCamButtons() {
@@ -3669,7 +3676,10 @@ function floodTest() {
 // ---------- the strategy game's mode (Map3D.game; game/adapter3d.js, game/cars3d.js) ----------
 // What cars3d.js may use of this view: its world, cars, camera and a few drawing helpers – nothing of the live paths.
 const gameLifted = new Set();
+let gamePitCam = null;
 const gameKit = {
+  setCamByDirector(m) { pitCamDirecting = true; try { setCam(m); } finally { pitCamDirecting = false; } },
+  pitTeamsGroup: () => pitTeams.group || null, nightLit,
   THREE, get camera() { return camera; }, cars, lifted: gameLifted, ROAD_LIFT,
   world: () => world, camMode: () => camMode, focus: () => app().focus || leader(),
   carFor, paintLabel, scaleForView, applyLift, restoreCar, pitModelFor,
@@ -3687,6 +3697,7 @@ const gameKit = {
 };
 function gameCars(dt) {
   const fr = updateGameCars(gameKit, game, dt);
+  if (fr) { const t0 = performance.now(); gamePitCam.direct(game, fr, t0); gamePitCost.direct += performance.now() - t0; gamePitCost.frames++; gamePitFr = fr; }
   // the safety car where the engine has it (snapshot.sc: on the engine's lap, mapped like the cars)
   const sc = fr?.snap?.sc, SP = supportCtx(game, 0);
   if (SP) {
@@ -3696,6 +3707,19 @@ function gameCars(dt) {
     placeSupportCar(SP, "sc", models.sc || "neutralSc", where, !!where, (fr?.t || 0) / 1000);
   }
   gameNote(fr);
+}
+gamePitCam = createPitCam(gameKit);
+// the pit view's camera (camMode "pit"): game/pitcam.js's pose for this frame, or the camera left where it is
+let gamePitFr = null, pitCamDirecting = false;
+const gamePitCost = { direct: 0, pose: 0, frames: 0 };
+function gamePitView(dt) {
+  controls.enabled = false; setNear(0.1);
+  const t0 = performance.now(), p = gamePitFr && gamePitCam.pose(game, { ...gamePitFr, dtWall: dt }, t0, camera);
+  gamePitCost.pose += performance.now() - t0;
+  if (!p) { camNoteSet("피트 카메라: 이 팀의 박스를 아직 그릴 수 없어요"); return; }
+  if (camera.fov !== p.fov) { camera.fov = p.fov; camera.updateProjectionMatrix(); }
+  camera.position.copy(p.pos); camera.up.copy(UP); camera.lookAt(p.look); camLook.copy(p.look);
+  camNoteSet(p.note);
 }
 function gameNote(fr) {
   const note = document.getElementById("note3d");
@@ -3765,6 +3789,8 @@ function gameAttach(adapter) {
 }
 function gameDetach() {
   if (!game) return "not attached";
+  if (camMode === "pit") { gameKit.setCamByDirector(gamePitCam.S.prev || "chase"); }
+  gamePitCam.finish(game); gamePitCam.S.pinned = false; gamePitCam.S.manual = false; gameKit.crewMem = null;
   game.unbind?.();
   disposeWorld(); geoJob++; lastBuildCheck = 0; wx?.reset(); gameLifted.clear();
   game = null;
@@ -3785,6 +3811,15 @@ window.Map3D = {
       cars: [...cars.values()].filter((c) => c.obj.visible).map((c) => ({ num: c.num, x: +c.pos.x.toFixed(2), y: +c.pos.y.toFixed(2), z: +c.pos.z.toFixed(2), yaw: +c.yaw.toFixed(3), s: c.worldS != null ? +c.worldS.toFixed(1) : null, where: c.game?.where, phase: c.game?.pit?.phase, lifted: !!c.lifted, cmp: c.game?.tyre?.compound })),
       crews: world?.crews ? true : false, boxes: gameKit.boxDiag || null, cam: camMode, focus: app().focus || null, t: app().t }),
     setCam: (m) => setCam(m),
+    // the pit view (game/pitcam.js): auto-direction and auto-slow on / off, the team's cars the director follows (the
+    // selected car always first), its state and costs (ms: the director and the camera's placing, over `frames`)
+    pitcam: {
+      auto(on) { if (on != null) gamePitCam.S.auto = !!on; return gamePitCam.S.auto; },
+      slow(on) { if (on != null) gamePitCam.S.slow = !!on; return gamePitCam.S.slow; },
+      cars(list) { if (list !== undefined) gamePitCam.S.cars = list ? list.map(String) : null; return gamePitCam.S.cars; },
+      state: () => JSON.stringify({ ...gamePitCam.state(), cam: camMode, cost: { frames: gamePitCost.frames, directMs: +(gamePitCost.direct / Math.max(1, gamePitCost.frames)).toFixed(4), poseMs: +(gamePitCost.pose / Math.max(1, gamePitCost.frames)).toFixed(4) }, crews: gameKit.crewInfo || null, drawn: gameKit.crewDrawn || null, crewCost: gameKit.crewCost ? { msPerFrame: +(gameKit.crewCost.ms / Math.max(1, gameKit.crewCost.frames)).toFixed(4), worstMs: +gameKit.crewCost.worst.toFixed(2), frames: gameKit.crewCost.frames } : null }),
+      resetCost() { gamePitCost.direct = gamePitCost.pose = 0; gamePitCost.frames = 0; gameKit.crewCost = null; return "ok"; },
+    },
   },
   floodTest,
   // development: look at a support car ("sc" | "med") from `dist` m at bearing `ang` (rad, 0 = from behind), `h` m up

@@ -105,7 +105,8 @@ export function pitStep(car, T, ctx, P = PIT) {
       if (p.stopU === boxU) {
         p.u = boxU; p.v = 0; p.times.stop = ctx.t;
         box.queue = box.queue.filter((n) => n !== car.num);
-        if (ctx.penaltyS > 0) { p.phase = "penalty"; p.holdUntil = ctx.t + Math.round(ctx.penaltyS * 1000); ev = "penalty"; }
+        // (noWork kept for the screen: a stop-and-go's crew may not touch the car – a time penalty's waits to start)
+        if (ctx.penaltyS > 0) { p.phase = "penalty"; p.holdUntil = ctx.t + Math.round(ctx.penaltyS * 1000); p.noWork = !!ctx.noWork; ev = "penalty"; }
         else { startWork(car, ctx, P); ev = "work"; }
       } else { p.phase = "queue"; p.times.queue = p.times.queue ?? ctx.t; ev = "queue"; }
     }
@@ -113,7 +114,7 @@ export function pitStep(car, T, ctx, P = PIT) {
   if (p.phase === "queue" && (box.occupant == null || box.occupant === car.num)) { box.occupant = car.num; p.phase = "approach"; p.stopU = boxU; p.times.queueEnd = ctx.t; }
   if (p.phase === "penalty" && ctx.t >= p.holdUntil) {
     p.served += ctx.penaltyS; p.times.penEnd = ctx.t;
-    if (ctx.noWork) { p.phase = "release"; p.workEnd = ctx.t; p.times.work = ctx.t; p.times.workEnd = ctx.t; p.stops++; ev = "penaltyServed"; }
+    if (ctx.noWork) { p.phase = "release"; p.err = null; p.workEnd = ctx.t; p.times.work = ctx.t; p.times.workEnd = ctx.t; p.stops++; ev = "penaltyServed"; }
     else { startWork(car, ctx, P); ev = "work"; }
   }
   if (p.phase === "work" && ctx.t >= p.workEnd) {
@@ -145,12 +146,14 @@ export function pitStep(car, T, ctx, P = PIT) {
   }
   if (p.phase === "exit" && p.u >= L.L) {
     p.times.exit = ctx.t; ev = "exit";
-    const overshoot = p.u - L.L; p.phase = "none"; p.call = null; p.stopU = null;
+    const overshoot = p.u - L.L; p.phase = "none"; p.call = null; p.stopU = null; p.noWork = false;
     car.s = T.wrap(L.sOut + overshoot); car.v = p.v;
   }
   return ev;
 }
 
+export const WHEELS = ["FL", "FR", "RL", "RR"];
+export const slowWheelOf = (u) => Math.floor(u * 4096) & 3;
 function startWork(car, ctx, P) {
   const p = car.pit, crew = ctx.crew || { base: P.workBase.v, sd: P.workSd.v };
   // a clean stop: the crew's base time and its spread (normal, truncated at −2σ: a stop can't be quicker than the crew can be)
@@ -158,7 +161,9 @@ function startWork(car, ctx, P) {
   // a slow wheel: its chance has causes (double stack, rain) – and a size
   const pe = P.errBase.v * (ctx.stack ? P.errStack.v : 1) * (ctx.wet ? P.errWet.v : 1);
   p.err = null;
-  if (ctx.rng.chance(pe)) { const [a, b] = P.errDelay.v, d = a + (b - a) * ctx.rng.next(); w += d; p.err = { kind: "slow wheel", add: d, causes: [ctx.stack && "double stack", ctx.wet && "rain"].filter(Boolean) }; }
+  // (which wheel: from the same draw as its size – its low bits, so no draw is added and every other stream and stop
+  // stays as it was; 0 front left, 1 front right, 2 rear left, 3 rear right – the car's own left)
+  if (ctx.rng.chance(pe)) { const [a, b] = P.errDelay.v, u = ctx.rng.next(), d = a + (b - a) * u; w += d; p.err = { kind: "slow wheel", add: d, wheel: slowWheelOf(u), causes: [ctx.stack && "double stack", ctx.wet && "rain"].filter(Boolean) }; }
   p.phase = "work"; p.times.work = ctx.t; p.workEnd = ctx.t + Math.round(w * 1000); p.workS = w;
 }
 
