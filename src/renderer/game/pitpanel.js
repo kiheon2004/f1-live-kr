@@ -62,3 +62,6 @@ export function renderPitPanel(el, car, T, { tla = null, colour = null } = {}) {
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
   return m;
 }
+// the HUD's call (racehud.js: render(el, car, renderT, { entry, snapshot, scenario, team })) – car must be the adapter's
+// frameCars() row at renderT, not the newest snapshot's (that one runs ahead: the release or the new tyres early)
+export const render = (el, car, T, ctx = {}) => renderPitPanel(el, car, T, { tla: ctx.entry?.tla ?? ctx.tla ?? car?.tla ?? null, colour: ctx.entry?.colour ?? ctx.colour ?? car?.color ?? null });

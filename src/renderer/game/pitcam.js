@@ -32,7 +32,7 @@ const IN_LANE = new Set(["entry", "lane", "approach", "queue", "penalty", "work"
 export const SHOTS = {
   approach: { spots: [[17, -7.5, 5.5], [17, -5, 7.5], [24, -9, 9], [11, -9.5, 4.2]], look: "car", fov: 38 },
   wide: { spots: [[6.8, -8.2, 7.6], [-6.8, -8.2, 7.6], [0.5, -10.5, 9.5], [8.5, -6, 10.5]], look: [-0.2, 0, 0.45], fov: 42 },
-  close: { spots: [[2.9, -4.4, 2.0], [-2.2, -4.4, 2.0], [4.2, -3.8, 2.6], [0.4, -4.8, 2.8]], look: [0.7, -0.7, 0.42], fov: 36 },
+  close: { spots: [[3.8, -5.9, 2.8], [-2.9, -5.9, 2.8], [5.2, -4.9, 3.3], [0.6, -6.5, 3.5]], look: [0.5, -0.4, 0.4], fov: 40 },
   release: { spots: [[15, -9, 3.4], [13, -7, 5], [19, -10, 6.5]], look: "car", fov: 40 },
   idle: { spots: [[6.8, -8.2, 7.6], [-6.8, -8.2, 7.6], [0.5, -10.5, 9.5]], look: [-0.2, 0, 0.45], fov: 42 },
 };
@@ -90,7 +90,7 @@ export function createPitCam(K) {
   // ---------- the director (each frame, before the camera is placed) ----------
   function direct(A, fr, now) {
     const T = fr.t, paused = !(A.ctx.rate > 0), mode = K.camMode(), focus = K.focus();
-    if (!S.auto && mode !== "pit") { endSlow(A); S.subject = null; S.took = false; return; }
+    if (!S.auto && mode !== "pit") { endSlow(A, true); S.subject = null; S.took = false; A.camAuto = null; return; }
     const order = [focus, ...(S.cars || [])].filter((x, i, a) => x && a.indexOf(x) === i);
     const sub = pickSubject(S.subject, fr.cars, order, (g) => boxOfRow(A, g), T);
     if (sub !== S.subject) {
@@ -108,6 +108,8 @@ export function createPitCam(K) {
     // auto-slow for the stop (screen speed only)
     if (S.slow && g && want !== "idle") maybeSlow(A, g, T);
     if (want !== S.shot && (S.shot == null || (!paused && (now - S.shotWall) / 1000 >= SHOT_HOLD))) cut(want, now, T, sub);
+    // (for the HUD: which car the camera shows and why – the selected car may be another; racehud.js reads A.camAuto)
+    A.camAuto = S.took && sub ? { num: sub, why: "피트 " + SHOT_KO[S.shot || "idle"] } : null;
   }
   function cut(shot, now, T, sub) {
     S.shot = shot; S.shotWall = now; S.spot = null; S.look = null; S.stats.cuts++; S.stats.lastCut = { shot, t: Math.round(T), car: sub };
@@ -160,7 +162,9 @@ export function createPitCam(K) {
     // the look follows its target critically damped (a pan, not a jump) – none while paused (dt 0)
     if (!S.look) S.look = target.clone(); else { const k = 1 - Math.exp(-Math.max(0, fr.dtWall || 0.016) * 6); S.look.lerp(target, k); }
     const label = `피트 카메라 · ${SHOT_KO[S.shot || "idle"]}${num ? ` · ${A.driverOf(num)?.Tla || num}` : ""}${S.took ? " · 자동 연출" : ""}${S.spot?.i > 0 ? " · 가림 회피 각도" : ""}`;
-    return { pos: S.spot.pos, look: S.look, fov: shot.fov, note: label };
+    // (looking at a car far down the lane: zoomed in so it fills about a tenth of the picture's height – a broadcast's long lens)
+    const fov = shot.look === "car" ? Math.max(9, Math.min(shot.fov, (2 * Math.atan(6 / Math.max(1, S.spot.pos.distanceTo(S.look))) * 180) / Math.PI)) : shot.fov;
+    return { pos: S.spot.pos, look: S.look, fov: +fov.toFixed(1), note: label };
   }
   // the first spot of the shot that holds (see the header); null if none
   function place(B, shot, target, team, num, camera) {

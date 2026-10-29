@@ -94,6 +94,10 @@ export const swappedAt = (g, T) => g.pit?.workT1 != null && T >= g.pit.workT1 &&
 // cars3d.updateGameCrews. Records what was drawn in K.crewInfo (per team: mode, car, figures' places – the pit camera
 // keeps off them) for the camera and the checks.
 export function updateGameCrews(K, A, fr) {
+  const t0 = performance.now(), c = K.crewCost || (K.crewCost = { ms: 0, frames: 0, worst: 0 });
+  try { crews(K, A, fr); } finally { const d = performance.now() - t0; c.ms += d; c.frames++; if (d > c.worst) c.worst = d; }
+}
+function crews(K, A, fr) {
   const G = K.pitG(), world = K.world(), teams = K.pitTeams();
   const was = K.lifted, now = new Set(), mem = K.crewMem || (K.crewMem = {}), info = (K.crewInfo = {});
   const done = () => { for (const num of was) if (!now.has(num)) { const c = K.cars.get(num); if (c) K.restoreCar(c); } was.clear(); for (const n of now) was.add(n); };
