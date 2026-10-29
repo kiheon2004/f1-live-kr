@@ -78,3 +78,19 @@ test("a pit-lane starter (Hungary 2025: car 22) starts from the pit lane behind 
   for (let i = 0; i < 20 * 40; i++) E.step(r);   // 40 s
   assert.strictEqual(r.state.order[r.state.order.length - 1], "22", `last after 40 s: ${r.state.order.join(",")}`);
 });
+
+test("a stop's loss is measured, part by part: lane time minus the free time over the same stretch; queue + stationary + rest = loss", async () => {
+  const E = await load();
+  const r = E.createRace({ scenario: SC, seed: 4 });
+  E.command(r, { id: "a", type: "pit", car: "4", args: { compound: "HARD" }, by: "ai" });
+  E.command(r, { id: "b", type: "pit", car: "81", args: { compound: "HARD" }, by: "ai" });   // the teammate the same lap: a queue
+  for (let i = 0; i < 20 * 300; i++) E.step(r);
+  for (const n of ["4", "81"]) {
+    const c = r.state.cars.find((x) => x.num === n), p = c.acct.pitParts?.[0];
+    assert.ok(p, `car ${n} stopped`);
+    assert.ok(Math.abs(p.queue + p.stationary + p.rest - p.loss) < 0.02);
+    assert.ok(p.loss > 10 && p.loss < 40, `loss ${p.loss}`);
+  }
+  const q = ["4", "81"].map((n) => r.state.cars.find((x) => x.num === n).acct.pitParts[0].queue);
+  assert.ok(Math.max(...q) > 0.3, `one of the two queued: ${q}`);
+});

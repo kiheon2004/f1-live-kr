@@ -93,7 +93,7 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
     const fitted = TEAM_CARS[season]?.[e.teamKey];
     cars[e.num] = { ...base, ...(fitted ? values(fitted) : {}), ...(carParams?.[e.teamKey] || {}) };
     drivers[e.num] = driverParams?.[e.num] || {};
-    profiles[e.num] = { prof: makeProfile(T.n), at: -1e9 };
+    profiles[e.num] = { prof: makeProfile(T.n), at: -1e9, phase: (sc.entries.indexOf(e) * 97) % REPROFILE.everyMs };
   }
   const rec = weatherRecord(sc.weather);
   // race names (SOFT/MEDIUM/HARD) → the C-number Pirelli nominated for this event (research data; else the defaults, est)
@@ -188,7 +188,9 @@ function moveLap(race, car, t, capFollow) {
   const pr = C.profiles[car.num], mu = cp.mu_mech * E.muTyre * E.rubber * E.util;
   if ((t - pr.at >= 500 && needsReprofile(pr.prof, mu, E.m)) || t - pr.at >= REPROFILE.everyMs) {
     car.profIn = { muTyre: E.muTyre, muTrack: E.rubber, util: E.util, m: E.m, rho: E.rho };   // (saved: a restored race rebuilds the same envelope)
-    computeProfile(C.PT, cp, { ...car.profIn, forward: false }, pr.prof); pr.at = t;
+    computeProfile(C.PT, cp, { ...car.profIn, forward: false }, pr.prof);
+    // (the 2 s refreshes staggered over the cars – not all 20 envelopes on one step: the frame-time spikes ui3d measured)
+    pr.at = pr.at < -1e8 ? t - pr.phase : t;
   }
   const vCap = Math.min(capFollow, lapCapForPit(car, T));
   const cs = { s: car.s, v: car.v, lap: 0, aLong: 0, aLat: 0, pDrive: 0, pBrake: 0, crossed: false, tCross: 0, limited: false, over: 0 };
@@ -207,7 +209,7 @@ function moveLap(race, car, t, capFollow) {
   const sg0 = segOf(C.surface, s0), sg1 = segOf(C.surface, car.s); if (sg0 !== sg1) C.surface.passes[sg1] += 1;
   // the pit: commit / entry
   const pev = pitOnLap(car, T, s0, car.s, t);
-  if (pev === "entry") { car.where = "pit"; log(race, { t, car: car.num, type: "pitEntry", cause: car.pit.call?.by || "call", effect: `box for ${car.pit.call?.compound || "same"}` }); }
+  if (pev === "entry") { car.where = "pit"; car.pit.refS = pitReference(race, car); log(race, { t, car: car.num, type: "pitEntry", cause: car.pit.call?.by || "call", effect: `box for ${car.pit.call?.compound || "same"}` }); }
   if (pev === "committed") log(race, { t, car: car.num, type: "pitCommitted", cause: "call", effect: "past the commit point" });
   // line crossing
   lineCrossing(race, car, s0, car.s, cs.crossed, t - DT_MS + Math.round(cs.tCross * 1000));
@@ -232,14 +234,31 @@ function movePit(race, car, t) {
   car.wheelDist += car.v * DT;
   if (car.pit.phase === "none" && ev === "exit") {
     car.where = "lap"; car.d = T.at(T.line, car.s);
-    const tm = car.pit.times, loss = (tm.exit - tm.entry) / 1000;
-    log(race, { t, car: car.num, type: "pitExit", cause: "stop", effect: `lane ${loss.toFixed(1)} s (stop ${((tm.release - tm.stop) / 1000).toFixed(1)} s${tm.queue ? `, queued ${((tm.queueEnd - tm.queue) / 1000).toFixed(1)} s` : ""})` });
+    const tm = car.pit.times, lane = (tm.exit - tm.entry) / 1000;
+    // the stop's loss: time from the branch to the merge minus the time the car would have taken on the lap over the same
+    // stretch at its free reference pace (forward pass of its envelope at entry) – the parts: queue, stationary (penalty +
+    // work), the rest (braking to the limiter, the lane, the launch). Approximate: the reference is a free lap's pace.
+    const queue = tm.queue != null ? (tm.queueEnd - tm.queue) / 1000 : 0, still = (tm.release - tm.stop) / 1000, ref = car.pit.refS ?? 0;
+    const loss = lane - ref;
+    car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2) });
+    log(race, { t, car: car.num, type: "pitExit", cause: "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s − free ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
     car.pit.times = {};
   }
   // the timing line inside the pit lane
   const sNow = car.where === "pit" ? T.pit.pitToLap(car.pit.u) : car.s;
   if (car.where === "pit") { const crossed = T.ahead(sPrev, sNow) < T.L / 2 && sNow < sPrev; lineCrossing(race, car, sPrev, sNow, crossed, t); car.s = sNow; }
   car.dist = car.armed ? car.lap * T.L + (car.where === "pit" ? sNow : car.s) : (car.where === "pit" ? sNow : car.s) - T.L;
+}
+
+// the time the car would take from the pit branch (sIn) to the merge (sOut) on the lap at its free pace (s): one forward
+// pass of its present envelope (≈ 0.2 ms, once per stop)
+function pitReference(race, car) {
+  const C = race.cache, T = C.T, cp = C.cars[car.num], st = car.profIn; if (!st) return 0;
+  const pr = C.pitRef || (C.pitRef = makeProfile(T.n));
+  computeProfile(C.PT, cp, { ...st, P: cp.P_ice, forward: true }, pr);
+  const vf = pr.vf, n = T.n, i0 = T.idx(T.pit.sIn), len = Math.round(T.ahead(T.pit.sIn, T.pit.sOut) / T.ds); let tt = 0;
+  for (let k = 0; k < len; k++) { const i = (i0 + k) % n, j = (i + 1) % n; tt += (2 * T.ds) / Math.max(1, vf[i] + vf[j]); }
+  return tt;
 }
 
 // a pit-lane starter waits at the pit exit until the field has passed it (simple rule; control.js refines)
