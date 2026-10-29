@@ -27,7 +27,7 @@ const rgbOf = (c) => { const n = parseInt(hex(c).slice(1), 16); return [n >> 16,
 
 // The painted floor (one texture over the whole floor, w × d m): the colour – the paint's tone with a slow mottling
 // (±3 %), the flake of an epoxy floor (fine speckle), and a few faint tyre scuffs and drips round the car's place –
-// and its roughness map (G channel: three.js reads roughness from G) – satin paint 0.5–0.7, the scuffs and the walked
+// and its roughness map (G channel: three.js reads roughness from G) – satin paint 0.45–0.65, the scuffs and the walked
 // lanes a touch smoother. Never below 0.42: a painted floor is not a wet mirror (request §11).
 export function floorTextures(tone, w, d, seed = 1, car = null) {
   if (!hasDom) return { map: null, rough: null };
@@ -40,7 +40,7 @@ export function floorTextures(tone, w, d, seed = 1, car = null) {
     const flake = r() < 0.012 ? (r() - 0.5) * 0.16 : 0;
     const f = 1 + slow * 0.07 + grain * 0.025 + flake, i = (y * cw + x) * 4;
     ci.data[i] = Math.min(255, R * f); ci.data[i + 1] = Math.min(255, G * f); ci.data[i + 2] = Math.min(255, B * f); ci.data[i + 3] = 255;
-    const ro = 0.6 + slow * 0.12 + grain * 0.06; ri.data[i] = 0; ri.data[i + 1] = Math.round(255 * Math.max(0.42, Math.min(0.85, ro))); ri.data[i + 2] = 0; ri.data[i + 3] = 255;
+    const ro = 0.52 + slow * 0.12 + grain * 0.06; ri.data[i] = 0; ri.data[i + 1] = Math.round(255 * Math.max(0.42, Math.min(0.85, ro))); ri.data[i + 2] = 0; ri.data[i + 3] = 255;
   }
   gc.putImageData(ci, 0, 0); gr.putImageData(ri, 0, 0);
   // the scuffs: a few faint tyre arcs and drips where the car stands (restrained: ≤ 6 % darker, request §11)

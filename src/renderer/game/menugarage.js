@@ -144,10 +144,10 @@ function buildWorld(o, renderer) {
   const target = [0, 0.5, (planA.car?.z0 ?? ROOM.carZ0) + (dims?.length ?? 5.6) / 2];
   const rigA = buildLightRig(A.userData.zone, A.userData.fixtures, target, { mode: "full", shadow: true, shadowSize: 2048, floor: style.floor });
   A.add(rigA.group);
-  const rigB = buildLightRig(B.userData.zone, B.userData.fixtures, [0, 0.5, target[2]], { mode: "full", key: false, hemi: false, shadow: false, door: false, scale: 0.55 });
+  const rigB = buildLightRig(B.userData.zone, B.userData.fixtures, [0, 0.5, target[2]], { mode: "full", key: false, sides: 1, hemi: false, shadow: false, door: false, scale: 0.9 });
   B.add(rigB.group);
   const env = roomEnvironment(renderer, { width: ROOM.width, depth: ROOM.depth, ceilingH: ROOM.ceilingH, wall: style.wall.base, floor: style.floor, ceiling: style.dark ? "#1d1f22" : "#55595e", fixtures: A.userData.fixtures.filter((f) => f.kind === "ceiling"), doorW: ROOM.doorW, doorH: ROOM.doorH });
-  scene.environment = env; scene.environmentIntensity = 0.35;
+  scene.environment = env; scene.environmentIntensity = 0.7;
   const camera = new THREE.PerspectiveCamera(CAM.fov, 16 / 9, 0.1, 80);
   const W = { key: `${o.season}|${o.teamKey}`, season: o.season, teamKey: o.teamKey, team: o.team, colour: hexc(o.colour), style, lib, scene, camera, env, bays: [A, B], cars, spots, lights: [...rigA.lights, ...rigB.lights],
     focus: null, buildMs: 0, extra: [reveal] };
@@ -228,6 +228,7 @@ function mgFrame(t) {
     const q = MG.gpu?.begin();
     try { r.render(W.scene, W.camera); } finally { CAR_SKY.value = sky; MG.gpu?.end(q); }
     const ms = performance.now() - a; MG.ms.push(ms); if (MG.ms.length > 240) MG.ms.shift();
+    if (W.firstFrameMs == null) W.firstFrameMs = Math.round(ms);   // (the first draw uploads textures and builds the shadow pass's programs)
     MG.frames++; MG.dirty = false; MG.last = t;
   }
   if (move) MG.raf = requestAnimationFrame(mgFrame);
@@ -317,7 +318,7 @@ export function state() {
   const W = MG.world, r = MG.renderer, ms = MG.ms.slice().sort((a, b) => a - b);
   return {
     on: MG.on, gen: MG.gen, built: MG.built, stale: MG.stale, err: MG.err,
-    request: MG.req, shown: W ? { season: W.season, teamKey: W.teamKey, team: W.team, colour: W.colour, focus: W.focus, styleSeed: W.style.seed, buildMs: W.buildMs, compileMs: W.compileMs ?? null } : null,
+    request: MG.req, shown: W ? { season: W.season, teamKey: W.teamKey, team: W.team, colour: W.colour, focus: W.focus, styleSeed: W.style.seed, buildMs: W.buildMs, compileMs: W.compileMs ?? null, firstFrameMs: W.firstFrameMs ?? null } : null,
     cars: W ? W.cars.map((c) => ({ num: c.num, tla: c.entry.tla || null, bay: c.bay, front: c.num === W.focus, profile: c.obj.userData.profile.key, x: +c.obj.position.x.toFixed(2), z: +c.obj.position.z.toFixed(2),
       size: [+(c.box.max.x - c.box.min.x).toFixed(3), +c.box.max.y.toFixed(3), +(c.box.max.z - c.box.min.z).toFixed(3)] })) : [],
     bays: W ? W.bays.map((b) => ({ draws: b.userData.stats.draws, triangles: b.userData.stats.triangles, items: b.userData.plan.items.map((i) => i.kind), dropped: b.userData.plan.dropped.map((d) => d.kind), lod: b.userData.lod })) : [],

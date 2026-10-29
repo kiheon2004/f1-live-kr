@@ -121,4 +121,5 @@ test("garage kit: lights – one shadow at most per rig, none in 'none' mode, th
   assert.strictEqual(noShadow.lights.filter((l) => l.castShadow).length, 0);
   const second = K.buildLightRig(n, fx, null, { key: false, hemi: false, door: false, shadow: false });
   assert.ok(second.lights.every((l) => l.isSpotLight && !l.castShadow) && second.lights.length === 2);
+  assert.strictEqual(K.buildLightRig(n, fx, [0, 0.5, 5], { key: false, sides: 1, hemi: false, door: false, shadow: false }).lights.length, 1);
 });

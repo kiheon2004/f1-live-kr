@@ -8,7 +8,7 @@
 import * as THREE from "../vendor/three.module.js";
 
 // fixtures: bay.js userData.fixtures; target: the car's centre in the bay frame ([x, y, z]); opts: { mode: "full" |
-// "key" | "none", key: true (false: no key light – a second bay lit by its lamps only), hemi: true, shadow: true,
+// "key" | "none", key: true (false: no key light – a second bay lit by its lamps only), sides: 2 | 1, hemi: true, shadow: true,
 // shadowSize: 2048, door: true (daylight from the pit lane through the door), floor: the bounce colour, scale: 1 }.
 // → { group (in the bay frame: add it to the bay's group), key, lights: [...], shadowLights: n }
 export function buildLightRig(zone, fixtures = [], target = null, opts = {}) {
@@ -30,12 +30,17 @@ export function buildLightRig(zone, fixtures = [], target = null, opts = {}) {
   if (mode === "key") return { group, key, lights, shadowLights: key?.castShadow ? 1 : 0 };
   // the ceiling's other lamps as one soft spot each side of the room (no shadow): light on the walls and the equipment
   const ceil = fixtures.filter((f) => f.kind === "ceiling");
-  const side = ceil.length >= 2 ? [ceil[0], ceil[ceil.length - 1]] : [{ x: -W / 4, y: H - 0.3, z: D / 2 }, { x: W / 4, y: H - 0.3, z: D / 2 }];
+  let side = ceil.length >= 2 ? [ceil[0], ceil[ceil.length - 1]] : [{ x: -W / 4, y: H - 0.3, z: D / 2 }, { x: W / 4, y: H - 0.3, z: D / 2 }];
+  // (sides: 1 – one lamp over the middle: a room seen only through an opening needs no more; every light is paid for in
+  // every lit pixel of the scene)
+  if (opts.sides === 1) side = [{ x: 0.01, y: H - 0.3, z: t[2] }];
   for (const f of side) {
     const s = new THREE.SpotLight(0xf4f1ea, 30 * k, 0, 1.2, 1, 2);
     // (aimed at the side wall's equipment, half way up: the lit walls and cabinets give the room its depth – a spot on the
     // floor only lit the floor)
-    s.position.set(f.x, f.y, f.z); s.target.position.set(Math.sign(f.x || 1) * W / 2, 0.9, Math.min(D - 0.5, f.z + 0.8)); group.add(s, s.target); lights.push(s);
+    s.position.set(f.x, f.y, f.z);
+    if (opts.sides === 1) s.target.position.set(t[0], 0, t[2]); else s.target.position.set(Math.sign(f.x || 1) * W / 2, 0.9, Math.min(D - 0.5, f.z + 0.8));
+    group.add(s, s.target); lights.push(s);
   }
   // daylight from the pit lane through the open door (cool, soft, no shadow)
   if (opts.door !== false) {
@@ -58,13 +63,13 @@ export function roomEnvironment(renderer, { width = 9, depth = 12, ceilingH = 4.
     const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.rotation.set(rx, ry, 0); sc.add(o); mats.push(m); geos.push(g);
   };
   const W = width, D = depth, H = ceilingH, cx = 0, cz = D / 2;
-  plane(W, D, floor, cx, 0, cz, -Math.PI / 2, 0, 0.55);
+  plane(W, D, floor, cx, 0, cz, -Math.PI / 2, 0, 0.35);
   plane(W, D, ceiling, cx, H, cz, Math.PI / 2, 0, 0.6);
-  plane(D, H, wall, -W / 2, H / 2, cz, 0, Math.PI / 2, 0.6); plane(D, H, wall, W / 2, H / 2, cz, 0, -Math.PI / 2, 0.6);
-  plane(W, H, wall, cx, H / 2, D, 0, Math.PI, 0.6);
+  plane(D, H, wall, -W / 2, H / 2, cz, 0, Math.PI / 2, 0.35); plane(D, H, wall, W / 2, H / 2, cz, 0, -Math.PI / 2, 0.35);
+  plane(W, H, wall, cx, H / 2, D, 0, Math.PI, 0.35);
   plane(W, H, wall, cx, H / 2, 0, 0, 0, 0.5);
-  if (door) plane(doorW, doorH, "#dfe7f2", cx, doorH / 2, -0.02, 0, 0, 3.2);
-  for (const f of fixtures) { const [w, d] = f.along === "x" ? [f.len, 0.3] : [0.3, f.len]; plane(w, d, "#ffffff", f.x, H - 0.02, f.z, Math.PI / 2, 0, 9); }
+  if (door) plane(doorW, doorH, "#dfe7f2", cx, doorH / 2, -0.02, 0, 0, 6);
+  for (const f of fixtures) { const [w, d] = f.along === "x" ? [f.len, 0.3] : [0.3, f.len]; plane(w, d, "#ffffff", f.x, H - 0.02, f.z, Math.PI / 2, 0, 14); }
   const pm = new THREE.PMREMGenerator(renderer);
   const rt = pm.fromScene(sc, 0.035, 0.1, 100, { position: new THREE.Vector3(0, 1.2, D * 0.45) });
   pm.dispose(); for (const m of mats) m.dispose(); for (const g of geos) g.dispose();
