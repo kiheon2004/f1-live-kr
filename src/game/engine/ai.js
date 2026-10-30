@@ -232,6 +232,17 @@ function decide(race, team, car, why) {
   const nextStop = (car.plan?.stints || []).find((x) => x.toLap > car.lap && x !== car.plan.stints[car.plan.stints.length - 1]);
   const inWindow = nextStop && nextStop.toLap - car.lap <= AI.window;
   const wetTyre = WETS.includes(car.tyre.name);
+  // the water trend this car's team has seen at its lap decisions (the last 3 laps) – the evidence a family switch needs:
+  // to wet-weather tyres only while it rains or the water is rising (or the track is properly wet), back to slicks only when
+  // it has stopped raining and the water is not rising; and not straight back within AI.familyMinLaps (v0.50 §5-5)
+  if (why === "lap" || why.startsWith("lap")) { (cs.wh ||= []).push(+view.water.toFixed(3)); if (cs.wh.length > 3) cs.wh.shift(); }
+  const rising = (cs.wh?.length >= 2) && cs.wh[cs.wh.length - 1] > cs.wh[cs.wh.length - 2] + 0.005;
+  const famOk = (to) => {
+    const toWet = WETS.includes(to); if (toWet === wetTyre) return true;
+    const recent = car.lap - (cs.switchLap ?? -99) < AI.familyMinLaps;
+    if (toWet) return view.water >= AI.wetNow || (!recent && (view.rain > 0.1 || rising));
+    return !recent && view.rain <= 0.1 && !rising;
+  };
   // the tyre-family check every lap: box for the other family when a fresh set of it is expected to be clearly faster
   // over the next laps – the water expected there from the forecast scenarios (rain coming → it rises, a dry forecast →
   // it falls), the model corrected by what the field is doing on each compound right now (public lap times: the
@@ -242,12 +253,12 @@ function decide(race, team, car, why) {
     const need = pitLoss(M, est, view.flag) + AI.switchDelta * (car.lap - (cs.switchLap ?? -9) < 4 ? 3 : 1);
     let best = null, bg = need;
     const gains = crossoverGains(M, est, view, car.num, { name: car.tyre.name, age: car.tyre.laps, fuel: car.energy.fuel }, { K, corr, key: `${car.num}:${car.pit.stops}:w` });
-    for (const c in gains) if (gains[c] > bg && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) { bg = gains[c]; best = c; }
+    for (const c in gains) if (gains[c] > bg && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) { bg = gains[c]; best = c; }
     // a stop the plan makes in the next two laps anyway: no extra stop to pay for – only the right tyre for it
     const ns = nextStopOf(car), imminent = ns && ns.toLap - car.lap <= 2;
     if (imminent && !best) {
       const fc = freshCosts(M, est, view, car.num, { K, corr, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
-      let pick = ns.compound; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
+      let pick = ns.compound; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
       if (pick !== ns.compound && WETS.includes(pick) !== WETS.includes(ns.compound)) {
         const stints = [{ compound: car.tyre.name, toLap: ns.toLap }, { compound: pick, toLap: S.totalLaps }];
         order(race, team, car, "plan", { stints }); cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = ns.toLap; cs.lockLap = ns.toLap + 1;
@@ -316,7 +327,7 @@ function decide(race, team, car, why) {
     if (change && corrNow && best.stints.length > 1) {
       // wet or drying: the tyre for the plan's next stop chosen for the water expected then (the dry DP doesn't know it)
       const fc = freshCosts(M, est, view, car.num, { K: Math.min(10, S.totalLaps - car.lap - 1), corr: corrNow, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
-      const want = best.stints[1].compound; let pick = want; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
+      const want = best.stints[1].compound; let pick = want; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
       if (WETS.includes(pick) !== WETS.includes(want)) best.stints[1].compound = pick;
     }
     if (change) {
