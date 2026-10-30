@@ -12,6 +12,7 @@
 body { font-size: var(--fs-md); }
 :root { --bar-h: 44px; --row-h: 30px; }
 @media (max-height: 820px) { :root { --row-h: 26px; } }
+@media (min-height: 980px) { :root { --row-h: 34px; } #board td.time, #board .drv .name { font-size: var(--fs-lg); } }
 
 /* ---------- app bar ---------- */
 .top { display: flex; align-items: center; gap: var(--s-4); min-height: var(--bar-h); padding: var(--s-3) var(--s-5); border-bottom: var(--bw) solid var(--line); background: var(--bg-1); flex-wrap: wrap; row-gap: var(--s-3); }
@@ -134,7 +135,9 @@ body.game-on .top .modes, body.game-on .top .right .cols-wrap, body.game-on .top
 .stale-bar.bad { background: var(--bad-soft); color: #ff7a71; }
 
 /* ---------- main layout ---------- */
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--side-w, 480px); min-height: 0; }
+/* (the side column grows with the window: a 1920 px window gives the map and panels ~40 %, the table keeps enough for
+   every column without stretching them apart) */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--side-w, clamp(420px, 40vw, 860px)); min-height: 0; }
 .board { overflow: auto; min-width: 0; background: var(--bg-0); }
 .splitter { background: var(--line); position: relative; z-index: 2; transition: background var(--t-fast); }
 .splitter.v { cursor: col-resize; }
@@ -187,6 +190,8 @@ td.chg b { font-weight: var(--fw-bold); }
 .drv .tla { color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-bold); letter-spacing: 0.04em; }
 .drv .team { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; max-width: 12em; }
 td.time { font-size: var(--fs-md); }
+/* (a race: the interval is the number to read, the gap to the leader the quieter one) */
+#board td.gapc { color: var(--text-2); }
 td.time .t-none, td .t-none { color: var(--text-3); }
 .close { color: var(--ok); font-weight: var(--fw-bold); }
 .trend { display: inline-block; margin-left: var(--s-2); font-size: var(--fs-2xs); font-weight: var(--fw-med); min-width: 3em; text-align: left; vertical-align: 1px; }
@@ -270,12 +275,11 @@ td.pits .zero { color: var(--text-3); }
 .tabs button { position: relative; flex: 1 0 auto; border: 0; border-radius: 0; background: none; min-height: 34px; padding: 0 var(--s-4); color: var(--text-2); font-weight: var(--fw-med); font-size: var(--fs-sm); white-space: nowrap; }
 .tabs button:hover { color: var(--text-1); }
 .tabs button[aria-selected="true"] { color: var(--text-1); box-shadow: inset 0 -2px 0 var(--text-1); }
-.tab-badge { display: inline-block; min-width: 16px; height: 16px; margin-left: var(--s-2); padding: 0 var(--s-2); border-radius: 8px; background: var(--bg-3); color: var(--text-1); font-size: var(--fs-2xs); line-height: 16px; font-weight: var(--fw-bold); text-align: center; vertical-align: 1px; font-variant-numeric: tabular-nums; }
-.tab-badge.red, .tab-badge.penalty { background: var(--bad); color: #fff; } .tab-badge.sc { background: var(--sc); color: var(--text-inv); } .tab-badge.yellow { background: var(--warn); color: var(--text-inv); }
 /* race control */
 .chips { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: var(--bw) solid var(--line-soft); }
 .chips button { min-height: var(--hit); padding: 0 var(--s-4); border-radius: var(--r-1); font-size: var(--fs-xs); background: none; border: var(--bw) solid var(--line); color: var(--text-2); }
 .chips button span { font-variant-numeric: tabular-nums; color: var(--text-3); margin-left: var(--s-1); }
+.chips .blue-toggle { margin-left: auto; border-style: dashed; }
 .chips button[aria-pressed="true"] { background: var(--bg-3); color: var(--text-1); border-color: var(--text-3); font-weight: var(--fw-bold); }
 #rc { list-style: none; margin: 0; padding: 0; overflow: auto; }
 #rc li { padding: var(--s-4) var(--s-6) var(--s-4) var(--s-5); border-bottom: var(--bw) solid var(--line-soft); display: grid; gap: var(--s-1); border-left: 3px solid transparent; }
@@ -457,7 +461,20 @@ h2 small { color: var(--text-3); font-weight: var(--fw-reg); margin-left: var(--
   #liveState { max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
   #board td, #board th { padding: 0 var(--s-3); }
 }
-@media (max-width: 1180px) { .sb-source .more, #weather .w.track { display: none; } }
+@media (max-width: 1240px) {
+  /* (small windows and 125–150 % zoom: the table keeps every main column without a sideways scroll – the change column
+     and the interval trend give way first, the side column narrows) */
+  .layout { grid-template-columns: minmax(0, 1fr) 6px var(--side-w, 360px); }
+  #board td, #board th { padding: 0 var(--s-3); }
+  #board th:nth-child(2), #board td:nth-child(2), #board .trend { display: none; }
+  .sb-source .more, #weather .w.track { display: none; }
+  .map-card > .view-switch button { padding: 0 var(--s-4); }
+}
+@media (max-width: 1100px) {
+  /* (narrower still: the sector times go – they stay in the driver panel and the lap comparison view) */
+  #board th:nth-child(n+7):nth-child(-n+9), #board td:nth-child(n+7):nth-child(-n+9) { display: none; }
+  #elapsed { font-size: var(--fs-sm); }
+}
 
 /* ---------- compact timing tower (a narrow window beside a stream) ---------- */
 body.compact .layout { grid-template-columns: minmax(0, 1fr); }
@@ -512,7 +529,7 @@ body.home-on .top .modes { margin-right: auto; }
 .gm-pick button { display: block; width: 100%; text-align: left; border: 0; background: none; min-height: var(--ctl-h); padding: 0 var(--s-4); border-radius: var(--r-1); }
 .gm-pick button:hover, .gm-pick button:focus-visible { background: var(--bg-3); }
 .home-globe-note { position: absolute; left: var(--s-6); top: var(--s-5); margin: 0; max-width: 420px; font-size: var(--fs-sm); color: var(--text-2); background: var(--hud-bg); border: var(--bw) solid var(--line); border-radius: var(--r-2); padding: var(--s-4) var(--s-5); }
-.home-lower { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--s-4); padding: var(--s-4) var(--s-5) var(--s-5); height: min(370px, 44vh); min-height: 0; }
+.home-lower { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: var(--s-4); padding: var(--s-4) var(--s-5) var(--s-5); height: min(440px, 46vh); min-height: 0; }
 .home-card { background: var(--bg-1); border: var(--bw) solid var(--line); border-radius: var(--r-2); padding: var(--s-5) var(--s-6); min-height: 0; overflow: auto; }
 .home-card h3 { margin: 0 0 var(--s-3); font-size: var(--fs-lg); display: flex; align-items: baseline; gap: var(--s-4); flex-wrap: wrap; }
 .home-card h3 small { color: var(--text-3); font-weight: var(--fw-reg); font-size: var(--fs-sm); }

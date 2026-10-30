@@ -471,7 +471,8 @@
   //   live:   실시간 · 수신 중 | 연결 중… | 다시 연결 중… | 연결 안 됨 | 오류 · 지연 30초 (on purpose, to match the TV) ·
   //           멈춤 · 수신 없음 40초 (nothing arrived: the values shown are the last received, not zeros)
   function lastReceived() { const q = live.queue; return Math.max(live.shownAt, q.length ? q[q.length - 1].at : -Infinity); }
-  const liveStale = (now = Date.now()) => LiveStatus.stale({ mode, liveOnScreen: src === live, hasDrivers: !!live.state.DriverList, conn: liveStatus.state, message: liveStatus.message, now, lastReceived: lastReceived() });
+  // (a function declaration: paintSource runs during start-up, before a const here would exist)
+  function liveStale(now = Date.now()) { return LiveStatus.stale({ mode, liveOnScreen: src === live, hasDrivers: !!live.state.DriverList, conn: liveStatus.state, message: liveStatus.message, now, lastReceived: lastReceived() }); }
   function paintSource() {
     const box = $("sbSource"); if (!box) return;
     let html = "";
@@ -678,7 +679,7 @@
         <td class="chg">${chg > 0 ? `<span class="up" title="출발 그리드보다 ${chg}계단 올라감"><b>↑</b>${chg}</span>` : chg < 0 ? `<span class="down" title="출발 그리드보다 ${-chg}계단 내려감"><b>↓</b>${-chg}</span>` : type === "Race" && grid ? `<span class="same">–</span>` : ""}</td>
         <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
           <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span><span class="tla">${esc(d.Tla)}</span>${num === compare && num !== focus ? `<span class="mark" title="Shift+클릭으로 고른 비교 드라이버">비교</span>` : ""}<span class="team">${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span></div></td>
-        <td class="time r">${leader && type === "Race" && !rel ? `<span class="faint">선두</span>` : cell(gap)}</td>
+        <td class="time r${type === "Race" && !rel ? " gapc" : ""}">${leader && type === "Race" && !rel ? `<span class="faint">선두</span>` : cell(gap)}</td>
         <td class="time r ${close ? "close" : ""}"${close ? ` title="앞 차와 1초 이내"` : ""}>${leader ? "" : interval ? esc(interval) + trendTag(trend[num]) : NONE}</td>
         <td class="time r">${lapV ? `<span class="lap ${lapCls}"${lapTitle ? ` title="${lapTitle}"` : ""}>${esc(lapV)}</span>` : NONE}</td>
         ${[0, 1, 2].map((i) => `<td class="time r sec ${sectorCls(sectors[i])}"${sectors[i]?.OverallFastest ? ` title="전체 최고"` : sectors[i]?.PersonalFastest ? ` title="개인 최고"` : ""}><span>${esc(sectors[i]?.Value || "")}</span>${miniSectors(sectors[i])}</td>`).join("")}
@@ -732,7 +733,12 @@
     ["limits", "트랙 리밋", (m) => /TRACK LIMITS|DELETED/.test(m.Message)],
   ];
   let rcKind = store.get("rcKind", "all");
+  // v0.50: blue flags (lapped cars told to let the leaders by – dozens a race) are left out of the list unless asked
+  // for: a toggle at the end of the chips, with their count
+  let rcBlue = store.get("rcBlue", false);
+  const isBlue = (m) => /BLUE FLAG/.test(m.Message || "") || m.Flag === "BLUE";
   $("rcFilter").addEventListener("click", (e) => {
+    if (e.target.closest("button[data-blue]")) { rcBlue = !rcBlue; store.set("rcBlue", rcBlue); rcCount = -1; renderRC(); return; }
     const k = e.target.closest("button[data-kind]")?.dataset.kind; if (!k) return;
     rcKind = k; store.set("rcKind", k); rcCount = -1; renderRC();
   });
@@ -744,7 +750,7 @@
     const u = LiveStatus.rcUnread(src?.messages || [], rcSeen, panel === "rc"), b = $("rcBadge");
     rcSeen = u.seen; b.hidden = !u.count;
     if (!u.count) return;
-    b.textContent = u.count > 99 ? "99+" : String(u.count); b.className = `tab-badge ${u.top}`;
+    b.textContent = u.count > 99 ? "99+" : String(u.count); b.className = `ui-count ${u.top}`;
     b.title = `안 본 메시지 ${u.count}개`;
   }
   function paintTicker() {
@@ -764,12 +770,13 @@
     const msgs = src.messages;
     if (src.rc?.rev === rcCount) return; rcCount = src.rc?.rev;
     paintRcBadge(); paintTicker();
+    const pool = rcBlue ? msgs : msgs.filter((m) => !isBlue(m)), blues = msgs.length - msgs.filter((m) => !isBlue(m)).length;
     $("rcFilter").innerHTML = RC_KINDS.map(([k, label, fn]) => {
-      const n = k === "all" ? msgs.length : msgs.filter(fn).length;
+      const n = k === "all" ? pool.length : pool.filter(fn).length;
       return `<button data-kind="${k}" aria-pressed="${k === rcKind}"${n || k === "all" ? "" : " disabled"}>${label} <span>${n}</span></button>`;
-    }).join("");
+    }).join("") + (blues ? `<button data-blue class="blue-toggle" aria-pressed="${rcBlue}" title="파란 깃발(랩다운 차에게 비켜 주라는 신호) 메시지를 목록에 보일지">파란 깃발 ${rcBlue ? "보임" : "숨김"} <span>${blues}</span></button>` : "");
     const keep = (RC_KINDS.find(([k]) => k === rcKind) || RC_KINDS[0])[2];
-    const shown = msgs.filter(keep);
+    const shown = pool.filter(keep);
     if (!shown.length) { $("rc").innerHTML = `<li class="empty-li">${msgs.length ? "이 종류의 메시지는 아직 없어요." : "레이스 컨트롤 메시지가 오면 여기에 한국어로 보여 줘요."}</li>`; return; }
     $("rc").innerHTML = shown.slice().reverse().map((m) => {
       const ko = KO.translate(m.Message);
@@ -1350,7 +1357,8 @@
       if (!src || !focus || !drivers[focus]) { setHTML(tel, workEmpty("텔레메트리를 볼 드라이버를 고르세요")); return; }
       if (!src.hasTelemetry?.()) { setHTML(tel, `<div class="ui-state"><b>텔레메트리 자료가 없어요</b><span>${src.isLive ? "실시간 속도·스로틀·브레이크는 F1 TV로 로그인하면 받을 수 있어요." : "이 세션 기록에는 차량 텔레메트리가 없어요."}</span></div>`); return; }
       const { W, H } = paneSize(tel), d = drivers[focus];
-      const size = { W, H: Math.min(Math.max(230, H - 90), 520) };
+      // (the chart takes what is left under the heading and the gauges – one gauge row per driver)
+      const size = { W, H: Math.min(Math.max(170, H - 70 - (compare && drivers[compare] ? 104 : 56)), 520) };
       setHTML(tel, `<div class="wp-head"><h3>${esc(KO.DRIVERS[d.Tla] || d.Tla)}</h3><span>${esc(focus)}번 · ${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span><span class="grow"></span><span class="faint">속도(km/h) · Δ 기준 랩과의 누적 시간 차 · 페달</span></div>${telemetry(focus, size).replace('<div class="d-section">', '<div class="d-section wp-body">')}`);
       return;
     }
@@ -1380,7 +1388,7 @@
         const a = val(focus, k), b = cd ? val(compare, k) : null, diff = a != null && b != null ? a - b : null;
         return `<tr><td>${label}</td><td>${fmt(a, k)}</td>${cd ? `<td>${fmt(b, k)}</td><td class="d ${diff == null ? "" : diff < 0 ? "t-gain" : diff > 0 ? "t-lose" : ""}">${diff == null ? NONE : fmtRel(diff)}</td>` : ""}</tr>`;
       }).join("")}</tbody></table>`;
-      const chartH = Math.min(Math.max(170, H - 260), 380);
+      const chartH = Math.min(Math.max(150, H - 60), 380);
       setHTML(laps, `<div class="wp-head"><h3>랩 비교</h3><span class="legend"><span><i style="background:#fff"></i>${esc(KO.DRIVERS[d.Tla] || d.Tla)}</span>${cd ? `<span><i style="background:${series[1].color}"></i>${esc(KO.DRIVERS[cd.Tla] || cd.Tla)}</span>` : `<span class="faint">Shift+클릭으로 비교할 드라이버를 더하세요</span>`}</span><span class="grow"></span><span class="faint">초록 점: 개인 최고 랩 · 파란 점선: 피트 진입</span></div>
         ${lapChart(series, src.pits(focus, tNow), { W, H: chartH })}${table}${stintTable(focus) ? `<h4 class="wp-sub">${esc(d.Tla)} 스틴트 페이스</h4>${stintTable(focus)}` : ""}${cd && stintTable(compare) ? `<h4 class="wp-sub">${esc(cd.Tla)} 스틴트 페이스</h4>${stintTable(compare)}` : ""}`);
     }
