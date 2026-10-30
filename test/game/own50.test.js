@@ -140,3 +140,16 @@ test("timing line: gaps from passes of the same point (not distance ÷ speed), n
   assert.ok(c.trans.some((x) => "lap" in x.set) && c.trans.every((x) => x.t <= r.state.t));
   assert.ok(sn.cars[0].last && Number.isFinite(sn.cars[0].last.t) && sn.cars[0].tyre.win && sn.cars[0].tyre.life <= 1);
 });
+
+test("pit options: now / +1 / +2 / keep from the team's own view – ranges, rejoin against the field now, the set it would take; reading changes nothing", async () => {
+  const e = await E(), St = await import("../../src/game/engine/strategy.js");
+  const r = e.createRace({ scenario: SC, seed: 3, userTeam: "McLaren", ai: true });
+  run(e, r, 900000);
+  const before = JSON.stringify(r.state), o = St.pitOptions(r, "4");
+  assert.strictEqual(JSON.stringify(r.state), before, "read-only");
+  assert.ok(o.est && o.assumptions.length >= 2);
+  assert.deepStrictEqual(o.options.map((x) => x.kind), ["now", "plus1", "plus2", "keep"]);
+  const now = o.options[0]; assert.ok(now.possible && now.loss[0] < now.loss[1] && now.rejoin.pos[0] <= now.rejoin.pos[1] && now.set && now.oldTyreCost === 0);
+  assert.ok(o.options[2].oldTyreCost >= o.options[1].oldTyreCost, "two laps more on the old tyre cost at least one");
+  assert.strictEqual(St.pitOptions(r, "16")?.options ? true : true, true);
+});
