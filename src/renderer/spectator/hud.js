@@ -20,13 +20,19 @@ import { WIDGETS, WIDGET_IDS, PRESETS, PRESET_IDS, nextCols, loadPrefs, savePref
 import { flagOf, gapText, gapSec, hms, parseClock, playText, tyreLetter, pitText } from "./hudtext.js";
 
 const RATE = { tower: 500, strip: 500, driver: 500, tel: 100, pit: 200, ready: 250, zones: 500 };
-const ORDER = ["cam", "driver", "strip", "tower", "pit", "notes"];   // layout priority (who keeps its place)
+const ORDER = ["cam", "strip", "driver", "tower", "pit", "notes"];   // layout priority (who keeps its place)
 const ROW_H = 20;
 const CAM_SVG = '<svg class="cam-ico" viewBox="0 0 16 12" aria-hidden="true"><rect x="1" y="2.5" width="10" height="8" rx="1.5"/><path d="M11 5.5l4-2.5v7l-4-2.5z"/></svg>';
 const esc = (x) => String(x ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const hex = (c) => (/^[0-9a-f]{6}$/i.test(c || "") ? "#" + c : "#888888");
-function setText(el, v) { v = v == null ? "" : String(v); if (el.__t !== v) { el.__t = v; el.textContent = v; } }
+function setText(el, v) {
+  v = v == null ? "" : String(v); if (el.__t === v) return; el.__t = v;
+  // (one text node changed in place – a characterData change, no node made and thrown away 10 times a second)
+  const t = el.firstChild; if (t && t.nodeType === 3 && !t.nextSibling && v) t.nodeValue = v; else el.textContent = v;
+}
+function setBg(el, c) { if (el.__bg !== c) { el.__bg = c; el.style.background = c; } }
 function setCls(el, k, on) { on = !!on; if ((el.__c || (el.__c = {}))[k] !== on) { el.__c[k] = on; el.classList.toggle(k, on); } }
+function setHid(el, v) { v = !!v; if (el.hidden !== v) el.hidden = v; }   // (a write of the same value is still a DOM mutation)
 function setAttr(el, k, v) { if (el.getAttribute(k) !== v) el.setAttribute(k, v); }
 const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 
@@ -102,7 +108,7 @@ export function createSpecHud(host, api) {
   function paintTower(A) {
     const src = A.src, lines = src?.state.TimingData?.Lines || {}, drivers = src?.state.DriverList || {};
     const nums = Object.keys(lines).filter((n) => drivers[n]);
-    const empty = W.tower.inner.querySelector(".tw-empty"); empty.hidden = nums.length > 0;
+    const empty = W.tower.inner.querySelector(".tw-empty"); setHid(empty, nums.length > 0);
     const key = nums.slice().sort().join(",") + "|" + nums.map((n) => drivers[n]?.TeamColour).join("");
     if (key !== towerKey) { towerKey = key; buildTower(drivers, nums); layoutDue = true; }
     const order = nums.slice().sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
@@ -147,7 +153,7 @@ export function createSpecHud(host, api) {
   // ---------- session strip ----------
   function paintStrip(A) {
     const s = A.src?.state || {}, f = flagOf(s.TrackStatus?.Status, s.SessionStatus?.Status), flag = q("strip", "flag");
-    flag.hidden = !f; if (f) { setText(flag, f.ko); setAttr(flag, "class", "ui-flag " + f.cls); }
+    setHid(flag, !f); if (f) { setText(flag, f.ko); setAttr(flag, "class", "ui-flag " + f.cls); }
     const lc = s.LapCount; setText(q("strip", "lap"), lc?.CurrentLap ? `랩 ${lc.CurrentLap}/${lc.TotalLaps || "?"}` : "");
     const clk = s.ExtrapolatedClock; let rem = parseClock(clk?.Remaining);
     if (rem != null && clk.Extrapolating) { const now = A.utcNow?.(); const u = window.ReplayKit?.parseUtc?.(clk.Utc); if (now && u) rem -= now - u; }
@@ -155,17 +161,17 @@ export function createSpecHud(host, api) {
     const p = playText({ mode: A.mode, rate: A.rate, delayMs: A.src?.delayMs || 0, conn: A.mode === "live" ? document.getElementById("liveState")?.textContent : null });
     const pb = q("strip", "play"); setText(pb, p.ko); setAttr(pb, "class", "ui-badge " + p.cls);
     const w = s.WeatherData, wx = q("strip", "wx"), rain = w?.Rainfall === "1";
-    wx.hidden = !w; if (w) { setText(wx, `${rain ? "비 · " : ""}노면 ${w.TrackTemp}°`); setCls(wx, "warn", rain); setCls(wx, "info", !rain); }
+    setHid(wx, !w); if (w) { setText(wx, `${rain ? "비 · " : ""}노면 ${w.TrackTemp}°`); setCls(wx, "warn", rain); setCls(wx, "info", !rain); }
   }
 
   // ---------- selected driver ----------
   function paintDriver(A) {
     const src = A.src, num = A.focus || api.leader(), d = src?.state.DriverList?.[num], l = src?.state.TimingData?.Lines?.[num];
     const main = W.driver.inner.querySelector(".dc-main"), empty = W.driver.inner.querySelector(".dc-empty");
-    main.hidden = !(d && l); empty.hidden = !!(d && l);
+    setHid(main, !(d && l)); setHid(empty, !!(d && l));
     if (!d || !l) return;
     const KO = window.KO;
-    W.driver.inner.querySelector(".dc-bar").style.background = hex(d.TeamColour);
+    setBg(W.driver.inner.querySelector(".dc-bar"), hex(d.TeamColour));
     setText(W.driver.inner.querySelector(".dc-pos"), l.Position ? `P${l.Position}` : "P–");
     setText(W.driver.inner.querySelector(".dc-name b"), KO ? KO.surname(d.Tla, d.LastName) : d.LastName || d.Tla);
     setText(W.driver.inner.querySelector(".dc-name small"), `${d.Tla || num} · ${(KO?.TEAMS?.[d.TeamName]) || d.TeamName || ""}`);
@@ -184,21 +190,21 @@ export function createSpecHud(host, api) {
     // the filmed car, when it is another one
     const cam = api.camNum(), camRow = W.driver.inner.querySelector(".dc-cam");
     const diff = !!cam && cam !== num && api.camMode() !== "heli";
-    camRow.hidden = !diff;
+    setHid(camRow, !diff);
     if (diff) { const cd = src.state.DriverList?.[cam]; setText(q("driver", "camtxt"), `카메라는 ${cd?.Tla || cam} 보는 중`); }
     // the comparison driver
     const cmp = A.compare, cl = cmp && src.state.TimingData?.Lines?.[cmp], cmpRow = W.driver.inner.querySelector(".dc-cmp");
-    cmpRow.hidden = !(cl && cmp !== num);
+    setHid(cmpRow, !(cl && cmp !== num));
     if (cl && cmp !== num) {
       const cd = src.state.DriverList?.[cmp], a = leader ? 0 : gapSec(l.GapToLeader), b = cl.Position === "1" ? 0 : gapSec(cl.GapToLeader);
       const dt = a != null && b != null ? b - a : null;
-      W.driver.inner.querySelector(".dc-cmpdot").style.background = hex(cd?.TeamColour);
+      setBg(W.driver.inner.querySelector(".dc-cmpdot"), hex(cd?.TeamColour));
       setText(q("driver", "cmptxt"), `비교 ${cd?.Tla || cmp} P${cl.Position || "–"} · ${dt == null ? "시간 차 자료 없음" : dt >= 0 ? `${dt.toFixed(1)}초 뒤` : `${(-dt).toFixed(1)}초 앞`}`);
     }
   }
   function paintTel(A) {
     const num = A.focus || api.leader(), c = A.src?.carAt?.(num, A.t), tel = W.driver.inner.querySelector(".dc-tel");
-    tel.hidden = !c;
+    setHid(tel, !c);
     if (!c) return;
     setText(q("driver", "spd"), Math.round(c.speed || 0)); setText(q("driver", "gear"), c.gear == null ? "–" : c.gear || "N");
     const thr = Math.max(0, Math.min(100, +c.thr || 0)), brk = c.brk ? 100 : 0, ti = q("driver", "thr"), bi = q("driver", "brk");
@@ -212,7 +218,8 @@ export function createSpecHud(host, api) {
     setText(who, d?.Tla || cam || "–");
     const diff = !!cam && !!A.focus && cam !== A.focus;
     setCls(W.cam.inner.querySelector(".cam-who"), "diff", diff);
-    W.cam.inner.querySelector(".cam-who").title = diff ? `카메라: ${d?.Tla || cam} · 선택: ${A.src?.state.DriverList?.[A.focus]?.Tla || A.focus} (다른 차)` : "카메라가 보는 차";
+    const cw = W.cam.inner.querySelector(".cam-who"), tt = diff ? `카메라: ${d?.Tla || cam} · 선택: ${A.src?.state.DriverList?.[A.focus]?.Tla || A.focus} (다른 차)` : "카메라가 보는 차";
+    if (cw.title !== tt) cw.title = tt;
     const fb = W.cam.inner.querySelector('[data-act="follow"]'); setAttr(fb, "aria-pressed", String(api.follow())); setText(fb, api.follow() ? "따라가기: 켬" : "따라가기: 끔");
   }
 
@@ -233,7 +240,7 @@ export function createSpecHud(host, api) {
     if (!show) { if (editing) { setText(q("pit", "ptitle"), "피트 정보"); setText(q("pit", "pwho"), ""); if (body.__h !== "ed") { body.__h = "ed"; body.innerHTML = '<dt></dt><dd class="faint">차가 피트 레인에 들어오면 나와요</dd>'; } } if (!wasHidden && !editing) layoutDue = true; return; }
     if (wasHidden) layoutDue = true;
     const d = A.src?.state.DriverList?.[who];
-    setText(q("pit", "ptitle"), show.title); setText(q("pit", "pwho"), d?.Tla || who); q("pit", "pbar").style.background = hex(d?.TeamColour);
+    setText(q("pit", "ptitle"), show.title); setText(q("pit", "pwho"), d?.Tla || who); setBg(q("pit", "pbar"), hex(d?.TeamColour));
     setAttr(W.pit.outer, "data-tone", show.cls || "");
     const html = show.rows.map((r) => `<dt>${esc(r.k)}</dt><dd class="${esc(r.cls)}">${esc(r.v)}</dd>`).join("");
     if (body.__h !== html) { body.__h = html; body.innerHTML = html; }
@@ -242,7 +249,7 @@ export function createSpecHud(host, api) {
   // ---------- ready / loading ----------
   function paintReady() {
     const r = api.ready();
-    ready.hidden = !r.busy;
+    setHid(ready, !r.busy);
     if (r.busy) { setText(ready.querySelector("b"), r.text); setText(ready.querySelector(".sub"), r.sub || ""); }
   }
 
@@ -253,7 +260,7 @@ export function createSpecHud(host, api) {
       setCls(o, "hidden", !p.on);
       const z = String(+(p.scale * baseScale).toFixed(3)); if (W[id].inner.style.zoom !== z) W[id].inner.style.zoom = z;
     }
-    if (!gameOn) { notes.hidden = !prefs.widgets.notes.on; }
+    if (!gameOn) { setHid(notes, !prefs.widgets.notes.on); }
     editor.querySelectorAll("[data-preset]").forEach((b) => setAttr(b, "aria-pressed", String(b.dataset.preset === prefs.preset && !prefs.edited)));
     editor.querySelectorAll("[data-show]").forEach((c) => { c.checked = prefs.widgets[c.dataset.show].on; });
     layoutDue = true;

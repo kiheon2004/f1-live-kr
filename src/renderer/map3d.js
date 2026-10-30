@@ -628,7 +628,7 @@ function noteLine(id) {
 function pitWorkNote(text) {
   let el = document.getElementById("pitWorkNote");
   if (!el && text) { el = noteLine("pitWorkNote"); }
-  if (el) { if (el.textContent !== (text || "")) el.textContent = text || ""; el.hidden = !text; }
+  if (el) { if (el.textContent !== (text || "")) el.textContent = text || ""; if (el.hidden !== !text) el.hidden = !text; }
 }
 // the pit lane's direction at (x, z) – the way the cars go – if that's in front of a facility's garages (0–16 m out),
 // else null
@@ -649,7 +649,7 @@ function pitLaneDir(x, z) {
 function pitTeamNote(text) {
   let el = document.getElementById("pitTeamNote");
   if (!el && text) { el = noteLine("pitTeamNote"); }
-  if (el) { el.textContent = text || ""; el.hidden = !text; }
+  if (el) { if (el.textContent !== (text || "")) el.textContent = text || ""; if (el.hidden !== !text) el.hidden = !text; }
 }
 // (Map3D.boardsDiag – a pure function of the pit building, the session's data, the layer and the camera: boardStatus
 // in garages.js says why each board is or isn't there; this adds what only the scene can say)
@@ -2320,13 +2320,13 @@ function supportNote(plan, models) {
   const text = parts.join(" · ") || null;
   let el = document.getElementById("supportNote");
   if (!el && text) { el = noteLine("supportNote"); }
-  if (el) { el.hidden = !text; if (text && el.textContent !== text) el.textContent = text; }
+  if (el) { if (el.hidden !== !text) el.hidden = !text; if (text && el.textContent !== text) el.textContent = text; }
 }
 // the gantry's reds before a standing start (startplan.js startLights: a replay's estimate – the data has lights out only)
 function updateStartLights(src, t) {
   const lamps = world?.group.getObjectByName("grid")?.userData.lamps;
   // (no gantry or source: no lights and no note left from before)
-  if (!lamps || !src) { const el = document.getElementById("startLightNote"); if (el) el.hidden = true; return; }
+  if (!lamps || !src) { const el = document.getElementById("startLightNote"); if (el && !el.hidden) el.hidden = true; return; }
   // (a replay's standing starts at the moment the field set off by its telemetry where that differs from the race clock's
   // – the clock isn't always lights out; live: as the clock says, nothing ahead)
   const L = startLights(shownStarts(src, t), t, { live: !!src.isLive });
@@ -2334,7 +2334,7 @@ function updateStartLights(src, t) {
   const note = L.est ? "출발 신호: 데이터에는 소등 시각만 있어요 – 빨간불이 켜지는 시점은 추정(1초 간격, 소등 2초 전 5개 점등)" : null;
   let el = document.getElementById("startLightNote");
   if (!el && note) { el = noteLine("startLightNote"); }
-  if (el) { el.hidden = !note; if (note && el.textContent !== note) el.textContent = note; }
+  if (el) { if (el.hidden !== !note) el.hidden = !note; if (note && el.textContent !== note) el.textContent = note; }
 }
 // The steering wheels' screens: each driver's own data at the moment shown (wheelscreen.js) on the cars drawn close up –
 // the cockpit car first, then the nearest – four at most; the others show the neutral face. A new session starts clean.
