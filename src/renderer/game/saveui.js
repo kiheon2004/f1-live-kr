@@ -133,7 +133,7 @@ export async function saveNow(slot, { quiet = false } = {}) {
   let r; try { r = await API.save(slot, data); } catch (e) { r = { ok: false, why: String(e?.message || e) }; }
   const m = endSave(G, tok, r?.ok !== false);
   if (m.stale) return { ...(r || {}), stale: true };   // (an earlier race's answer: nothing of this race changes)
-  if (m.marked) { G.saveNote = { ok: true, text: `${SLOT_KO[slot] || slot}에 저장 · ${data.lap}/${data.totalLaps}랩${m.behind ? " · 저장 뒤 바뀐 내용은 아직 저장 안 됨" : ""}` }; S.saves = null; S.savesAt = 0; }
+  if (m.marked) { G.saveNote = { ok: true, text: `${SLOT_KO[slot] || slot}에 저장 · ${data.lap}/${data.totalLaps}랩${m.behind && G.run?.paused ? " · 저장 뒤 바뀐 내용은 아직 저장 안 됨" : ""}` }; S.saves = null; S.savesAt = 0; }
   else G.saveNote = { ok: false, text: `저장 실패: ${r?.why || "?"} – 다시 저장해 주세요` };
   if (!quiet || r?.ok === false) paint();
   return r;

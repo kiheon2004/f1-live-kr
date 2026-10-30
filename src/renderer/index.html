@@ -7,15 +7,18 @@
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="css/live.css">
 <link rel="stylesheet" href="css/game.css">
 </head>
 <body class="home-on">
+<!-- v0.50 top: the app bar (where the data comes from and how to drive it) over the session bar (what is on screen).
+     Account, schedule, glossary and alerts sit in the 메뉴 popover; columns, compact and pin are quiet icon buttons. -->
 <header class="top">
   <div class="brand">라이브 타이밍 <b>KR</b> <span class="tag">비공식</span></div>
-  <button id="homeBtn" class="ghost home-btn" title="시즌 지구본 홈">⌂ 홈</button>
-  <div class="modes" role="tablist" aria-label="모드">
-    <button id="modeReplay" role="tab" aria-selected="true">다시보기</button>
-    <button id="modeLive" role="tab" aria-selected="false">실시간 <span id="liveDot" class="dot"></span></button>
+  <button id="homeBtn" class="ghost home-btn" title="시즌 지구본 홈">홈</button>
+  <div class="modes" role="tablist" aria-label="데이터 출처">
+    <button id="modeReplay" role="tab" aria-selected="true" title="저장된 세션 기록을 다시 재생해요">다시보기</button>
+    <button id="modeLive" role="tab" aria-selected="false" title="지금 진행 중인 세션을 F1 실시간 서버에서 받아요">실시간 <span id="liveDot" class="dot"></span></button>
   </div>
 
   <div id="replayBar" class="picker">
@@ -29,13 +32,15 @@
   <div id="liveBar" class="picker" hidden>
     <button id="liveToggle" class="primary">연결</button>
     <span id="liveState" class="chip">연결 안 됨</span>
-    <label class="delay" title="TV 중계가 늦게 나오면 그만큼 화면을 늦춰 맞춥니다 · 단축키 , . (1초) [ ] (5초)">
-      <span class="delay-text">중계 지연</span> <input id="delay" type="range" min="0" max="600" step="1" value="0"> <output id="delayOut" class="mono">0초</output>
-    </label>
-    <span class="nudge"><button id="delayMinus5" class="ghost small" title="5초 줄이기 ( [ )">−5</button><button id="delayMinus" class="ghost small" title="1초 줄이기 ( , )">−1</button><button id="delayPlus" class="ghost small" title="1초 늘리기 ( . )">+1</button><button id="delayPlus5" class="ghost small" title="5초 늘리기 ( ] )">+5</button></span>
+    <div class="delay-group" role="group" aria-label="중계 지연">
+      <label class="delay" title="TV 중계가 늦게 나오면 그만큼 화면을 늦춰 맞춰요 · 단축키 , . (1초) [ ] (5초)">
+        <span class="delay-text">중계 지연</span> <input id="delay" type="range" min="0" max="600" step="1" value="0" aria-label="중계 지연(초)"> <output id="delayOut" class="mono">0초</output>
+      </label>
+      <span class="nudge"><button id="delayMinus5" class="ghost small" title="5초 줄이기 ( [ )">−5</button><button id="delayMinus" class="ghost small" title="1초 줄이기 ( , )">−1</button><button id="delayPlus" class="ghost small" title="1초 늘리기 ( . )">+1</button><button id="delayPlus5" class="ghost small" title="5초 늘리기 ( ] )">+5</button></span>
+    </div>
     <button id="livePause" class="small" aria-pressed="false" title="TV 중계를 멈췄을 때 같이 멈춰요. 다시 누르면 멈춘 시간만큼 지연이 늘어나 TV와 계속 맞아요 (스페이스바)">❚❚ 멈춤</button>
     <button id="syncBtn" class="small" aria-expanded="false" aria-controls="syncPop">TV와 맞추기</button>
-    <div id="syncPop" class="sync-pop" hidden>
+    <div id="syncPop" class="sync-pop" role="dialog" aria-label="TV 중계와 시점 맞추기" hidden>
       <h3>TV 중계와 시점 맞추기</h3>
       <p class="muted">중계가 늦게 나오는 만큼 화면을 늦춰서, 순위가 TV보다 먼저 바뀌지 않게 해요.</p>
       <div class="sync-way">
@@ -51,14 +56,22 @@
   </div>
 
   <div class="right">
-    <button id="compactBtn" class="ghost" aria-pressed="false" aria-label="컴팩트 보기" title="컴팩트 보기 · 중계 화면 옆에 둘 좁은 순위표로 바꿔요 (다시 누르면 원래대로)">▤<span class="compact-text"> 컴팩트</span></button>
-    <button id="pinBtn" class="ghost" aria-pressed="false" aria-label="위에 고정" title="위에 고정 · 쿠팡플레이·F1 TV를 전체 화면으로 볼 때도 이 창을 위에 띄워 둬요">📌<span class="pin-text"> 위에 고정</span></button>
-    <label class="toggle" title="세이프티카·적색기·페널티를 macOS 알림으로도 받아요 (실시간)"><input type="checkbox" id="notify"> 알림</label>
-    <div class="cols-wrap"><button id="colsBtn" class="ghost" aria-expanded="false" title="순위표에 보일 열을 골라요">열</button>
+    <div class="cols-wrap"><button id="colsBtn" class="ghost icon-btn" aria-expanded="false" aria-controls="colsPop" aria-label="순위표 열 고르기" data-tip="순위표에 보일 열을 골라요"><i data-icon="columns-3"></i></button>
       <div id="colsPop" class="cols-pop" hidden><p class="muted">순위표에 보일 열</p><div id="colsList"></div><button id="colsReset" class="small">기본으로</button></div></div>
-    <button id="glossaryBtn" class="ghost">용어</button>
-    <button id="scheduleBtn" class="ghost">KST 일정</button>
-    <button id="authBtn" class="ghost">F1 TV 로그인</button>
+    <button id="compactBtn" class="ghost icon-btn" aria-pressed="false" aria-label="컴팩트 보기" data-tip="컴팩트 보기 · 중계 화면 옆에 둘 좁은 순위표로 바꿔요 (다시 누르면 원래대로)"><i data-icon="panel-right-close"></i></button>
+    <button id="pinBtn" class="ghost icon-btn" aria-pressed="false" aria-label="위에 고정" data-tip="위에 고정 · 쿠팡플레이·F1 TV를 전체 화면으로 볼 때도 이 창을 위에 띄워 둬요"><i data-icon="pin"></i></button>
+    <div class="menu-wrap">
+      <button id="menuBtn" class="ghost menu-btn" title="일정 · 용어 · 알림 · F1 TV 계정"><i data-icon="ellipsis"></i><span class="menu-text">메뉴</span><span id="menuAuthDot" class="auth-dot" hidden></span></button>
+      <div id="appMenu" class="ui-menu app-menu" hidden>
+        <button id="scheduleBtn" role="menuitem"><i data-icon="calendar-days"></i>시즌 일정 <span class="k">KST</span></button>
+        <button id="glossaryBtn" role="menuitem"><i data-icon="book-open"></i>용어 설명</button>
+        <hr>
+        <label class="toggle" title="세이프티카·적색기·페널티를 macOS 알림으로도 받아요 (실시간)"><input type="checkbox" id="notify"><span>macOS 알림 <small class="muted">SC · 적색기 · 페널티 (실시간)</small></span></label>
+        <hr>
+        <button id="authBtn" role="menuitem"><i data-icon="log-in"></i><span id="authText">F1 TV 로그인</span></button>
+        <p id="authNote" class="menu-note muted"></p>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -68,7 +81,7 @@
     <label class="home-season" id="homeSeasonWrap">시즌 <select id="homeSeason" aria-label="시즌"></select></label>
     <button id="homeAll" class="ghost small" aria-pressed="false" title="앱이 이미 확인한 시즌의 개최지를 한꺼번에 봐요 (새로 받지 않아요)">전체 개최지</button>
     <span id="homeMeta" class="home-meta muted" aria-live="polite"></span>
-    <button id="homeGameBtn" class="home-game-btn" title="실제 팀을 골라 두 드라이버를 운영하는 싱글플레이 전략 게임 (라이브 타이밍과 분리된 게임 엔진)">🏁 전략 게임</button>
+    <button id="homeGameBtn" class="home-game-btn" title="실제 팀을 골라 두 드라이버를 운영하는 싱글플레이 전략 게임 (라이브 타이밍과 분리된 게임 엔진 · 결과는 실제 기록이 아니에요)"><i data-icon="gamepad-2"></i>전략 게임</button>
   </div>
   <div class="home-main">
     <div class="home-left">
@@ -87,6 +100,11 @@
       <p id="homeAllNote" class="home-all-note muted" hidden></p>
       <ol id="homeList" class="home-list" role="listbox" aria-label="경기 목록" tabindex="0"></ol>
       <p id="homeEmpty" class="empty" hidden>검색 결과가 없어요.</p>
+      <details class="home-legend"><summary>표시 설명</summary>
+        <dl><dt><span class="badge">예정</span><span class="badge ok">진행 중</span><span class="badge done">종료</span></dt><dd>개최 일정 (Jolpica 일정 기준 · 종료는 F1 기록에 결승이 있을 때만)</dd>
+        <dt><span class="badge ok">로컬 캐시 있음</span><span class="badge">세션 목록 있음</span><span class="badge muted">확인 중</span></dt><dd>데이터 준비 상태 (이 컴퓨터에 있음 / F1 기록 목록에 있음 / 확인하는 중)</dd>
+        <dt><span class="badge sprint">스프린트</span></dt><dd>스프린트가 있는 주말</dd></dl>
+      </details>
     </aside>
   </div>
 </section>
@@ -98,30 +116,35 @@
   <div id="gameBody" class="game-body"></div>
 </section>
 
-<section class="status-bar">
-  <div id="title" class="title">세션을 골라 불러오세요</div>
-  <div id="part" class="pill" hidden></div>
+<!-- the session bar: season · Grand Prix · session, where the data comes from and how fresh it is (live: connection,
+     delay, pause; replay: playing / paused), the flag (word + colour), the latest important race control message, lap,
+     session clock, weather -->
+<section class="status-bar" aria-label="세션 상태">
+  <div class="sb-id"><span id="sbYear" class="sb-year"></span><div id="title" class="title">세션을 골라 불러오세요</div><div id="part" class="pill" hidden></div></div>
+  <div id="sbSource" class="sb-source" aria-live="polite"></div>
   <div id="trackStatus" class="pill">—</div>
   <div id="sessStatus" class="chip" hidden></div>
   <div id="nextChip" class="chip next-chip" hidden></div>
+  <button id="rcTicker" class="rc-ticker" hidden title="최근 레이스 컨트롤 메시지 · 누르면 레이스 컨트롤 탭을 열어요"></button>
   <div class="facts"><span id="lap"></span><span id="clock"></span><span id="weather"></span></div>
+  <p id="staleBar" class="stale-bar" role="status" hidden></p>
 </section>
 
 <main class="layout">
   <section class="board">
-    <table id="board">
+    <table id="board" class="ui-table board-table">
       <thead><tr>
         <th data-col="pos" class="c" title="현재 순위">순위</th>
         <th data-col="chg" class="c" title="출발 그리드 대비 순위 변화 (결승·스프린트) · ↑ 올라감 · ↓ 내려감">변동</th>
         <th data-col="drv">드라이버</th>
-        <th data-col="gap" class="c"><button id="gapToggle" class="th-btn" aria-pressed="false"><span id="hGap">리더와 차이</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></th>
-        <th data-col="int" class="c" id="hInt" title="바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요">앞 차와 간격</th>
-        <th data-col="lap" class="c"><button id="lapToggle" class="th-btn" aria-pressed="false" title="누르면 랩타임 ↔ 개인 최고 랩을 바꿔 봐요 · 보라: 전체 최고 · 초록: 개인 최고 · 흐린 회색: 아웃랩·인랩처럼 피트를 오간 느린 랩"><span id="lapLabel">랩타임</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></th>
-        <th data-col="s1" class="c" title="섹터 1 기록과 아래 미니 섹터 막대 · 보라: 전체 최고 · 초록: 개인 최고 · 노랑: 그 외 · 파랑: 피트 레인">S1</th>
-        <th data-col="s2" class="c" title="섹터 2 기록">S2</th>
-        <th data-col="s3" class="c" title="섹터 3 기록">S3</th>
-        <th data-col="st" class="c" title="속도 트랩(최고 속도 측정 지점)에서 잰 이번 세션 최고 속도, km/h · 보라: 전체 최고 · 초록: 개인 최고">ST</th>
-        <th data-col="tyre" class="c" title="지금 끼운 타이어와 그 타이어로 달린 랩 수 · S 소프트 · M 미디엄 · H 하드 · I 인터미디어트 · W 웻">타이어</th>
+        <th data-col="gap" class="r"><button id="gapToggle" class="th-btn" aria-pressed="false"><span id="hGap">선두와 차이</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></th>
+        <th data-col="int" class="r" id="hInt" title="바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요">앞 차 간격</th>
+        <th data-col="lap" class="r"><button id="lapToggle" class="th-btn" aria-pressed="false" title="누르면 최근 랩 ↔ 개인 최고 랩을 바꿔 봐요 · 보라 바탕: 전체 최고 · 초록 글자: 개인 최고 · 흐린 회색: 아웃랩·인랩처럼 피트를 오간 느린 랩"><span id="lapLabel">최근 랩</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></th>
+        <th data-col="s1" class="r" title="섹터 1 기록과 아래 미니 섹터 막대 · 보라 바탕: 전체 최고 · 초록 글자: 개인 최고 · 기본 글자: 그 외 · 막대 파랑: 피트 레인">S1</th>
+        <th data-col="s2" class="r" title="섹터 2 기록 · 보라 바탕: 전체 최고 · 초록 글자: 개인 최고">S2</th>
+        <th data-col="s3" class="r" title="섹터 3 기록 · 보라 바탕: 전체 최고 · 초록 글자: 개인 최고">S3</th>
+        <th data-col="st" class="r" title="속도 트랩(최고 속도 측정 지점)에서 잰 이번 세션 최고 속도, km/h · 보라 바탕: 전체 최고 · 초록 글자: 개인 최고">ST</th>
+        <th data-col="tyre" class="c" title="지금 끼운 타이어와 그 타이어로 달린 랩 수 · S 소프트 · M 미디엄 · H 하드 · I 인터미디어트 · W 웻 · 점선 테두리: 중고 세트로 시작">타이어</th>
         <th data-col="pits" class="c" title="피트스톱 횟수">피트</th>
         <th data-col="state">상태</th>
       </tr></thead>
@@ -135,7 +158,7 @@
   <section class="side">
     <div class="card map-card" id="mapCard">
       <div class="view-switch seg" role="group" aria-label="맵 보기">
-        <button data-view="2d" title="위에서 내려다본 평면 맵">2D</button><button data-view="3d" title="실제 높낮이를 살린 3D 서킷">3D</button>
+        <button data-view="2d" title="위에서 내려다본 평면 맵">2D</button><button data-view="3d" title="실제 높낮이를 살린 3D 서킷">3D</button><button data-view="tel" title="선택한 드라이버의 속도·페달 그래프와 기준 랩과의 시간 차이 (3D 카메라는 그대로 두어요)">텔레메트리</button><button data-view="laps" title="선택한 드라이버와 비교 드라이버의 랩타임·섹터 비교 (3D 카메라는 그대로 두어요)">랩 비교</button>
       </div>
       <button id="expandMap" class="expand-btn" title="크게 보기 · Esc로 닫기" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
       <canvas id="map"></canvas>
@@ -194,6 +217,8 @@
         </div>
       </div>
       <ol id="miniBoard" class="mini-board" hidden></ol>
+      <div id="workTel" class="work-pane" role="region" aria-label="텔레메트리" hidden></div>
+      <div id="workLaps" class="work-pane" role="region" aria-label="랩 비교" hidden></div>
       <p class="expand-hint" hidden>스페이스바 재생 · ←/→ 이동 · 끌어서 시점 회전 · 더블클릭 정면 · Esc 닫기</p>
       <div class="map-tools" role="toolbar" aria-label="맵 조작">
         <button id="mapZoomIn" title="확대 · 트랙패드 핀치로도 돼요"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21M10.5 7.5v6M7.5 10.5h6"/></svg></button>
@@ -208,10 +233,10 @@
     <div id="splitH" class="splitter h" role="separator" aria-orientation="horizontal" tabindex="0" title="끌어서 맵 높이 조절 · 더블클릭: 기본 크기"></div>
     <div class="card tabs-card">
       <div class="tabs" role="tablist">
-        <button id="tabRC" role="tab" aria-selected="true">레이스 컨트롤</button>
-        <button id="tabDriver" role="tab" aria-selected="false">드라이버</button>
-        <button id="tabRadio" role="tab" aria-selected="false">팀 라디오</button>
-        <button id="tabStrat" role="tab" aria-selected="false" title="모든 드라이버의 타이어 사용 구간(스틴트)과 피트 시점">타이어 전략</button>
+        <button id="tabRC" role="tab" aria-selected="true" title="레이스 컨트롤 메시지 (깃발 · 세이프티카 · 조사 · 페널티)">레이스 컨트롤<span id="rcBadge" class="ui-count" hidden></span></button>
+        <button id="tabDriver" role="tab" aria-selected="false" title="선택한 드라이버의 기록 · 텔레메트리 · 피트 · 스틴트">드라이버</button>
+        <button id="tabRadio" role="tab" aria-selected="false" title="팀 라디오">라디오</button>
+        <button id="tabStrat" role="tab" aria-selected="false" title="타이어 전략: 모든 드라이버의 타이어 사용 구간(스틴트)과 피트 시점">스틴트</button>
         <button id="tabTrace" role="tab" aria-selected="false" title="랩마다 선두와의 시간 차이를 선으로 그려요 (결승·스프린트)">갭 차트</button>
         <button id="tabChamp" role="tab" aria-selected="false" title="지금 순위대로 끝나면 챔피언십 순위가 어떻게 바뀌는지 (결승·스프린트)">챔피언십</button>
       </div>
@@ -246,7 +271,7 @@
 </main>
 
 <footer class="player" id="player">
-  <button id="play" class="primary" disabled>▶ 재생</button>
+  <button id="play" class="primary" disabled aria-label="재생">▶ 재생</button>
   <select id="speed" disabled aria-label="재생 속도">
     <option value="1">1배속</option><option value="2">2배속</option><option value="5">5배속</option>
     <option value="10">10배속</option><option value="30">30배속</option>
@@ -254,21 +279,25 @@
   <button id="toStart" class="ghost" disabled title="세션이 시작된 순간으로 돌아가요">처음으로</button>
   <input id="seek" type="range" min="0" max="0" value="0" step="1000" disabled aria-label="재생 위치">
   <span id="elapsed" class="mono">00:00:00 / 00:00:00</span>
-  <span class="hint muted">스페이스바 재생 · ←/→ 5초 · Shift 1분</span>
+  <span class="hint muted"><kbd class="ui-kbd">Space</kbd> 재생 · <kbd class="ui-kbd">←</kbd><kbd class="ui-kbd">→</kbd> 5초 · <kbd class="ui-kbd">Shift</kbd> 1분</span>
 </footer>
 
-<div id="schedule" class="drawer" hidden>
+<div id="schedule" class="drawer" role="dialog" aria-label="시즌 일정" hidden>
   <div class="drawer-head"><h2>시즌 일정 <small>한국 시간(KST)</small></h2><button id="scheduleClose" class="ghost">닫기</button></div>
   <p id="nextUp" class="next"></p>
   <div id="scheduleList" class="drawer-body"></div>
 </div>
 
-<div id="glossary" class="drawer" hidden>
+<div id="glossary" class="drawer" role="dialog" aria-label="용어 설명" hidden>
   <div class="drawer-head"><h2>용어 설명</h2><button id="glossaryClose" class="ghost">닫기</button></div>
   <dl id="glossaryList" class="drawer-body glossary"></dl>
 </div>
 
 <script src="../shared/ko.js"></script>
+<script src="icons.js"></script>
+<script src="ui/kit.js"></script>
+<script src="ui/keys.js"></script>
+<script src="ui/livestatus.js"></script>
 <script src="replay.js"></script>
 <script src="../shared/homedata.js"></script>
 <script src="app.js"></script>

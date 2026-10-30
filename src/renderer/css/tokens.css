@@ -26,9 +26,9 @@
   --scrim: rgb(8 9 11 / 0.72);      /* behind a dialog; HUD backing over 3D */
   --hud-bg: rgb(15 17 20 / 0.86);   /* a HUD panel over the 3D view (no blur) */
   /* text */
-  --text-1: #e9edf1; --text-2: #a7b1bc; --text-3: #737d88; --text-inv: #0f1114;
+  --text-1: #e9edf1; --text-2: #a7b1bc; --text-3: #808a95; --text-inv: #0f1114;
   /* the one accent and the focus ring */
-  --accent: #ff4b3e; --accent-ink: #ffffff; --accent-soft: rgb(255 75 62 / 0.14);
+  --accent: #ff4b3e; --accent-ink: #ffffff; --accent-soft: rgb(255 75 62 / 0.14); --accent-hover: #ff6154;
   --focus: #f3f5f7;
   /* state meanings (shared by timing, HUD and game) */
   --best: #b46cff;  --best-soft: rgb(180 108 255 / 0.16);   /* overall best (purple) */
@@ -36,6 +36,7 @@
   --warn: #f0c030;  --warn-soft: rgb(240 192 48 / 0.15);    /* caution, yellow flag, pending */
   --sc: #f2952e;    --sc-soft: rgb(242 149 46 / 0.15);      /* SC / VSC */
   --bad: #ea3d33;   --bad-soft: rgb(234 61 51 / 0.15);      /* danger, red flag, refused, losing */
+  --bad-ink: #ff7a71;                                        /* red as text on a dark surface (contrast ≥ 4.5:1 on --bg-0..2) */
   --info: #7aa7d8;  --info-soft: rgb(122 167 216 / 0.13);   /* neutral info: estimates, "자료 없음", pit lane */
   --sel: #e9edf1;   --sel-bg: rgb(233 237 241 / 0.07);      /* the selected driver: a light bar + raised row */
   --cmp-bg: rgb(122 167 216 / 0.07);                         /* the comparison driver */

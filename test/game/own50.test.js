@@ -153,3 +153,17 @@ test("pit options: now / +1 / +2 / keep from the team's own view – ranges, rej
   assert.ok(o.options[2].oldTyreCost >= o.options[1].oldTyreCost, "two laps more on the old tyre cost at least one");
   assert.strictEqual(St.pitOptions(r, "16")?.options ? true : true, true);
 });
+
+test("ownership: a cancel refused when applied (no call / past the commit point) and a box for a tyre the car has no set of leave the plan with the AI", async () => {
+  const e = await E(), r = e.createRace({ scenario: SC, seed: 3, userTeam: "McLaren", ai: true });
+  run(e, r, 200000);
+  assert.ok(e.command(r, { id: "c0", type: "pitCancel", car: "4", args: {} }).ok, "taken (shape ok)"); e.step(r);
+  assert.strictEqual(e.commandStatus(r, "c0").state, "refused"); assert.strictEqual(r.state.own["4"].plan, "ai");
+  // committed: the AI's own call past the commit point – the player's cancel is refused and changes nothing
+  const c = r.state.cars.find((x) => x.num === "4"); let guard = 0;
+  e.commandAs(r, { id: "ai-call", type: "pit", car: "4", args: { compound: "HARD" } }, "ai:McLaren");
+  while (c.pit.phase !== "committed" && guard++ < 4000) e.step(r);
+  assert.strictEqual(c.pit.phase, "committed");
+  e.command(r, { id: "c1", type: "pitCancel", car: "4", args: {} }); e.step(r);
+  assert.strictEqual(e.commandStatus(r, "c1").state, "refused"); assert.match(e.commandStatus(r, "c1").why, /commit/); assert.strictEqual(r.state.own["4"].plan, "ai");
+});

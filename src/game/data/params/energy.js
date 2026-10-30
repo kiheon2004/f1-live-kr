@@ -44,7 +44,11 @@ function season(y) {
       // Overtake P ≤ 7100 − 20·v kW (0 at 355 km/h). ⇒ 350 kW up to 290 km/h normally, 337.5 km/h in Overtake. ≤2025: none.
       capA: is26 ? rule(1800e3, "W", "normal MGU-K cap intercept: P ≤ capA − capB·v_kmh", "C5.2.8", [1000e3, 3000e3], y) : est(1e12, "W", "no speed cap ≤2025", "rule did not exist", [1e12, 1e12], "H"),
       capB: is26 ? rule(5e3, "W per km/h", "normal MGU-K cap slope", "C5.2.8", [0, 50e3], y) : est(0, "W per km/h", "no speed cap ≤2025", "rule did not exist", [0, 0], "H"),
-      capCut: is26 ? rule(340, "km/h", "normal MGU-K cap: no deployment at or above this speed", "C5.2.8", [300, 400], y) : est(1e9, "km/h", "no speed cut ≤2025", "rule did not exist", [1e9, 1e9], "H"),
+      capCut: is26 ? rule(340, "km/h", "normal MGU-K cap: the first segment ends here", "C5.2.8 i", [300, 400], y) : est(1e9, "km/h", "no speed cut ≤2025", "rule did not exist", [1e9, 1e9], "H"),
+      // (C5.2.8 i second segment, read by the research helper 2026-10-30 – v050/research/energy_rules.md row 6)
+      capA2: is26 ? rule(6900e3, "W", "normal MGU-K cap 340–345 km/h: P ≤ capA2 − capB2·v_kmh", "C5.2.8 i", [0, 10000e3], y) : est(0, "W", "no speed cap ≤2025", "rule did not exist", [0, 0], "H"),
+      capB2: is26 ? rule(20e3, "W per km/h", "normal MGU-K cap slope 340–345 km/h", "C5.2.8 i", [0, 50e3], y) : est(0, "W per km/h", "no speed cap ≤2025", "rule did not exist", [0, 0], "H"),
+      capCut2: is26 ? rule(345, "km/h", "normal MGU-K cap: no deployment at or above this speed", "C5.2.8 i", [300, 400], y) : est(1e9, "km/h", "no speed cut ≤2025", "rule did not exist", [1e9, 1e9], "H"),
       otA: is26 ? rule(7100e3, "W", "Overtake MGU-K cap intercept: P ≤ otA − otB·v_kmh", "C5.2.10", [1000e3, 9000e3], y) : est(1e12, "W", "no Overtake ≤2025", "rule did not exist", [1e12, 1e12], "H"),
       otB: is26 ? rule(20e3, "W per km/h", "Overtake MGU-K cap slope (0 at 355 km/h)", "C5.2.10", [0, 50e3], y) : est(0, "W per km/h", "no Overtake ≤2025", "rule did not exist", [0, 0], "H"),
     },

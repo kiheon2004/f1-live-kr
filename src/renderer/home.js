@@ -32,6 +32,10 @@ const seasonsText = (ys) => [...new Set(ys)].map((y) => { const n = ys.filter((x
 const calWhen = (s) => (s.utc ? kstFull.format(Date.parse(s.utc)) : s.date ? `${kstDay.format(Date.parse(s.date + "T12:00:00Z"))} · 시간 미정` : "시간 미정");
 
 const thisYear = new Date().getFullYear(), FIRST_SEASON = 2014;
+// v0.50: a sprint weekend (its calendar or its F1 record list has a session named Sprint) is marked in the list and on
+// the race card; the circuit's own name stands next to the Grand Prix's (a country with two or three circuits – Italy,
+// the USA – reads apart before anything is picked)
+const hasSprint = (sessions) => !!sessions?.some((s) => /^Sprint$/.test(s?.name || ""));
 const metrics = { tScript: Math.round(performance.now()), tListReady: null, tScheduleReady: null, tGlobeFirstFrame: null, ignored: { season: 0, cached: 0, probe: 0, all: 0, load: 0 }, seasonLoads: 0 };
 const S = {
   year: store.get("homeYear", thisYear), races: [], sched: { state: "loading" }, listing: { state: "loading" }, sessions: [], match: null,
@@ -131,6 +135,7 @@ function rebuild() {
     items.push({
       id: `r${r.round}`, kind: "race", round: r.round, race: r, meeting, match,
       name: r.name, koName: KO.gpName(r.name), circuitName: r.circuitName, circuitId: r.circuitId, locality: r.locality, country: r.country,
+      sprint: hasSprint(r.sessions) || hasSprint(meeting?.sessions),
       lat: r.lat, lon: r.lon, dateText: r.date ? (r.precision === "time" ? kstShort.format(Date.parse(r.utc)) : kstShort.format(Date.parse(r.date + "T12:00:00Z"))) : "",
       sched: D.scheduleStatus(r, { now, raceListed: !!raceS, raceStart: raceS ? archiveAt(raceS) : null }),
       data: D.dataStatus({ year: S.year, listing, match, cached: S.cached, probes: S.probes, now, race: r }),
@@ -143,7 +148,7 @@ function rebuild() {
     items.push({
       id: `m${g.key}`, kind: "meeting", round: null, race: null, meeting: g, match: { state: "matched", meeting: g },
       name: g.name, koName: KO.gpName(g.name), circuitName: g.circuit, locality: g.location, country: g.country, lat: null, lon: null,
-      dateText: first ? kstShort.format(archiveAt(first)) : "", extra: true,
+      dateText: first ? kstShort.format(archiveAt(first)) : "", extra: true, sprint: hasSprint(g.sessions),
       sched: { key: "unknown", ...D.SCHEDULE.unknown, why: S.races.length ? "일정(Jolpica)에 없는 F1 기록" : "일정을 받지 못함" },
       data: D.dataStatus({ year: S.year, listing, match: { state: "matched", meeting: g }, cached: S.cached, probes: S.probes, now }),
     });
@@ -269,9 +274,9 @@ function renderList(scroll) {
     if (g && g !== group) { html += `<li class="group" role="presentation">${esc(g)}</li>`; group = g; }
     const id = S.all ? it.id : fullId(it);
     const badges = S.all ? `<span class="badge">개최 ${it.hosted.length}</span>${it.replay.length ? `<span class="badge ok">다시보기 목록 ${it.replay.length}</span>` : ""}`
-      : `<span class="badge ${it.sched.cls}" title="${esc(it.sched.why)}">${esc(it.sched.ko)}</span><span class="badge ${it.data.cls}" title="${esc(it.data.why)}">${esc(it.data.ko)}</span>`;
+      : `<span class="badge ${it.sched.cls}" title="개최 일정: ${esc(it.sched.why)}">${esc(it.sched.ko)}</span><span class="badge ${it.data.cls}" title="데이터: ${esc(it.data.why)}">${esc(it.data.ko)}</span>${it.sprint ? `<span class="badge sprint" title="스프린트가 있는 주말">스프린트</span>` : ""}`;
     const sub = S.all ? `${esc([it.locality, it.country].filter(Boolean).join(", "))} · ${esc(seasonsText(it.hosted.map((h) => h.season)))}` : `${esc(it.dateText)} · ${esc([it.locality, it.country].filter(Boolean).join(", "))}${it.lat == null && !it.extra ? " · 좌표 없음" : ""}`;
-    html += `<li role="option" id="hl-${esc(id.replace(/[^A-Za-z0-9_-]/g, "_"))}" data-id="${esc(id)}" aria-selected="${id === sel}" class="${i === S.kbd ? "kbd" : ""}"><span class="rd">${it.round ? `R${it.round}` : S.all ? "" : "·"}</span><span class="nm"><em>${esc(it.koName)}</em></span><span class="sub">${sub} ${badges}</span></li>`;
+    html += `<li role="option" id="hl-${esc(id.replace(/[^A-Za-z0-9_-]/g, "_"))}" data-id="${esc(id)}" aria-selected="${id === sel}" class="${i === S.kbd ? "kbd" : ""}"><span class="rd">${it.round ? `R${it.round}` : S.all ? "" : "·"}</span><span class="nm"><em>${esc(it.koName)}</em>${!S.all && it.circuitName ? `<small>${esc(it.circuitName)}</small>` : ""}</span><span class="sub">${sub} ${badges}</span></li>`;
   }
   if (ol.__html !== html) { ol.innerHTML = html; ol.__html = html; }
   const loading = !S.all && (S.sched.state === "loading" || S.listing.state === "loading") && !S.items.length;
@@ -291,7 +296,9 @@ function renderEvent() {
   if (!it) { box.innerHTML = `<h3>경기를 고르세요</h3>${progressHtml("event")}<p class="muted">오른쪽 목록이나 지구본의 빨간 표시를 누르세요. 화살표 키로도 고를 수 있어요.</p>`; return; }
   const r = it.race;
   const head = `<h3>${it.round ? `R${it.round} · ` : ""}${esc(it.koName)} <small>${esc([it.circuitName, it.locality, it.country].filter(Boolean).join(" · "))}</small></h3>`;
-  const badges = `<p><span class="badge ${it.sched.cls}">${esc(it.sched.ko)}</span> <span class="muted">${esc(it.sched.why)}</span><br><span class="badge ${it.data.cls}">${esc(it.data.ko)}</span> <span class="muted">${esc(it.data.why)}</span></p>`;
+  const badges = `<p><span class="badge ${it.sched.cls}">${esc(it.sched.ko)}</span> <span class="muted">개최 · ${esc(it.sched.why)}</span><br><span class="badge ${it.data.cls}">${esc(it.data.ko)}</span> <span class="muted">데이터 · ${esc(it.data.why)}</span>${it.sprint ? `<br><span class="badge sprint">스프린트</span> <span class="muted">스프린트가 있는 주말이에요</span>` : ""}</p>`;
+  // other seasons at this circuit: only from what the app has checked (전체 개최지) – asked for, not fetched here
+  const history = it.circuitId || it.lat != null ? `<p class="home-history"><button class="ghost small" data-history="${esc(it.circuitId || "")}">이 서킷의 다른 시즌 개최 이력</button> <span class="muted">앱이 확인한 시즌 기준</span></p>` : "";
   const coord = r ? (r.lat == null ? `<p class="muted">좌표 정보가 없어 지구본에 표시하지 않았어요 (목록에서는 고를 수 있어요).</p>` : "") : "";
   let body = "";
   if (it.meeting) {
@@ -300,15 +307,15 @@ function renderEvent() {
       const st = D.sessionStatus({ cached: S.cached[s.path], probe: S.probes[s.path] });
       const busy = S.load?.state === "loading" && S.load.path === s.path;
       const btn = loaded === s.path ? `<button class="primary small" data-resume>이어보기</button>` : `<button class="small${s.name === "Race" ? " primary" : ""}" data-load="${esc(s.path)}" ${busy ? "disabled" : ""}>${busy ? "불러오는 중" : "불러오기"}</button>`;
-      return `<li class="${s.name === "Race" ? "main" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span class="when">${esc(kstFull.format(archiveAt(s)))}</span><span class="act"><span class="badge ${st.cls}" title="${esc(st.why)}">${esc(st.ko)}</span>${btn}</span></li>`;
+      return `<li class="${s.name === "Race" ? "main" : s.name === "Sprint" ? "sprint" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span class="when">${esc(kstFull.format(archiveAt(s)))}</span><span class="act"><span class="badge ${st.cls}" title="${esc(st.why)}">${esc(st.ko)}</span>${btn}</span></li>`;
     }).join("");
     body = `<h4>세션 (F1 기록 목록 · 한국 시간)</h4><ul class="home-sessions">${rows}</ul>`;
   } else if (r) {
-    const rows = r.sessions.map((s) => `<li class="${s.name === "Race" ? "main" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span class="when">${esc(calWhen(s))}</span><span class="act"></span></li>`).join("");
+    const rows = r.sessions.map((s) => `<li class="${s.name === "Race" ? "main" : s.name === "Sprint" ? "sprint" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span class="when">${esc(calWhen(s))}</span><span class="act"></span></li>`).join("");
     body = `<h4>일정 (Jolpica · 한국 시간)</h4><ul class="home-sessions">${rows}</ul><p class="muted">${S.listing.state === "error" ? `F1 기록 목록을 받지 못해 (${esc(it.data.ko)}) 이 경기의 세션을 확인할 수 없어요. 기록이 없다는 뜻은 아니에요.` : S.listing.state === "skip" ? `F1 기록 보관소는 ${D.ARCHIVE_FROM}년부터라 이 시즌은 다시볼 수 없어요.` : S.listing.state === "loading" ? "F1 기록 목록을 확인하는 중이에요…" : it.match?.state === "ambiguous" ? "F1 기록에서 이 경기로 보이는 후보가 여러 개라 자동으로 고르지 않았어요." : "F1 기록 목록에 이 경기의 세션이 아직 없어 불러올 수 없어요 (취소됐다는 뜻은 아니에요)."}</p>`;
   }
   // (the load's progress or error right under the title, where it's seen without scrolling)
-  box.innerHTML = head + progressHtml("event") + badges + coord + body;
+  box.innerHTML = head + progressHtml("event") + badges + coord + body + history;
 }
 function renderVenue(box, v) {
   box.innerHTML = `<h3>${esc(v.koName)} <small>${esc([v.locality, v.country].filter(Boolean).join(" · "))}</small></h3>
@@ -382,6 +389,15 @@ async function loadAll() {
   if (!S.allItems.some((v) => v.id === S.sel)) S.sel = S.allItems[0]?.id ?? null;
   render();
 }
+// "이 서킷의 다른 시즌 개최 이력": the all-venues view, on this circuit's venue once it has been put together
+async function showHistory(circuitId, it) {
+  if (!it) return;
+  S.all = true; $("homeAll").setAttribute("aria-pressed", "true");
+  await loadAll();
+  const key = circuitId || (it.lat != null ? `${it.lat.toFixed(2)},${it.lon.toFixed(2)}` : null);
+  const v = S.allItems.find((x) => x.id === `v:${key}`);
+  if (v) select(v.id);
+}
 function setAll(on) {
   S.all = on; $("homeAll").setAttribute("aria-pressed", String(on));
   if (on) loadAll();
@@ -414,6 +430,7 @@ $("home").addEventListener("click", (e) => {
   else if (b.hasAttribute("data-retry") && S.load) startLoad(S.load.path, S.load.info, S.load.at, S.load.origin);
   else if (b.hasAttribute("data-login")) A().signIn().then(() => { if (S.load) startLoad(S.load.path, S.load.info, S.load.at, S.load.origin); }).catch(() => {});
   else if (b.hasAttribute("data-dismiss")) { S.load = null; render(); }
+  else if (b.hasAttribute("data-history")) showHistory(b.dataset.history, itemById(S.sel));
   else if (b.dataset.goto) { const [y, r] = b.dataset.goto.split(":"); setAll(false); store.set("homeYear", +y); store.set("homeSel", `${y}:${r}`); S.sel = `${y}:${r}`; loadSeason(+y); }
   else if (b.hasAttribute("data-live-start")) A().startLive();
   else if (b.hasAttribute("data-live-retry")) A().stopLive().then(() => A().startLive());
