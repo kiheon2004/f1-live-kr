@@ -26,7 +26,7 @@ import * as Hud from "./racehud.js";
 import * as Res from "./results.js";
 
 const SETTINGS_KEY = "f1kr:game:settings";
-const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: false };
+const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: false, garageQuality: "auto" };
 function loadSettings() { try { return { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}) }; } catch { return { ...DEFAULT_SETTINGS }; } }
 
 export const G = {
@@ -110,7 +110,9 @@ export function paint() {
   if (!G.on) return;
   const crumbs = [["team", "시즌·팀"], ["menu", "차고"], ["prerace", "출발 전 전략"], ["race", "레이스"], ["results", "게임 결과"]];
   $("gameCrumbs").innerHTML = crumbs.map(([k, t]) => `<span class="${k === G.step ? "on" : ""}">${t}</span>`).join("<i>›</i>");
-  $("gameEngine").textContent = G.engine ? "엔진 연결됨" : G.engineErr === "checking" ? "엔진 확인 중…" : `엔진: ${G.engineErr || "?"}`;
+  // (nothing to say while the engine works; only a problem is shown – no "connected" jargon)
+  $("gameEngine").textContent = G.engine ? "" : G.engineErr === "checking" ? "게임 엔진 여는 중…" : "게임 엔진을 열지 못했어요";
+  $("gameEngine").title = G.engine ? "" : String(G.engineErr || "");
   $("gameEngine").classList.toggle("bad", !G.engine);
   const body = $("gameBody");
   body.dataset.step = G.step;

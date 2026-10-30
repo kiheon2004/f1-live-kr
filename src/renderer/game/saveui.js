@@ -29,8 +29,8 @@ export function paintRaces({ standalone = false } = {}) {
   const bad = (G.list || []).filter((s) => s.error);
   return `${list}
     ${bad.length ? `<p class="g-warn">읽지 못한 시나리오 ${bad.length}개: ${bad.map((b) => `${esc(b.id)} (${esc(b.error)})`).join(", ")}</p>` : ""}
-    <div class="g-row"><button class="ghost small" data-act="save:refresh">목록 새로고침</button>
-      <button class="ghost small" data-act="save:import" ${caps.importScenario ? "" : "disabled"}>시나리오 파일 가져오기</button>
+    <div class="g-row"><button class="ui-btn sm" data-act="save:refresh">목록 새로고침</button>
+      <button class="ui-btn sm" data-act="save:import" ${caps.importScenario ? "" : "disabled"}>시나리오 파일 가져오기</button>
       ${caps.importScenario ? "" : `<small class="muted">가져오기: 앱 쪽 기능 연결 전</small>`}</div>
     ${S.importNote ? `<p class="${S.importNote.ok ? "muted" : "g-warn"}">${esc(S.importNote.text)}</p>` : ""}
     <h4 class="g-sub">이 컴퓨터의 세션 기록에서 준비</h4>${paintPrepare()}`;
@@ -38,14 +38,14 @@ export function paintRaces({ standalone = false } = {}) {
 function paintPrepare() {
   const caps = API.caps(), P = S.prep;
   const prog = P ? `<div class="g-prep ${P.state}"><b>${esc(P.name)}</b>
-      ${P.state === "running" ? `<div class="g-bar-p"><i style="width:${Math.round((P.frac ?? 0) * 100)}%"></i></div><small>${esc(P.text || "준비 중…")}</small> <button class="ghost small" data-act="save:cancelPrep">취소</button>` : ""}
+      ${P.state === "running" ? `<div class="g-bar-p"><i style="width:${Math.round((P.frac ?? 0) * 100)}%"></i></div><small>${esc(P.text || "준비 중…")}</small> <button class="ui-btn sm" data-act="save:cancelPrep">취소</button>` : ""}
       ${P.state === "failed" ? `<small class="bad">준비 실패: ${esc(P.why || "?")}</small>` : ""}${P.state === "cancelled" ? `<small class="muted">취소했어요</small>` : ""}${P.state === "done" ? `<small>준비됨 – 목록에 추가했어요</small>` : ""}</div>` : "";
   if (S.prepListErr) return `${prog}<p class="g-warn">세션 목록을 읽지 못했어요: ${esc(S.prepListErr)}</p>`;
-  if (!S.prepList) return `${prog}<p class="muted">${S.prepBusy ? "이 컴퓨터의 세션 기록을 확인하는 중…" : ""}</p><button class="ghost small" data-act="save:prepList">세션 기록 확인</button>`;
+  if (!S.prepList) return `${prog}<p class="muted">${S.prepBusy ? "이 컴퓨터의 세션 기록을 확인하는 중…" : ""}</p><button class="ui-btn sm" data-act="save:prepList">세션 기록 확인</button>`;
   const have = new Set(okList().flatMap((s) => [s.id, s.metaId]));
   const todo = S.prepList.filter((s) => !s.prepared && !have.has(s.id || API.scenarioIdOf(s.path)));
   return `${prog}${todo.length ? `<div class="g-list g-prep-list">${todo.slice(0, 40).map((s) => `<div class="g-prep-item"><span><b>${esc(raceKo(s.name))}</b> <small class="muted">${esc(s.season)} · ${esc(s.date || "")}</small></span>
-      <button class="ghost small" data-act="save:prepare" data-path="${esc(s.path)}" data-name="${esc(s.name)}" ${caps.prepare && !(P?.state === "running") ? "" : "disabled"}>준비</button></div>`).join("")}</div>`
+      <button class="ui-btn sm" data-act="save:prepare" data-path="${esc(s.path)}" data-name="${esc(s.name)}" ${caps.prepare && !(P?.state === "running") ? "" : "disabled"}>준비</button></div>`).join("")}</div>`
     : `<p class="muted">이 컴퓨터에 있는 결승 세션은 모두 준비돼 있어요 (${S.prepList.length}개 확인).</p>`}
     ${caps.prepare ? "" : `<p class="muted">경기 준비(캐시에서 시나리오 만들기)는 앱 쪽 기능이 연결되면 여기서 바로 돼요. 세션 기록은 읽기만 하고 바꾸지 않아요.</p>`}`;
 }
@@ -94,14 +94,14 @@ export function paintSaves() {
   const rows = SLOTS.map(([slot, name]) => {
     const s = by.get(slot);
     if (!s) return `<div class="g-slot empty"><b>${name}</b><span class="muted">비어 있음</span></div>`;
-    if (s.error) return `<div class="g-slot bad"><b>${name}</b><span>읽기 실패: ${esc(s.error)}</span>${API.caps().savesRemove ? `<button class="ghost small" data-act="save:remove" data-slot="${slot}">삭제</button>` : ""}</div>`;
+    if (s.error) return `<div class="g-slot bad"><b>${name}</b><span>읽기 실패: ${esc(s.error)}</span>${API.caps().savesRemove ? `<button class="ui-btn sm" data-act="save:remove" data-slot="${slot}">삭제</button>` : ""}</div>`;
     const ver = G.engine && s.stateVersion != null && s.stateVersion !== G.engine.STATE_VERSION ? `<small class="bad">저장 형식 v${esc(s.stateVersion)} – 이 엔진(v${G.engine.STATE_VERSION})과 달라 불러올 수 없음</small>` : G.engine && s.engine && s.engine !== G.engine.ENGINE_VERSION ? `<small class="g-warn">다른 엔진 버전(${esc(s.engine)})에서 저장</small>` : "";
     return `<div class="g-slot"><b>${name}</b><span>${esc(raceKo(s.event || s.scenarioId))} · ${esc(teamKo(s.team))} · ${s.lap ?? "?"}/${s.totalLaps ?? "?"}랩<br><small class="muted">${when(s.savedAt)}${s.label ? " · " + esc(s.label) : ""}</small> ${ver}</span>
-      <span class="g-slot-b"><button class="small" data-act="save:load" data-slot="${slot}" ${G.engine ? "" : "disabled"}>불러오기</button>${API.caps().savesRemove ? `<button class="ghost small" data-act="save:remove" data-slot="${slot}">삭제</button>` : ""}</span></div>`;
+      <span class="g-slot-b"><button class="ui-btn sm" data-act="save:load" data-slot="${slot}" ${G.engine ? "" : "disabled"}>불러오기</button>${API.caps().savesRemove ? `<button class="ui-btn sm" data-act="save:remove" data-slot="${slot}">삭제</button>` : ""}</span></div>`;
   }).join("");
   return `${S.loadErr ? `<p class="g-err">불러오기 실패: ${esc(S.loadErr)}</p>` : ""}${S.loadWarn ? `<p class="g-warn">${esc(S.loadWarn)}</p>` : ""}${S.savesErr ? `<p class="g-warn">저장 목록 오류: ${esc(S.savesErr)}</p>` : ""}
     <div class="g-slots">${rows}</div>
-    <div class="g-row"><button class="ghost small" data-act="save:refreshSaves">새로고침</button></div>
+    <div class="g-row"><button class="ui-btn sm" data-act="save:refreshSaves">새로고침</button></div>
     <p class="muted">경기 중 상단의 '저장'으로 슬롯 1–3에 저장해요. 자동 저장은 설정에서 켜고 끌 수 있어요. 저장은 게임 폴더(game/saves)에만 해요.</p>`;
 }
 
@@ -176,12 +176,12 @@ export function paintModal() {
   if (m.kind === "leave") {
     el.innerHTML = `<div class="g-modal-box" role="dialog" aria-modal="true" aria-labelledby="gModalT"><h3 id="gModalT">진행 중인 경기를 저장할까요?</h3>
       <p>마지막 저장 뒤에 진행한 내용이 있어요. ${m.to === "live" ? "라이브 타이밍으로 나가면" : "메뉴로 나가면"} 이 경기는 닫혀요.</p>
-      <div class="g-row"><button class="primary" data-act="save:leaveSave">저장하고 나가기 <small>(${SLOT_KO.auto})</small></button><button data-act="save:leaveNoSave">저장하지 않고 나가기</button><button class="ghost" data-act="save:stay">계속하기</button></div></div>`;
+      <div class="g-row"><button class="ui-btn primary" data-act="save:leaveSave">저장하고 나가기 <small>(${SLOT_KO.auto})</small></button><button class="ui-btn" data-act="save:leaveNoSave">저장하지 않고 나가기</button><button class="ui-btn ghost" data-act="save:stay">계속하기</button></div></div>`;
   } else if (m.kind === "save") {
     const by = new Map((S.saves || []).map((s) => [s.slot, s]));
     el.innerHTML = `<div class="g-modal-box" role="dialog" aria-modal="true" aria-labelledby="gModalT"><h3 id="gModalT">경기 저장</h3>
       <div class="g-slots">${SLOTS.filter(([k]) => k !== "auto").map(([slot, name]) => { const s = by.get(slot); return `<button class="g-slot-pick" data-act="save:saveTo" data-slot="${slot}"><b>${name}</b><small>${s ? `덮어쓰기 – ${esc(raceKo(s.event || s.scenarioId))} ${s.lap ?? "?"}랩 · ${when(s.savedAt)}` : S.saves ? "비어 있음" : "확인 중…"}</small></button>`; }).join("")}</div>
-      <div class="g-row"><button class="ghost" data-act="save:stay">닫기</button></div></div>`;
+      <div class="g-row"><button class="ui-btn ghost" data-act="save:stay">닫기</button></div></div>`;
   }
 }
 

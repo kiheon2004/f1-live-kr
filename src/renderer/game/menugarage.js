@@ -16,7 +16,10 @@
 //   setFocus(num) – the other driver's car to the front bay (no rebuild: the two cars swap bays)
 //   setMotion("auto" | "on" | "off") – the slow camera drift; "auto" follows prefers-reduced-motion; saved
 //       (localStorage f1kr:game:motion). Off: nothing moves and the room is drawn only when something changes.
-//   setSafeLeft(f) – re-frame for a menu of another width
+//   setSafeLeft(f) / setSafe(left, right) – re-frame for a menu / cards of another width (the menu measures its DOM)
+//   setQuality("high" | "medium" | "low") – the menu's own quality budget (v0.50): high adds the floor's reflection of the
+//       cars and draws the still picture at 1.5×; low drops the rim light, draws at 1× with a 1024² shadow map. Rebuilds
+//       the room when the level changes. show({ quality }) sets it too.
 //   hide() – stops drawing at once and frees everything on the GPU: the room, the cars, the textures, the WebGL context
 //   dispose() – hide() and forget the host (the game closing)
 //   state() – a plain object for dev checks: what is shown, the loop, renderer.info, the generation counter.
@@ -51,13 +54,17 @@ export const CAM = { pos: [-2.95, 0.58, -4.95], look: [0.35, 0.78, -0.7], fov: 4
 const MOTION_KEY = "f1kr:game:motion";
 
 const MG = { gen: 0, on: false, host: null, canvas: null, renderer: null, world: null, raf: 0, dirty: false, ro: null, mq: null,
-  motion: readMotion(), safeLeft: 0.32, safeRight: 0, frames: 0, ms: [], last: 0, t0: 0, stale: 0, built: 0, leases: new Map(), err: null, req: null };
+  motion: readMotion(), quality: "medium", safeLeft: 0.32, safeRight: 0, frames: 0, ms: [], last: 0, t0: 0, stale: 0, built: 0, leases: new Map(), err: null, req: null };
 
 function readMotion() { try { const v = localStorage.getItem(MOTION_KEY); return ["on", "off", "auto"].includes(v) ? v : "auto"; } catch { return "auto"; } }
 // Resolution: a still picture is drawn once per change – at up to 1.5× (sharp edges on the car's curves); while the
 // camera drifts every frame is drawn, at 1× (measured, 2400×1302 at 1.5×: ~40 ms of GPU per frame on this M3 – the room's
 // environment map ~10 ms, the side / door lamps ~13 ms, the shadow ~3 ms – a menu doesn't need that every frame).
-const pixelRatio = (move) => Math.min(move ? 1 : 1.5, (typeof devicePixelRatio === "number" && devicePixelRatio) || 1);
+// The quality levels (the menu's own budget, apart from the circuit view's): high – the floor's reflection of the cars, the
+// still picture at 1.5×; medium – no reflection, 1.25×; low – no reflection, no rim light, 1× and a 1024² shadow map.
+export const QUALITY = { high: { still: 1.5, move: 1, mirror: true, rim: true, shadow: 2048 }, medium: { still: 1.25, move: 1, mirror: false, rim: true, shadow: 2048 }, low: { still: 1, move: 1, mirror: false, rim: false, shadow: 1024 } };
+const Q = () => QUALITY[MG.quality] || QUALITY.medium;
+const pixelRatio = (move) => Math.min(move ? Q().move : Q().still, (typeof devicePixelRatio === "number" && devicePixelRatio) || 1);
 const reducedPref = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
 const moving = () => (MG.motion === "on" ? true : MG.motion === "off" ? false : !reducedPref());
 const hexc = (c) => { const s = String(c ?? "").replace(/^#/, ""); return /^[0-9a-f]{6}$/i.test(s) ? "#" + s : "#888888"; };
@@ -70,7 +77,7 @@ function ensureRenderer(host) {
   (host || document.body).prepend(c);
   const r = new THREE.WebGLRenderer({ canvas: c, antialias: true, powerPreference: "high-performance" });
   r.setPixelRatio(pixelRatio(false));
-  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.95; r.outputColorSpace = THREE.SRGBColorSpace;
+  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.9; r.outputColorSpace = THREE.SRGBColorSpace;
   r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; r.shadowMap.autoUpdate = false;   // (redrawn when the scene changes: render())
   MG.canvas = c; MG.renderer = r; MG.host = host;
   MG.ro = new ResizeObserver(() => { resize(); kick(); }); MG.ro.observe(host || document.body);
@@ -119,7 +126,7 @@ function zoneB() { const x = ROOM.width + ROOM.wall; return { ...zoneA(), centre
 
 function buildWorld(o, renderer) {
   const t0 = performance.now();
-  const style = teamGarageStyle(o.team, o.colour, { season: o.season });
+  const style = menuStyle(teamGarageStyle(o.team, o.colour, { season: o.season }));
   const lib = createKitLibrary(), scene = new THREE.Scene(), entries = (o.entries || []).filter((e) => e && e.num != null).slice(0, 2);
   scene.background = new THREE.Color(style.dark ? 0x101113 : 0x1b1d20);
   // the cars first: their real bounds size the work area
@@ -153,15 +160,35 @@ function buildWorld(o, renderer) {
   // the lights: bay A's rig (the key light over the front car casts the scene's one shadow), bay B gets only its
   // ceiling's two soft lamps (no shadow), the room's environment for reflections
   const target = [0, 0.5, (planA.car?.z0 ?? ROOM.carZ0) + (dims?.length ?? 5.6) / 2];
-  const rigA = buildLightRig(A.userData.zone, A.userData.fixtures, target, { mode: "full", shadow: true, shadowSize: 2048, floor: style.floor });
+  const rigA = buildLightRig(A.userData.zone, A.userData.fixtures, target, { mode: "full", shadow: true, shadowSize: Q().shadow, floor: style.floor });
   A.add(rigA.group);
   const rigB = buildLightRig(B.userData.zone, B.userData.fixtures, [0, 0.5, target[2]], { mode: "full", key: false, sides: 1, hemi: false, shadow: false, door: false, scale: 0.9 });
   B.add(rigB.group);
   const env = roomEnvironment(renderer, { width: ROOM.width, depth: ROOM.depth, ceilingH: ROOM.ceilingH, wall: style.wall.base, floor: style.floor, ceiling: style.dark ? "#1d1f22" : "#55595e", fixtures: A.userData.fixtures.filter((f) => f.kind === "ceiling"), doorW: ROOM.doorW, doorH: ROOM.doorH });
-  scene.environment = env; scene.environmentIntensity = 0.7;
+  scene.environment = env; scene.environmentIntensity = 0.75;
+  // (the floor faces the ceiling's bright lamp strips in the environment map: its image-based fill alone lifted it to a
+  // near-white; the door's daylight lit the foreground floor more than the car. Menu-only: the floor takes a third of the
+  // room's fill and the door light is halved – the floor reads as a painted floor in a lit room, the car stays the
+  // brightest thing in the middle)
+  for (const bay of [A, B]) bay.traverse((x) => { if (x.isMesh && x.name === "bay:floor" && x.material) x.material.envMapIntensity = 0.32; });
+  for (const l of rigA.lights) if (l.isSpotLight && l.color.getHex() === 0xdde6f5) l.intensity *= 0.45;
+  // the rim: a cool, soft light from behind and above the front car (no shadow) – it draws the bodywork's upper edges
+  // and the halo against the darker back wall, so the car's shape reads apart from the room (quality ≥ medium)
+  const extra = [reveal], lights = [...rigA.lights, ...rigB.lights];
+  if (Q().rim) {
+    const rim = new THREE.SpotLight(0xdfe8ff, 55, 0, 0.75, 0.9, 2); rim.name = "menuRim";
+    rim.position.set(1.4, ROOM.ceilingH - 0.4, target[2] + 4.2); rim.target.position.set(0, 0.6, target[2] - 0.4);
+    A.add(rim, rim.target); lights.push(rim);
+  }
   const camera = new THREE.PerspectiveCamera(CAM.fov, 16 / 9, 0.1, 80);
-  const W = { key: `${o.season}|${o.teamKey}`, season: o.season, teamKey: o.teamKey, team: o.team, colour: hexc(o.colour), style, lib, scene, camera, env, bays: [A, B], cars, spots, lights: [...rigA.lights, ...rigB.lights],
-    focus: null, buildMs: 0, extra: [reveal] };
+  const W = { key: `${o.season}|${o.teamKey}`, season: o.season, teamKey: o.teamKey, team: o.team, colour: hexc(o.colour), style, lib, scene, camera, env, bays: [A, B], cars, spots, lights,
+    focus: null, buildMs: 0, extra, quality: MG.quality };
+  // the floor's reflection of the cars (high quality only): the cars and the lights also on the mirror's layer
+  if (Q().mirror) {
+    for (const c of cars) c.obj.traverse((x) => x.layers.enable(MIRROR_LAYER));
+    scene.traverse((x) => { if (x.isLight) x.layers.enable(MIRROR_LAYER); });
+    W.mirror = makeMirror(); scene.add(W.mirror.mesh); extra.push(W.mirror.mesh);
+  }
   setFocusIn(W, o.focusNum ?? cars[0]?.num);
   W.buildMs = Math.round(performance.now() - t0);
   return W;
@@ -183,10 +210,20 @@ function parked(car, lib, style) {
 }
 // the soft dark patch under the car (the AO stand-in for where the floor meets the car: the key light's shadow alone
 // leaves the floor under the floor-plate too bright from the bounce light)
+// plus a small, darker patch under each tyre's contact (where the rubber meets the floor the floor gets almost no light –
+// without it the car looked set onto the floor rather than standing on it). In the car's frame: the group is turned and
+// placed with the car (setFocusIn), the wheels' x / z from the car's own wheel objects.
 function contactUnder(c, lib) {
-  const b = c.box, g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
-  const m = new THREE.Mesh(g, lib.M.contact); m.scale.set((b.max.x - b.min.x) * 1.12, 1, (b.max.z - b.min.z) * 1.04); m.renderOrder = 1; m.name = "contact";
-  return m;
+  const b = c.box, grp = new THREE.Group(); grp.name = "contact";
+  const g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(g, lib.M.contact); m.scale.set((b.max.x - b.min.x) * 1.12, 1, (b.max.z - b.min.z) * 1.04); m.renderOrder = 1; grp.add(m);
+  const cz = (b.max.z + b.min.z) / 2, p = c.obj.userData.profile || {};
+  for (const [i, w] of (c.obj.userData.wheels || []).entries()) {
+    const wp = new THREE.Vector3(); w.getWorldPosition(wp); c.obj.worldToLocal(wp);
+    const wd = ((i < 2 ? p.FW : p.RW) || 0.36) * 1.5, len = 0.42;
+    const t = new THREE.Mesh(g, lib.M.contact); t.scale.set(wd, 1, len); t.position.set(wp.x, 0.002, wp.z - cz); t.renderOrder = 2; grp.add(t);
+  }
+  return grp;
 }
 // put the focused car in bay A, the other in bay B (no rebuild); camera re-aimed
 function setFocusIn(W, num) {
@@ -198,10 +235,11 @@ function setFocusIn(W, num) {
     const s = W.spots[i]; if (!s) { c.obj.visible = false; c.contact.visible = false; return; }
     const cz = s.z + c.box.max.z;                       // the nose (model +z) at the spot's z0, facing the door (−z)
     c.obj.position.set(s.x, 0, cz); c.obj.rotation.set(0, Math.PI, 0); c.obj.visible = true;
-    c.contact.position.set(s.x, 0.005, cz - (c.box.max.z + c.box.min.z) / 2); c.contact.visible = true;
+    c.contact.position.set(s.x, 0.005, cz - (c.box.max.z + c.box.min.z) / 2); c.contact.rotation.set(0, Math.PI, 0); c.contact.visible = true;
     c.bay = i;
   });
   W.anchor = new THREE.Vector3(W.spots[0].x, 0, W.spots[0].z + first.box.max.z);
+  if (W.mirror) { const u = W.mirror.mat.uniforms; order.forEach((c, i) => u[i ? "c1" : "c0"].value.set(c.contact.position.x, c.contact.position.z)); if (order.length < 2) u.c1.value.copy(u.c0.value); }
 }
 function aim(W, t) {
   const cam = W.camera, a = W.anchor, d = moving() ? CAM.drift : null;
@@ -218,8 +256,68 @@ function disposeWorld(W) {
   for (const x of W.extra || []) disposeGroup(x, done);
   for (const l of W.lights) l.shadow?.map?.dispose?.();
   W.env?.dispose(); W.env?.userData.renderTarget?.dispose();
+  if (W.mirror) { W.mirror.tex?.dispose(); W.mirror.mat.dispose(); }
   W.lib.dispose();
   W.scene.clear();
+}
+
+// ---------- menu-only looks ----------
+// The floor: the kit picks a light epoxy grey for a circuit garage (seen from outside, in daylight); in the menu the
+// camera looks down at it from 0.6 m and it filled half the picture brighter than the car. Here it is taken towards
+// graphite (the same hue, about half the value) – this world's own style object, the circuit's garages are untouched.
+const MIRROR_LAYER = 3;
+function menuStyle(style) {
+  const c = new THREE.Color(style.floor), hsl = {}; c.getHSL(hsl, THREE.SRGBColorSpace);   // (sRGB lightness, not linear)
+  c.setHSL(hsl.h, hsl.s * 0.8, Math.min(hsl.l, 0.62) * 0.5, THREE.SRGBColorSpace);
+  return { ...style, floor: "#" + c.getHexString() };
+}
+// The floor's reflection (high quality): the cars (and only the cars – MIRROR_LAYER) drawn by the camera mirrored in the
+// floor plane into a corner of the canvas at half size, copied into a texture (copyFramebufferToTexture), then laid over
+// the floor near the cars as a faint additive sheen (a satin epoxy, not a mirror). Drawn on the canvas rather than into a
+// render target so it uses the very shader programs of the main pass (a render target needs other tone-mapping variants
+// of every car material: measured +2.6 s of compiling on the first picture). One extra pass of the cars' draws at a
+// quarter of the pixels, only when the picture is redrawn anyway.
+function makeMirror() {
+  const cam = new THREE.PerspectiveCamera(); cam.layers.set(MIRROR_LAYER);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { tMap: { value: null }, texM: { value: new THREE.Matrix4() }, strength: { value: 0.5 }, c0: { value: new THREE.Vector2() }, c1: { value: new THREE.Vector2() } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    vertexShader: `uniform mat4 texM; varying vec4 vUv; varying vec3 vW;
+      void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vUv = texM * w; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    // (the copied picture is already tone-mapped and sRGB-encoded – the texture is plain RGBA8, a copy can't go into an sRGB
+    // texture: decoded here, written back through the output encoding only)
+    fragmentShader: `uniform sampler2D tMap; uniform float strength; uniform vec2 c0; uniform vec2 c1; varying vec4 vUv; varying vec3 vW;
+      void main() {
+        vec3 r = sRGBTransferEOTF(texture2DProj(tMap, vUv)).rgb;
+        float d = min(distance(vW.xz, c0), distance(vW.xz, c1));
+        float fade = 1.0 - smoothstep(0.8, 3.4, d);
+        gl_FragColor = vec4(r * strength * fade, 1.0);
+        #include <colorspace_fragment>
+      }` });
+  const g = new THREE.PlaneGeometry(ROOM.width * 2 + ROOM.wall, ROOM.depth); g.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(g, mat); mesh.position.set((ROOM.width + ROOM.wall) / 2, 0.003, ROOM.depth / 2); mesh.renderOrder = 0.5; mesh.name = "menuMirror";
+  mesh.visible = false;   // (until the first copy exists)
+  return { tex: null, cam, mat, mesh, look: new THREE.Vector3(), clear: new THREE.Color(), vp: new THREE.Vector4(), buf: new THREE.Vector2(), at: new THREE.Vector2(0, 0) };
+}
+const BIAS = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
+function renderMirror(W, r) {
+  const M = W.mirror, cam = W.camera, vc = M.cam, buf = r.getDrawingBufferSize(M.buf), ratio = r.getPixelRatio();
+  const w = Math.max(2, buf.x >> 1), h = Math.max(2, buf.y >> 1);
+  if (!M.tex || M.tex.image.width !== w || M.tex.image.height !== h) {
+    M.tex?.dispose(); M.tex = new THREE.FramebufferTexture(w, h); M.tex.minFilter = M.tex.magFilter = THREE.LinearFilter;
+    M.mat.uniforms.tMap.value = M.tex;
+  }
+  cam.updateMatrixWorld();
+  vc.position.set(cam.position.x, -cam.position.y, cam.position.z);
+  M.look.set(0, 0, -1).applyQuaternion(cam.quaternion).add(cam.position); M.look.y = -M.look.y;
+  vc.up.set(0, 1, 0).applyQuaternion(cam.quaternion); vc.up.y = -vc.up.y;
+  vc.lookAt(M.look); vc.near = cam.near; vc.far = cam.far;
+  vc.updateMatrixWorld(); vc.projectionMatrix.copy(cam.projectionMatrix); vc.projectionMatrixInverse.copy(cam.projectionMatrixInverse);
+  M.mat.uniforms.texM.value.copy(BIAS).multiply(vc.projectionMatrix).multiply(vc.matrixWorldInverse);
+  const bg = W.scene.background, a = r.getClearAlpha(); r.getClearColor(M.clear); r.getViewport(M.vp);
+  W.scene.background = null; r.setClearColor(0x000000, 1); r.setViewport(0, 0, w / ratio, h / ratio); r.clear();
+  try { r.render(W.scene, vc); r.copyFramebufferToTexture(M.tex, M.at); M.mesh.visible = true; }
+  finally { r.setViewport(M.vp); r.setClearColor(M.clear, a); W.scene.background = bg; }
 }
 
 // ---------- the loop: draws while something moves; otherwise once per change ----------
@@ -238,7 +336,7 @@ function mgFrame(t) {
     CAR_SKY.value = 0;
     if (MG.dirty) r.shadowMap.needsUpdate = true;
     const q = MG.gpu?.begin();
-    try { r.render(W.scene, W.camera); } finally { CAR_SKY.value = sky; MG.gpu?.end(q); }
+    try { if (W.mirror) renderMirror(W, r); r.render(W.scene, W.camera); } finally { CAR_SKY.value = sky; MG.gpu?.end(q); }
     const ms = performance.now() - a; MG.ms.push(ms); if (MG.ms.length > 240) MG.ms.shift();
     if (W.firstFrameMs == null) W.firstFrameMs = Math.round(ms);   // (the first draw uploads textures and builds the shadow pass's programs)
     MG.frames++; MG.dirty = false; MG.last = t;
@@ -249,14 +347,15 @@ function mgFrame(t) {
 // ---------- API ----------
 export function show(o = {}) {
   if (typeof document === "undefined") return Promise.resolve({ error: "no DOM" });
+  if (o.quality && QUALITY[o.quality]) MG.quality = o.quality;
   const gen = ++MG.gen, key = `${o.season}|${o.teamKey}`;
-  MG.req = { season: o.season, teamKey: o.teamKey, focusNum: o.focusNum ?? null };
+  MG.req = { season: o.season, teamKey: o.teamKey, focusNum: o.focusNum ?? null }; MG.lastShow = { ...o };
   if (o.safeLeft != null || o.safeRight != null) setSafe(o.safeLeft ?? MG.safeLeft, o.safeRight ?? 0, false);
   // (the circuit view never draws under the menu: hidden now – its own loop ends at its next frame)
   try { window.Map3D?.hide?.(); } catch {}
   const host = o.host || document.getElementById("gGarage3d") || document.getElementById("game") || document.body;
   const sameEntries = MG.world && JSON.stringify(MG.world.cars.map((c) => c.num)) === JSON.stringify((o.entries || []).slice(0, 2).map((e) => String(e.num)));
-  if (MG.on && MG.world && MG.world.key === key && sameEntries && (o.date || null) === (MG.world.date || null)) {
+  if (MG.on && MG.world && MG.world.key === key && sameEntries && (o.date || null) === (MG.world.date || null) && MG.world.quality === MG.quality) {
     if (o.focusNum != null) setFocus(o.focusNum);
     ensureRenderer(host); resize(); kick();
     return Promise.resolve(state());
@@ -285,6 +384,14 @@ export function show(o = {}) {
 export function setFocus(num) {
   const W = MG.world; if (!W || !W.cars.some((c) => c.num === String(num))) return false;
   setFocusIn(W, num); if (MG.req) MG.req.focusNum = String(num); kick(); return true;
+}
+// another quality: the room is built again (the shadow map size, the rim light and the mirror are made at build) – the
+// last request repeated with the new level; same level: nothing
+export function setQuality(q) {
+  if (!QUALITY[q] || q === MG.quality) return MG.quality;
+  MG.quality = q;
+  if (MG.on && MG.world && MG.lastShow) show({ ...MG.lastShow, focusNum: MG.world.focus, quality: q });
+  return q;
 }
 export function setMotion(m) {
   MG.motion = ["on", "off", "auto"].includes(m) ? m : "auto";
@@ -333,11 +440,11 @@ export function hide() {
   }
   return true;
 }
-export function dispose() { hide(); MG.host = null; MG.req = null; return true; }
+export function dispose() { hide(); MG.host = null; MG.req = null; MG.lastShow = null; return true; }
 export function state() {
   const W = MG.world, r = MG.renderer, ms = MG.ms.slice().sort((a, b) => a - b);
   return {
-    on: MG.on, gen: MG.gen, built: MG.built, stale: MG.stale, err: MG.err,
+    on: MG.on, gen: MG.gen, built: MG.built, stale: MG.stale, err: MG.err, quality: MG.quality, mirror: !!MG.world?.mirror,
     request: MG.req, shown: W ? { season: W.season, teamKey: W.teamKey, team: W.team, colour: W.colour, focus: W.focus, styleSeed: W.style.seed, buildMs: W.buildMs, compileMs: W.compileMs ?? null, firstFrameMs: W.firstFrameMs ?? null } : null,
     cars: W ? W.cars.map((c) => ({ num: c.num, tla: c.entry.tla || null, bay: c.bay, front: c.num === W.focus, profile: c.obj.userData.profile.key, x: +c.obj.position.x.toFixed(2), z: +c.obj.position.z.toFixed(2),
       size: [+(c.box.max.x - c.box.min.x).toFixed(3), +c.box.max.y.toFixed(3), +(c.box.max.z - c.box.min.z).toFixed(3)] })) : [],
@@ -349,4 +456,4 @@ export function state() {
     leases: MG.leases.size, lastRelease: MG.lastRelease ?? null,
   };
 }
-if (typeof window !== "undefined") window.MenuGarage = { show, setFocus, setMotion, setSafe, setSafeLeft, setView, probe, hide, dispose, state, ROOM, CAM };
+if (typeof window !== "undefined") window.MenuGarage = { show, setFocus, setMotion, setQuality, setSafe, setSafeLeft, setView, probe, hide, dispose, state, ROOM, CAM };
