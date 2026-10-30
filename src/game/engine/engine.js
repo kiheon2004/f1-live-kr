@@ -715,7 +715,9 @@ function gapOf(c, lead, ahead, T) {
   if (c === lead) return { leader: 0, ahead: null, lapsDown: 0, how: "line" };
   if (c.status === "dnf") return { leader: null, ahead: null, lapsDown: down, how: null };
   const fin = (x, y) => (x.finT != null && y.finT != null ? +((x.finT - y.finT) / 1000).toFixed(3) : null);
-  const g = (x) => { if (!x) return null; const f = fin(c, x); if (f != null) return f; const v = lineGap(c, x); return v == null ? null : +v.toFixed(3); };
+  // (a negative time means the order and the timing points disagree – a car in the pit lane passes the points on a
+  // different path: no gap rather than a wrong one)
+  const g = (x) => { if (!x) return null; const f = fin(c, x); if (f != null) return f; const v = lineGap(c, x); return v == null || v < 0 ? null : +v.toFixed(3); };
   const aheadDown = ahead ? Math.max(0, Math.floor((ahead.dist - c.dist) / T.L)) : 0;
   return { leader: down ? null : g(lead), ahead: ahead && !aheadDown ? g(ahead) : null, aheadLaps: aheadDown, lapsDown: down, how: "line" };
 }
