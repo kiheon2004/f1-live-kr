@@ -74,6 +74,10 @@ export const PRESETS = {
   },
 };
 export const PRESET_IDS = Object.keys(PRESETS);
+// the tower's value column (its header button cycles them): interval to the car ahead, gap to the leader, or both with
+// tyre and stops
+export const TOWER_COLS = ["int", "gap", "full"];
+export const nextCols = (c) => TOWER_COLS[(TOWER_COLS.indexOf(c) + 1) % TOWER_COLS.length];
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const num = (v, d) => (Number.isFinite(+v) ? +v : d);
@@ -98,6 +102,7 @@ export function sanitizePrefs(raw) {
     if (["t", "c", "b"].includes(r.ay)) d.ay = r.ay;
     d.dx = clamp(num(r.dx, d.dx), -4000, 4000); d.dy = clamp(num(r.dy, d.dy), -4000, 4000);
     d.scale = clamp(Math.round(num(r.scale, d.scale) * 100) / 100, SCALE.min, SCALE.max);
+    if (id === "tower" && TOWER_COLS.includes(r.cols)) d.cols = r.cols;
   }
   return out;
 }

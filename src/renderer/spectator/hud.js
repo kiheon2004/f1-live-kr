@@ -16,7 +16,7 @@
 // Editing (HUD 편집): presets 관전 / 분석 / 최소 HUD, show / hide, drag, scale (− / +, keys), reset – saved as a UI
 // preference only (layout.js loadPrefs / savePrefs). Layout runs on a resize, a preference change, a camera change, a
 // widget's own size change and – in the cockpit cameras – every half second against the keep-clear zones map3d measures.
-import { WIDGETS, WIDGET_IDS, PRESETS, PRESET_IDS, loadPrefs, savePrefs, applyPreset, resetWidgets, setWidget, stepScale, placeRect, anchorFor, avoidZones, clampRect } from "./layout.js";
+import { WIDGETS, WIDGET_IDS, PRESETS, PRESET_IDS, nextCols, loadPrefs, savePrefs, applyPreset, resetWidgets, setWidget, stepScale, placeRect, anchorFor, avoidZones, clampRect } from "./layout.js";
 import { flagOf, gapText, gapSec, hms, parseClock, playText, tyreLetter, pitText } from "./hudtext.js";
 
 const RATE = { tower: 500, strip: 500, driver: 500, tel: 100, pit: 200, ready: 250, zones: 500 };
@@ -60,7 +60,7 @@ export function createSpecHud(host, api) {
 
   // ---------- the widgets' static parts ----------
   W.strip.inner.innerHTML = '<span class="ui-flag" data-k="flag"></span><span class="st-lap num" data-k="lap"></span><span class="st-clock num" data-k="clock"></span><span class="ui-badge" data-k="play"></span><span class="ui-badge info" data-k="wx" hidden></span>';
-  W.tower.inner.innerHTML = '<header class="tw-h"><span>순위</span><span class="tw-hcol" data-k="hgap"></span></header><ol class="tw-rows"></ol><p class="tw-empty faint" hidden>순위 자료 없음</p>';
+  W.tower.inner.innerHTML = '<header class="tw-h"><span>순위</span><button class="tw-hcol" data-act="cols" data-k="hgap" title="값 바꾸기: 앞 차 간격 → 선두와 차이 → 둘 다(타이어·피트 포함)"></button></header><ol class="tw-rows"></ol><p class="tw-empty faint" hidden>순위 자료 없음</p>';
   W.driver.inner.innerHTML = `<div class="dc-main"><i class="dc-bar"></i><b class="dc-pos num"></b><span class="dc-name"><b></b><small></small></span>
     <span class="dc-kv"><small>선두와</small><b class="num" data-k="gap"></b></span><span class="dc-kv"><small>앞 차</small><b class="num" data-k="int"></b></span>
     <span class="dc-kv"><small>최근 랩</small><b class="num" data-k="lastlap"></b></span><span class="dc-kv dc-more"><small>최고 랩</small><b class="num" data-k="best"></b></span>
@@ -76,11 +76,11 @@ export function createSpecHud(host, api) {
     <button class="ui-btn sm" data-act="follow" aria-pressed="true" title="켜면 드라이버를 고를 때 카메라도 그 차로 가요 · 끄면 카메라는 ◀ ▶로 따로 움직여요">따라가기: 켬</button>
     <button class="ui-btn sm ghost" data-act="edit" aria-pressed="false" title="HUD 편집: 프리셋, 표시/숨김, 위치·크기 (스페이스바 재생 · ←/→ 이동 · Esc 닫기)">HUD</button>`;
   W.pit.inner.innerHTML = '<header class="pt-h"><b data-k="ptitle"></b><span class="ui-drv"><i data-k="pbar"></i><b data-k="pwho"></b></span></header><dl class="pt-rows"></dl>';
-  editor.innerHTML = `<header class="ui-ph"><span>HUD 편집</span><span class="grow"></span><button class="ui-btn sm ghost" data-ed="close" aria-label="닫기">닫기</button></header>
+  editor.innerHTML = `<header class="ui-ph"><span>HUD 편집</span><span class="grow"></span><button class="ui-btn sm ghost" data-ed="cancel" aria-label="취소하고 닫기">닫기</button></header>
     <div class="ed-body"><div class="ui-seg" role="group" aria-label="프리셋">${PRESET_IDS.map((p) => `<button data-preset="${p}">${esc(PRESETS[p].name)}</button>`).join("")}</div>
     <div class="ed-list">${WIDGET_IDS.filter((id) => WIDGETS[id].hide).map((id) => `<label class="ui-check"><input type="checkbox" data-show="${id}"> ${esc(WIDGETS[id].name)}</label>`).join("")}</div>
     <p class="faint ed-hint">위젯을 끌어서 옮기고 − / + 로 크기를 바꿔요. 키보드: 위젯 선택 후 방향키(Shift: 크게) · + / − · H 숨김. 설정은 이 컴퓨터의 화면 설정에만 저장돼요.</p></div>
-    <footer><button class="ui-btn sm" data-ed="reset">초기화</button><button class="ui-btn sm primary" data-ed="done">완료</button></footer>`;
+    <footer><button class="ui-btn sm ghost" data-ed="reset" title="지금 프리셋의 기본 배치로">초기화</button><span class="grow"></span><button class="ui-btn sm" data-ed="cancel" title="편집 전으로 되돌리기 (Esc)">취소</button><button class="ui-btn sm primary" data-ed="done">저장</button></footer>`;
   const q = (id, k) => W[id].inner.querySelector(`[data-k="${k}"]`);
 
   // ---------- tower rows: built per driver set, then only text / order changed ----------
@@ -104,8 +104,9 @@ export function createSpecHud(host, api) {
     const key = nums.slice().sort().join(",") + "|" + nums.map((n) => drivers[n]?.TeamColour).join("");
     if (key !== towerKey) { towerKey = key; buildTower(drivers, nums); layoutDue = true; }
     const order = nums.slice().sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
-    const full = prefs.widgets.tower.cols === "full";
-    setCls(W.tower.outer, "full", full && !cockpit); setText(q("tower", "hgap"), cockpit ? "앞뒤 차 · 간격" : full ? "선두 · 간격" : "간격");
+    const cols = cockpit ? "int" : prefs.widgets.tower.cols || "int", full = cols === "full";
+    setCls(W.tower.outer, "full", full); setText(q("tower", "hgap"), cockpit ? "앞뒤 차 · 간격" : full ? "선두 · 간격 ▾" : cols === "gap" ? "선두와 ▾" : "간격 ▾");
+    q("tower", "hgap").disabled = cockpit;
     const sel = A.focus, cmp = A.compare || null, cam = api.camNum();
     // (a short view: the rows around the selected driver, the leader's first. The cockpit cameras: the two cars ahead of
     // and behind the filmed one only – a small relative box that fits beside the wheel and under the mirrors)
@@ -128,10 +129,11 @@ export function createSpecHud(host, api) {
       const leader = l.Position === "1";
       const gl = leader ? (src.state.LapCount?.CurrentLap ? `랩 ${src.state.LapCount.CurrentLap}` : "선두") : gapText(l.GapToLeader || l.TimeDiffToFastest);
       const iv = leader ? "" : gapText(l.IntervalToPositionAhead?.Value || l.TimeDiffToPositionAhead);
-      if (full && !cockpit) { setText(r.gap, gl || "–"); setText(r.int, iv); }
-      else { setText(r.gap, leader ? gl : iv || gl || "–"); setText(r.int, ""); }
-      setCls(r.gap, "t-none", !(full && !cockpit ? gl : leader ? gl : iv || gl));
-      if (full && !cockpit) {
+      const one = cols === "gap" ? gl : leader ? gl : iv || gl;
+      if (full) { setText(r.gap, gl || "–"); setText(r.int, iv || (leader ? "" : "–")); }
+      else { setText(r.gap, one || "–"); setText(r.int, ""); }
+      setCls(r.gap, "t-none", !(full ? gl : one)); setCls(r.int, "t-none", full && !leader && !iv);
+      if (full) {
         const st = src.stints?.(n) || [], s = st[st.length - 1], L = tyreLetter(s?.Compound);
         const ty = L ? `<span class="ui-tyre sm ${L}${s.New === "false" || s.New === false ? " used" : ""}">${L}</span>` : '<span class="t-none">–</span>';
         if (r.ty !== ty) { r.ty = ty; r.tyre.innerHTML = ty; }
@@ -286,14 +288,17 @@ export function createSpecHud(host, api) {
   function smallSpec(id) { return { cam: { ax: "l", ay: "t", dx: 8, dy: 8 }, driver: { ax: "c", ay: "b", dx: 0, dy: 8 }, strip: { ax: "l", ay: "b", dx: 8, dy: 52 }, pit: { ax: "r", ay: "b", dx: 8, dy: 52 } }[id] || { ax: "l", ay: "t", dx: 8, dy: 8 }; }
 
   // ---------- editing ----------
-  let editReturn = null;
-  function setEditing(on) {
+  let editReturn = null, editBefore = null;
+  function setEditing(on, keep = true) {
     if (on && small) { api.toast?.("HUD 편집은 크게 보기에서 할 수 있어요."); return; }
+    if (on && !editing) editBefore = JSON.parse(JSON.stringify(prefs));
+    if (!on && editing && !keep && editBefore) { prefs = editBefore; savePrefs(window.localStorage, prefs); }   // (취소: back to before the edit)
+    if (!on) editBefore = null;
     editing = !!on; setCls(root, "editing", editing); editor.hidden = !editing;
     setAttr(W.cam.inner.querySelector('[data-act="edit"]'), "aria-pressed", String(editing));
     for (const id of WIDGET_IDS) W[id].grip.tabIndex = editing ? 0 : -1;
     if (editing) { editReturn = document.activeElement; applyPrefsToDom(); editor.querySelector("[data-preset]")?.focus(); }
-    else { (editReturn && document.contains(editReturn) ? editReturn : W.cam.inner.querySelector('[data-act="edit"]')).focus?.(); editReturn = null; }
+    else { applyPrefsToDom(); api.setFollow(prefs.follow); (editReturn && document.contains(editReturn) ? editReturn : W.cam.inner.querySelector('[data-act="edit"]')).focus?.(); editReturn = null; }
     last.pit = 0; layoutDue = true;
   }
   const commit = (p) => { prefs = p; savePrefs(window.localStorage, prefs); applyPrefsToDom(); };
@@ -301,7 +306,8 @@ export function createSpecHud(host, api) {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.preset) commit(applyPreset(prefs, b.dataset.preset));
     else if (b.dataset.ed === "reset") commit(resetWidgets(prefs));
-    else if (b.dataset.ed === "done" || b.dataset.ed === "close") setEditing(false);
+    else if (b.dataset.ed === "done") setEditing(false, true);
+    else if (b.dataset.ed === "cancel") setEditing(false, false);
   });
   editor.addEventListener("change", (e) => { const id = e.target.dataset?.show; if (id) commit(setWidget(prefs, id, { on: e.target.checked })); });
   root.addEventListener("click", (e) => {
@@ -332,7 +338,7 @@ export function createSpecHud(host, api) {
   root.addEventListener("pointerup", endDrag); root.addEventListener("pointercancel", endDrag);
   root.addEventListener("keydown", (e) => {
     if (!editing) return;
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditing(false); return; }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditing(false, false); return; }
     const g = e.target.closest?.(".spec-grip"); if (!g) return;
     const id = g.parentElement.dataset.w, r = placed[id]; if (!r) return;
     const k = e.shiftKey ? 32 : 8, mv = { ArrowLeft: [-k, 0], ArrowRight: [k, 0], ArrowUp: [0, -k], ArrowDown: [0, k] }[e.key];
@@ -341,7 +347,7 @@ export function createSpecHud(host, api) {
     if ((e.key === "h" || e.key === "H" || e.key === "Delete") && WIDGETS[id].hide) { e.preventDefault(); e.stopPropagation(); commit(setWidget(prefs, id, { on: false })); }
   });
   // (Escape while editing closes the editor first – not the full-window map)
-  window.addEventListener("keydown", (e) => { if (editing && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); setEditing(false); } }, true);
+  window.addEventListener("keydown", (e) => { if (editing && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); setEditing(false, false); } }, true);
 
   // ---------- the HUD's own buttons ----------
   root.addEventListener("click", (e) => {
@@ -349,7 +355,8 @@ export function createSpecHud(host, api) {
     const act = b.dataset.act;
     if (act === "prev" || act === "next") api.cycleCam(act === "prev" ? -1 : 1);
     else if (act === "follow") { const on = !api.follow(); api.setFollow(on); prefs.follow = on; savePrefs(window.localStorage, prefs); paintCam(api.app()); }
-    else if (act === "edit") setEditing(!editing);
+    else if (act === "edit") setEditing(!editing, true);
+    else if (act === "cols") commit(setWidget(prefs, "tower", { cols: nextCols(prefs.widgets.tower.cols || "int") }));
     else if (act === "film") api.filmSelected();
     last.driver = last.tower = 0;
   });
@@ -399,7 +406,7 @@ export function createSpecHud(host, api) {
         nodes: root.querySelectorAll("*").length + notes.querySelectorAll("*").length, ready: !ready.hidden ? ready.textContent : null }),
       cost: () => ({ msPerFrame: +(cost.ms / Math.max(1, cost.frames)).toFixed(4), worstMs: +cost.worst.toFixed(2), frames: cost.frames, layouts: cost.layouts, towerBuilds: cost.built }),
       resetCost: () => { cost.ms = cost.frames = cost.worst = cost.layouts = cost.built = 0; },
-      edit: (on) => setEditing(on), preset: (p) => commit(applyPreset(prefs, p)), set: (id, patch) => commit(setWidget(prefs, id, patch)), reset: () => commit(resetWidgets(prefs)),
+      edit: (on, keep = true) => setEditing(on, keep), preset: (p) => commit(applyPreset(prefs, p)), set: (id, patch) => commit(setWidget(prefs, id, patch)), reset: () => commit(resetWidgets(prefs)),
       layout: () => { layout(); return placed; },
     },
   };
