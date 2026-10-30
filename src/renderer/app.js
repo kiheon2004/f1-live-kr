@@ -1841,7 +1841,9 @@
   // Live mode with nothing running: say so, and when the next session starts.
   function paintIdle() {
     paintSource();
-    const liveIdle = mode === "live" && (!live.state.DriverList || liveStatus.state === "stopped");
+    // (v0.50: disconnected with the last data still on screen – the stale line above the table says so; the "not
+    // connected yet" text under it would contradict the table)
+    const liveIdle = mode === "live" && (!live.state.DriverList || (liveStatus.state === "stopped" && src !== live));
     const over = mode === "live" && /Finalised|Ends/.test(live.state.SessionStatus?.Status || "");
     if (mode === "live" && !schedule) loadSchedule().catch(() => {});
     const next = nextSession();

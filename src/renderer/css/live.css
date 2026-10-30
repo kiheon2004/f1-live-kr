@@ -469,6 +469,7 @@ h2 small { color: var(--text-3); font-weight: var(--fw-reg); margin-left: var(--
   #board th:nth-child(2), #board td:nth-child(2), #board .trend { display: none; }
   .sb-source .more, #weather .w.track { display: none; }
   .map-card > .view-switch button { padding: 0 var(--s-4); }
+  #driver .gauge { grid-template-columns: 40px 84px 44px 1fr auto; } #driver .gauge .mono { display: none; }
 }
 @media (max-width: 1100px) {
   /* (narrower still: the sector times go – they stay in the driver panel and the lap comparison view) */
