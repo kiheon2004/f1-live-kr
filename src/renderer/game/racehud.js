@@ -265,7 +265,7 @@ function wireResize() {
 export function onClick(act, b) {
   const num = b.dataset.num, v = b.dataset.v, R = G.run; if (!R) return;
   const tla = num ? G.sc.entries.find((e) => String(e.num) === String(num))?.tla || num : "";
-  if (act === "speed") { R.setSpeed(+v); R.slowNote = null; paint(); return; }
+  if (act === "speed") { if (+v > 0) R.manual(+v); else { R.slowNote = null; R.pause(); } paint(); return; }
   if (act === "sel") { G.sel = String(num); import("./gamehome.js").then((m) => m.applyRacePrefs()); paint(); return; }
   if (act === "cam") { G.adapter?.ctx.setFocus(String(num)); if (G.adapter?.camAuto) G.adapter.camAuto = null; paint(); return; }
   if (act === "tower") { H.towerSlim = !H.towerSlim; build(); paint(); dispatchEvent(new Event("resize")); return; }

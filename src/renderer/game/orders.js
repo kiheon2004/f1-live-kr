@@ -68,4 +68,7 @@ export class OrderBook {
   // an order still waiting for the engine (the button shows it as pending, not as the mode in force)
   pending(car, type) { return this.list.find((o) => o.car === String(car) && o.type === type && o.state === "queued") || null; }
   recent(n = 6) { return this.list.slice(-n); }
+  // the state to SHOW at render time T (v0.50 §3-2): the engine applies an order at its step, which can be ahead of the
+  // render time by up to a frame of sim time – until T reaches tEff it is still shown as waiting, never as in force
+  stateAt(o, T) { return (o.state === "applied" || o.state === "refused") && o.tEff != null && o.stage !== "submit" && o.tEff > T ? "queued" : o.state; }
 }
