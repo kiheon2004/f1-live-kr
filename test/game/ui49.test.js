@@ -207,13 +207,11 @@ test("tyre lists: every screen list has both wet tyres even when the real race u
 test("the HUD reads the snapshot at or before the render time, never a newer one", async () => {
   const U = await R("renderer/game/ui.js");
   const a = { t: 1000, cars: [{ tyre: { compound: "MEDIUM" }, pit: { phase: "work" } }] }, b = { t: 2000, cars: [{ tyre: { compound: "HARD" }, pit: { phase: "release" } }] };
-  assert.strictEqual(U.hudSnap({ pair: () => ({ a, b, renderT: 1100 }) }), a);
-  assert.strictEqual(U.hudSnap({ pair: () => ({ a: null, b, renderT: 2000 }) }), b);
+  // (v0.50: one render-time picture – present.js – instead of the older snapshot as it is: a's discrete state, never b's)
+  const h0 = U.hudSnap({ pair: () => ({ a: { ...a, flag: "green" }, b: { ...b, flag: "sc" }, renderT: 1100 }) });
+  assert.strictEqual(h0.cars[0].tyre.compound, "MEDIUM"); assert.strictEqual(h0.cars[0].pit.phase, "work"); assert.strictEqual(h0.flag, "green"); assert.strictEqual(h0.t, 1100);
+  assert.strictEqual(U.hudSnap({ pair: () => ({ a: null, b, renderT: 2000 }) }).cars[0].tyre.compound, "HARD");
   assert.strictEqual(U.hudSnap({ pair: () => null }), null);
-  // with the 3D adapter: its render-time cars (discrete state at its own sim time), the race-wide fields from a
-  const fr = { t: 1100, cars: [{ tyre: { compound: "MEDIUM" }, pit: { phase: "work" } }] };
-  const h = U.hudSnap({ pair: () => ({ a: { ...a, flag: "green" }, b: { ...b, flag: "sc" }, renderT: 1100 }) }, { frameCars: () => fr });
-  assert.strictEqual(h.cars, fr.cars); assert.strictEqual(h.flag, "green"); assert.strictEqual(h.t, 1100);
   // estimates are rounded to what their spread allows
   assert.strictEqual(U.fmtEst(12.34, 25), "+10"); assert.strictEqual(U.fmtEst(12.34, 6), "+12"); assert.strictEqual(U.fmtEst(-1.26, 1), "−1.5");
 });

@@ -20,17 +20,10 @@
 const wrapTo = (x, L) => ((x % L) + L) % L;
 const lerp = (a, b, f) => a + (b - a) * f;
 
-// a car's discrete state at time T: snapshot a's (taken at ta), with the changes the engine recorded in (ta, T] applied in
-// order (b's trans list; a change older than its window is already in a). Raw engine status ("run" also in the pit).
-export function discreteAt(ca, cb, ta, T) {
-  const D = { where: ca.where, status: rawStatus(ca), phase: ca.pit?.phase ?? "none", tyre: ca.tyre?.compound, code: ca.tyre?.code };
-  for (const e of cb.trans || []) {
-    if (e.t <= ta || e.t > T) continue;
-    for (const k in e.set) D[k] = e.set[k];
-  }
-  return D;
-}
-const rawStatus = (c) => (c.status === "pit" ? "run" : c.status);
+// the render-time picture (field contract, discrete changes at their sim times): present.js – shared with the HUD
+import { presentCars, presentRace, discreteAt } from "./present.js";
+const presentRaceWeather = (p) => (p.a ? presentRace(p.a, p.b, p.renderT).weather : p.b.weather) || {};
+export { discreteAt };
 
 export function createGameAdapter({ scenario, source, label = "게임" }) {
   const m = scenario.meta || {}, tr = scenario.track, C = tr.columns;
@@ -84,40 +77,18 @@ export function createGameAdapter({ scenario, source, label = "게임" }) {
       const pr = source.pair(); if (!pr?.b) return null;
       const { a, b } = pr, T = pr.renderT; renderT = T;
       const f = a && b.t > a.t ? Math.max(0, Math.min(1, (T - a.t) / (b.t - a.t))) : 1;
-      const prev = new Map((a?.cars || []).map((c) => [c.num, c]));
-      const out = [];
-      for (const cb of b.cars) {
-        const ca = prev.get(cb.num), c = { ...cb };
-        if (ca && f < 1) {
-          const D = discreteAt(ca, cb, a.t, T);
-          if (D.where === ca.where && D.where === cb.where) {
-            if (cb.where === "lap" && cb.s != null && ca.s != null) { let ds = cb.s - ca.s; if (ds < -tr.L / 2) ds += tr.L; if (ds > tr.L / 2) ds -= tr.L; c.s = wrapTo(ca.s + ds * f, tr.L); }
-            else if (cb.u != null && ca.u != null) c.u = lerp(ca.u, cb.u, f);
-          } else if (D.where === ca.where) {   // (still on a's side: a's place moved on at a's speed)
-            Object.assign(c, { where: ca.where, s: ca.s != null ? wrapTo(ca.s + (ca.v || 0) * (T - a.t) / 1000, tr.L) : ca.s, u: ca.u != null ? ca.u + (ca.v || 0) * (T - a.t) / 1000 : ca.u });
-          } else {   // (already on b's side: b's place moved back at b's speed)
-            Object.assign(c, { s: cb.s != null ? wrapTo(cb.s - (cb.v || 0) * (b.t - T) / 1000, tr.L) : cb.s, u: cb.u != null ? Math.max(0, cb.u - (cb.v || 0) * (b.t - T) / 1000) : cb.u });
-          }
-          c.d = lerp(ca.d ?? 0, cb.d ?? 0, f); c.v = lerp(ca.v, cb.v, f); c.steer = lerp(ca.steer ?? 0, cb.steer ?? 0, f);
-          c.wheelDist = lerp(ca.wheelDist ?? 0, cb.wheelDist ?? 0, f);
-          if (ca.aero && cb.aero) c.aero = { open: lerp(ca.aero.open || 0, cb.aero.open || 0, f), front: lerp(ca.aero.front || 0, cb.aero.front || 0, f) };
-          c.where = D.where; c.status = D.where === "pit" && D.status === "run" ? "pit" : D.status;
-          c.pit = { ...cb.pit, phase: D.phase };
-          if (D.tyre !== cb.tyre?.compound || D.code !== cb.tyre?.code) c.tyre = { ...ca.tyre };   // (the old set until the change)
-        }
-        out.push(c);
-      }
-      return { t: T, snap: b, cars: out, f };
+      return { t: T, snap: b, cars: presentCars(a, b, T, tr.L), f };
     },
-    // the order by the newer snapshot (the timing tower's, the camera's ◀ ▶, the leader)
-    order() { const b = source.pair()?.b; return b ? [...b.cars].sort((x, y) => x.pos - y.pos).map((c) => c.num) : []; },
+    // the order at render time (the tower's, the camera's ◀ ▶, the leader): positions as presented, never the newer snapshot's
+    order() { const fr = A.frameCars(); return fr ? [...fr.cars].sort((x, y) => (x.pos ?? 99) - (y.pos ?? 99)).map((c) => c.num) : []; },
     leader() { return A.order()[0] || null; },
     snapshot() { return source.pair()?.b || null; },
     // weather3d's environment from the engine's truth now (screen rain = engine rain; DESIGN §9, §13). Presentation
     // mappings (not measurements): drops drawn ∝ rain up to 4 mm/h ("moderate"), the road's wet look 1 − e^(−water/0.6 mm)
     // (a 0.1 mm film ≈ 0.15: damp, 1 mm ≈ 0.8: wet), overcast while raining
     weather() {
-      const w = source.pair()?.b?.weather; if (!w) return null;
+      const p = source.pair(); if (!p?.b) return null;
+      const w = presentRaceWeather(p);
       const rain = Math.max(0, +w.rain || 0), water = Math.max(0, +w.water || 0);
       return { rain, water, rainShare: Math.min(1, rain / 4), wet: 1 - Math.exp(-water / 0.6), cloud: rain > 0 ? 0.92 : null, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, est: !!w.est };
     },

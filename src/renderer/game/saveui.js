@@ -6,6 +6,7 @@
 //                engine's state version and the scenario are checked before a save is used
 //   leave prompt a race in progress that has changed since its last save asks: save and leave / leave / stay
 // The player never has to copy files into an app folder or know a path.
+import { beginSave, endSave } from "./saverev.js";
 import { G, go, paint, refreshList, racesOf, okList, myCars, seasons, startRace, stopRace, closeGame, leaveRace, ensureScenario } from "./gamehome.js";
 import { $, esc, raceKo, teamKo } from "./ui.js";
 import * as API from "./gameapi.js";
@@ -114,20 +115,36 @@ export function buildSave(slot) {
   const meta = { scenarioId: G.sid, scenarioMetaId: sc.meta.id, season: G.season, event: sc.meta.event, team: G.teamKey, lap: st.leaderLap, totalLaps: st.totalLaps, t: st.t,
     engine: E.ENGINE_VERSION, stateVersion: E.STATE_VERSION, label: slot === "auto" ? "자동 저장" : "" };
   return { kind: "f1kr-game-save", format: 1, slot, meta, label: meta.label, savedAt: new Date().toISOString(),
-    engine: E.ENGINE_VERSION, stateVersion: E.STATE_VERSION, scenarioId: G.sid, scenarioMetaId: sc.meta.id, scenarioBuiltAt: sc.meta.builtAt || null, scenarioVersion: sc.version ?? null,
+    engine: E.ENGINE_VERSION, stateVersion: E.STATE_VERSION, scenarioId: G.sid, scenarioMetaId: sc.meta.id, scenarioBuiltAt: sc.meta.builtAt || null, scenarioVersion: sc.version ?? null, scenarioPrint: scenarioPrint(sc),
     season: G.season, event: sc.meta.event, team: G.teamKey, seed: G.seed, lap: st.leaderLap, totalLaps: st.totalLaps, t: st.t, runOpts: G.runOpts || null,
-    ui: { sel: G.sel, focus: G.adapter?.ctx.focus || null, speed: R.speed || 1, cam: (() => { try { return JSON.parse(window.Map3D?.game.state?.() || "{}").cam || null; } catch { return null; } })() },
+    ui: { sel: G.sel, focus: G.adapter?.ctx.focus || null, speed: R.speed || 1, paused: !!R.paused, cam: (() => { try { return JSON.parse(window.Map3D?.game.state?.() || "{}").cam || null; } catch { return null; } })() },
     orders: G.book.list.slice(-100), race: E.saveRace(R.race) };
 }
+// v0.50 §3-3: the save is taken with the race it belongs to (G.raceGen – a new race / a load starts a new generation) and
+// the change counter at that moment (G.rev – every step run and every order sent adds one). A success marks saved ONLY
+// that revision, and only if the same race is still on: an order sent while the file was being written stays unsaved, and
+// a late answer for an earlier race neither marks the new one saved nor overwrites its notice. Same time t ≠ same state.
+// Saves run one after another per file in the store (gamestore.js); a manual and an automatic save may overlap – each
+// marks its own revision, the highest wins.
 export async function saveNow(slot, { quiet = false } = {}) {
   const data = buildSave(slot); if (!data) { if (!quiet) { G.saveNote = { ok: false, text: "저장할 경기가 없어요" }; paint(); } return { ok: false }; }
-  const t = data.t;
+  const tok = beginSave(G);
   if (!quiet) { G.saveNote = { ok: true, text: "저장 중…" }; paint(); }
-  const r = await API.save(slot, data);
-  if (r?.ok !== false) { if (G.run && G.run.race.state.t === t) G.savedT = G.dirtyT; G.saveNote = { ok: true, text: `${SLOT_KO[slot] || slot}에 저장 · ${data.lap}/${data.totalLaps}랩` }; S.saves = null; S.savesAt = 0; }
-  else G.saveNote = { ok: false, text: `저장 실패: ${r.why || "?"}` };
+  let r; try { r = await API.save(slot, data); } catch (e) { r = { ok: false, why: String(e?.message || e) }; }
+  const m = endSave(G, tok, r?.ok !== false);
+  if (m.stale) return { ...(r || {}), stale: true };   // (an earlier race's answer: nothing of this race changes)
+  if (m.marked) { G.saveNote = { ok: true, text: `${SLOT_KO[slot] || slot}에 저장 · ${data.lap}/${data.totalLaps}랩${m.behind ? " · 저장 뒤 바뀐 내용은 아직 저장 안 됨" : ""}` }; S.saves = null; S.savesAt = 0; }
+  else G.saveNote = { ok: false, text: `저장 실패: ${r?.why || "?"} – 다시 저장해 주세요` };
   if (!quiet || r?.ok === false) paint();
   return r;
+}
+// the scenario's fingerprint (FNV-1a over its content without the build time): a re-prepared race with the same content
+// keeps it; a different content (new data, a changed builder) changes it – checked on load, never trusted from builtAt alone
+export function scenarioPrint(sc) {
+  if (!sc) return null; if (sc._fp) return sc._fp;
+  const str = JSON.stringify(sc, (k, v) => (k === "builtAt" || k === "_sid" || k === "_fp" ? undefined : v));
+  let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return (sc._fp = h.toString(16).padStart(8, "0") + ":" + str.length);
 }
 // a save → checks → the race running again (paused) with the screen as it was
 export async function loadSlot(slot) {
@@ -140,7 +157,9 @@ export async function loadSlot(slot) {
   G.season = d.season ?? G.season; G.teamKey = d.team; G.sid = d.scenarioId; G.seed = d.seed ?? 1; G.sc = null;
   const sc = await ensureScenario(); if (!sc) { S.loadErr = `이 저장의 경기를 읽지 못했어요: ${G.scErr || "?"}`; paint(); return false; }
   if (sc.meta.id !== d.scenarioMetaId) { S.loadErr = `저장은 ${d.scenarioMetaId} 경기인데 준비된 시나리오는 ${sc.meta.id}이에요`; paint(); return false; }
-  const warn = [...chk.warn]; if (d.scenarioBuiltAt && sc.meta.builtAt && d.scenarioBuiltAt !== sc.meta.builtAt) warn.push("이 경기는 저장한 뒤 다시 준비됐어요 – 이어서 진행은 되지만 처음부터 다시 한 경기와 다를 수 있어요");
+  const warn = [...chk.warn], fp = scenarioPrint(sc);
+  if (d.scenarioPrint ? d.scenarioPrint !== fp : d.scenarioBuiltAt && sc.meta.builtAt && d.scenarioBuiltAt !== sc.meta.builtAt) warn.push("이 경기 자료가 저장한 뒤 다시 준비되어 내용이 달라졌어요 – 이어서 진행은 되지만 저장 당시와 다른 경기가 될 수 있어요");
+  else if (!d.scenarioPrint && d.scenarioBuiltAt && sc.meta.builtAt && d.scenarioBuiltAt === sc.meta.builtAt) { /* (older save: same build) */ }
   let race;
   try { race = E.loadRace(d.race, sc); } catch (e) { S.loadErr = `저장된 경기 상태를 복원하지 못했어요 (${e.message || e})`; paint(); return false; }
   S.loadWarn = warn.join(" · ") || null;

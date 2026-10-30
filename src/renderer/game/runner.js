@@ -7,7 +7,12 @@
 //   render time what the 3D view and the tower draw: behind sim time by about one frame's worth of sim time, inside the
 //               buffered snapshots, never past the newest one; paused, it stops where it is
 //
-// Speed: pause / 1× / 2× / 5× / 10× / 30× / 60×. A frame may run many steps (60× at 60 fps: 20 steps a frame); if the
+// Speed (v0.50 §3-4): the REQUESTED speed (1× … 60×, kept while paused) and paused are separate – 30× → pause → resume
+// is 30× again; a race loaded from a save comes back paused at its saved speed; the very first resume without any speed
+// chosen is 1×. The ACHIEVED speed (what the machine really ran over the last second) is shown apart from the requested
+// one. Automatic actions (alerts.js – slow to 1× or pause on a chosen moment) only ever go DOWN and are marked as
+// automatic (slowNote); a speed the player picks by hand always wins and is what resume returns to.
+// Speeds: pause / 1× / 2× / 5× / 10× / 30× / 60×. A frame may run many steps (60× at 60 fps: 20 steps a frame); if the
 // steps don't fit the frame's budget the runner stops short (clock.js: "behind") and what is shown is the speed really
 // achieved over the last second – never the asked-for one when the machine can't keep up. The race computed is the same
 // at every speed (the steps are the same steps).
@@ -21,7 +26,7 @@ export class GameRunner {
   constructor(race, engine, { now = () => performance.now(), budgetMs = 8, keep = 6, autoSlow = null } = {}) {
     this.race = race; this.engine = engine; this.now = now;
     this.clock = new Runner(race, (r) => engine.step(r), { now, speed: 1, budgetMs });
-    this.buf = []; this.keep = keep; this.renderT = race.state.t; this.lagMs = DT_MS; this.speed = 1;
+    this.buf = []; this.keep = keep; this.renderT = race.state.t; this.lagMs = DT_MS; this.speed = 1; this.manualAt = null;
     this.autoSlow = autoSlow;   // null, or { match(event) → bool, to: speed } – screen only, never the engine
     this.slowNote = null; this.evAt = race.state.t; this.listeners = new Set();
     this.stats = { frames: 0, steps: 0, stepMs: 0, worstFrameStepMs: 0, snapMs: 0 };
@@ -30,12 +35,21 @@ export class GameRunner {
   get paused() { return this.clock.paused; }
   get achieved() { return this.clock.achieved; }
   get behind() { return this.clock.behind; }
+  // x > 0: that speed, playing; 0: pause (the requested speed is kept for resume)
   setSpeed(x) {
-    if (!(x > 0)) { this.clock.pause(); this.speed = 0; return; }
+    if (!(x > 0)) { this.clock.pause(); return; }
     this.speed = x; this.clock.setSpeed(x); if (this.clock.paused) this.clock.play();
   }
+  // the player's own choice (buttons, keys): wins over automatic slowing, which it clears
+  manual(x) { this.manualAt = this.now(); this.slowNote = null; this.setSpeed(x); }
   pause() { this.clock.pause(); }
-  play() { this.clock.play(); if (!this.speed) this.speed = 1; this.clock.setSpeed(this.speed); }
+  play() { if (!(this.speed > 0)) this.speed = 1; this.clock.setSpeed(this.speed); this.clock.play(); }
+  toggle() { if (this.clock.paused) this.play(); else this.pause(); }
+  // an automatic action (alerts.js clockAction): pause, or slow to `to` – never faster than now
+  auto({ pause = false, slowTo = null } = {}, note = null) {
+    if (pause) { if (!this.clock.paused) { this.clock.pause(); this.slowNote = note; } return; }
+    if (slowTo != null && !this.clock.paused && this.speed > slowTo) { this.speed = slowTo; this.clock.setSpeed(slowTo); this.slowNote = note; }
+  }
   push() {
     const s0 = this.now(), snap = this.engine.snapshot(this.race);
     this.stats.snapMs += this.now() - s0;
@@ -61,9 +75,9 @@ export class GameRunner {
   }
   onEvents(ev) {
     for (const f of this.listeners) f(ev);
-    if (!this.autoSlow || this.speed <= this.autoSlow.to) return;
+    if (!this.autoSlow || this.clock.paused || this.speed <= this.autoSlow.to) return;
     const hit = ev.find((e) => this.autoSlow.match(e));
-    if (hit) { this.setSpeed(this.autoSlow.to); this.slowNote = { t: hit.t ?? this.race.state.t, type: hit.type, why: [hit.type, hit.car ? "#" + hit.car : "", typeof hit.effect === "string" ? hit.effect : typeof hit.cause === "string" ? hit.cause : hit.effect?.kind || ""].filter(Boolean).join(" ") }; }
+    if (hit) { this.speed = this.autoSlow.to; this.clock.setSpeed(this.autoSlow.to); this.slowNote = { t: hit.t ?? this.race.state.t, type: hit.type, why: [hit.type, hit.car ? "#" + hit.car : "", typeof hit.effect === "string" ? hit.effect : typeof hit.cause === "string" ? hit.cause : hit.effect?.kind || ""].filter(Boolean).join(" ") }; }
   }
   // the two snapshots around the render time (for adapter3d.frameCars)
   pair() {

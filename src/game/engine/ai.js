@@ -15,6 +15,8 @@
 // State: race.state.ai (plain JSON, saved and restored with the race). The team models (strategy.js teamModel) are
 // derived data in race.cache, rebuilt identically from the scenario + seed on load.
 import { commandAs } from "./engine.js";   // (a cycle engine ↔ ai: only called at run time, both loaded by then)
+import { kindOf } from "./commands.js";
+import { stockMap, stockOf } from "./inventory.js";
 import { teamModel, publicView, planCandidates, evaluate, scenarios, crossoverGains, freshCosts, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, lastClean, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
 import { streamFor } from "./rng.js";
 import { AI, TEAM_TENDENCY } from "../data/params/ai.js";
@@ -23,8 +25,9 @@ import { WEATHER } from "../data/params/weather.js";
 
 export const AI_STATE_VERSION = 1;
 
-// state for the teams the AI runs (all by default). userTeam: the player's team – the AI runs it too, but hands off
-// each car (by order kind) once the player has given that car an order of that kind.
+// state for the teams the AI runs (all by default). userTeam: the player's team – the AI runs it too, kind by kind
+// (pace / energy / plan) as engine.js's ownership says (state.own: an APPLIED player order takes a kind, "delegate"
+// gives it back; a refused order changes nothing – v0.50 §3-1).
 export function newAiState(race, { teams = null } = {}) {
   const S = race.state, all = [...new Set(S.cars.map((c) => c.teamKey))], run = teams || all, out = { v: AI_STATE_VERSION, teams: {}, seen: {}, lastFlag: "green", fcIssue: -1, order: S.order.slice(), passes: 0, passLaps: 0, work: { decisions: 0, events: 0 } };
   for (const team of run) {
@@ -47,7 +50,7 @@ export function aiPrePlans(race, teams = null) {
     const est = { g: 1, off: {}, lane: M.lanePrior, stintLife: {} }, view = publicView(race, team); view.lapS = ltOfMu(M, 0.95 * M.muTrack * M.pace);
     const scns = scenarios(M, est, view, "pre");
     for (const num of M.nums) {
-      const st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0 };
+      const carS = S.cars.find((c) => c.num === num), st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0, stock: carS?.sets ? Object.fromEntries(Object.entries(stockMap(carS)).map(([k, v]) => [k, v + (carS.sets.some((x) => x.state === "fitted" && x.compound === k) ? 1 : 0)])) : null };
       // (traffic from the grid: equal pace for everyone before any lap is run – what the team can say before the start)
       const tctx = prepTraffic(M, est, view, num), tctx2 = prepTraffic(M, est, view, num, { rivals: "long" });
       const ev = evaluate(M, est, st, planCandidates(M, est, st, { top: 4 }), scns);
@@ -201,7 +204,16 @@ function stintLife(M, est, total) {
   return out;
 }
 
-const touched = (race, num, kinds) => { const cs = race.state.commands; return cs.log.some((c) => c.by === "player" && c.car === num && kinds.includes(c.type)) || cs.queue.some((c) => c.by === "player" && c.car === num && kinds.includes(c.type)); };
+// does someone other than the team AI decide this kind for this car now? The ownership state (engine.js: only applied
+// orders move it); while a player order of that kind waits for its step the AI holds off too (if the engine refuses it,
+// the queue empties and the AI carries on). A race from before v0.50 without ownership: its applied player orders.
+const HOLD = { pace: ["pace", "goal", "delegate"], energy: ["energy", "goal", "delegate"], plan: ["pit", "pitCancel", "plan", "delegate"] };
+function controlled(race, num, kind) {
+  const S = race.state, own = S.own?.[num], cs = S.commands;
+  if (own) { if (own[kind] !== "ai") return true; }
+  else if (cs.log.some((c) => c.by === "player" && c.ok && c.car === num && kindOf(c.type) === kind)) return true;
+  return cs.queue.some((c) => c.by === "player" && c.car === num && HOLD[kind].includes(c.type));
+}
 function order(race, team, car, type, args) {
   const S = race.state, id = `ai:${team}:${car?.num ?? "team"}:${type}:${S.t}`;
   return commandAs(race, { id, type, car: car?.num ?? null, team, args }, "ai:" + team);
@@ -210,13 +222,13 @@ function order(race, team, car, type, args) {
 // ---------- one decision for one car ----------
 function decide(race, team, car, why) {
   const S = race.state, TS = S.ai.teams[team], cs = TS.cars[car.num], est = TS.est, M = teamModel(race, team);
-  const isUser = S.userTeam === team, handsPlan = isUser && touched(race, car.num, ["pit", "pitCancel", "plan"]);
+  const isUser = S.userTeam === team, handsPlan = isUser && controlled(race, car.num, "plan");
   if (car.where === "pit" || (car.pit.phase !== "none" && car.pit.phase !== "called") || S.control?.flag === "red") return;
   if (car.lap >= S.totalLaps - 1) return;
   if (est.lane == null) est.lane = M.lanePrior;
   est.stintLife = stintLife(M, est, S.totalLaps);
   const view = publicView(race, team, { forecast: forecastOf(race) });
-  const st = { num: car.num, lap: car.lap, total: S.totalLaps, cur: { name: car.tyre.name, age: car.tyre.laps }, used: [...new Set([...car.laps.map((l) => l.compound), car.tyre.name])], sets: 1 + car.pit.stops, fuel: car.energy.fuel };
+  const st = { num: car.num, lap: car.lap, total: S.totalLaps, cur: { name: car.tyre.name, age: car.tyre.laps }, used: [...new Set([...car.laps.map((l) => l.compound), car.tyre.name])], sets: 1 + car.pit.stops, fuel: car.energy.fuel, stock: car.sets ? stockMap(car) : null };
   const nextStop = (car.plan?.stints || []).find((x) => x.toLap > car.lap && x !== car.plan.stints[car.plan.stints.length - 1]);
   const inWindow = nextStop && nextStop.toLap - car.lap <= AI.window;
   const wetTyre = WETS.includes(car.tyre.name);
@@ -230,12 +242,12 @@ function decide(race, team, car, why) {
     const need = pitLoss(M, est, view.flag) + AI.switchDelta * (car.lap - (cs.switchLap ?? -9) < 4 ? 3 : 1);
     let best = null, bg = need;
     const gains = crossoverGains(M, est, view, car.num, { name: car.tyre.name, age: car.tyre.laps, fuel: car.energy.fuel }, { K, corr, key: `${car.num}:${car.pit.stops}:w` });
-    for (const c in gains) if (gains[c] > bg) { bg = gains[c]; best = c; }
+    for (const c in gains) if (gains[c] > bg && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) { bg = gains[c]; best = c; }
     // a stop the plan makes in the next two laps anyway: no extra stop to pay for – only the right tyre for it
     const ns = nextStopOf(car), imminent = ns && ns.toLap - car.lap <= 2;
     if (imminent && !best) {
       const fc = freshCosts(M, est, view, car.num, { K, corr, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
-      let pick = ns.compound; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta) pick = c;
+      let pick = ns.compound; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
       if (pick !== ns.compound && WETS.includes(pick) !== WETS.includes(ns.compound)) {
         const stints = [{ compound: car.tyre.name, toLap: ns.toLap }, { compound: pick, toLap: S.totalLaps }];
         order(race, team, car, "plan", { stints }); cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = ns.toLap; cs.lockLap = ns.toLap + 1;
@@ -301,7 +313,7 @@ function decide(race, team, car, why) {
     if (change && corrNow && best.stints.length > 1) {
       // wet or drying: the tyre for the plan's next stop chosen for the water expected then (the dry DP doesn't know it)
       const fc = freshCosts(M, est, view, car.num, { K: Math.min(10, S.totalLaps - car.lap - 1), corr: corrNow, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
-      const want = best.stints[1].compound; let pick = want; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta) pick = c;
+      const want = best.stints[1].compound; let pick = want; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
       if (WETS.includes(pick) !== WETS.includes(want)) best.stints[1].compound = pick;
     }
     if (change) {
@@ -317,12 +329,12 @@ function decide(race, team, car, why) {
     }
   }
   // pace: the plan's mode for this stint (the DP picked it: manage stretches a stint, attack only pays on short ones)
-  if (!(isUser && touched(race, car.num, ["pace"]))) {
+  if (!(isUser && controlled(race, car.num, "pace"))) {
     const m = cs.modes.find((x) => x.toLap > car.lap)?.mode || "balanced";
     if (car.mode.pace !== m) order(race, team, car, "pace", { mode: m });
   }
   // energy: harvest when the store is low, push when close behind a car (a pass is possible), else balanced
-  if (!(isUser && touched(race, car.num, ["energy"]))) {
+  if (!(isUser && controlled(race, car.num, "energy"))) {
     const soc = car.energy.soc / race.cache.ep.ers.socWindow, ahead = view.cars.find((c) => c.pos === view.cars.find((x) => x.num === car.num).pos - 1);
     const close = ahead && ahead.status === "run" && (view.cars.find((x) => x.num === car.num).gap - ahead.gap) < 1.0;
     const want = soc < 0.2 ? "harvest" : close && soc > 0.5 ? "push" : "balanced";
