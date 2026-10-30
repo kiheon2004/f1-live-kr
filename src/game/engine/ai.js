@@ -276,6 +276,9 @@ function decide(race, team, car, why) {
     const cur = planAsCandidate(car, st, cs.modes); if (cur) cands.push(cur);
     // weather: box now for a wet tyre / back to slicks (the reactive rule decides later laps in the scenarios)
     const scns = scenarios(M, est, view, `${car.num}:${car.pit.stops}`);   // (the same draws for the whole stint: plans compared on common scenarios don't flip on sampling noise)
+    // (under SC / VSC: "box now" only on tyres that have done AI.scMinAge laps, once per neutralisation – v0.50 §5-5)
+    const scPeriod = flag !== "green" ? `${flag}:${S.control?.sc?.t0 ?? S.control?.vsc?.t0 ?? ""}` : null;
+    if (scPeriod && (car.tyre.laps < AI.scMinAge || cs.scStop === scPeriod)) cands = cands.filter((c) => !(c.stints[0].laps === 1 && c.stints.length > 1));
     let ev = evaluate(M, est, st, cands, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap, corr: corrNow });
     if (!ev.length) return;
     // traffic over the next laps for each candidate's next stop, and the teammate's box (a queue when both come in together)
@@ -322,7 +325,7 @@ function decide(race, team, car, why) {
       cs.modes = best.stints.map((s, i) => ({ toLap: plan[i].toLap, mode: s.mode }));
       if (car.pit.phase === "called" && best.stints[0].laps > 1) order(race, team, car, "pitCancel", {});
       // under SC/VSC, box now is called directly (the plan's call would wait for this lap's line)
-      if (best.stints[0].laps === 1 && car.pit.phase === "none" && flag !== "green") order(race, team, car, "pit", { compound: best.stints[1].compound });
+      if (best.stints[0].laps === 1 && car.pit.phase === "none" && flag !== "green") { order(race, team, car, "pit", { compound: best.stints[1].compound }); cs.scStop = scPeriod; }
       TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why, plan: plan.map((x) => `${x.compound[0]}${x.toLap}`).join("-"), gain: now ? +(now.score - best.score).toFixed(1) : null, hold: +best.hold.toFixed(1),
         alts: ev.slice(0, 4).map((c) => `${c.tag === "current" ? "*" : ""}${c.stints.map((x) => x.compound[0] + x.laps).join("-")} ${(c.mean - best.mean).toFixed(1)}+${c.hold.toFixed(1)}`) });
       if (TS.decisions.length > 60) TS.decisions.shift();
