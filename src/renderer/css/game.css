@@ -52,7 +52,7 @@ body.game-on { grid-template-rows: auto 1fr; }
   .g-cmp.cmp-INTERMEDIATE { border-color: var(--tyre-i); color: var(--tyre-i); } .g-cmp.cmp-WET { border-color: var(--tyre-w); color: var(--tyre-w); }
   .g-cmp.used { border-style: dashed; }
   .cmp-bg-SOFT { --cc: var(--tyre-s); } .cmp-bg-MEDIUM { --cc: var(--tyre-m); } .cmp-bg-HARD { --cc: var(--tyre-h); } .cmp-bg-INTERMEDIATE { --cc: var(--tyre-i); } .cmp-bg-WET { --cc: var(--tyre-w); }
-  .g-empty { max-width: 760px; }
+  .g-empty { max-width: 760px; margin: var(--s-7) auto; }
   .g-note-est { color: var(--info); }
 
   /* ---------- season & team ---------- */
@@ -116,6 +116,7 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gm-drv.on em { color: var(--text-1); }
   .gm-drv:not(.on) .gm-num { opacity: 0.8; }
   .gm-sheet { background: var(--bg-1); border: var(--bw) solid var(--line); border-radius: var(--r-2); padding: 0 var(--s-6) var(--s-6); overflow: auto; max-height: calc(100vh - 190px); box-shadow: var(--shadow-float); }
+  @media (min-width: 1680px) { .gm-over { grid-template-columns: 320px minmax(0, 1fr) 340px; } .gm-act span { font-size: var(--fs-xl); } .gm-act.primary span { font-size: var(--fs-2xl); } }
   .gm-over:has(.gm-sheet) { grid-template-columns: 276px minmax(0, 1fr) min(440px, 38vw); }
   .gm-sheet-h { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; background: var(--bg-1); padding: var(--s-5) 0 var(--s-4); z-index: 1; border-bottom: var(--bw) solid var(--line-soft); margin-bottom: var(--s-4); }
   .gm-sheet-h h3 { margin: 0; font-size: var(--fs-lg); }
@@ -341,17 +342,18 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gr-card { min-width: 0; display: grid; gap: var(--s-3); padding: var(--s-3) var(--s-5) var(--s-4); border-radius: var(--r-2); background: var(--bg-1); border: var(--bw) solid var(--line); box-shadow: inset 0 2px 0 var(--tc); }
   .gr-card.sel { border-color: var(--text-3); }
   .gr-card.out { opacity: 0.72; }
-  .gc-h { display: flex; align-items: center; gap: var(--s-5); min-height: 28px; min-width: 0; }
+  .gc-h { display: flex; align-items: center; gap: var(--s-4); min-height: 28px; min-width: 0; }
+  .gc-cam { flex: none; }
   .gc-sel { display: flex; align-items: center; gap: var(--s-4); background: none; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; }
   .gc-pos { font-size: var(--fs-xl); font-weight: var(--fw-bold); min-width: 40px; }
   .gc-name { display: flex; align-items: baseline; gap: var(--s-2); } .gc-name b { font-size: var(--fs-lg); } .gc-name small { color: var(--text-3); }
   .gr-card.sel .gc-name b { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--tc); }
-  .gc-h .ui-badge { width: 92px; flex: none; justify-content: center; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 18px; text-align: center; }
+  .gc-h .ui-badge { width: 78px; flex: none; justify-content: center; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 18px; text-align: center; }
   .gc-gaps, .gc-lapt { display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-sm); }
   .gc-gaps small, .gc-lapt small, .gc-kv > small { color: var(--text-3); font-size: var(--fs-2xs); white-space: nowrap; }
   .gc-gaps b { min-width: 42px; text-align: right; font-weight: var(--fw-med); }
   .gc-lapt b { min-width: 62px; font-weight: var(--fw-med); }
-  .gc-lapt em { font-style: normal; min-width: 50px; font-size: var(--fs-xs); }
+  .gc-lapt em { font-style: normal; min-width: 46px; font-size: var(--fs-xs); }
   .gc-cam { margin-left: auto; }
   .gr-card.cam .gc-cam { color: var(--text-1); box-shadow: inset 0 0 0 1px var(--text-3); }
   .gc-stats { display: flex; align-items: center; gap: var(--s-4); min-height: 24px; font-size: var(--fs-sm); flex-wrap: nowrap; overflow: hidden; }

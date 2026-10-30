@@ -95,7 +95,7 @@ function card(e) {
         <span class="ui-meter" data-f="lifeM"><i><em data-f="lifebar"></em></i></span><b class="num" data-f="life">–</b><span class="ui-badge" data-f="temp"></span></span>
       <span class="gc-kv" title="연료: 이 차가 지금까지 쓴 양으로 추정한 완주 여유 (게임 추정)"><small>연료 여유</small><b class="num" data-f="fuel">–</b></span>
       <span class="gc-kv" title="배터리 충전 상태"><small>배터리</small><span class="ui-meter" data-f="socM"><i><em data-f="socbar"></em></i></span><b class="num" data-f="soc">–</b></span>
-      <span class="gc-kv" title="계획의 다음 피트"><small>다음 피트</small><b data-f="next">–</b></span>
+      <span class="gc-kv" title="계획의 다음 피트 (랩 · 타이어)"><small>다음</small><b data-f="next">–</b></span>
     </div>
     <div class="gc-ctl">
       <span class="gc-grp"><small>페이스<em data-f="ownPace"></em></small>${seg("pace", PACE.slice().sort((a, b) => PACE_ORDER.indexOf(a) - PACE_ORDER.indexOf(b)), PACE_KO)}</span>
