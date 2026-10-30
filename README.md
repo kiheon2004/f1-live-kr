@@ -7,16 +7,16 @@
 **F1 세션을 한국어로 보는 데스크톱 앱**<br>
 다시보기·실시간 타이밍 · 실제 지도 3D 서킷 · 싱글플레이 전략 게임
 
-![version](https://img.shields.io/badge/version-0.49.0-e10600?style=flat-square)
+![version](https://img.shields.io/badge/version-0.50.0-e10600?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)
 ![electron](https://img.shields.io/badge/Electron-44-47848F?style=flat-square&logo=electron&logoColor=white)
 ![three.js](https://img.shields.io/badge/three.js-r186-000000?style=flat-square&logo=threedotjs&logoColor=white)
-![tests](https://img.shields.io/badge/tests-821%20passing-2ea44f?style=flat-square)
+![tests](https://img.shields.io/badge/tests-870%20passing-2ea44f?style=flat-square)
 ![unofficial](https://img.shields.io/badge/비공식-개인용-555555?style=flat-square)
 
 [주요 기능](#-주요-기능) · [화면](#-화면) · [시작하기](#-시작하기) · [사용법](#-사용법) · [전략 게임](#-전략-게임) · [변경 기록](CHANGELOG.md)
 
-<img src="docs/images/hero.jpg" alt="헝가리 그랑프리 2025 결승 다시보기: 한국어 순위표, 3D 추적 카메라, 드라이버 텔레메트리" width="100%">
+<img src="docs/images/hero.jpg" alt="헝가리 그랑프리 2025 결승 다시보기: 한국어 순위표와 3D 관전 화면" width="100%">
 
 </div>
 
@@ -32,7 +32,7 @@
 | 🇰🇷 | **한국어 타이밍** | 순위·간격·섹터·미니 섹터·타이어·피트를 한국어로, 레이스 컨트롤 메시지는 번역과 원문을 함께 |
 | ⏪ | **다시보기** | 지난 세션을 1~30배속으로 재생하고 원하는 장면으로 이동 |
 | 📡 | **실시간** | 경기 중 연결, 중계 지연(0~10분)을 맞춰 TV보다 먼저 결과가 보이지 않게 |
-| 🗺️ | **3D 서킷** | 위성 사진·지형·건물·관중석·피트레인까지 실제 위치에 그린 서킷 위에서 헬기·추적·온보드·1인칭 시점 |
+| 🗺️ | **3D 관전** | 실제 위치에 그린 서킷 위에서 헬기·추적·온보드·1인칭 시점, 편집할 수 있는 관전 HUD(관전·분석·최소 프리셋) |
 | 📊 | **분석** | 텔레메트리, 스틴트 페이스, 타이어 전략, 갭 차트, 피트 복귀 예상, 챔피언십 예상 |
 | 🏁 | **전략 게임** | 실제 팀을 골라 두 드라이버의 전략과 피트 스톱을 직접 운영 |
 
@@ -88,20 +88,24 @@
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/map2d.jpg" alt="2D 트랙맵"><br><sub><b>2D 트랙맵</b> · 코너 번호와 차량 위치</sub></td>
-    <td width="50%"><img src="docs/images/grid3d.jpg" alt="3D 출발 그리드"><br><sub><b>3D 출발 그리드</b> · 헝가로링, 실제 그리드 위치</sub></td>
+    <td width="50%"><img src="docs/images/map2d.jpg" alt="2D 트랙맵"><br><sub><b>라이브타이밍</b> · 순위표와 2D 트랙맵, 텔레메트리</sub></td>
+    <td width="50%"><img src="docs/images/monaco.jpg" alt="3D 관전 화면"><br><sub><b>3D 관전</b> · 순위 타워·세션 바·드라이버 카드 (편집 가능한 HUD)</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/images/cockpit.jpg" alt="1인칭 시점"><br><sub><b>1인칭</b> · 모나코, 스티어링 휠 화면과 장갑</sub></td>
-    <td><img src="docs/images/monaco.jpg" alt="모나코 항구"><br><sub><b>모나코 항구</b> · 지형, 건물, 요트</sub></td>
+    <td><img src="docs/images/cockpit.jpg" alt="1인칭 시점"><br><sub><b>1인칭</b> · 모나코, HUD가 스티어링휠과 미러를 피해 배치</sub></td>
+    <td><img src="docs/images/grid3d.jpg" alt="모나코 출발 그리드"><br><sub><b>3D 출발 그리드</b> · 모나코, 실제 그리드 위치</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/images/home.jpg" alt="홈 화면"><br><sub><b>홈</b> · 시즌 지구본과 한국 시간 일정</sub></td>
+    <td><img src="docs/images/home.jpg" alt="홈 화면"><br><sub><b>홈</b> · 시즌 지구본, 개최·데이터 상태</sub></td>
     <td><img src="docs/images/game_garage.jpg" alt="전략 게임 차고 메뉴"><br><sub><b>전략 게임</b> · 3D 차고 메뉴</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/images/game_plan.jpg" alt="출발 전 전략 편집"><br><sub><b>전략 게임</b> · 출발 전 전략 편집</sub></td>
+    <td><img src="docs/images/game_plan.jpg" alt="출발 전 전략 편집"><br><sub><b>전략 게임</b> · 두 드라이버 공통 랩 축 전략 편집</sub></td>
+    <td><img src="docs/images/game_race.jpg" alt="레이스 운영 화면"><br><sub><b>전략 게임</b> · 레이스 운영 (두 드라이버 패널)</sub></td>
+  </tr>
+  <tr>
     <td><img src="docs/images/game_pit.jpg" alt="피트 스톱"><br><sub><b>전략 게임</b> · 피트 카메라와 크루</sub></td>
+    <td><img src="docs/images/game_results.jpg" alt="게임 결과"><br><sub><b>전략 게임</b> · 결과와 전략 분석</sub></td>
   </tr>
 </table>
 
@@ -170,7 +174,11 @@ npm test          # 테스트
 - **팀 선택 → 3D 차고 → 전략 편집 → 경기 → 결과** 순서로 진행합니다.
 - 실제 경기의 랩 수와 참가 명단을 쓰고, 같은 시드는 언제나 같은 경기를 만듭니다(결정론적 엔진).
 - 트래픽, 피트 스톱, 날씨, 세이프티카와 레이스 컨트롤, 규정, 사고를 계산합니다. 다른 팀은 AI가 운영합니다.
-- 경기 중에는 피트 호출과 취소, 타이어 선택, 페이스 모드, 팀 지시를 내립니다. 명령마다 대기·적용·거절과 그 이유가 표시됩니다.
+- **목표 중심 운영:** 페이스·에너지를 직접 고르거나 "앞차 압박 / 뒤차 방어 / 타이어 관리 / 에너지 비축" 같은 목표를 주면 엔진이 같은 규칙으로 지시를 만듭니다(보너스 없음). 언제든 "AI에 맡기기"로 되돌릴 수 있습니다.
+- **경기 중 전략 편집:** 두 드라이버의 남은 스틴트를 같은 랩 축에서 고치고 "적용"할 때만 반영됩니다. 지금 / 1랩 뒤 / 2랩 뒤 / 계획 유지를 손실 범위·복귀 순위 범위·교통·팀 동료 대기 위험과 함께 비교합니다.
+- **타이어 세트 재고:** 드라이버별 세트를 관리합니다(실제 주말 재고 자료가 없어 게임용 가정 배정으로 표시).
+- 타이어 표면·코어 온도, 마모와 남은 상태, 배터리·연료 여유를 원인과 함께 보여주고, 계산하지 않은 "몇 초 이득"은 표시하지 않습니다.
+- 고배속 중 중요한 순간(내 피트 윈도, 비 예보 변화, SC/VSC, 손상 등)에 알림·감속·일시정지를 고를 수 있습니다.
 - 받아 둔 다시보기 세션으로 새 경기를 앱 안에서 준비할 수 있습니다. 저장 슬롯, 자동 저장, 앱을 다시 켠 뒤 이어하기를 지원합니다.
 - 화폐, 상자, 시즌 패스 같은 과금 요소는 없습니다.
 
@@ -241,6 +249,11 @@ src/
 | Google Map Tiles API (선택) | 고해상도 위성 사진. 사용자 본인 API 키, 디스크에 저장하지 않음 |
 
 지도와 위성 사진의 출처는 앱 화면에도 표시합니다.
+
+| 글꼴·아이콘 | 사용 조건 |
+|---|---|
+| [Pretendard](https://github.com/orioncactus/pretendard) (앱에 포함) | SIL Open Font License 1.1 – `src/renderer/fonts/PRETENDARD-LICENSE.txt` |
+| [Lucide](https://lucide.dev) 아이콘 일부 (앱에 포함) | ISC – `src/renderer/ICONS-LICENSE.txt` |
 
 ## ⚖️ 고지
 
