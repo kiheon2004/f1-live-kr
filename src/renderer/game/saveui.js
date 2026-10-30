@@ -134,9 +134,16 @@ export async function saveNow(slot, { quiet = false } = {}) {
   const m = endSave(G, tok, r?.ok !== false);
   if (m.stale) return { ...(r || {}), stale: true };   // (an earlier race's answer: nothing of this race changes)
   if (m.marked) { G.saveNote = { ok: true, text: `${SLOT_KO[slot] || slot}에 저장 · ${data.lap}/${data.totalLaps}랩${m.behind && G.run?.paused ? " · 저장 뒤 바뀐 내용은 아직 저장 안 됨" : ""}` }; S.saves = null; S.savesAt = 0; }
-  else G.saveNote = { ok: false, text: `저장 실패: ${r?.why || "?"} – 다시 저장해 주세요` };
+  else G.saveNote = { ok: false, text: `저장 실패: ${saveWhyKo(r?.why)} – 다시 저장해 주세요` };
   if (!quiet || r?.ok === false) paint();
   return r;
+}
+// a store failure in plain words (the IPC wrapper's English and the OS code are not for the player; the code is kept)
+export function saveWhyKo(why) {
+  const s = String(why || "").replace(/^Error invoking remote method '[^']+': /, "").replace(/^Error: /, "");
+  const code = /\b(E[A-Z]{3,})\b/.exec(s)?.[1];
+  const ko = { EACCES: "저장 폴더에 쓸 권한이 없어요", EPERM: "저장 폴더에 쓸 권한이 없어요", ENOSPC: "디스크 공간이 부족해요", EROFS: "저장 위치가 읽기 전용이에요", ENOENT: "저장 폴더를 찾을 수 없어요" }[code];
+  return ko ? `${ko} (${code})` : s.slice(0, 120) || "알 수 없는 오류";
 }
 // the scenario's fingerprint (FNV-1a over its content without the build time): a re-prepared race with the same content
 // keeps it; a different content (new data, a changed builder) changes it – checked on load, never trusted from builtAt alone
