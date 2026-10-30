@@ -34,6 +34,7 @@ import { streamFor } from "./rng.js";
 import { COMPOUNDS, TYRE_THERMAL as TH } from "../data/params/tyres.js";
 import { PACE_MODES, DRIVER_DEFAULT, UTIL_MAX } from "../data/params/drivers.js";
 import { PIT } from "../data/params/pit.js";
+import { ALLOC as INV_ALLOC } from "./inventory.js";
 import { WEATHER } from "../data/params/weather.js";
 import { airDensity } from "../data/params/physics.js";
 import { AI } from "../data/params/ai.js";
@@ -245,6 +246,8 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
       if (ms.length > R - 1) continue;
       const used = [...(st.used || []), f.name, ...ms], sets = (st.sets || (st.cur ? 1 : 0)) + (st.cur ? 0 : 1) + ms.length;
       if (!ruleOk(M.rule, used, sets)) continue;
+      // the sets in hand (inventory.js; v0.50): pre-race the first stint takes one too; a plan needing more is not a plan
+      if (st.stock && !fitsStock(st.stock, st.cur ? ms : [f.name, ...ms])) continue;
       // g(r): best cost of the fresh stints ms over r laps (min-convolution), with arg tables to rebuild
       let g = new Float64Array(R + 1).fill(BIG); g[0] = 0; const args = [];
       for (const c of ms) {
@@ -276,6 +279,7 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
 }
 
 // stints → the engine's plan order: [{ compound, toLap }] (toLap = in-lap of each stop; last = total)
+const fitsStock = (stock, list) => { const need = {}; for (const c of list) need[c] = (need[c] || 0) + 1; for (const c in need) if (need[c] > (stock[c] || 0)) return false; return true; };
 export function toPlan(st, cand) {
   let lap = st.lap; const stints = [];
   for (const s of cand.stints) { lap += s.laps; stints.push({ compound: s.compound, toLap: lap }); }
@@ -500,7 +504,8 @@ export function preRaceStrategy(race, team, { top = 4, start = {} } = {}) {
   const scns = scenarios(M, est, view, "pre");
   const firstStop = [];
   const cars = M.nums.map((num, i) => {
-    const st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0 };
+    const carS = S.cars.find((c) => c.num === num), stock = {}; for (const x of carS?.sets || []) stock[x.compound] = (stock[x.compound] || 0) + 1;   // (pre-race: every set of the allocation)
+    const st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0, stock: carS?.sets ? stock : null };
     let cands = evaluate(M, est, st, planCandidates(M, est, st, { top: 10 }).filter((c) => !start[num] || c.stints[0].compound === start[num]), scns);
     // the second car: the same first in-lap as its teammate costs it a queue behind the teammate's stop (cars close on
     // the grid run close early on) – the same plan a lap either side is offered and scored with that
@@ -534,6 +539,10 @@ export function preRaceStrategy(race, team, { top = 4, start = {} } = {}) {
     pitLoss: { s: +loss.toFixed(1), sc: +pitLoss(M, est, "sc").toFixed(1), vsc: +pitLoss(M, est, "vsc").toFixed(1), lane: +M.lanePrior.toFixed(1), freeStretch: +M.refPit.toFixed(1), stationary: PIT.workBase.v,
       text: `피트레인 약 ${M.lanePrior.toFixed(1)}초(정차 ${PIT.workBase.v}초 포함) − 같은 구간 본선 ${M.refPit.toFixed(1)}초 = 손실 약 ${loss.toFixed(1)}초 (SC 중 약 ${pitLoss(M, est, "sc").toFixed(1)}초)` },
     rule: { ...M.rule, compounds: M.av.dry, compoundSource: M.av.source },
+    // the tyre sets each car has (inventory.js – the game's assumed allocation, never the real weekend's)
+    inventory: { est: INV_ALLOC.est, source: INV_ALLOC.source, cars: Object.fromEntries(M.nums.map((n) => [n, (S.cars.find((c) => c.num === n)?.sets || []).map((x) => ({ id: x.id, compound: x.compound, used: x.used, laps: x.laps, wear: x.wear }))])) },
+    // what the estimate leaves out (shown with it): the energy modes are not in the stint model (pace modes are)
+    limits: ["에너지 모드(회수·사용)의 효과는 이 예상에 들어 있지 않아요 – 페이스 모드만 반영", "교통·세이프티카·사고는 확률적 범위로만 반영돼요"],
     cars, conflicts,
     compare: cars.length === 2 && cars[0].best && cars[1].best ? { diffS: +(cars[1].best.mean - cars[0].best.mean).toFixed(1), same: cars[0].best.key === cars[1].best.key } : null };
 }
