@@ -159,7 +159,7 @@ export default {
                 fullPowerUpToKmh: { withOvertake: 337.5, without: 290 } },
       notTheWings: true },
     { ...b("B7.2.1b ii/v/vii–ix, B7.2.2, B7.2.3"), also: c("C5.2.8 ii, C5.2.10 iii") },
-    { implPartial: "engine/control.js overtakeModeAllowed: availability only (leader past the Detection Line, off under SC until all crossed the Line, low grip) – the detection gap and the power curve are the energy model's", note: "fullPowerUpToKmh is arithmetic on C5.2.8 (350 kW cap): 1800−5v=350 → v=290; 7100−20v=350 → v=337.5. The FIA may adjust the curves per circuit (B7.2.1b i–ii)." }),
+    { implNoteVsc: "the game also turns Overtake off under VSC and local yellows (a race-control practice choice; B7.2.2 lists SC, low grip and the Race Director's decision)", implPartial: "engine/control.js overtakeModeAllowed: availability only (leader past the Detection Line, off under SC until all crossed the Line, low grip) – the detection gap and the power curve are the energy model's", note: "fullPowerUpToKmh is arithmetic on C5.2.8 (350 kW cap): 1800−5v=350 → v=290; 7100−20v=350 → v=337.5. The FIA may adjust the curves per circuit (B7.2.1b i–ii)." }),
 
   // ---------- power unit / energy ----------
   ers: R({ mguKMaxKw: 350, mguKMaxNm: 500, mguH: null, socWindowMJ: 4,
@@ -168,7 +168,13 @@ export default {
       powerRampDown: "driver max power demand may not drop >150 kW at the start of a power-limited period (fixed ≥1 s), nor faster than 50 kW/s (power-limited distance >3500 m) or 100 kW/s, total ≤700 kW (exceptions per circuit)",
       lap: "lap line to line; on pit entry the lap ends at the start of the pit lane", efficiencyCorrection: 0.97 },
     c("C5.2.7–C5.2.10, C5.2.21, C5.12.4–C5.12.7, energy-flow diagram p.63"),
-    { note: "per-event recharge limits and power-curve adjustments come in the FIA's per-competition document (B7.2.1b, B7.2.1d)" }),
+    { note: "per-event recharge limits and power-curve adjustments come in the FIA's per-competition document (B7.2.1b, B7.2.1d)",
+      implPartial: "engine/energy.js ersCap: 350 kW, the 4 MJ window, 8.5 MJ recharge, both segments of the normal speed cap (v0.50: 6900 − 20·v at 340–345 added), the Overtake curve",
+      notImplemented: ["C5.2.8 iii: 250 kW below 310 km/h on FIA-specified sectors during power-limited periods (the per-event sector list is not public)",
+        "C5.12.4–C5.12.7: power ramp-down limits and the driver's Boost exception",
+        "C5.2.10: partial-load harvest – the game's 2026 car recharges from braking only, so it may reach less SoC than a real car on low-braking circuits",
+        "Boost as its own mode: the game's 'push' energy mode is the closest (maximum deployment); 'overtake' uses the Overtake curve only when eligible"],
+      sources: "v050/research/energy_rules.md (SR/TR 2025, B26 Iss 09, C26 Iss 21, read 2026-10-30)" }),
   fuel: R({ maxEnergyFlowMJh: 3000, perCylinderMaxMJh: 550, below10500rpm: "EF(MJ/h) = 0.27·N(rpm) + 165",
       partLoad: "EF = 380 at ≤ −50 kW, else 9.78·P(kW) + 869", sustainable: "advanced sustainable components; GHG savings ≥ EU RED transport threshold (C16)",
       raceFuelCapKg: null, refuelInRace: false }, c("C5.2.3–C5.2.6, C16.1–C16.3"),
