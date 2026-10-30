@@ -461,7 +461,9 @@ body.game-on { grid-template-rows: auto 1fr; }
   .ga-rules { display: grid; }
   .ga-rule { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); padding: var(--s-3) 0; border-bottom: var(--bw) solid var(--line-soft); }
   .ga-rule > span { display: grid; gap: var(--s-1); }
-  .ga-rule > span > b { font-weight: var(--fw-med); }
+  .ga-name { display: flex; align-items: center; gap: var(--s-3); }
+  .ga-name b { font-weight: var(--fw-med); }
+  .ga-rules.off .ui-select { color: var(--text-2); }
   .ga-rule small { color: var(--text-2); font-size: var(--fs-xs); }
   .ga-rule .ui-select { min-height: var(--ctl-h-sm); font-size: var(--fs-sm); max-width: 150px; }
 

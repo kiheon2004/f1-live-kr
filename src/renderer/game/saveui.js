@@ -187,21 +187,37 @@ export function historyFor(sid) {
 // ---------- the modal (leave prompt / save slots in the race) ----------
 export function leavePrompt(to) { G.modal = { kind: "leave", to }; paintModal(); }
 export function savePrompt() { G.modal = { kind: "save" }; if (!S.saves) refreshSaves(); paintModal(); }
+// The dialog keeps the focus inside while open (Tab cycles its buttons), Escape is "계속하기 / 닫기", and the focus goes
+// back to what had it before (the 저장 button, usually) when it closes.
+let modalReturn = null;
+function modalKeys(e) {
+  const el = $("gModal"); if (!el) return;
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); G.modal = null; paintModal(); return; }
+  if (e.key !== "Tab") return;
+  const f = [...el.querySelectorAll("button:not(:disabled), select, input")]; if (!f.length) return;
+  const i = f.indexOf(document.activeElement);
+  if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+}
 export function paintModal() {
   let el = $("gModal");
-  if (!G.modal) { if (el) el.remove(); return; }
-  if (!el) { el = document.createElement("div"); el.id = "gModal"; el.className = "g-modal"; $("game").appendChild(el); }
+  if (!G.modal) { if (el) { el.remove(); const r = modalReturn; modalReturn = null; if (r?.isConnected) r.focus(); } return; }
+  const fresh = !el;
+  if (!el) { modalReturn = document.activeElement; el = document.createElement("div"); el.id = "gModal"; el.className = "g-modal"; el.addEventListener("keydown", modalKeys); $("game").appendChild(el); }
+  queueMicrotask(() => { if (fresh || !el.contains(document.activeElement)) el.querySelector(".g-modal-box button")?.focus(); });
   const m = G.modal;
+  let html = "";
   if (m.kind === "leave") {
-    el.innerHTML = `<div class="g-modal-box" role="dialog" aria-modal="true" aria-labelledby="gModalT"><h3 id="gModalT">진행 중인 경기를 저장할까요?</h3>
+    html = `<div class="g-modal-box" role="dialog" aria-modal="true" aria-labelledby="gModalT"><h3 id="gModalT">진행 중인 경기를 저장할까요?</h3>
       <p>마지막 저장 뒤에 진행한 내용이 있어요. ${m.to === "live" ? "라이브 타이밍으로 나가면" : "메뉴로 나가면"} 이 경기는 닫혀요.</p>
       <div class="g-row"><button class="ui-btn primary" data-act="save:leaveSave">저장하고 나가기 <small>(${SLOT_KO.auto})</small></button><button class="ui-btn" data-act="save:leaveNoSave">저장하지 않고 나가기</button><button class="ui-btn ghost" data-act="save:stay">계속하기</button></div></div>`;
   } else if (m.kind === "save") {
     const by = new Map((S.saves || []).map((s) => [s.slot, s]));
-    el.innerHTML = `<div class="g-modal-box" role="dialog" aria-modal="true" aria-labelledby="gModalT"><h3 id="gModalT">경기 저장</h3>
+    html = `<div class="g-modal-box" role="dialog" aria-modal="true" aria-labelledby="gModalT"><h3 id="gModalT">경기 저장</h3>
       <div class="g-slots">${SLOTS.filter(([k]) => k !== "auto").map(([slot, name]) => { const s = by.get(slot); return `<button class="g-slot-pick" data-act="save:saveTo" data-slot="${slot}"><b>${name}</b><small>${s ? `덮어쓰기 – ${esc(raceKo(s.event || s.scenarioId))} ${s.lap ?? "?"}랩 · ${when(s.savedAt)}` : S.saves ? "비어 있음" : "확인 중…"}</small></button>`; }).join("")}</div>
       <div class="g-row"><button class="ui-btn ghost" data-act="save:stay">닫기</button></div></div>`;
   }
+  // (rewritten only when it changed: a repaint must not take the focus off the button the player tabbed to)
+  if (el._h !== html) { const had = el.contains(document.activeElement) ? document.activeElement.dataset?.slot || document.activeElement.dataset?.act : null; el._h = html; el.innerHTML = html; if (had) (el.querySelector(`[data-slot="${had}"]`) || el.querySelector(`[data-act="${had}"]`))?.focus(); }
 }
 
 // ---------- actions ----------

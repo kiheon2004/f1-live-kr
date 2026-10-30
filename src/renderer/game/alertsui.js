@@ -33,12 +33,12 @@ export function settingsHtml({ compact = false } = {}) {
   const S = G.settings;
   const rows = Object.entries(RULES).map(([k, r]) => {
     const cur = actionOf(k), opts = k === "myPit" ? ["off", "note", "scene", "slow", "pause"] : ACTIONS;
-    return `<label class="ga-rule"><span><b>${RULE_KO[k] || k}</b> <span class="ui-badge ${r.level >= 3 ? "bad" : r.level >= 2 ? "warn" : ""}">${LEVEL_KO[r.level] || ""}</span>${compact ? "" : `<small>${esc(RULE_HELP[k] || "")} · ${cool(r.cooldownMs)}</small>`}</span>
+    return `<label class="ga-rule"><span><span class="ga-name"><b>${RULE_KO[k] || k}</b><span class="ui-badge ${r.level >= 3 ? "bad" : r.level >= 2 ? "warn" : ""}">${LEVEL_KO[r.level] || ""}</span></span>${compact ? "" : `<small>${esc(RULE_HELP[k] || "")} · ${cool(r.cooldownMs)}</small>`}</span>
       <select class="ui-select" data-chg="alerts:rule" data-k="${k}" aria-label="${esc(RULE_KO[k] || k)}">${opts.map((a) => `<option value="${a}" ${a === cur ? "selected" : ""}>${ACTION_KO[a]}</option>`).join("")}</select></label>`;
   }).join("");
   return `<div class="ga-set">
     <label class="gm-set"><input type="checkbox" data-chg="alerts:master" ${S.autoSlow ? "checked" : ""}><span><b>중요한 순간에 배속 조절</b><small>${S.autoSlow ? "켜짐 – 아래에서 고른 대로 1배속 또는 일시정지" : "꺼짐 – 고른 순간은 알림만 보여요"} · 화면만 바뀌고 경기 계산은 같아요 · 직접 바꾼 배속이 우선</small></span></label>
-    <div class="ga-rules">${rows}</div></div>`;
+    <div class="ga-rules ${S.autoSlow ? "" : "off"}">${rows}</div>${S.autoSlow ? "" : `<p class="muted gd-small">배속 조절이 꺼져 있어 '1배속으로'·'일시정지'도 지금은 알림만 보여요.</p>`}</div>`;
 }
 export function onChange(act, t) {
   if (act === "master") { G.settings.autoSlow = !!t.checked; saveSettings(); repaint(); return; }

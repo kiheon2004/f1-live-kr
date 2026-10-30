@@ -329,5 +329,6 @@ window.GameDev = {
   // (development only: the result screen without a full race – NEVER evidence of a finished race; see reports/ui.md)
   finish: () => { if (G.run) finishRace(); return "finished (forced)"; },
   get runner() { return G.run; },
+  hud: () => JSON.stringify(Hud.hudCosts?.() || null),
   workerProbe: (n = 200) => import("./devprobe.js").then((m) => m.workerProbe(G, n)),
 };

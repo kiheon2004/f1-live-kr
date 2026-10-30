@@ -53,7 +53,7 @@ export function build() {
       <div class="gr-clock"><small>경기 시각</small><b class="num" id="grClock">–</b></div>
       <div class="gr-speedbox">
         <div class="ui-seg gr-speeds" role="group" aria-label="배속">${SPEEDS.map((x) => `<button data-act="hud:speed" data-v="${x}" title="${x ? x + "배속" : "일시정지 (Space)"}">${x ? x + "×" : "❚❚"}</button>`).join("")}</div>
-        <span class="gr-ach num" id="grAch"></span>
+        <span class="gr-ach num" id="grAch"><small id="grAchL">실제</small> <b id="grAchV">–</b></span>
       </div>
       <span class="gr-auto" id="grAuto"></span>
       <span class="gr-gap"></span>
@@ -118,7 +118,8 @@ function card(e) {
 }
 
 const f = (root, k) => root.querySelector(`[data-f="${k}"]`);
-const setT = (el, s) => { if (el && el.textContent !== s) { el.textContent = s; H.costs.writes++; } };
+// (a text already there is changed in place – its node's data – rather than replaced: no node churn for the tower's gaps)
+const setT = (el, s) => { if (!el || el.textContent === s) return; const n = el.firstChild; if (n && n.nodeType === 3 && el.childNodes.length === 1 && s) n.data = s; else el.textContent = s; H.costs.writes++; };
 const setH = (el, s) => { if (el && el._h !== s) { el._h = s; el.innerHTML = s; H.costs.writes++; } };
 const setC = (el, cls) => { if (el && el.className !== cls) el.className = cls; };
 const setW = (el, frac) => { if (!el) return; const w = `${Math.round(Math.max(0, Math.min(1, frac ?? 0)) * 100)}%`; if (el.style.width !== w) el.style.width = w; };
@@ -137,7 +138,8 @@ export function paint() {
   const w = snap.weather || {};
   setH($("grWx"), `${w.airT != null ? `<span>기온 <b class="num">${Math.round(w.airT)}°</b></span>` : ""}${w.trackT != null ? `<span>노면 <b class="num">${Math.round(w.trackT)}°</b></span>` : ""}<span>${w.rain > 0.05 ? `<b class="rain">비</b>` : "건조"}${w.water > 0.05 ? ` · 물 ${w.water.toFixed(1)}mm` : w.water > 0.005 ? " · 젖음" : ""}</span>`);
   setT($("grClock"), fmtT(T));
-  setH($("grAch"), R.paused ? `<b>일시정지</b>` : `실제 <b class="${R.behind ? "bad" : ""}">${R.achieved.toFixed(1)}×</b>`);
+  // (the achieved speed: two text nodes updated in place – no markup rebuilt 5× a second)
+  setT($("grAchL"), R.paused ? "" : "실제"); setT($("grAchV"), R.paused ? "일시정지" : `${R.achieved.toFixed(1)}×`); setC($("grAchV"), R.behind && !R.paused ? "bad" : "");
   setH($("grAuto"), R.slowNote ? `<span class="ui-badge warn" title="${esc(R.slowNote.why || "")}">${R.slowNote.action === "pause" ? "자동 정지" : "자동 감속"} · ${esc(String(R.slowNote.why || "").slice(0, 26))}</span>` : R.behind ? `<span class="ui-badge sc" title="계산이 따라가지 못해 실제로 낼 수 있는 배속으로 진행 중">계산 한계</span>` : "");
   const req = R.paused ? 0 : R.speed;
   // (paused: the pause button is pressed and the speed it resumes at is marked "held")
@@ -159,7 +161,11 @@ export function paint() {
   if (pitCar) pitPanel(pitEl, pitCar, T, snap); else if (!pitEl.hidden) pitEl.hidden = true;
   // ---- notices (alerts.js via gamehome: G.notices) ----
   paintToasts();
-  const note = $("grNote"); if (G.saveNote) { note.hidden = false; note.className = `gr-note ${G.saveNote.ok ? "" : "bad"}`; setT(note, G.saveNote.text); } else note.hidden = true;
+  // (the save note for 6 s after it changes – a failure stays until the next save)
+  const note = $("grNote"), sn = G.saveNote;
+  if (sn && sn !== H.note) { H.note = sn; H.noteAt = performance.now(); }
+  const showNote = sn && (!sn.ok || performance.now() - (H.noteAt || 0) < 6000);
+  if (showNote) { note.hidden = false; note.className = `gr-note ${sn.ok ? "" : "bad"}`; setT(note, sn.text); } else if (!note.hidden) note.hidden = true;
   // ---- the dock (1 Hz, or at once after an order) ----
   if (H.n % 5 === 0 || H.ordersDirty) Dock.paint(snap, T, { fuel: H.fuel });
   H.ordersDirty = false;

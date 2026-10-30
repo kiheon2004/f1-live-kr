@@ -1,15 +1,18 @@
-// The game's main menu (request §10): the player's team in its garage – the 3D menu garage (menugarage.js, the kit's
-// scene) fills the screen; the menu sits in a narrow column on the left and the two drivers' cards on the right, so the
-// car in the middle is never behind a button. Landscape desktop layout; no currency, boxes or passes.
+// The game's main menu (v0.50 request §9-1): the player's team in its garage – the 3D menu garage (menugarage.js) fills
+// the screen and the car is the hero; the menu is a narrow column on the left, the race's two drivers on the right, and
+// the car is framed in the free middle (the safe area is MEASURED from the laid-out DOM – it changes with the window and
+// when a side sheet opens – and handed to the scene's setSafe()).
+//
+// The main actions first: 이어하기 (the latest save) and 레이스 준비 (the chosen race's strategy screen); the one that fits
+// is the primary action – a save exists → 이어하기, none → 레이스 준비. The rest (race choice, saves, driver info,
+// records, settings) is a quiet secondary list; the exit is last.
 //
 // Which drivers: the entry list of ONE prepared race (the chosen one, else the team's latest prepared race of the
-// season) – said on screen ("참가 명단 기준"), since a team's drivers change during a season.
+// season) – said on screen ("이 경기 기준"); never the season's other drivers (a team's line-up changes during a season).
 //
-// The 3D garage: the kit's menugarage.js – show({ season, teamKey, team, colour, entries, focusNum, date, host, safeLeft })
-// / setFocus(num) / setMotion("auto"|"on"|"off") / setSafeLeft(f) / hide() / dispose(). Until that module is in this
-// build (or if it fails) the menu works over a flat team-colour backdrop – the hook below is the only place that knows
-// about the scene. safeLeft: the share of the width the menu column covers (the scene frames the car in the rest);
-// safeRight (the driver cards' column) is passed too, for when the scene takes it.
+// Loading: the menu's own DOM and a readable loading line (team, car number) are painted BEFORE the room is built – the
+// build and shader compile hold the main thread for a moment and the screen must not be blank meanwhile. The scene's
+// quality (high: floor reflection / medium / low) is the menu's own budget (settings: 차고 화질).
 import { G, go, paint, seasons, teamsOf, racesOf, menuRace, toPrerace, saveSettings, autoSlowRule, applyRacePrefs } from "./gamehome.js";
 import { $, esc, teamKo, raceKo, fmtT } from "./ui.js";
 import { safeFrac } from "./hudmodel.js";
