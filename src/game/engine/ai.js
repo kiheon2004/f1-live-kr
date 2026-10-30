@@ -322,7 +322,18 @@ function decide(race, team, car, why) {
     }
     ev.sort((a, b) => a.score - b.score);
     const best = ev[0], now = cur ? ev.find((c) => c.tag === "current") : null;
-    const change = best && (!now || (best.tag !== "current" && best.score < now.score - TS.tend.hyst));
+    // (against flip-flopping – v0.50 §5-5, seen by the game helper: Hungary seed 1 LEC re-planned S49·S → S50·M → S49·S on
+    // laps 44–48): a plan the team dropped in the last AI.revertLaps laps, or the same tyres with a stop moved by a lap or
+    // two, needs a larger gain than the team's usual hysteresis
+    const keyOf = (c) => { const pl = toPlan(st, c); return pl.map((x) => x.compound[0] + x.toLap).join("-"); }, shape = (c) => c.stints.map((x) => x.compound[0]).join("");
+    let need = TS.tend.hyst;
+    if (best && now && best.tag !== "current") {
+      const k = keyOf(best);
+      if ((cs.dropped || []).some((d) => d.key === k && car.lap - d.lap <= AI.revertLaps)) need = TS.tend.hyst * AI.revertK;
+      else if (shape(best) === shape(now) && best.stints.length > 1 && Math.abs(best.stints[0].laps - now.stints[0].laps) <= 2) need = TS.tend.hyst * AI.tweakK;
+    }
+    const change = best && (!now || (best.tag !== "current" && best.score < now.score - need));
+    if (change && now) { (cs.dropped ||= []).push({ key: keyOf(now), lap: car.lap }); if (cs.dropped.length > 6) cs.dropped.shift(); }
     const run = change ? best : now; if (run) { cs.predHold = +(run.hold1 / kHold).toFixed(3); cs.predLap = car.lap + 1; }
     if (change && corrNow && best.stints.length > 1) {
       // wet or drying: the tyre for the plan's next stop chosen for the water expected then (the dry DP doesn't know it)
