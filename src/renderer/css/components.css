@@ -39,6 +39,10 @@
 .ui-tabs > button[aria-selected="true"] { color: var(--text-1); }
 .ui-tabs > button[aria-selected="true"]::after { content: ""; position: absolute; left: var(--s-4); right: var(--s-4); bottom: -1px; height: 2px; background: var(--text-1); }
 .ui-tabs > button .ui-badge { margin-left: var(--s-2); }
+/* a count on a tab (unread messages …); coloured by the most serious item it counts */
+.ui-count { display: inline-block; min-width: 16px; height: 16px; margin-left: var(--s-2); padding: 0 var(--s-2); border-radius: 8px; background: var(--bg-3); color: var(--text-1);
+  font-size: var(--fs-2xs); line-height: 16px; font-weight: var(--fw-bold); text-align: center; vertical-align: 1px; font-variant-numeric: tabular-nums; }
+.ui-count.red, .ui-count.bad, .ui-count.penalty { background: var(--bad); color: #fff; } .ui-count.sc { background: var(--sc); color: var(--text-inv); } .ui-count.yellow, .ui-count.warn { background: var(--warn); color: var(--text-inv); }
 
 /* ---------- badges / chips ---------- */
 .ui-badge { display: inline-flex; align-items: center; gap: var(--s-2); height: 18px; padding: 0 var(--s-3); border-radius: var(--r-1); background: var(--bg-3); color: var(--text-2);
