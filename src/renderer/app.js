@@ -10,6 +10,8 @@
   const at = (arrOrObj, i) => (Array.isArray(arrOrObj) ? arrOrObj[i] : arrOrObj?.[i]);
   // (an element's HTML replaced only when it's different: writing the same again still makes the page lay out again)
   const setHTML = (el, html) => { if (el.__html !== html) { el.innerHTML = html; el.__html = html; } };
+  const ico = (name, opts) => window.UIIcons?.svg(name, opts) || "";
+  const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.reduceMotion === "1";
   const lastOf = (arrOrObj) => { const a = Array.isArray(arrOrObj) ? arrOrObj : Object.values(arrOrObj || {}); return a[a.length - 1]; };
   const store = {
     get(k, d) { try { const v = localStorage.getItem("f1kr:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -50,12 +52,17 @@
   let seenMsgs = 0, prevPos = {};
   let notifyOn = store.get("notify", false);
   let liveKey = null, liveEpoch = 0;
+  // v0.50: boardJump – the next table drawing follows a jump (seek, load, mode or session change): rows don't slide;
+  // rcSeen – race control messages already seen (the tab's unread badge counts the rest; -1: everything now is seen);
+  // sessionTag – which session the screen shows now (replay path / live session key): async answers and the radio
+  // list compare it with the one they were made for
+  let boardJump = true, rcSeen = -1, sessionTag = "";
   // The season globe home screen (home.js) is on at launch; the timing screen stays built underneath it.
   let homeOn = document.body.classList.contains("home-on");
 
   // ---------- modes ----------
   function setMode(m) {
-    mode = m; store.set("mode", m);
+    mode = m; store.set("mode", m); boardJump = true; rcSeen = -1;
     $("modeReplay").setAttribute("aria-selected", String(m === "replay"));
     $("modeLive").setAttribute("aria-selected", String(m === "live"));
     $("replayBar").hidden = m !== "replay"; $("liveBar").hidden = m !== "live"; $("player").hidden = m !== "replay";
@@ -162,7 +169,7 @@
       // (switched to live while it downloaded: the replay is ready for when replay is picked again – setMode shows it
       // then – and the live screen's circuit, alerts, lists and title are left as they are)
       if (mode === "replay") {
-        src = replay; prevPos = {};
+        src = replay; prevPos = {}; boardJump = true; rcSeen = -1;
         rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = "";
         outline = r.lapShape() || replayFallbackLap(); if (!outline.length) outline = r.trackOutline(); outlineFor = "replay";
         refreshTitle();
@@ -215,40 +222,42 @@
   function paintHomeBtn() {
     const b = $("homeBtn"); if (!b) return;
     const canLeave = mode === "live" || !!replay;
-    b.textContent = homeOn ? "타이밍 화면 →" : "⌂ 홈";
+    b.innerHTML = homeOn ? `타이밍 화면 ${ico("chevron-right")}` : `${ico("house")}홈`;
     b.title = homeOn ? "불러온 세션의 타이밍 화면으로 돌아가요" : "시즌 지구본 홈 (재생은 멈추고 위치를 기억해요)";
     b.hidden = homeOn && !canLeave;
   }
 
   // ---------- replay playback ----------
-  function play() { if (!replay || mode !== "replay") return; playing = true; $("play").textContent = "❚❚ 일시정지"; lastFrame = performance.now(); }
-  function pause() { playing = false; $("play").textContent = "▶ 재생"; }
+  // (the button names what it does next; the session bar says what is happening – paintSource)
+  const paintPlay = () => { $("play").innerHTML = playing ? `${ico("pause")}<span>일시정지</span>` : `${ico("play")}<span>재생</span>`; $("play").setAttribute("aria-label", playing ? "일시정지" : "재생"); };
+  function play() { if (!replay || mode !== "replay") return; playing = true; paintPlay(); lastFrame = performance.now(); paintSource(); }
+  function pause() { playing = false; paintPlay(); paintSource(); }
   function seekTo(ms) {
     if (!replay) return;   // (nothing loaded yet: a seek before the first load does nothing)
     t = Math.max(t0, Math.min(ms, t1)); replay.seek(t);
-    seenMsgs = replay.rc.added; prevPos = {}; radioKey = "";   // jumping shouldn't fire alerts
+    seenMsgs = replay.rc.added; prevPos = {}; radioKey = ""; boardJump = true; rcSeen = -1; rcCount = -1;   // jumping shouldn't fire alerts (or slide rows)
     renderAll(true);
   }
   $("play").addEventListener("click", () => (playing ? pause() : play()));
-  $("speed").addEventListener("change", () => { speed = +$("speed").value; });
+  $("speed").addEventListener("change", () => { speed = +$("speed").value; paintSource(); });
   $("toStart").addEventListener("click", () => seekTo(tOpen));   // (a race: the standing grid)
   $("seek").addEventListener("input", () => seekTo(+$("seek").value));
-  // Shortcuts. A clicked button keeps the focus, and Space would also press it a second time (play → pause
-  // straight away), so the focus is dropped first.
-  const typing = (el) => el.closest?.("select, input, textarea, audio, [contenteditable], .splitter");
+  // Shortcuts – the policy is ui/keys.js (UIKeys.decide): never while typing, composing (IME), with a dialog open or
+  // the home screen / game on top; Space held down toggles once; a button the keyboard focused keeps its own Space; a
+  // button the mouse last pressed loses the focus first (its keyup would press it again: play → pause straight away).
   document.addEventListener("keydown", (e) => {
-    if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey || homeOn) return;
-    if (e.code === "Space" && e.target.closest("button")) e.target.blur();
+    const d = UIKeys.decide(e, { mode, target: UIKeys.describe(e.target), dialogOpen: !!window.UIKit?.isDialogOpen(), covered: homeOn || !!($("game") && !$("game").hidden) });
+    if (d.prevent) e.preventDefault();
+    if (d.blur) e.target.blur?.();
+    if (!d.run) return;
     if (mode === "live") {
-      if (e.code === "Space") { e.preventDefault(); toggleLivePause(); }
-      else if (e.key === ",") nudgeDelay(-1); else if (e.key === ".") nudgeDelay(1);
-      else if (e.key === "[") nudgeDelay(-5); else if (e.key === "]") nudgeDelay(5);
+      if (d.run === "toggle") toggleLivePause();
+      else { const m = /^delay([+-]\d+)$/.exec(d.run); if (m) nudgeDelay(+m[1]); }
       return;
     }
     if (mode !== "replay" || !replay) return;
-    if (e.code === "Space") { e.preventDefault(); playing ? pause() : play(); }
-    else if (e.code === "ArrowRight") { e.preventDefault(); seekTo(t + (e.shiftKey ? 60e3 : 5e3)); }
-    else if (e.code === "ArrowLeft") { e.preventDefault(); seekTo(t - (e.shiftKey ? 60e3 : 5e3)); }
+    if (d.run === "toggle") playing ? pause() : play();
+    else { const m = /^seek([+-]\d+)$/.exec(d.run); if (m) seekTo(t + +m[1] * 1000); }
   });
 
   // ---------- live ----------
@@ -257,7 +266,7 @@
   const MAX_DELAY = 600;
   live.maxDelayMs = MAX_DELAY * 1000;
   const delayText = (s) => (s >= 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s}초`);
-  const paintDelay = () => { $("delayOut").textContent = delayText(Math.round(live.delayMs / 1000)); };
+  const paintDelay = () => { $("delayOut").textContent = delayText(Math.round(live.delayMs / 1000)); paintSource(); };
   const setDelay = (s) => { s = Math.max(0, Math.min(MAX_DELAY, Math.round(s))); live.delayMs = s * 1000; $("delay").value = s; store.set("delay", s); paintDelay(); };
   const nudgeDelay = (d) => setDelay(live.delayMs / 1000 + d);
   paintDelay();
@@ -266,6 +275,7 @@
   // Pause along with a paused stream; resuming adds the paused time to the delay so the two stay in step.
   function paintLivePause() {
     $("livePause").textContent = live.paused ? "▶ 이어서" : "❚❚ 멈춤";
+    paintSource();
     $("livePause").setAttribute("aria-pressed", String(live.paused));
     $("livePause").classList.toggle("primary", live.paused);
   }
@@ -282,7 +292,7 @@
   $("livePause").addEventListener("click", toggleLivePause);
   // Window stays on top of a full-screen stream when pinned.
   let pinned = store.get("pin", false);
-  const paintPin = () => { $("pinBtn").setAttribute("aria-pressed", String(pinned)); $("pinBtn").classList.toggle("signed", pinned); };
+  const paintPin = () => { $("pinBtn").setAttribute("aria-pressed", String(pinned)); $("pinBtn").innerHTML = ico("pin"); };
   $("pinBtn").addEventListener("click", () => { pinned = !pinned; store.set("pin", pinned); window.api.pinWindow(pinned); paintPin(); });
   if (pinned) window.api.pinWindow(true);
   paintPin();
@@ -291,9 +301,9 @@
   function setCompact(on) {
     compactOn = on;
     document.body.classList.toggle("compact", on);
-    $("compactBtn").setAttribute("aria-pressed", String(on)); $("compactBtn").classList.toggle("signed", on);
+    $("compactBtn").setAttribute("aria-pressed", String(on)); $("compactBtn").innerHTML = ico(on ? "panel-right-open" : "panel-right-close");
     window.api.compactWindow(on);
-    if (on && !pinned) toast("📌 위에 고정도 함께 켜면 중계 화면 위에 계속 떠 있어요.", "");
+    if (on && !pinned) toast("위에 고정(핀 버튼)도 함께 켜면 중계 화면 위에 계속 떠 있어요.", "");
     setTimeout(() => { applySizes(); renderAll(true); }, 250);
   }
   $("compactBtn").addEventListener("click", () => setCompact(!compactOn));
@@ -338,6 +348,7 @@
     $("liveState").className = "chip " + cls;
     $("liveDot").classList.toggle("on", s.state === "live");
     $("liveToggle").textContent = s.state === "stopped" ? "연결" : "연결 끊기";
+    paintSource();
     if (mode === "live") { src = s.state === "live" ? live : src; refreshOutline(); renderAll(true); }
     dispatchEvent(new CustomEvent("f1kr-live"));
   });
@@ -362,6 +373,8 @@
       const got = await window.api.trackOutline(loc).catch(() => []);
       if (liveLapFor !== loc) return;
       liveLap = got; outlineLoading = false;
+      // (v0.50: switched to replay while this was asked – the replay's own outline stays; the live one is kept in liveLap)
+      if (!LiveStatus.answerApplies({ mode: "live" }, { mode })) return;
     }
     outline = liveLap;
   }
@@ -395,7 +408,7 @@
       if (key !== liveKey || live.epoch !== liveEpoch) {
         const newSession = key !== liveKey;
         liveKey = key; liveEpoch = live.epoch;
-        rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = ""; seenMsgs = live.rc.added; prevPos = {};
+        rcCount = -1; radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; trendKey = ""; seenMsgs = live.rc.added; prevPos = {}; boardJump = true; rcSeen = -1;
         if (newSession) { circuitFor = null; refreshOutline(); }
         refreshTitle(); renderAll(true);
       }
@@ -417,7 +430,7 @@
       lastHeavy = now; paintIdle();
       if (!src) { renderAll(true); return; }
       const covered = $("mapCard").classList.contains("expanded");
-      uiQueue = [["status", renderStatus], ...(covered ? [["mini", renderMiniBoard]] : [["board", renderBoard], ["rc", renderRC], ["driver", renderDriver], ["radio", renderRadio], ["strat", renderStrat], ["trace", renderTrace], ["champ", renderChamp]]), ["alerts", checkAlerts]];
+      uiQueue = [["status", renderStatus], ...(covered ? [["mini", renderMiniBoard]] : [["board", renderBoard], ["rc", renderRC], ["driver", renderDriver], ["work", renderWork], ["radio", renderRadio], ["strat", renderStrat], ["trace", renderTrace], ["champ", renderChamp]]), ["alerts", checkAlerts]];
     }
     // (at least one a frame, then more while under 3 ms)
     const a = performance.now();
@@ -431,44 +444,81 @@
     if (!heavy) return;
     lastHeavy = performance.now();
     paintIdle();
-    if (!src) { setHTML($("board").tBodies[0], ""); $("rc").innerHTML = ""; renderDriver(); return; }
+    if (!src) { setHTML($("board").tBodies[0], ""); $("rc").innerHTML = ""; renderDriver(); paintTicker(); paintRcBadge(); renderWork(); return; }
     uiQueue = [];   // (all drawn now)
     const T = timed;
-    T("status", renderStatus); T("board", renderBoard); T("rc", renderRC); T("driver", renderDriver); T("radio", renderRadio); T("strat", renderStrat); T("trace", renderTrace); T("champ", renderChamp); T("mini", renderMiniBoard); T("alerts", checkAlerts);
+    T("status", renderStatus); T("board", renderBoard); T("rc", renderRC); T("driver", renderDriver); T("work", renderWork); T("radio", renderRadio); T("strat", renderStrat); T("trace", renderTrace); T("champ", renderChamp); T("mini", renderMiniBoard); T("alerts", checkAlerts);
   }
 
   // ---------- titles & status strip ----------
   const sessionType = () => src?.state.SessionInfo?.Type || "";
   const isSprint = () => /Sprint/.test(src?.state.SessionInfo?.Name || "");
   function refreshTitle() {
-    if (!src) { $("title").textContent = mode === "live" ? "실시간: 연결하면 지금 진행 중인 세션이 표시돼요" : "세션을 골라 불러오세요"; return; }
+    const tag = LiveStatus.sessionTag(mode, replayInfo?.path, live.state.SessionInfo?.Key);
+    if (tag !== sessionTag) { sessionTag = tag; document.querySelectorAll("#radio audio").forEach((a) => a.pause()); }
+    $("sbYear").textContent = "";
+    if (!src) { $("title").textContent = mode === "live" ? "실시간: 연결하면 지금 진행 중인 세션이 표시돼요" : "세션을 골라 불러오세요"; $("title").title = ""; return; }
     const si = src.state.SessionInfo || {};
     if (src.isLive && !si.Name) { $("title").textContent = "실시간: 세션 정보를 기다리는 중…"; return; }
     const meeting = si.Meeting?.Name || (src.isLive ? "" : replayInfo?.meeting), name = si.Name || (src.isLive ? "" : replayInfo?.name);
+    const year = +(si.Path || (src.isLive ? "" : replayInfo?.path) || si.StartDate || "").slice(0, 4);
+    $("sbYear").textContent = year >= 1950 ? `${year}` : "";
     $("title").textContent = `${KO.gpName(meeting)} · ${KO.sessionName(name)}`;
+    $("title").title = [si.Meeting?.Circuit?.ShortName, si.Meeting?.Location, si.Meeting?.Country?.Name].filter(Boolean).join(" · ");
+  }
+  // Where the data comes from and how fresh it is – the meaning of the clock, the delay and a pause, in words.
+  //   replay: 다시보기 · 재생 중 2배속 | 일시정지 (the session clock and lap are the recording's at that moment)
+  //   live:   실시간 · 수신 중 | 연결 중… | 다시 연결 중… | 연결 안 됨 | 오류 · 지연 30초 (on purpose, to match the TV) ·
+  //           멈춤 · 수신 없음 40초 (nothing arrived: the values shown are the last received, not zeros)
+  function lastReceived() { const q = live.queue; return Math.max(live.shownAt, q.length ? q[q.length - 1].at : -Infinity); }
+  const liveStale = (now = Date.now()) => LiveStatus.stale({ mode, liveOnScreen: src === live, hasDrivers: !!live.state.DriverList, conn: liveStatus.state, message: liveStatus.message, now, lastReceived: lastReceived() });
+  function paintSource() {
+    const box = $("sbSource"); if (!box) return;
+    let html = "";
+    if (mode === "replay") {
+      if (replay) html = `<span class="src" title="저장된 기록을 재생 중이에요 · 남은 시간과 랩은 그 순간의 기록이에요">다시보기</span><span>${playing ? `재생 중 <b>${esc(speed)}배속</b>` : `${ico("pause", { size: 14 })}일시정지`}</span>`;
+    } else {
+      const st = liveStatus.state, conn = { live: ["수신 중", "ok"], connecting: ["연결 중…", "warn"], reconnecting: ["다시 연결 중…", "warn"], error: ["오류", "bad"], stopped: ["연결 안 됨", ""] }[st] || [st, ""];
+      const delay = Math.round(live.delayMs / 1000), stale = liveStale(), wait = st !== "stopped" ? live.waitingMs() : 0;
+      html = `<span class="src live${st === "live" ? "" : " off"}" title="F1 실시간 서버에서 받은 데이터예요">실시간</span><span class="${conn[1]}">${ico(st === "live" ? "wifi" : "wifi-off", { size: 14 })}${conn[0]}</span>`
+        + (delay ? `<span title="TV 중계에 맞추려고 일부러 늦춰 보여 주는 시간이에요">지연 <b>${esc(delayText(delay))}</b></span>` : `<span class="more" title="받는 즉시 보여 줘요 (TV보다 빠를 수 있어요)">지연 없음</span>`)
+        + (live.paused ? `<span class="warn" title="화면을 멈췄어요 · 이어서를 누르면 멈춘 시간만큼 지연이 늘어나요"><b>멈춤</b></span>` : "")
+        + (wait > 0 ? `<span>${Math.ceil(wait / 1000)}초 뒤 표시</span>` : "")
+        + (stale?.age ? `<span class="warn">수신 없음 ${Math.round(stale.age / 1000)}초</span>` : "")
+        + (st === "live" && !liveStatus.positions ? `<span class="more" title="F1 TV로 로그인하면 차량 위치와 텔레메트리도 받아요">위치 없음</span>` : "");
+    }
+    setHTML(box, html);
+    // the table: values not refreshed for a while are greyed and a line says why (never shown as zeros)
+    const stale = liveStale();
+    $("staleBar").hidden = !stale;
+    if (stale) { $("staleBar").textContent = stale.text; $("staleBar").className = `stale-bar ${stale.level}`; }
+    document.querySelector(".board")?.classList.toggle("stale", !!stale);
   }
   const parseClock = (s) => { const m = /^(\d+):(\d\d):(\d\d)/.exec(s || ""); return m ? ((+m[1] * 60 + +m[2]) * 60 + +m[3]) * 1000 : null; };
   function renderStatus() {
     const s = src.state;
-    const ts = KO.TRACK_STATUS[s.TrackStatus?.Status] || { ko: "—", cls: "" };
+    // the flag: word + colour; a race whose session is over shows the chequered flag
+    const over = /Finished|Finalised|Ends/.test(s.SessionStatus?.Status || "") && /Race/.test(sessionType());
+    const ts = over ? { ko: "체커기 · 종료", cls: "chequered" } : KO.TRACK_STATUS[s.TrackStatus?.Status] || { ko: "깃발 정보 없음", cls: "" };
     $("trackStatus").textContent = ts.ko; $("trackStatus").className = "pill " + ts.cls;
     const part = s.TimingData?.SessionPart;
     $("part").hidden = !(sessionType() === "Qualifying" && part);
     $("part").textContent = `${isSprint() ? "SQ" : "Q"}${part}`;
     const lc = s.LapCount;
-    setHTML($("lap"), lc?.CurrentLap ? `랩 <b>${esc(lc.CurrentLap)}</b> / ${esc(lc.TotalLaps || "?")}` : "");
+    setHTML($("lap"), lc?.CurrentLap ? `<span title="선두 기준 현재 랩">랩 <b>${esc(lc.CurrentLap)}</b> / ${esc(lc.TotalLaps || "?")}</span>` : "");
     const clk = s.ExtrapolatedClock;
     let rem = parseClock(clk?.Remaining);
     if (rem != null && clk.Extrapolating) { const nowUtc = src.utcAt(src.now()); if (nowUtc) rem -= nowUtc - ReplayKit.parseUtc(clk.Utc); }
-    setHTML($("clock"), rem != null ? `남은 시간 <b>${hms(Math.max(0, rem))}</b>` : "");
+    setHTML($("clock"), rem != null ? `<span title="F1 세션 시계의 남은 시간${src.isLive ? " (중계 지연을 적용한 화면 기준)" : " (재생 중인 순간의 기록)"}${clk.Extrapolating ? "" : " · 시계 멈춤"}">남은 시간 <b>${hms(Math.max(0, rem))}</b>${clk.Extrapolating ? "" : " <small>(멈춤)</small>"}</span>` : "");
     // In qualifying "Finished"/"Inactive" also happen between Q1, Q2 and Q3, so name the part.
     const st = s.SessionStatus?.Status, qp = sessionType() === "Qualifying" ? s.TimingData?.SessionPart : null, qn = `${isSprint() ? "SQ" : "Q"}${qp}`;
     const ss = qp && st === "Finished" && qp < 3 ? `${qn} 종료` : qp && st === "Inactive" && qp > 1 ? `${qn} 시작 전` : qp && st === "Started" ? `${qn} 진행 중`
       : { Inactive: "시작 전", Started: "진행 중", Aborted: "중단", Finished: "종료", Finalised: "결과 확정", Ends: "세션 종료" }[st];
     $("sessStatus").hidden = !ss; $("sessStatus").textContent = ss || "";
-    $("sessStatus").className = "chip " + (s.SessionStatus?.Status === "Started" ? "ok" : "");
+    $("sessStatus").className = "chip " + (s.SessionStatus?.Status === "Started" ? "ok" : s.SessionStatus?.Status === "Aborted" ? "bad" : "");
     const w = s.WeatherData;
-    setHTML($("weather"), w ? `기온 <b>${esc(w.AirTemp)}°</b> 노면 <b>${esc(w.TrackTemp)}°</b> 습도 ${esc(w.Humidity)}% 풍속 ${esc(w.WindSpeed)}m/s${w.Rainfall === "1" ? " · <b>비</b>" : ""}` : "");
+    const wv = (v) => (v == null || v === "" ? "–" : esc(v));
+    setHTML($("weather"), w ? `<span class="w air" title="기온">${ico("thermometer")}기온 <b>${wv(w.AirTemp)}°</b></span><span class="w track" title="노면 온도">노면 <b>${wv(w.TrackTemp)}°</b></span><span class="w hum" title="습도">${ico("droplets")}${wv(w.Humidity)}%</span><span class="w wind" title="풍속">${ico("wind")}${wv(w.WindSpeed)}m/s</span>${w.Rainfall === "1" ? `<span class="w rain" title="F1 날씨 데이터: 비 감지">${ico("cloud-rain")}비</span>` : ""}` : "");
   }
 
   // ---------- leaderboard ----------
@@ -481,9 +531,9 @@
   };
   const sectorCls = (s) => (s?.OverallFastest ? "s-purple" : s?.PersonalFastest ? "s-green" : s?.Value ? "s-yellow" : "");
   const HEADERS = {
-    Race: ["리더와 차이", "선두와의 시간 차이(초). '1랩'은 선두에게 한 바퀴 뒤처졌다는 뜻이에요", "앞 차와 간격", "바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요"],
-    Qualifying: ["1위와 차이", "이번 단계(Q1·Q2·Q3)에서 가장 빠른 기록과의 차이", "앞 순위와 차이", "바로 앞 순위 드라이버 기록과의 차이"],
-    Practice: ["1위와 차이", "이 세션 가장 빠른 기록과의 차이", "앞 순위와 차이", "바로 앞 순위 드라이버 기록과의 차이"],
+    Race: ["선두와 차이", "선두와의 시간 차이(초). '+1랩'은 선두에게 한 바퀴 뒤처졌다는 뜻이에요 · –: 아직 받지 않은 값", "앞 차 간격", "바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요 · 작은 ▼/▲: 최근 3랩 동안 줄어든/늘어난 간격"],
+    Qualifying: ["1위와 차이", "이번 단계(Q1·Q2·Q3)에서 가장 빠른 기록과의 차이 · –: 아직 기록 없음", "앞 순위와", "바로 앞 순위 드라이버 기록과의 차이"],
+    Practice: ["1위와 차이", "이 세션 가장 빠른 기록과의 차이 · –: 아직 기록 없음", "앞 순위와", "바로 앞 순위 드라이버 기록과의 차이"],
   };
   const lines0 = () => src?.state.TimingData?.Lines || {};
   function rowsNow() {
@@ -494,7 +544,7 @@
   // Lap column shows the last lap, or (toggled from the header) each driver's personal best.
   let lapMode = store.get("lapMode", "last");
   function paintLapToggle() {
-    $("lapLabel").textContent = lapMode === "best" ? "개인 최고 랩" : "랩타임";
+    $("lapLabel").textContent = lapMode === "best" ? "개인 최고" : "최근 랩";
     $("lapToggle").setAttribute("aria-pressed", String(lapMode === "best"));
   }
   $("lapToggle").addEventListener("click", () => { lapMode = lapMode === "best" ? "last" : "best"; store.set("lapMode", lapMode); paintLapToggle(); renderAll(true); });
@@ -550,6 +600,14 @@
     return null;
   }
 
+  // v0.50 table: times right-aligned with tabular digits; "–" where nothing has been received (never a made-up 0);
+  // overall best = purple fill, personal best = green text (fill vs none: not colour alone); the tyre as its lettered
+  // ring (dashed: a used set); state as badges. A row whose position changed slides from where it was (300 ms; off under
+  // reduced motion and after a jump) and its position number is tinted for a few seconds (gain / loss).
+  const NONE = `<span class="t-none">–</span>`;
+  const cell = (v) => (v == null || v === "" ? NONE : esc(v));
+  const TYRE_LETTER = { SOFT: "S", MEDIUM: "M", HARD: "H", INTERMEDIATE: "I", WET: "W" };
+  let boardOrder = "", moved = {};
   function renderBoard() {
     const s = src.state, drivers = s.DriverList || {}, app = s.TimingAppData?.Lines || {};
     const type = sessionType() || "Race", part = (s.TimingData?.SessionPart || 1) - 1;
@@ -558,7 +616,7 @@
     const rel = type === "Race" && gapMode === "focus" && focus && ReplayKit.gapSec(lines0()[focus]?.GapToLeader) != null;
     const focusD = rel ? drivers[focus] : null;
     $("hGap").textContent = rel ? `${KO.surname(focusD?.Tla, focusD?.LastName)} 기준` : h[0];
-    $("gapToggle").title = type === "Race" ? (rel ? "집중 드라이버와의 시간 차이(초) · + 는 뒤, − 는 앞 · 누르면 선두 기준으로 바꿔요" : `${h[1]} · 누르면 집중 드라이버 기준으로 바꿔요`) : h[1];
+    $("gapToggle").title = type === "Race" ? (rel ? "선택한 드라이버와의 시간 차이(초) · + 는 뒤, − 는 앞 · 누르면 선두 기준으로 바꿔요" : `${h[1]} · 누르면 선택한 드라이버 기준으로 바꿔요`) : h[1];
     $("gapToggle").setAttribute("aria-pressed", String(!!rel)); $("gapToggle").disabled = type !== "Race";
     $("hInt").textContent = h[2]; $("hInt").title = h[3];
     const rows = rowsNow();
@@ -572,6 +630,14 @@
     const bestOf = (l) => (type === "Qualifying" ? at(l.BestLapTimes, part)?.Value : "") || l.BestLapTime?.Value || "";
     let fastest = Infinity;
     for (const [, l] of rows) { const v = ReplayKit.toSec(bestOf(l)); if (v) fastest = Math.min(fastest, v); }
+    // position changes since the last drawing (not after a jump)
+    const order = rows.map(([n]) => n).join(","), nowMs = performance.now();
+    const before = boardJump || order === boardOrder ? null : new Map([...$("board").tBodies[0].rows].map((tr) => [tr.dataset.num, tr.offsetTop]));
+    if (boardJump) moved = {};
+    else if (order !== boardOrder && boardOrder) {
+      const was = boardOrder.split(",");
+      for (const [i, n] of rows.map(([n]) => n).entries()) { const j = was.indexOf(n); if (j >= 0 && j !== i) moved[n] = { dir: i < j ? "gain" : "loss", until: nowMs + 4000 }; }
+    }
     setHTML($("board").tBodies[0], rows.map(([num, l]) => {
       const d = drivers[num], a = app[num] || {};
       const stint = lastOf(src.stints(num)), ty = KO.TYRES[stint?.Compound];
@@ -591,31 +657,47 @@
         const g = ReplayKit.gapSec(l.GapToLeader);
         gap = num === focus ? "기준" : g != null && focusGap != null ? fmtRel(g - focusGap) : gap;
       }
+      const leader = +l.Position === 1;
       const close = type === "Race" && /^\+?0\.\d+$/.test(interval);
       const grid = +a.GridPos, pos = +l.Position;
       const chg = type === "Race" && grid && pos ? grid - pos : 0;
-      const state = l.Retired ? "리타이어" : l.Stopped ? "정지" : l.KnockedOut ? "탈락" : l.InPit ? "피트" : l.PitOut ? "피트 아웃" : "";
+      const state = l.Retired ? ["리타이어", "bad"] : l.Stopped ? ["정지", "bad"] : l.KnockedOut ? ["탈락", ""] : l.InPit ? ["피트", "info"] : l.PitOut ? ["피트 아웃", "info"] : null;
       // Deleted laps: in races every track limits deletion is a strike (the 4th brings a penalty).
       const del = deleted[num] || [];
       const strikes = del.filter((x) => x.limits).length;
       const delTag = !del.length ? "" : `<span class="del${type === "Race" && strikes >= 3 ? " warn" : ""}" title="${esc((type === "Race" ? `트랙 리밋 위반 ${strikes}회 (3회째 흑백기, 그 뒤로는 페널티)\n` : `삭제된 기록 ${del.length}개\n`) + del.map((x) => KO.translate(x.msg) || x.msg).join("\n"))}">${type === "Race" && strikes ? `TL ${strikes}` : `삭제 ${del.length}`}</span>`;
-      const cls = [l.Retired || l.Stopped || l.KnockedOut ? "out" : "", num === focus ? "focus" : num === compare ? "compare" : "", +l.Position === cutAfter ? "cutoff" : ""].join(" ");
+      const mv = moved[num] && moved[num].until > nowMs ? moved[num].dir : "";
+      const cls = [l.Retired || l.Stopped || l.KnockedOut ? "out" : "", num === focus ? "focus" : num === compare ? "compare" : "", +l.Position === cutAfter ? "cutoff" : "", mv].join(" ");
+      const lapV = lapMode === "best" ? best : l.LastLapTime?.Value;
+      const lapCls = lapMode === "best" ? (ReplayKit.toSec(best) === fastest ? "purple" : "green")
+        : l.LastLapTime?.OverallFastest ? "purple" : l.LastLapTime?.PersonalFastest ? "green" : slowLap(l.LastLapTime?.Value, fastest) ? "slow" : "";
+      const lapTitle = lapCls === "purple" ? "전체 최고" : lapCls === "green" ? "개인 최고" : lapCls === "slow" ? "피트를 오간 느린 랩(아웃랩·인랩)" : "";
+      const pits = l.NumberOfPitStops;
       return `<tr class="${cls}" data-num="${esc(num)}">
         <td class="pos">${esc(l.Position || "")}</td>
-        <td class="chg">${chg > 0 ? `<span class="up"><b>↑</b>${chg}</span>` : chg < 0 ? `<span class="down"><b>↓</b>${-chg}</span>` : type === "Race" && grid ? `<span class="same">–</span>` : ""}</td>
+        <td class="chg">${chg > 0 ? `<span class="up" title="출발 그리드보다 ${chg}계단 올라감"><b>↑</b>${chg}</span>` : chg < 0 ? `<span class="down" title="출발 그리드보다 ${-chg}계단 내려감"><b>↓</b>${-chg}</span>` : type === "Race" && grid ? `<span class="same">–</span>` : ""}</td>
         <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
-          <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span><span class="tla">${esc(d.Tla)}</span><span class="team">${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span></div></td>
-        <td class="time c">${esc(gap)}</td>
-        <td class="time c ${close ? "close" : ""}">${esc(interval)}${interval ? trendTag(trend[num]) : ""}</td>
-        <td class="c">${lapMode === "best"
-          ? pill(best, ReplayKit.toSec(best) === fastest ? "purple" : "green")
-          : pill(l.LastLapTime?.Value, l.LastLapTime?.OverallFastest ? "purple" : l.LastLapTime?.PersonalFastest ? "green" : slowLap(l.LastLapTime?.Value, fastest) ? "slow" : "")}</td>
-        ${[0, 1, 2].map((i) => `<td class="time c sec ${sectorCls(sectors[i])}"><span>${esc(sectors[i]?.Value || "")}</span>${miniSectors(sectors[i])}</td>`).join("")}
-        <td class="time c sec ${sectorCls(l.Speeds?.ST)}"><span>${esc(l.Speeds?.ST?.Value || "")}</span></td>
-        <td class="c">${ty ? `<span class="tyre" title="${esc(ty.ko)}${stint.New === "true" ? " (새 타이어)" : " (중고 타이어)"} · 이 타이어로 ${esc(stint.TotalLaps ?? 0)}랩"><i style="border-color:${ty.color};color:${ty.color}">${ty.short}</i><span style="color:${ty.color}">${esc(stint.TotalLaps ?? "")}</span></span>` : ""}</td>
-        <td class="c">${esc(l.NumberOfPitStops ?? (type === "Race" && l.Position ? 0 : ""))}</td>
-        <td class="state">${state}${delTag}</td></tr>`;
+          <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span><span class="tla">${esc(d.Tla)}</span>${num === compare && num !== focus ? `<span class="mark" title="Shift+클릭으로 고른 비교 드라이버">비교</span>` : ""}<span class="team">${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span></div></td>
+        <td class="time r">${leader && type === "Race" && !rel ? `<span class="faint">선두</span>` : cell(gap)}</td>
+        <td class="time r ${close ? "close" : ""}"${close ? ` title="앞 차와 1초 이내"` : ""}>${leader ? "" : interval ? esc(interval) + trendTag(trend[num]) : NONE}</td>
+        <td class="time r">${lapV ? `<span class="lap ${lapCls}"${lapTitle ? ` title="${lapTitle}"` : ""}>${esc(lapV)}</span>` : NONE}</td>
+        ${[0, 1, 2].map((i) => `<td class="time r sec ${sectorCls(sectors[i])}"${sectors[i]?.OverallFastest ? ` title="전체 최고"` : sectors[i]?.PersonalFastest ? ` title="개인 최고"` : ""}><span>${esc(sectors[i]?.Value || "")}</span>${miniSectors(sectors[i])}</td>`).join("")}
+        <td class="time r sec ${sectorCls(l.Speeds?.ST)}"><span>${esc(l.Speeds?.ST?.Value || "")}</span></td>
+        <td class="c">${ty ? `<span class="tyre" title="${esc(ty.ko)}${stint.New === "true" ? " (새 타이어)" : " (중고 타이어로 시작)"} · 이 타이어로 ${esc(stint.TotalLaps ?? 0)}랩"><i class="ui-tyre ${TYRE_LETTER[stint.Compound] || ""}${stint.New === "false" ? " used" : ""}">${ty.short}</i><span class="n">${esc(stint.TotalLaps ?? "")}</span></span>` : NONE}</td>
+        <td class="c pits">${pits != null ? esc(pits) : type === "Race" && l.Position ? `<span class="zero" title="피트스톱 기록이 아직 없어요 (F1은 첫 피트스톱 뒤에 횟수를 보내요)">0</span>` : NONE}</td>
+        <td class="state">${state ? `<span class="ui-badge ${state[1]}">${state[0]}</span>` : ""}${delTag}</td></tr>`;
     }).join(""));
+    boardOrder = order;
+    // FLIP: each moved row starts where it was and slides into its new place
+    if (before && before.size && !reduceMotion() && !window.F1KR_NOUI) {
+      for (const tr of $("board").tBodies[0].rows) {
+        const was = before.get(tr.dataset.num); if (was == null) continue;
+        const dy = was - tr.offsetTop; if (!dy || Math.abs(dy) > 400) continue;
+        tr.style.transform = `translateY(${dy}px)`; tr.style.transition = "none";
+        requestAnimationFrame(() => { tr.style.transition = "transform 300ms cubic-bezier(0.2, 0.7, 0.2, 1)"; tr.style.transform = ""; });
+      }
+    }
+    boardJump = false;
   }
   // deleted laps from the race control messages: worked out again only when the messages or the drivers' codes change
   let deletedMemo = null;
@@ -629,14 +711,17 @@
     const n = tr.dataset.num;
     if (e.shiftKey && focus && n !== focus) compare = compare === n ? null : n;
     else { focus = focus === n ? null : n; if (compare === focus) compare = null; store.set("focus", focus); }
-    if (focus) setPanel("driver");
+    if (focus && !analysisOn()) setPanel("driver");   // (the analysis on the map card already shows the driver: the tab stays)
     renderAll(true);
   });
 
   // ---------- race control ----------
   let rcCount = -1;
+  // A red flag: the flag itself (Flag "RED", or a message that starts with it) – not "CHEQUERED FLAG" (whose letters
+  // contain "RED FLAG": v0.49 coloured and alerted the chequered flag as a red flag) nor "RED FLAG INFRINGEMENT".
+  const isRedFlag = (m) => m?.Flag === "RED" || /^RED FLAG\b(?! INFRINGEMENT)/.test(m?.Message || "");
   function rcClass(m) {
-    return /RED FLAG/.test(m.Message) ? "flag-red" : m.Category === "SafetyCar" ? "sc" : /YELLOW/.test(m.Flag || "") ? "flag-yellow" : /PENALTY/.test(m.Message) ? "penalty" : "";
+    return isRedFlag(m) ? "flag-red" : m.Category === "SafetyCar" ? "sc" : /YELLOW/.test(m.Flag || "") ? "flag-yellow" : /PENALTY/.test(m.Message) ? "penalty" : "";
   }
   // Message kinds for the filter chips above the list.
   const RC_KINDS = [
@@ -651,10 +736,34 @@
     const k = e.target.closest("button[data-kind]")?.dataset.kind; if (!k) return;
     rcKind = k; store.set("rcKind", k); rcCount = -1; renderRC();
   });
+  // v0.50: an important message is never only inside an inactive tab – the session bar shows the latest one (the
+  // ticker; a click opens this tab) and the tab carries the count of messages not seen yet, coloured by the most serious
+  // (red flag > SC/VSC > penalty > yellow). Messages before a jump (load, seek, mode or session change) count as seen.
+  const rcKindOf = LiveStatus.rcKind;
+  function paintRcBadge() {
+    const u = LiveStatus.rcUnread(src?.messages || [], rcSeen, panel === "rc"), b = $("rcBadge");
+    rcSeen = u.seen; b.hidden = !u.count;
+    if (!u.count) return;
+    b.textContent = u.count > 99 ? "99+" : String(u.count); b.className = `tab-badge ${u.top}`;
+    b.title = `안 본 메시지 ${u.count}개`;
+  }
+  function paintTicker() {
+    const msgs = src?.messages || [], el = $("rcTicker");
+    let m = null;
+    for (let i = msgs.length - 1; i >= 0 && !m; i--) if (!/TRACK LIMITS|DELETED|BLUE FLAG/.test(msgs[i].Message)) m = msgs[i];
+    m ||= msgs[msgs.length - 1];
+    el.hidden = !m;
+    if (!m) return;
+    const time = m.Utc ? kstTime.format(new Date(m.Utc + (/Z$/.test(m.Utc) ? "" : "Z"))) : "";
+    setHTML(el, `<small>${m.Lap ? `${esc(m.Lap)}랩 · ` : ""}${esc(time)}</small><span>${esc(KO.translate(m.Message) || m.Message)}</span>`);
+    el.className = `rc-ticker ${rcKindOf(m)}`;
+  }
+  $("rcTicker").addEventListener("click", () => setPanel("rc"));
   // (redrawn when the list changes – a new message, or one corrected or taken back in place)
   function renderRC() {
     const msgs = src.messages;
     if (src.rc?.rev === rcCount) return; rcCount = src.rc?.rev;
+    paintRcBadge(); paintTicker();
     $("rcFilter").innerHTML = RC_KINDS.map(([k, label, fn]) => {
       const n = k === "all" ? msgs.length : msgs.filter(fn).length;
       return `<button data-kind="${k}" aria-pressed="${k === rcKind}"${n || k === "all" ? "" : " disabled"}>${label} <span>${n}</span></button>`;
@@ -686,7 +795,7 @@
   function checkAlerts() {
     for (const m of ReplayKit.newMessages(src, seenMsgs)) {
       const ko = KO.translate(m.Message) || m.Message;
-      if (/RED FLAG/.test(m.Message)) alertOut("🟥 " + ko, "red");
+      if (isRedFlag(m)) alertOut("🟥 " + ko, "red");
       else if (m.Category === "SafetyCar" && /DEPLOYED|ENDING|IN THIS LAP/.test(m.Message)) alertOut("🟧 " + ko, "sc");
       else if (/PENALTY FOR CAR|CHEQUERED FLAG/.test(m.Message) && !/SERVED/.test(m.Message)) alertOut(ko, "");
     }
@@ -712,6 +821,7 @@
     $("rc").hidden = $("rcFilter").hidden = p !== "rc"; $("driver").hidden = p !== "driver"; $("radio").hidden = $("radioBar").hidden = p !== "radio"; $("trace").hidden = p !== "trace"; $("champ").hidden = p !== "champ";
     $("strat").hidden = p !== "strat";
     radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; renderDriver(); if (src) { renderRadio(); renderTrace(); renderChamp(); renderStrat(); }
+    paintRcBadge();
   }
   $("tabRC").addEventListener("click", () => setPanel("rc"));
   $("tabDriver").addEventListener("click", () => setPanel("driver"));
@@ -745,14 +855,14 @@
     const step = total > 40 ? 10 : 5;
     for (let k = step; k < total; k += step) ticks.push(`<i style="left:${pct(k)}"><span>${k}</span></i>`);
     box.innerHTML = `<div class="strat-head"><span class="muted">${race ? `랩 ${now || "–"} / ${total}` : `최대 ${total}랩`} · 빗금: 중고 타이어로 시작</span>
-      <span class="legend">${Object.values(KO.TYRES).map((t) => `<span><i style="background:${t.color}"></i>${t.ko}</span>`).join("")}</span></div>
+      <span class="legend">${Object.entries(KO.TYRES).map(([k, t]) => `<span><i class="ui-tyre sm ${TYRE_LETTER[k]}">${t.short}</i>${t.ko}</span>`).join("")}</span></div>
       <ol class="strat-list">${list.map(({ n, l, parts }) => {
         const d = drivers[n] || {};
         return `<li class="${n === focus ? "focus" : ""}${l.Retired || l.Stopped ? " out" : ""}" data-num="${esc(n)}">
           <span class="p">${esc(l.Position || "")}</span><span class="b" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span><b>${esc(d.Tla || n)}</b>
           <div class="lane">${ticks.join("")}${race && now ? `<em class="now" style="left:${pct(Math.min(total, now))}"></em>` : ""}${parts.map(({ x, from, laps }) => {
             const ty = KO.TYRES[x.Compound] || { short: "?", color: "#666", ko: x.Compound || "알 수 없음" };
-            return `<div class="st${x.New === "false" ? " used" : ""}" style="left:${pct(from)};width:${pct(Math.max(laps, 0.6))};--c:${ty.color}" title="${esc(`${ty.ko} · ${from + 1}~${from + laps}랩 (${laps}랩)${x.New === "false" ? ` · 중고 타이어 (${x.StartLaps}랩 사용)` : " · 새 타이어"}`)}">${laps >= 3 ? `${ty.short}${laps}` : ""}</div>`;
+            return `<div class="st${x.New === "false" ? " used" : ""}" style="left:${pct(from)};width:${pct(Math.max(laps, 0.6))};--c:var(--tyre-${(TYRE_LETTER[x.Compound] || "x").toLowerCase()}, ${ty.color})" title="${esc(`${ty.ko} · ${from + 1}~${from + laps}랩 (${laps}랩)${x.New === "false" ? ` · 중고 타이어 (${x.StartLaps}랩 사용)` : " · 새 타이어"}`)}">${laps >= 3 ? `${ty.short}${laps}` : ""}</div>`;
           }).join("")}</div></li>`;
       }).join("")}</ol>`;
   }
@@ -922,7 +1032,7 @@
   // Clips are mp3 files next to the session data; the list only re-renders when new clips arrive so playback isn't cut.
   // Each clip is placed on the lap it was recorded in: the race lap (as shown on TV) in races and sprints,
   // otherwise the driver's own lap. "이번 랩" shows only the current lap; "랩별 전체" groups every clip by lap.
-  let radioKey = "", radioView = store.get("radioView", "lap");
+  let radioKey = "", radioView = store.get("radioView", "lap"), radioFor = "";
   const paintRadioView = () => document.querySelectorAll("#radioBar .seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.rv === radioView)));
   document.querySelectorAll("#radioBar .seg button").forEach((b) => b.addEventListener("click", () => {
     radioView = b.dataset.rv; store.set("radioView", radioView); paintRadioView(); radioKey = ""; renderRadio(true);
@@ -944,6 +1054,8 @@
     const raceLap = isRaceLike() ? src.state.LapCount?.CurrentLap : null;
     $("radioLap").innerHTML = raceLap ? `지금 <b>${raceLap}랩</b>` : isRaceLike() ? "" : "드라이버마다 자기 랩 기준";
     const key = [list.length, raceLap, radioView, focus, isRaceLike() ? "" : Math.floor(src.now() / 5000)].join("|");
+    // (v0.50: another session on screen – the old session's list goes even under a playing clip, which stops with it)
+    if (radioFor !== sessionTag) { force = true; radioFor = sessionTag; }
     if (key === radioKey && !force) return;
     // Don't rebuild the list under a clip that is playing; try again on the next update.
     if (!force && [...document.querySelectorAll("#radio audio")].some((a) => !a.paused)) return;
@@ -981,8 +1093,9 @@
 
   // ---------- driver panel ----------
   const fmtLap = (sec) => { if (sec == null) return ""; const m = Math.floor(sec / 60), s = sec - m * 60; return `${m}:${s.toFixed(1).padStart(4, "0")}`; };
-  function lapChart(series, pits) {
-    const W = 420, H = 150, L = 46, R = 8, T = 8, B = 20;
+  // (charts are drawn at a given size: the driver panel's 420 wide, stretched; the work area's at its real size)
+  function lapChart(series, pits, { W = 420, H = 150 } = {}) {
+    const L = 46, R = 8, T = 8, B = 20;
     const all = series.flatMap((s) => s.laps.filter((x) => x.sec));
     if (all.length < 2) return `<p class="muted">랩 기록이 쌓이면 그래프가 그려져요.</p>`;
     const sorted = all.map((x) => x.sec).sort((a, b) => a - b), med = sorted[Math.floor(sorted.length / 2)];
@@ -990,15 +1103,15 @@
     const maxLap = Math.max(...all.map((x) => x.lap)), minLap = Math.min(...all.map((x) => x.lap));
     const X = (lap) => L + ((lap - minLap) / Math.max(1, maxLap - minLap)) * (W - L - R);
     const Y = (sec) => T + ((Math.min(sec, hi) - lo) / Math.max(0.1, hi - lo)) * (H - T - B);
-    let out = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="랩타임 그래프">`;
+    let out = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="랩타임 그래프"${H !== 150 ? ` style="height:${H}px"` : ""}>`;
     for (let k = 0; k <= 3; k++) { const v = lo + ((hi - lo) * k) / 3, y = Y(v); out += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#2a3038"/><text x="4" y="${y + 3}">${fmtLap(v)}</text>`; }
-    for (const p of pits) out += `<line x1="${X(p.lap)}" x2="${X(p.lap)}" y1="${T}" y2="${H - B}" stroke="#f29a30" stroke-dasharray="3 3"/>`;
+    for (const p of pits) out += `<line x1="${X(p.lap)}" x2="${X(p.lap)}" y1="${T}" y2="${H - B}" stroke="#7aa7d8" stroke-dasharray="3 3"/>`;
     out += `<text x="${L}" y="${H - 5}">${minLap}랩</text><text x="${W - R - 30}" y="${H - 5}">${maxLap}랩</text>`;
     for (const s of series) {
       const pts = s.laps.filter((x) => x.sec);
       out += `<polyline fill="none" stroke="${s.color}" stroke-width="1.8" points="${pts.map((x) => `${X(x.lap).toFixed(1)},${Y(x.sec).toFixed(1)}`).join(" ")}"/>`;
       const fastest = pts.reduce((a, b) => (b.sec < a.sec ? b : a), pts[0]);
-      if (fastest) out += `<circle cx="${X(fastest.lap)}" cy="${Y(fastest.sec)}" r="3.5" fill="#b46cff"/>`;
+      if (fastest) out += `<circle cx="${X(fastest.lap)}" cy="${Y(fastest.sec)}" r="3.5" fill="#38c96a" stroke="#0f1114"/>`;
     }
     return out + "</svg>";
   }
@@ -1075,7 +1188,7 @@
     return `<table class="stint-pace"><tbody>${rows.map((r) => {
       const ty = KO.TYRES[r.x.Compound] || { short: "?", color: "#666" };
       const trend = r.slope == null || r.used < 4 ? "–" : `${r.slope >= 0 ? "+" : "−"}${Math.abs(r.slope).toFixed(3)}초/랩`;
-      return `<tr><td><i class="tyre-dot" style="border-color:${ty.color};color:${ty.color}">${ty.short}</i></td><td class="muted">${r.lo}–${r.hi}랩</td>
+      return `<tr><td><i class="ui-tyre sm ${TYRE_LETTER[r.x.Compound] || ""}">${ty.short}</i></td><td class="muted">${r.lo}–${r.hi}랩</td>
         <td>${r.avg ? `평균 <b>${lapStr(r.avg)}</b>` : ""}</td>
         <td class="${r.slope > 0.08 ? "deg-high" : r.slope != null && r.slope < 0 ? "deg-neg" : ""}" title="대표 랩 ${r.used}개로 계산 · 피트·세이프티카 랩과 느린 랩은 빼요 · 연료가 줄어드는 효과도 섞여 있어요">${trend}</td></tr>`;
     }).join("")}</tbody></table>`;
@@ -1101,7 +1214,7 @@
     if (!laps.length) return null;
     return laps.reduce((a, b) => (b.sec < a.sec ? b : a)).lap;
   }
-  function telemetry(num) {
+  function telemetry(num, size = {}) {
     if (!src.hasTelemetry?.()) {
       return src.isLive ? `<div class="d-section"><h4>텔레메트리</h4><p class="muted note" style="margin:0">실시간 속도·스로틀·브레이크는 F1 TV로 로그인하면 볼 수 있어요.</p></div>` : "";
     }
@@ -1112,13 +1225,13 @@
     if (telemRef === "compare" && cmpOn) { const cl = src.laps(compare, src.now()); refNum = compare; refLap = cl[cl.length - 1]?.lap; refLabel = `${src.state.DriverList[compare].Tla} 최근 랩`; }
     const a = last ? src.lapTrace(num, last.lap) : null;
     const b = refLap && !(refNum === num && refLap === last?.lap) ? src.lapTrace(refNum, refLap) : null;
-    const focusColor = "#ffffff", cmpColor = cmpOn ? "#" + (hexColour(src.state.DriverList[compare]?.TeamColour, "b46cff")) : "#b46cff";
+    const focusColor = "#ffffff", cmpColor = cmpOn ? "#" + (hexColour(src.state.DriverList[compare]?.TeamColour, "7aa7d8")) : "#7aa7d8";
     return `<div class="d-section"><h4>텔레메트리 <span class="seg mini" role="group" aria-label="비교 기준"><button data-tref="best" aria-pressed="${telemRef === "best"}">개인 최고 랩과</button><button data-tref="compare" aria-pressed="${telemRef === "compare"}"${cmpOn ? "" : " disabled title=\"Shift+클릭으로 비교할 드라이버를 고르세요\""}>비교 드라이버와</button></span></h4>
       <div class="gauges">${gauge(num, focusColor)}${cmpOn ? gauge(compare, cmpColor) : ""}</div>
-      ${a ? traceChart(a, b, focusColor, b ? (refNum === num ? "#b46cff" : cmpColor) : null, `${last.lap}랩 ${last.time || ""}`, b ? `${refLabel} ${b.lap}랩 ${b.time || ""}` : "") : `<p class="muted note">한 랩을 마치면 속도 그래프를 그려요.</p>`}</div>`;
+      ${a ? traceChart(a, b, focusColor, b ? (refNum === num ? "#38c96a" : cmpColor) : null, `${last.lap}랩 ${last.time || ""}`, b ? `${refLabel} ${b.lap}랩 ${b.time || ""}` : "", size) : `<p class="muted note">한 랩을 마치면 속도 그래프를 그려요.</p>`}</div>`;
   }
-  function traceChart(a, b, ca, cb, la, lb) {
-    const W = 420, H = 230, L = 34, R = 8, T = 16, sp = 120, dt = 50, pd = 22;   // speed / delta / pedals bands
+  function traceChart(a, b, ca, cb, la, lb, { W = 420, H = 230 } = {}) {
+    const L = 34, R = 8, T = 16, dt = 50, pd = 22, sp = Math.max(80, H - 110);   // speed / delta / pedals bands
     const len = a.d[a.d.length - 1] || 1;
     const vmax = Math.max(340, ...a.v, ...(b ? b.v : []));
     const X = (f) => L + f * (W - L - R);
@@ -1128,7 +1241,7 @@
       for (let i = 0; i < tr.d.length; i += 2) pts.push(`${X(tr.d[i] / n).toFixed(1)},${Ys(tr.v[i]).toFixed(1)}`);
       return `<polyline fill="none" stroke="${color}" stroke-width="${w}" stroke-linejoin="round" points="${pts.join(" ")}"/>`;
     };
-    let out = `<svg class="chart trace-tel" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="속도 그래프">`;
+    let out = `<svg class="chart trace-tel" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="속도 그래프"${H !== 230 ? ` style="height:${H}px"` : ""}>`;
     for (const v of [100, 200, 300]) if (v < vmax) out += `<line x1="${L}" x2="${W - R}" y1="${Ys(v)}" y2="${Ys(v)}" stroke="#2a3038"/><text x="2" y="${Ys(v) + 3}">${v}</text>`;
     out += `<text x="${L}" y="11" fill="${ca}">${esc(la)}</text>${b ? `<text x="${W - R}" y="11" text-anchor="end" fill="${cb}">${esc(lb)}</text>` : ""}`;
     if (b) out += line(b, cb, 1.4);
@@ -1196,7 +1309,7 @@
     let cmpName = "";
     if (compare && drivers[compare]) {
       const cd = drivers[compare]; cmpName = KO.DRIVERS[cd.Tla] || cd.Tla;
-      series.push({ laps: src.laps(compare, tNow), color: "#" + (hexColour(cd?.TeamColour, "b46cff")), label: cmpName });
+      series.push({ laps: src.laps(compare, tNow), color: "#" + (hexColour(cd?.TeamColour, "7aa7d8")), label: cmpName });
     }
     box.innerHTML = `
       <div class="d-head"><span class="team-bar" style="background:${color}"></span>
@@ -1215,13 +1328,68 @@
       <div class="d-section"><h4>타이어 스틴트</h4><div class="stints">${stints.map((x) => {
         const ty = KO.TYRES[x.Compound] || { short: "?", color: "#666", ko: x.Compound };
         const laps = Math.max(1, (x.TotalLaps || 0) - (x.StartLaps || 0));
-        return `<div style="flex:${laps};background:${ty.color}" title="${esc(ty.ko)} ${laps}랩${x.New === "true" ? " (새 타이어)" : ""}">${ty.short}${laps}</div>`;
-      }).join("") || `<div style="flex:1;background:#2a3038;color:#8b96a3">기록 없음</div>`}</div>${stintTable(focus)}</div>
+        return `<div class="${x.New === "false" ? "used" : ""}" style="flex:${laps};--tc:var(--tyre-${(TYRE_LETTER[x.Compound] || "x").toLowerCase()}, ${ty.color})" title="${esc(ty.ko)} ${laps}랩${x.New === "true" ? " (새 타이어)" : " (중고 타이어로 시작)"}">${ty.short}${laps}</div>`;
+      }).join("") || `<div style="flex:1;color:var(--text-3)">기록 없음</div>`}</div>${stintTable(focus)}</div>
       <div class="d-section"><h4>랩타임 ${cmpName ? `<span class="legend"><span><i style="background:#fff"></i>${esc(name)}</span><span><i style="background:${series[1].color}"></i>${esc(cmpName)}</span></span>` : ""}</h4>
         ${lapChart(series, src.pits(focus, tNow))}
-        <p class="muted" style="margin:4px 0 0;font-size:11px">보라 점: 최고 랩 · 주황 점선: 피트 진입 · 세이프티카·피트 랩은 위쪽에서 잘려요</p></div>
+        <p class="muted" style="margin:4px 0 0;font-size:11px">초록 점: 개인 최고 랩 · 파란 점선: 피트 진입 · 세이프티카·피트 랩은 위쪽에서 잘려요</p></div>
       ${sessionType() === "Race" ? `<div class="d-section"><h4>순위 변화</h4>${posChart(series)}</div>` : ""}`;
   }
+
+  // ---------- central work area: telemetry and lap comparison ----------
+  // The map card's view switch has four views: 2D, 3D, 텔레메트리, 랩 비교. The analysis views use the selected and the
+  // compared driver (selection is kept across views) and only HIDE the 3D view – its camera, target and mode stay as
+  // they were and come back unchanged (Map3D.hide/show touch no camera state).
+  const analysisOn = () => mapView === "tel" || mapView === "laps";
+  const paneSize = (el) => ({ W: Math.max(320, Math.floor(el.clientWidth - 32)), H: Math.max(200, Math.floor(el.clientHeight - 52 - 16)) });
+  function workEmpty(text) { return `<div class="ui-state"><b>${text}</b><span>순위표에서 드라이버를 누르면 선택돼요 · Shift+클릭으로 비교할 드라이버를 더해요</span></div>`; }
+  function renderWork() {
+    const tel = $("workTel"), laps = $("workLaps");
+    if (mapView === "tel" && !tel.hidden) {
+      const drivers = src?.state.DriverList || {};
+      if (!src || !focus || !drivers[focus]) { setHTML(tel, workEmpty("텔레메트리를 볼 드라이버를 고르세요")); return; }
+      if (!src.hasTelemetry?.()) { setHTML(tel, `<div class="ui-state"><b>텔레메트리 자료가 없어요</b><span>${src.isLive ? "실시간 속도·스로틀·브레이크는 F1 TV로 로그인하면 받을 수 있어요." : "이 세션 기록에는 차량 텔레메트리가 없어요."}</span></div>`); return; }
+      const { W, H } = paneSize(tel), d = drivers[focus];
+      const size = { W, H: Math.min(Math.max(230, H - 90), 520) };
+      setHTML(tel, `<div class="wp-head"><h3>${esc(KO.DRIVERS[d.Tla] || d.Tla)}</h3><span>${esc(focus)}번 · ${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span><span class="grow"></span><span class="faint">속도(km/h) · Δ 기준 랩과의 누적 시간 차 · 페달</span></div>${telemetry(focus, size).replace('<div class="d-section">', '<div class="d-section wp-body">')}`);
+      return;
+    }
+    if (mapView === "laps" && !laps.hidden) {
+      const drivers = src?.state.DriverList || {};
+      if (!src || !focus || !drivers[focus]) { setHTML(laps, workEmpty("랩을 비교할 드라이버를 고르세요")); return; }
+      const tNow = src.now(), d = drivers[focus], cd = compare && drivers[compare] ? drivers[compare] : null;
+      // (redrawn when a lap is added, the pair changes or the pane is resized – not every tick)
+      const { W, H } = paneSize(laps);
+      const key = [sessionTag, focus, compare, src.laps(focus, tNow).length, cd ? src.laps(compare, tNow).length : 0, W, H].join("|");
+      if (laps.__key === key) return; laps.__key = key;
+      const series = [{ laps: src.laps(focus, tNow), color: "#ffffff" }];
+      if (cd) series.push({ laps: src.laps(compare, tNow), color: "#" + hexColour(cd.TeamColour, "7aa7d8") });
+      const L = src.state.TimingData?.Lines || {}, S = src.state.TimingStats?.Lines || {};
+      const secOf = (n, i) => ReplayKit.toSec(at(S[n]?.BestSectors, i)?.Value);
+      const val = (n, k) => {
+        const l = L[n] || {};
+        if (k === "last") return ReplayKit.toSec(l.LastLapTime?.Value);
+        if (k === "best") return ReplayKit.toSec(l.BestLapTime?.Value);
+        if (k === "ideal") { const v = [0, 1, 2].map((i) => secOf(n, i)); return v.every(Boolean) ? v.reduce((a, x) => a + x, 0) : null; }
+        if (/^s\d$/.test(k)) return secOf(n, +k[1] - 1);
+        return null;
+      };
+      const fmt = (v, k) => (v == null ? NONE : /^s\d$/.test(k) ? v.toFixed(3) : lapStr(v));
+      const rowsDef = [["last", "최근 랩"], ["best", "개인 최고 랩"], ["s1", "최고 S1"], ["s2", "최고 S2"], ["s3", "최고 S3"], ["ideal", "이론상 최고 (최고 섹터 합)"]];
+      const table = `<table class="cmp-table"><thead><tr><th></th><th>${esc(d.Tla)}</th>${cd ? `<th>${esc(cd.Tla)}</th><th title="${esc(d.Tla)} − ${esc(cd.Tla)} · −: ${esc(d.Tla)}가 빠름">차이</th>` : ""}</tr></thead><tbody>${rowsDef.map(([k, label]) => {
+        const a = val(focus, k), b = cd ? val(compare, k) : null, diff = a != null && b != null ? a - b : null;
+        return `<tr><td>${label}</td><td>${fmt(a, k)}</td>${cd ? `<td>${fmt(b, k)}</td><td class="d ${diff == null ? "" : diff < 0 ? "t-gain" : diff > 0 ? "t-lose" : ""}">${diff == null ? NONE : fmtRel(diff)}</td>` : ""}</tr>`;
+      }).join("")}</tbody></table>`;
+      const chartH = Math.min(Math.max(170, H - 260), 380);
+      setHTML(laps, `<div class="wp-head"><h3>랩 비교</h3><span class="legend"><span><i style="background:#fff"></i>${esc(KO.DRIVERS[d.Tla] || d.Tla)}</span>${cd ? `<span><i style="background:${series[1].color}"></i>${esc(KO.DRIVERS[cd.Tla] || cd.Tla)}</span>` : `<span class="faint">Shift+클릭으로 비교할 드라이버를 더하세요</span>`}</span><span class="grow"></span><span class="faint">초록 점: 개인 최고 랩 · 파란 점선: 피트 진입</span></div>
+        ${lapChart(series, src.pits(focus, tNow), { W, H: chartH })}${table}${stintTable(focus) ? `<h4 class="wp-sub">${esc(d.Tla)} 스틴트 페이스</h4>${stintTable(focus)}` : ""}${cd && stintTable(compare) ? `<h4 class="wp-sub">${esc(cd.Tla)} 스틴트 페이스</h4>${stintTable(compare)}` : ""}`);
+    }
+  }
+  $("workTel").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tref]"); if (!b || b.disabled) return;
+    telemRef = b.dataset.tref; store.set("telemRef", telemRef); renderWork(); renderDriver();
+  });
+  new ResizeObserver(() => { $("workLaps").__key = ""; if (analysisOn()) renderWork(); }).observe($("mapCard"));
 
   // ---------- track map ----------
   const canvas = $("map"), ctx = canvas.getContext("2d");
@@ -1251,6 +1419,7 @@
 
   function drawMap() {
     if (mapView === "3d") { if (src) { ensureCircuit(); paintMapNote(true); } return; }
+    if (mapView !== "2d") { if (src) ensureCircuit(); return; }   // (telemetry / lap comparison on the map card)
     const w = mapW, h = mapH, dpr = devicePixelRatio || 1;
     // (the buffer in whole device pixels: the observed size is fractional – compared unrounded, the buffer was set
     // again, and cleared, every frame)
@@ -1340,7 +1509,7 @@
       const [x, y] = P(pos[num]); lastMapPts[num] = [x, y];
       const hl = num === focus || num === compare, r = (hl ? 6 : 4.6) * k;   // a touch smaller so the track shows
       ctx.globalAlpha = gone(num) ? 0.25 : focus && !hl ? 0.55 : 1;
-      if (hl) { ctx.strokeStyle = num === focus ? "#ffffff" : "#b46cff"; ctx.lineWidth = 2.5 * k; ctx.beginPath(); ctx.arc(x, y, r + 3 * k, 0, Math.PI * 2); ctx.stroke(); }
+      if (hl) { ctx.strokeStyle = num === focus ? "#ffffff" : "#7aa7d8"; ctx.lineWidth = 2.5 * k; ctx.beginPath(); ctx.arc(x, y, r + 3 * k, 0, Math.PI * 2); ctx.stroke(); }
       ctx.fillStyle = "#" + (hexColour(d?.TeamColour, "888")); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "#0e1013"; ctx.lineWidth = 1.5 * k; ctx.stroke();
       if (!gone(num)) dots.push({ num, d, x, y, r, hl });
@@ -1514,13 +1683,17 @@
     sessionHour: () => { const m = /T(\d\d):(\d\d)/.exec(src?.state.SessionInfo?.StartDate || (mode === "replay" ? replayInfo?.start : "") || ""); return m ? +m[1] + +m[2] / 60 : null; },
     sourceKey: () => (mode === "replay" ? `replay:${replayInfo?.path || ""}` : `live:${live.state.SessionInfo?.Key || ""}:${liveShape().length}`),
     trackPoints: () => (mode === "replay" ? (replay ? replay.lapShape() || replayFallbackLap() : []) : liveShape()),
-    setFocus(n) { focus = n; store.set("focus", n); if (panel !== "driver" && !$("mapCard").classList.contains("expanded")) setPanel("driver"); renderAll(true); },
+    setFocus(n) { focus = n; store.set("focus", n); if (panel !== "driver" && !analysisOn() && !$("mapCard").classList.contains("expanded")) setPanel("driver"); renderAll(true); },
   };
   let mapView = store.get("mapView", "2d");
   function setView(v) {
+    if (!["2d", "3d", "tel", "laps"].includes(v)) v = "2d";
     mapView = v; store.set("mapView", v);
     $("mapCard").dataset.view = v;
     $("map3d").hidden = v !== "3d";
+    $("workTel").hidden = v !== "tel"; $("workLaps").hidden = v !== "laps"; $("workLaps").__key = "";
+    if (analysisOn() && $("mapCard").classList.contains("expanded")) setExpanded(false);
+    if (analysisOn()) renderWork(); else drawMap();
     document.querySelectorAll(".view-switch button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
     // (the home screen covers the map: the 3D view starts drawing only once it's left – setHome)
     const go = () => (v === "3d" && !homeOn ? window.Map3D.show() : window.Map3D.hide());
@@ -1614,11 +1787,15 @@
   });
 
   // ---------- F1 TV sign-in ----------
+  // (in the 메뉴: the account line says the state and what pressing it does; a dot on the menu button when signed in)
   async function paintAuth() {
     const s = await window.api.auth.status();
-    $("authBtn").textContent = s.signedIn ? "F1 TV 연결됨" : s.expired ? "F1 TV 다시 로그인" : "F1 TV 로그인";
+    $("authText").textContent = s.signedIn ? "F1 TV 로그아웃" : s.expired ? "F1 TV 다시 로그인" : "F1 TV 로그인";
     $("authBtn").classList.toggle("signed", !!s.signedIn);
-    $("authBtn").title = s.signedIn ? `실시간 차량 위치를 받아요${s.expires ? ` · 만료 ${kstFull.format(s.expires)}` : ""} · 누르면 로그아웃` : "F1 TV 구독 계정으로 로그인하면 실시간 차량 위치까지 받아요";
+    $("authBtn").querySelector("svg")?.replaceWith(document.createRange().createContextualFragment(ico(s.signedIn ? "log-out" : "log-in")));
+    $("authNote").textContent = s.signedIn ? `연결됨 · 실시간 차량 위치를 받아요${s.expires ? ` · 만료 ${kstFull.format(s.expires)}` : ""}` : s.expired ? "로그인이 만료됐어요" : "F1 TV 구독 계정으로 로그인하면 실시간 차량 위치까지 받아요";
+    $("authBtn").title = s.signedIn ? "누르면 로그아웃" : "F1 TV 로그인 창을 열어요";
+    $("menuAuthDot").hidden = !s.signedIn;
     return s;
   }
   // (the home screen's 로그인 button takes this same path)
@@ -1630,7 +1807,7 @@
   $("authBtn").addEventListener("click", async () => {
     const s = await window.api.auth.status();
     if (s.signedIn) {
-      if (confirm("F1 TV에서 로그아웃할까요?")) await window.api.auth.logout();
+      if (await UIKit.confirm("F1 TV에서 로그아웃할까요? 실시간 차량 위치와 텔레메트리를 더 받지 않아요.", { title: "F1 TV 로그아웃", ok: "로그아웃", danger: true })) await window.api.auth.logout();
       await paintAuth();
       if (liveStatus.state !== "stopped") { await window.api.live.stop(); await window.api.live.start(); }
     } else await signIn();
@@ -1655,6 +1832,7 @@
 
   // Live mode with nothing running: say so, and when the next session starts.
   function paintIdle() {
+    paintSource();
     const liveIdle = mode === "live" && (!live.state.DriverList || liveStatus.state === "stopped");
     const over = mode === "live" && /Finalised|Ends/.test(live.state.SessionStatus?.Status || "");
     if (mode === "live" && !schedule) loadSchedule().catch(() => {});
@@ -1676,8 +1854,16 @@
     if (over && next) $("nextChip").textContent = `다음: ${KO.sessionName(next.s.name)} · ${untilText(next.at - Date.now())}`;
   }
 
+  // Drawers (schedule, glossary): the focus moves in, Tab stays inside, Escape or 닫기 closes and the focus goes back.
+  const drawerRelease = {};
+  function openDrawer(id) {
+    for (const other of ["schedule", "glossary"]) if (other !== id) closeDrawer(other);
+    $(id).hidden = false;
+    drawerRelease[id] ||= UIKit.trap($(id), { onEscape: () => closeDrawer(id), initial: $(id).querySelector(".drawer-head button") });
+  }
+  function closeDrawer(id) { if ($(id).hidden && !drawerRelease[id]) return; $(id).hidden = true; drawerRelease[id]?.(); drawerRelease[id] = null; }
   async function openSchedule() {
-    $("glossary").hidden = true; $("schedule").hidden = false;
+    openDrawer("schedule");
     if (!schedule) {
       $("scheduleList").innerHTML = `<p class="empty">일정을 불러오는 중…</p>`;
       try { await loadSchedule(); }
@@ -1698,7 +1884,7 @@
     document.querySelector(".race:not(.past)")?.scrollIntoView({ block: "start" });
   }
   $("scheduleBtn").addEventListener("click", openSchedule);
-  $("scheduleClose").addEventListener("click", () => { $("schedule").hidden = true; });
+  $("scheduleClose").addEventListener("click", () => closeDrawer("schedule"));
 
   // ---------- glossary ----------
   $("glossaryList").innerHTML = KO.GLOSSARY.map(([term, text]) => `<dt>${esc(term)}</dt><dd>${esc(text)}</dd>`).join("");
@@ -1715,13 +1901,18 @@
   }
   $("colsList").addEventListener("change", (e) => { const k = e.target.dataset.col; if (!k) return; if (e.target.checked) hiddenCols.delete(k); else hiddenCols.add(k); store.set("hiddenCols", [...hiddenCols]); applyCols(); });
   $("colsReset").addEventListener("click", () => { hiddenCols = new Set(COLS_DEFAULT_OFF); store.set("hiddenCols", [...hiddenCols]); applyCols(); });
-  $("colsBtn").addEventListener("click", (e) => { e.stopPropagation(); const open = $("colsPop").hidden; $("colsPop").hidden = !open; $("colsBtn").setAttribute("aria-expanded", String(open)); });
-  document.addEventListener("click", (e) => { if (!$("colsPop").hidden && !e.target.closest(".cols-wrap")) { $("colsPop").hidden = true; $("colsBtn").setAttribute("aria-expanded", "false"); } });
+  // (popovers: the column picker and the 메뉴 – keyboard, Escape and outside clicks from UIKit.menu)
+  UIKit.menu($("colsBtn"), $("colsPop"));
+  UIKit.menu($("menuBtn"), $("appMenu"));
   applyCols();
 
-  $("glossaryBtn").addEventListener("click", () => { $("schedule").hidden = true; $("glossary").hidden = !$("glossary").hidden; });
-  $("glossaryClose").addEventListener("click", () => { $("glossary").hidden = true; });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("schedule").hidden = true; $("glossary").hidden = true; $("syncPop").hidden = true; } });
+  $("glossaryBtn").addEventListener("click", () => ($("glossary").hidden ? openDrawer("glossary") : closeDrawer("glossary")));
+  $("glossaryClose").addEventListener("click", () => closeDrawer("glossary"));
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.isComposing) return;
+    closeDrawer("schedule"); closeDrawer("glossary");
+    if (!$("syncPop").hidden) { $("syncPop").hidden = true; $("syncBtn").setAttribute("aria-expanded", "false"); if ($("syncPop").contains(document.activeElement)) $("syncBtn").focus(); }
+  });
 
   // ---------- the home screen's bridge (home.js, an ES module) ----------
   // What the home screen may do with the app: the same load path, the mode, the live connection (the one LiveClient in
@@ -1743,6 +1934,9 @@
   $("homeBtn").addEventListener("click", () => setHome(!homeOn));
 
   // ---------- boot ----------
+  UIIcons.fill(document.body);
+  UIKit.tips();
+  paintPlay();
   paintAuth();
   loadSessionList();
   setMode(store.get("mode", "replay") === "live" ? "live" : "replay");
