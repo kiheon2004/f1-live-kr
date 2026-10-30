@@ -12,7 +12,9 @@
 // The alpha eases to its target (CORNERS.fade s) and the ranges have a margin both ways (hysteresis), so a number at
 // the edge doesn't blink. What is in front of a number (a building, a tunnel's roof, a hill) hides it: map3d draws
 // them with the depth test (except "all", the old map-like view).
-export const CORNERS = { ahead: 420, fadeIn: 60, passed: 12, next: 2, heliR: 500, heliK: 1.4, fade: 0.35, margin: 40 };
+export const CORNERS = { ahead: 420, fadeIn: 60, passed: 12, next: 2, heliR: 500, heliK: 1.4, heliMax: 8, fade: 0.35, margin: 40 };
+// v0.50 §8-6: from the helicopter at most heliMax numbers – the nearest to where it looks (one already shown keeps its place
+// against a newcomer up to `margin` m nearer: no swapping at the edge); a high view over a whole circuit showed every one
 
 // corners [{ n, x, z }] (scene metres), the lap line's points pts [{ x, z }] with cum[i] the distance to point i, lap
 // length L → [{ n, s, i }] (s: m along the lap). Each corner: the point of the lap line within `near` m of it that lies
@@ -49,11 +51,12 @@ export function cornerTargets(stations, view) {
   if (view.mode === "all") { for (const k of stations) out.set(k.n, 1); return out; }
   if (view.cam === "heli" || view.cam === "inspect" || view.carS == null) {
     const look = view.look || { x: 0, z: 0 }, R = Math.max(CORNERS.heliR, (view.height || 0) * CORNERS.heliK);
-    for (const k of stations) {
-      const d = Math.hypot(k.x - look.x, k.z - look.z), was = (prev.get(k.n) || 0) > 0.01;
+    const ranked = stations.map((k) => { const d = Math.hypot(k.x - look.x, k.z - look.z), was = (prev.get(k.n) || 0) > 0.01; return { k, d, was, key: d - (was ? CORNERS.margin : 0) }; })
+      .sort((a, b) => a.key - b.key);
+    ranked.forEach(({ k, d, was }, i) => {
       const r = was ? R + CORNERS.margin : R;
-      out.set(k.n, d <= r ? 1 - smooth01((d - (r - 120)) / 120) : 0);
-    }
+      out.set(k.n, i < (view.max ?? CORNERS.heliMax) && d <= r ? 1 - smooth01((d - (r - 120)) / 120) : 0);
+    });
     return out;
   }
   // riding: the next corners along the car's own lap. The limit (CORNERS.next) counts only the corners still ahead

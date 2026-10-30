@@ -30,12 +30,14 @@ function setCls(el, k, on) { on = !!on; if ((el.__c || (el.__c = {}))[k] !== on)
 function setAttr(el, k, v) { if (el.getAttribute(k) !== v) el.setAttribute(k, v); }
 const h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 
+// (the zones on a 16 px grid, grown outwards: the wheel turning a few degrees doesn't move the widgets every half second)
+const snapZones = (zs) => zs.map((r) => { const x = Math.floor(r.x / 16) * 16, y = Math.floor(r.y / 16) * 16; return { x, y, w: Math.ceil((r.x + r.w) / 16) * 16 - x, h: Math.ceil((r.y + r.h) / 16) * 16 - y, what: r.what }; });
 // host: #map3d; api: what map3d lends (see map3d.js specApi)
 export function createSpecHud(host, api) {
   let prefs = loadPrefs(window.localStorage), editing = false, small = false, cockpit = false, gameOn = false;
   const last = { tower: 0, strip: 0, driver: 0, tel: 0, pit: 0, ready: 0, zones: 0 };
   const cost = { ms: 0, frames: 0, worst: 0, layouts: 0, built: 0 };
-  let zones = [], layoutDue = true, placed = {};
+  let zones = [], layoutDue = true, placed = {}, baseScale = 1;
 
   const root = h("div", "spec-hud"); root.id = "specHud"; root.setAttribute("aria-label", "3D 관전 HUD");
   const W = {};
@@ -249,7 +251,7 @@ export function createSpecHud(host, api) {
     for (const id of WIDGET_IDS) {
       const p = prefs.widgets[id], o = W[id].outer;
       setCls(o, "hidden", !p.on);
-      const z = String(p.scale); if (W[id].inner.style.zoom !== z) W[id].inner.style.zoom = z;
+      const z = String(+(p.scale * baseScale).toFixed(3)); if (W[id].inner.style.zoom !== z) W[id].inner.style.zoom = z;
     }
     if (!gameOn) { notes.hidden = !prefs.widgets.notes.on; }
     editor.querySelectorAll("[data-preset]").forEach((b) => setAttr(b, "aria-pressed", String(b.dataset.preset === prefs.preset && !prefs.edited)));
@@ -260,6 +262,9 @@ export function createSpecHud(host, api) {
     layoutDue = false; cost.layouts++;
     const vw = host.clientWidth, vh = host.clientHeight; if (!vw || !vh) return;
     small = vw < 720; setCls(root, "small", small);
+    // (a big window: everything a little larger – 12 px type over a 1920 px wide picture reads small; the viewer's scale on top)
+    const base = vw >= 1600 ? 1.15 : 1;
+    if (base !== baseScale) { baseScale = base; applyPrefsToDom(); layoutDue = false; }
     const rects = [];
     for (const id of ORDER) {
       const o = W[id].outer, p = prefs.widgets[id];
@@ -276,6 +281,8 @@ export function createSpecHud(host, api) {
       .filter((e) => e && e.offsetParent).map((e) => { const b = e.getBoundingClientRect(); return { x: b.left - hr.left, y: b.top - hr.top, w: b.width, h: b.height }; })
       .filter((r) => r.w > 0 && r.h > 0 && r.x < vw && r.y < vh && r.x + r.w > 0 && r.y + r.h > 0);
     const out = avoidZones(rects, fixed.concat(cockpit && !editing ? zones : []), vw, vh);
+    // (the camera tools are never hidden – they are the way out of a cockpit view: with nowhere free they keep their place)
+    for (const r of out) if (r.id === "cam" && r.squeezed) Object.assign(r, rects.find((x) => x.id === "cam"), { squeezed: false, moved: false });
     for (const r of out) {
       placed[r.id] = r;
       const el = r.id === "notes" ? notes : W[r.id].outer;
@@ -389,7 +396,7 @@ export function createSpecHud(host, api) {
       if (now - last.pit >= RATE.pit) { last.pit = now; paintPit(A); }
     }
     setCls(root, "nosrc", !A?.src);
-    if (cockpit && now - last.zones >= RATE.zones) { last.zones = now; const z = api.keepClear(); if (JSON.stringify(z) !== JSON.stringify(zones)) { zones = z; layoutDue = true; } }
+    if (cockpit && now - last.zones >= RATE.zones) { last.zones = now; const z = snapZones(api.keepClear()); if (JSON.stringify(z) !== JSON.stringify(zones)) { zones = z; layoutDue = true; } }
     if (layoutDue && !drag) layout();
     const ms = performance.now() - t0; cost.ms += ms; cost.frames++; if (ms > cost.worst) cost.worst = ms;
   }

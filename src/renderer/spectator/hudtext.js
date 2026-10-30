@@ -71,7 +71,8 @@ export function pitText(p) {
     return { title: "피트 정차", rows, cls: "" };
   }
   if (st === "waiting (double stack)") return { title: "피트 대기", rows: [{ k: "대기", v: "팀 동료 정비 중 (더블 스택)", cls: "warn" }], cls: "warn" };
-  if (st === "queued" || st === "standing (no box known)") return { title: "피트 레인", rows: [{ k: "정지", v: `${sec(still)} · 앞이 막힘`, cls: "warn" }], cls: "warn" };
+  if (st === "queued") return { title: "피트 레인", rows: [{ k: "정지", v: `${sec(still)} · 박스 앞에서 대기`, cls: "warn" }], cls: "warn" };
+  if (st === "standing (no box known)") return { title: "피트 레인", rows: [{ k: "정지", v: sec(still), cls: "num" }, { k: "", v: "팀 박스 위치 자료 없음", cls: "faint" }], cls: "" };
   if (st === "drive-through") return { title: "피트 레인", rows: [{ k: "페널티", v: "드라이브 스루", cls: "warn" }], cls: "warn" };
   if (st === "pit start: waiting" || st === "pit start: going") return { title: "피트 레인 출발", rows: [{ k: "", v: st === "pit start: waiting" ? "출구 신호 대기" : "출발", cls: "" }], cls: "" };
   if (st === "retired") return { title: "피트 레인", rows: [{ k: "", v: "리타이어", cls: "bad" }], cls: "bad" };

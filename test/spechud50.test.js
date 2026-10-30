@@ -159,3 +159,26 @@ test("pitText: the stop as it is now – elapsed, penalty wait, work stage, long
   for (const r of all) assert.doesNotMatch(flat(r), /남은|후 출발|뒤 출발|예상|종료 시각|초 뒤|\d+:\d\d/, flat(r));
   assert.strictEqual(pitText(null), null);
 });
+
+test("tower value column: stored, sanitised, cycled; the preset's when unknown", async () => {
+  const { sanitizePrefs, nextCols, TOWER_COLS, setWidget, defaultPrefs } = await L();
+  assert.deepStrictEqual(TOWER_COLS.map(nextCols), ["gap", "full", "int"]);
+  assert.strictEqual(setWidget(defaultPrefs(), "tower", { cols: "gap" }).widgets.tower.cols, "gap");
+  assert.strictEqual(sanitizePrefs({ v: 1, preset: "watch", widgets: { tower: { cols: "<script>" } } }).widgets.tower.cols, "int");
+  assert.strictEqual(sanitizePrefs({ v: 1, preset: "analysis", widgets: { tower: {} } }).widgets.tower.cols, "full");
+});
+
+test("corner numbers from the helicopter: at most CORNERS.heliMax, the nearest to where it looks, no swapping at the edge", async () => {
+  const { cornerTargets, CORNERS } = await import("../src/renderer/corners.js");
+  const st = Array.from({ length: 16 }, (_, i) => ({ n: i + 1, s: i * 300, x: i * 100, z: 0 }));
+  const T = cornerTargets(st, { mode: "near", cam: "heli", L: 4800, look: { x: 0, z: 0 }, height: 3000 });
+  const shown = [...T].filter(([, v]) => v > 0).map(([n]) => n);
+  assert.strictEqual(shown.length, CORNERS.heliMax);
+  assert.deepStrictEqual(shown, [1, 2, 3, 4, 5, 6, 7, 8]);
+  // number 8 shown, 9 a little nearer now (look moved 20 m on): 8 keeps its place
+  const prev = new Map(shown.map((n) => [n, 1]));
+  const T2 = cornerTargets(st, { mode: "near", cam: "heli", L: 4800, look: { x: 20, z: 0 }, height: 3000, prev });
+  assert.ok(T2.get(8) > 0 && !(T2.get(9) > 0));
+  // "all" still shows every one (the viewer's own choice)
+  assert.strictEqual([...cornerTargets(st, { mode: "all", cam: "heli", L: 4800 }).values()].filter((v) => v > 0).length, 16);
+});

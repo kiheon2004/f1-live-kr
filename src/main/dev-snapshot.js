@@ -13,6 +13,7 @@
 //   F1KR_RADIO=1     also opens the team radio tab (F1KR_RADIO=all: grouped by lap)
 //   F1KR_SYNC=1      (live) opens the TV sync box and tries a clock sync
 //   F1KR_SIZE=1180x720  window size
+//   F1KR_ZOOM=1.5    page zoom (as ⌘+ does: 125 % / 150 % checks)
 //   F1KR_SHOTS="js;;js" runs each and saves out_1.png, out_2.png, … after it
 //   F1KR_JS="…"      runs this in the page just before the capture (F1KR_JS_WAIT ms afterwards, default 3000)
 //   F1KR_YEAR=2025   (replay) season to pick the session from
@@ -36,6 +37,7 @@ module.exports = function snapshot(win, outFile) {
     if (!process.env.F1KR_KEEP) await run(`localStorage.clear()`);
     if (!process.env.F1KR_HOME) await run(`window.F1KRApp?.setHome(false)`);
     if (process.env.F1KR_SIZE) { const [w, h] = process.env.F1KR_SIZE.split("x").map(Number); win.setSize(w, h); await wait(300); }
+    if (+process.env.F1KR_ZOOM > 0) { win.webContents.setZoomFactor(+process.env.F1KR_ZOOM); await wait(300); }
     if (process.env.F1KR_BIGMAP) await run(`localStorage.setItem("f1kr:sideW","900"); localStorage.setItem("f1kr:mapH","640"); dispatchEvent(new Event("resize"))`);
     if (process.env.F1KR_HOME) {
       let m = {};

@@ -1528,6 +1528,7 @@
     // (the home screen covers the map: the 3D view starts drawing only once it's left – setHome)
     const go = () => (v === "3d" && !homeOn ? window.Map3D.show() : window.Map3D.hide());
     if (window.Map3D) go(); else if (v === "3d") addEventListener("map3d-ready", go, { once: true });
+    if (typeof renderMiniBoard === "function") renderMiniBoard(true);
   }
   document.querySelectorAll(".view-switch button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
   setView(mapView);
@@ -1542,7 +1543,8 @@
   // Compact standings shown over the full-window map.
   let miniKey = "";
   function renderMiniBoard(force) {
-    if (!$("mapCard").classList.contains("expanded") || !src) return;
+    // (v0.50: in the 3D view the spectator HUD's tower stands in for it – not drawn there; drawn again on the switch to 2D)
+    if (!$("mapCard").classList.contains("expanded") || !src || mapView === "3d") return;
     const drivers = src.state.DriverList || {};
     const rows = rowsNow().map(([num, l]) => {
       const d = drivers[num] || {}, gap = l.Position === "1" ? "" : koGap(l.IntervalToPositionAhead?.Value || l.TimeDiffToPositionAhead || "");
