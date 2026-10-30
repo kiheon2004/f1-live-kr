@@ -19,11 +19,11 @@ import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection, laneSectionAt } from "./pitlane.js";
-import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, PIT } from "./pitstate.js";
+import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, garagePath, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { circuitVerdict, pitsUpToWall } from "./pitwallcheck.js";
-import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens } from "./garages.js";
+import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens, garageZones } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { probeMirrorPass, samePipeline, glassVsPicture, rendererState, flatFill, glassPixels, glassOnScreen } from "./mirrorprobe.js";
 import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO, lockFor } from "./car3d.js";
@@ -43,6 +43,8 @@ import { footing } from "./footing.js";
 import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, timeJump, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
 import { updateGameCars, paintGameHud, pitPoint } from "./game/cars3d.js";
+import { createPitCam } from "./game/pitcam.js";
+import { createPitKit } from "./garagekit/pitkit.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -211,7 +213,26 @@ function initGeoSettings() {
 const newPitTeams = () => ({ key: null, group: null, facility: null, session: null, inf: new PitInference(), last: 0, info: null, frame: null });
 // (the game's mode works on its own record – the live one, with what a live feed has gathered, is kept aside untouched)
 let pitTeams = newPitTeams(), livePitTeams = null;
+// v0.49: the garage interior kit in the team bays (garagekit/pitkit.js) – made with the teams' layer, freed with it.
+// garageKitOn: Map3D.garageKit(false) draws the layer's own simple equipment instead (before / after comparisons).
+let pitKit = null, garageKitOn = true, garageKitLight = true;
+// the teams the kit draws in full: the focused car's and, in the game, the pit camera's subject's
+const kitNearSet = new Set();
+function kitNear() {
+  kitNearSet.clear();
+  const teamOf = (num) => num != null && (pitTeams.teams || []).find((t) => (t.drivers || []).some((d) => String(d.num) === String(num)))?.team;
+  const a = teamOf(app()?.focus), b = game ? teamOf(gamePitCam?.S?.subject) : null;
+  if (a) kitNearSet.add(a); if (b) kitNearSet.add(b);
+  return kitNearSet;
+}
+function attachPitKit(G, teams, season) {
+  pitKit = null;
+  if (!garageKitOn || !pitTeams.group || !pitTeams.zones?.length) return;
+  try { pitKit = createPitKit({ G, zones: pitTeams.zones, teams, season, near: new Set(kitNear()), onMaterial: nightLit, light: garageKitLight }); pitTeams.group.add(pitKit.group); }
+  catch (e) { pitKit = null; console.warn("garage kit:", e); }
+}
 function clearPitTeams() {
+  pitKit = null;
   if (pitTeams.group) { pitTeams.group.parent?.remove(pitTeams.group); disposeGroup(pitTeams.group); pitTeams.facility?.userData?.garages?.openRail?.([]); }
   pitTeams.group = null; pitTeams.key = null;
 }
@@ -263,7 +284,7 @@ function updatePitTeams(force = false) {
   // (a box is painted where a car stands in it – LANES.box out from the garages –, not on the feed's line, which runs
   // anywhere across the lane: pitlane.js)
   { const pm = pitModelFor(G); for (const t of teams) if (t.box != null) t.boxOff = pm.at(t.box).boxC; }
-  pitTeams.teams = teams; pitTeams.G = G;
+  pitTeams.teams = teams; pitTeams.G = G; pitTeams.zones = garageZones(G, teams);
   pitTeams.info = { evidence: r.evidence, live: !!src.isLive };
   // (how many garages a team has and which driver's is which are estimates: the data shows only where the cars stopped)
   const est = teams.filter((t) => t.estimated);
@@ -273,7 +294,8 @@ function updatePitTeams(force = false) {
   clearPitTeams();
   pitTeams.key = key;
   if (!teams.length) return;   // neutral garages
-  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null);
+  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null, { kit: garageKitOn });
+  attachPitKit(G, teams, A.sessionYear?.() || null);
   // a layer added at night takes the light field too (its own materials only – the rest of the world has it already)
   pitTeams.group.traverse((o) => { for (const m of [].concat(o.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
@@ -376,6 +398,9 @@ function pitFrame(src, t, lag, isRace) {
   for (const r of out.values()) if (r.input.speed < PIT.creep && [...out.values()].some((o) => o !== r && o.team === r.team && (o.state.state === "in box" || o.state.state === "leaving box") && o.u != null && r.u != null && o.u > r.u + 2)) { r.input.teammateInBox = true; r.state = pitState(r.input); }
   for (const r of out.values()) {
     if (r.u == null) continue;
+    // (v0.49: going into its garage – to its own work space's car spot, garages.js garageZones; none known: it stays in the
+    // inner lane where it stands, never pushed through a garage's front)
+    if (r.state.lane === "garage") { r.spot = (pitTeams.zones || []).find((z) => z.kind === "car" && z.num === r.num) || null; r.state.evidence.push(r.spot ? `parked at its work space, bay ${r.spot.slot} (estimate)` : "no work space known: left in the inner lane"); }
     const at = m.at(r.u), want = laneOffsetOf(r.state, at, r.off, r.u, G.gStart, G.gEnd);
     // the way across changing along the lane: the heading turns by it (pulling into / out of the box)
     const ahead = laneOffsetOf(pitState({ ...r.input, u: r.u + 1 }), m.at(r.u + 1), r.off, r.u + 1, G.gStart, G.gEnd);
@@ -407,6 +432,7 @@ const ss01 = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 -
 function pitDraw(c, r, v) {
   c.pit = r; if (r.u == null || r.want == null) return;
   const G = pitTeams.G, s = r.at.slot, d = r.want - r.off;
+  if (r.state.lane === "garage") { garageDraw(c, r, v, G); return; }
   // from the raw position (r.x, r.z: the feed's, where r.off was measured), moved across to where its state puts it
   v.x = r.x - s.inward[0] * d; v.z = r.z - s.inward[1] * d;
   // on the lane's surface in front of the garages, easing to the ground the entry / exit roads lie on
@@ -419,6 +445,21 @@ function pitDraw(c, r, v) {
     const fx = ax * fwd * cs + ox * k, fz = az * fwd * cs + oz * k;
     c.yaw = Math.atan2(fx, fz);
   }
+}
+// v0.49: a car going into its garage (pitstate.js garagePath): along the inner lane to in front of its own work space,
+// turning to face out, then tail first straight in through the door to its car spot (garages.js garageZones: on the
+// garage's floor, facing the pit lane) – v0.48 pushed it 2.5 m sideways into whatever garage it stood in front of, turned
+// along the lane, through pillars, benches and the engineers' desks. No work space known: the inner lane where it stands.
+function garageDraw(c, r, v, G) {
+  const z = r.spot, at = r.at, near = r.input.boxU != null && Math.abs(r.u - r.input.boxU) <= (r.input.boxTol ?? PIT.atBox);
+  const from = { u: r.u, off: near && at.ok ? at.boxC : at.fastC }, ax = at.slot.along[0], az = at.slot.along[1];
+  const q0 = nearestOnPath(r.x, r.z), fwd = q0 && q0.d < 25 ? (ax * q0.tx + az * q0.tz >= 0 ? 1 : -1) : 1, laneYaw = Math.atan2(ax * fwd, az * fwd);
+  if (!z) { const s0 = at.slot, d = (at.ok ? at.boxC : at.fastC) - r.off; v.x = r.x - s0.inward[0] * d; v.z = r.z - s0.inward[1] * d; v.y = v.y + (at.floor + 0.004 - v.y) * r.inRun; c.yaw = laneYaw; return; }
+  const s = G.slots[z.slot], cs = z.carSpot, q = garagePath(r.state.w, from, { u: s.uc + z.w, off: -cs.d }, at.ok ? at.boxC : at.fastC);
+  v.x = s.front[0] + s.along[0] * (q.u - s.uc) - s.inward[0] * q.off; v.z = s.front[1] + s.along[1] * (q.u - s.uc) - s.inward[1] * q.off;
+  // (the lane's floor, then the garage's – one level: facilities.js lays the garage floors at the lane's height)
+  v.y = at.floor + 0.004 + (cs.y - at.floor - 0.004) * q.turn;
+  c.yaw = laneYaw + wrap(cs.yaw - laneYaw) * q.turn;
 }
 // The crews (crew.js), each team's from its cars' states (pitstate.js crewPhase): round its car in the box (work);
 // standing back by the garage (a stop-and-go: hold); out at the box while a car of the team comes to it (ready); walking
@@ -502,7 +543,8 @@ function updateCrews(frame) {
   const was = new Set(liftedCars); liftedCars.clear();
   const done = () => { for (const num of was) if (!liftedCars.has(num)) { const c = cars.get(num); if (c) restoreCar(c); } };
   if (!G || !world || !frame) { world?.crews?.clear(); done(); pitWorkNote(null); return; }
-  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); }
+  // (v0.49: the crews lit by the night's floodlights like the pit building – they were near black at night races)
+  if (!world.crews) { world.crews = crewMeshes(); world.group.add(world.crews.group); world.crews.group.traverse((o) => nightLit(o.material)); }
   const A = app(), src = A.src, m = pitModelFor(G), drivers = src?.state.DriverList || {}, list = [], loose = [], byTeam = new Map();
   const policy = pitWorkPolicy();
   let shown = null;
@@ -1258,7 +1300,7 @@ function carFor(num, d) {
   const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season, date, kit: geoSettings().gloves });
   if (nightNow) setCarEnvironment(model, carEnvironment(true), 0.6);
   { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false }));
-    sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; model.add(sh); }
+    sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; sh.name = "contactShadow"; sh.userData.notCar = true; model.add(sh); }
   if (nightNow) lightCar(model, true);
   // cars don't go into the (static) shadow map; the soft contact shadow under each car does the job
   obj.add(model);
@@ -2336,7 +2378,10 @@ function separate(dt, seen, snap = false) {
     // (a spring, ω 6/s: the correction comes and goes without a kink, which at 60 fps read as a shake)
     if (dt > 0.5 || snap) { c.sepX = tx; c.sepZ = tz; c.sepVX = c.sepVZ = 0; } else { spring(c, "sepX", "sepVX", tx, 6, dt); spring(c, "sepZ", "sepVZ", tz, 6, dt); }
     c.pos.set(o.x + c.sepX, c.pos.y, o.z + c.sepZ);
-    if (!c.onTrack) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + ROAD_LIFT - 0.02; }   // (on the track the height is right already)
+    // (on the track the height is right already; in the pit lane pitDraw put it on the lane's / the garage's floor – v0.49:
+    // this set every pit-lane car off the steadied tracks to the NEAREST LAP-LINE point's height, the start straight beside
+    // the lane: Monaco 2025's cars in their boxes 0.93 m under the lane's floor, Gasly's retired car 1.19 m over it)
+    if (!c.onTrack && !(c.pit?.at && c.pit.inRun > 0)) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + ROAD_LIFT - 0.02; }
     c.obj.position.copy(c.pos);
   }
 }
@@ -2419,6 +2464,8 @@ function carNoteFor(num, c) {
 function updateCamera(dt) {
   const A = app();
   if (camMode === "inspect") return;
+  // the game's pit view: posed by game/pitcam.js (its shots, occlusion checks and director); the live view never has it
+  if (camMode === "pit") { if (game) { gamePitView(dt); return; } setCam("chase"); }
   const num = A.focus || leader(), c = cars.get(num), shown = !!c?.obj.visible;
   // (a seek – the session's time jumping, or going back – starts the chase rig's swing and height over too)
   const t = A.t, jumped = camFor.t != null && (t < camFor.t - 50 || t - camFor.t > 2000);
@@ -2567,6 +2614,9 @@ function initLook() {
 }
 
 function setCam(mode) {
+  if (mode === "pit" && !game) return;
+  // (the viewer's own choice in game mode – not the pit director's – wins over the director: game/pitcam.js)
+  if (game && !pitCamDirecting) gamePitCam.userCam(mode);
   if (mode === camMode) return;
   resetLook();
   camera.up.copy(UP); chase.init = false;
@@ -2581,7 +2631,7 @@ function setCam(mode) {
     } else heli.follow = false;
   }
   camMode = mode; camInit = false; resetPace();
-  try { localStorage.setItem("f1kr:cam3d", JSON.stringify(mode)); } catch {}
+  if (mode !== "pit") try { localStorage.setItem("f1kr:cam3d", JSON.stringify(mode)); } catch {}
   paintCamButtons();
 }
 function paintCamButtons() {
@@ -3450,6 +3500,8 @@ function frame(now) {
   realPart("buildings")?.userData.update?.(camera.position);
   realPart("facilities")?.userData.update?.(camera.position);
   updatePitTeams();
+  // (the kit's near teams and its one light – cheap unless the focused / pit-camera team changed)
+  if (pitKit && pitTeams.group?.visible !== false) pitKit.update({ near: kitNear(), cam: camera.position, focus: app()?.focus });
   if (!devNoHud) paintHud();
   // glare points: pixels per metre at 1 m away, fading into the haze as the fog does; time for blinking lights
   NL.time.value = now / 1000;
@@ -3647,11 +3699,14 @@ function floodTest() {
 // ---------- the strategy game's mode (Map3D.game; game/adapter3d.js, game/cars3d.js) ----------
 // What cars3d.js may use of this view: its world, cars, camera and a few drawing helpers – nothing of the live paths.
 const gameLifted = new Set();
+let gamePitCam = null;
 const gameKit = {
+  setCamByDirector(m) { pitCamDirecting = true; try { setCam(m); } finally { pitCamDirecting = false; } },
+  pitTeamsGroup: () => pitTeams.group || null, nightLit,
   THREE, get camera() { return camera; }, cars, lifted: gameLifted, ROAD_LIFT,
   world: () => world, camMode: () => camMode, focus: () => app().focus || leader(),
   carFor, paintLabel, scaleForView, applyLift, restoreCar, pitModelFor,
-  pitG: () => pitTeams.G || null, pitTeams: () => pitTeams.teams || null,
+  pitG: () => pitTeams.G || null, pitTeams: () => pitTeams.teams || null, pitZones: () => pitTeams.zones || null,
   groundAt: (x, z) => { const R = world?.real; const g = R?.groundAt ? R.groundAt(x, z) : null; return Number.isFinite(g) ? g : groundY(x, z); },
   // a point on the pit lane moved across into the box (k 0 → 1: the lane's line → the box's offset from the garages), on
   // the lane's floor inside the garages' run – the pit building's own lane model (pitlane.js, as pitDraw does live)
@@ -3665,6 +3720,7 @@ const gameKit = {
 };
 function gameCars(dt) {
   const fr = updateGameCars(gameKit, game, dt);
+  if (fr) { const t0 = performance.now(); gamePitCam.direct(game, fr, t0); gamePitCost.direct += performance.now() - t0; gamePitCost.frames++; gamePitFr = fr; }
   // the safety car where the engine has it (snapshot.sc: on the engine's lap, mapped like the cars)
   const sc = fr?.snap?.sc, SP = supportCtx(game, 0);
   if (SP) {
@@ -3674,6 +3730,19 @@ function gameCars(dt) {
     placeSupportCar(SP, "sc", models.sc || "neutralSc", where, !!where, (fr?.t || 0) / 1000);
   }
   gameNote(fr);
+}
+gamePitCam = createPitCam(gameKit);
+// the pit view's camera (camMode "pit"): game/pitcam.js's pose for this frame, or the camera left where it is
+let gamePitFr = null, pitCamDirecting = false;
+const gamePitCost = { direct: 0, pose: 0, frames: 0 };
+function gamePitView(dt) {
+  controls.enabled = false; setNear(0.1);
+  const t0 = performance.now(), p = gamePitFr && gamePitCam.pose(game, { ...gamePitFr, dtWall: dt }, t0, camera);
+  gamePitCost.pose += performance.now() - t0;
+  if (!p) { camNoteSet("피트 카메라: 이 팀의 박스를 아직 그릴 수 없어요"); return; }
+  if (camera.fov !== p.fov) { camera.fov = p.fov; camera.updateProjectionMatrix(); }
+  camera.position.copy(p.pos); camera.up.copy(UP); camera.lookAt(p.look); camLook.copy(p.look);
+  camNoteSet(p.note);
 }
 function gameNote(fr) {
   const note = document.getElementById("note3d");
@@ -3713,13 +3782,14 @@ function gamePitTeams(force) {
   const plan = planOverrides(G, drivers);
   const teams = allocatePlaces(G.slots, G.pitch, drivers, places, plan.length ? plan : overridesFor(G.facility, A.sessionYear?.() || null, session));
   { const pm = pitModelFor(G); for (const t of teams) if (t.box != null) t.boxOff = pm.at(t.box).boxC; }
-  pitTeams.teams = teams; pitTeams.G = G; pitTeams.order = pub; pitTeams.info = { evidence: "game: published box order", live: false };
+  pitTeams.teams = teams; pitTeams.G = G; pitTeams.zones = garageZones(G, teams); pitTeams.order = pub; pitTeams.info = { evidence: "game: published box order", live: false };
   pitTeamNote(teams.length ? "게임: 팀 박스는 전년도 컨스트럭터 순위 배정(실측 박스 위치) · 차고 칸 수는 추정" : null);
   const key = allocationKey(teams);
   if (key === pitTeams.key) return;
   clearPitTeams(); pitTeams.key = key;
   if (!teams.length) return;
-  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null);
+  pitTeams.group = teamLayer(G, teams, drivers, A.sessionYear?.() || null, { kit: garageKitOn });
+  attachPitKit(G, teams, A.sessionYear?.() || null);
   pitTeams.group.traverse((x) => { for (const m of [].concat(x.material || [])) nightLit(m); });
   fac.add(pitTeams.group);
   G.openRail?.(pitTeams.group.userData.standSpans || []);
@@ -3743,6 +3813,8 @@ function gameAttach(adapter) {
 }
 function gameDetach() {
   if (!game) return "not attached";
+  if (camMode === "pit") { gameKit.setCamByDirector(gamePitCam.S.prev || "chase"); }
+  gamePitCam.finish(game); gamePitCam.S.pinned = false; gamePitCam.S.manual = false; gameKit.crewMem = null;
   game.unbind?.();
   disposeWorld(); geoJob++; lastBuildCheck = 0; wx?.reset(); gameLifted.clear();
   game = null;
@@ -3763,6 +3835,15 @@ window.Map3D = {
       cars: [...cars.values()].filter((c) => c.obj.visible).map((c) => ({ num: c.num, x: +c.pos.x.toFixed(2), y: +c.pos.y.toFixed(2), z: +c.pos.z.toFixed(2), yaw: +c.yaw.toFixed(3), s: c.worldS != null ? +c.worldS.toFixed(1) : null, where: c.game?.where, phase: c.game?.pit?.phase, lifted: !!c.lifted, cmp: c.game?.tyre?.compound })),
       crews: world?.crews ? true : false, boxes: gameKit.boxDiag || null, cam: camMode, focus: app().focus || null, t: app().t }),
     setCam: (m) => setCam(m),
+    // the pit view (game/pitcam.js): auto-direction and auto-slow on / off, the team's cars the director follows (the
+    // selected car always first), its state and costs (ms: the director and the camera's placing, over `frames`)
+    pitcam: {
+      auto(on) { if (on != null) gamePitCam.S.auto = !!on; return gamePitCam.S.auto; },
+      slow(on) { if (on != null) gamePitCam.S.slow = !!on; return gamePitCam.S.slow; },
+      cars(list) { if (list !== undefined) gamePitCam.S.cars = list ? list.map(String) : null; return gamePitCam.S.cars; },
+      state: () => JSON.stringify({ ...gamePitCam.state(), cam: camMode, cost: { frames: gamePitCost.frames, directMs: +(gamePitCost.direct / Math.max(1, gamePitCost.frames)).toFixed(4), poseMs: +(gamePitCost.pose / Math.max(1, gamePitCost.frames)).toFixed(4) }, crews: gameKit.crewInfo || null, drawn: gameKit.crewDrawn || null, crewCost: gameKit.crewCost ? { msPerFrame: +(gameKit.crewCost.ms / Math.max(1, gameKit.crewCost.frames)).toFixed(4), worstMs: +gameKit.crewCost.worst.toFixed(2), frames: gameKit.crewCost.frames } : null }),
+      resetCost() { gamePitCost.direct = gamePitCost.pose = 0; gamePitCost.frames = 0; gameKit.crewCost = null; return "ok"; },
+    },
   },
   floodTest,
   // development: look at a support car ("sc" | "med") from `dist` m at bearing `ang` (rad, 0 = from behind), `h` m up
@@ -4418,13 +4499,46 @@ window.Map3D = {
   // development: pairs of yachts whose hulls overlap (oriented rectangles; margin m each side) and hulls over land
   harbourCheck(margin = 0) { const H = world?.harbour; if (!H?.list) return JSON.stringify({ yachts: 0 }); const L = H.list, pairs = []; for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) if (hullsOverlap(L[i], L[j], margin)) pairs.push([L[i].zone, L[j].zone, Math.round(L[i].L), Math.round(L[j].L), +Math.hypot(L[i].x - L[j].x, L[i].z - L[j].z).toFixed(1)]); let land = 0; for (const y of L) { const ux = Math.sin(y.yaw), uz = Math.cos(y.yaw); for (const f of [-0.3, 0, 0.5]) for (const s of [-0.5, 0.5]) if (!world.real.isSea(y.x + ux * f * y.L - uz * s * y.B, y.z + uz * f * y.L + ux * s * y.B)) land++; } return JSON.stringify({ yachts: L.length, overlaps: pairs.length, pairs: pairs.slice(0, 20), landPoints: land }); },
   harbour() { const H = world?.harbour; if (!H?.list) return JSON.stringify({ yachts: 0 }); const z = {}; for (const y of H.list) { const e = z[y.zone] || (z[y.zone] = { n: 0, L: [] }); e.n++; e.L.push(Math.round(y.L)); } return JSON.stringify({ yachts: H.list.length, seaY: +world.real.seaLevel.toFixed(2), zones: z, first: H.list.slice(0, 3).map((y) => [+y.x.toFixed(1), +y.z.toFixed(1)]) }); },
+  // development (v0.49, garagecheck.js): real-size cars parked at the chosen teams' car work spaces (garages.js
+  // garageZones), wire boxes of the car (green clear / red hit), the bay's pillars, lintel, walls, partition, ceiling, and
+  // what it hits, and the report (JSON). o: { teams: ["McLaren"] (default: every team), park, boxes, clear: true – remove }
+  async garageCheck(o = {}) {
+    const old = scene.getObjectByName("garageCheck"); if (old) { scene.remove(old); disposeGroup(old); }
+    if (o.clear) return "cleared";
+    const G = pitTeams.G; if (!G || !pitTeams.zones) return JSON.stringify({ G: !!G, zones: !!pitTeams.zones });
+    const { garageCheckScene } = await import("./garagecheck.js"), A = app();
+    const drivers = game ? game.drivers() : A.src?.state.DriverList || {};
+    const r = await garageCheckScene({ G, zones: pitTeams.zones, layer: pitTeams.group, teams: o.teams || null, drivers, season: A.sessionYear?.() || null, date: sessionDate(), park: o.park !== false, boxes: o.boxes !== false, extra: pitKit ? (sl) => pitKit.boxesFor(sl.k) : null });
+    scene.add(r.group);
+    const zs = pitTeams.zones.filter((z) => !o.teams || o.teams.includes(z.team));
+    // (game: each team's box where the engine stops its cars against the box painted in the lane – v0.48 A1 / A2)
+    let engineBoxes = null;
+    if (game) { const P = game.scenario?.track?.pit, ent = new Map((game.scenario?.entries || []).map((e) => [e.team, e.teamKey]));
+      engineBoxes = (pitTeams.teams || []).map((t) => { const bu = P?.boxes?.[ent.get(t.team)]; if (bu == null || t.box == null) return [t.team, null, t.box]; const pp = pitPoint(P, bu, world.center), pr = G.project(pp.x, pp.z); return [t.team, +pr.u.toFixed(2), +t.box.toFixed(2), +(pr.u - t.box).toFixed(2)]; }); }
+    return JSON.stringify({ facility: G.facility || null, engineBoxes, plan: G.plan ? { built: G.plan.built, blocked: G.plan.blocked || null, folds: G.plan.folds || null } : null, cars: r.report,
+      zones: zs.map((z) => ({ team: z.team, kind: z.kind, slot: z.slot, num: z.num, w: +z.w.toFixed(2), width: +z.width.toFixed(2), depth: +z.depth.toFixed(2), back: +(+z.back).toFixed(2), doorW: z.doorW && +z.doorW.toFixed(2), doorH: z.doorH && +z.doorH.toFixed(2), ceilingH: z.ceilingH && +z.ceilingH.toFixed(2), lowest: z.lowest, floorY: +z.floorY.toFixed(3), depthFrom: z.depthFrom, walk: z.walk, fits: z.carSpot?.fits ?? null, box: z.box || null })) });
+  },
+  // development (v0.49): the garage interior kit in the team bays – on / off (off: the teams' layer draws its own simple
+  // equipment, as before the kit: before / after pictures at the same camera); returns the kit's state
+  garageKit(on, o = {}) {
+    const light = o.light ?? garageKitLight;
+    if ((on != null && !!on !== garageKitOn) || !!light !== garageKitLight) { if (on != null) garageKitOn = !!on; garageKitLight = !!light; clearPitTeams(); updatePitTeams(true); }
+    return JSON.stringify({ on: garageKitOn, kit: pitKit ? pitKit.state() : null });
+  },
+  // development: every bay of the pit building as built – its width, depth, back area, the building's depth behind it
+  garageBays() {
+    const G = pitTeams.G || (() => { let g = null; world?.real?.group.getObjectByName("facilities")?.traverse((x) => { if (!g && x.userData?.garages) g = x.userData.garages; }); return g; })();
+    if (!G) return JSON.stringify({ G: false });
+    return JSON.stringify({ facility: G.facility || null, depth: +G.depth.toFixed(2), plan: G.plan || null, slots: G.slots.map((s) => [s.k, +s.uc.toFixed(1), +s.width.toFixed(2), +s.depth.toFixed(2), s.back, s.building, +s.floor.toFixed(2), s.depthFrom, s.bay?.label || null]) });
+  },
   pitCar(num) {
     const G = pitTeams.G, c = cars.get(String(num)); if (!G || !c) return JSON.stringify({ G: !!G, car: !!c });
     const p = G.project(c.pos.x, c.pos.z), r = c.feedPos ? G.project(c.feedPos.x, c.feedPos.z) : null, team = app().src?.state.DriverList?.[num]?.TeamName;
     return JSON.stringify({ t: app().t, u: +p.u.toFixed(1), off: +p.off.toFixed(2), feedOff: r && +r.off.toFixed(2), speed: +c.speed.toFixed(1), box: pitTeams.teams?.find((x) => x.team === team)?.box ?? null, gStart: Math.round(G.gStart), gEnd: Math.round(G.gEnd),
       state: c.pit?.state?.state || null, lane: c.pit?.state?.lane || null, w: c.pit?.state ? +c.pit.state.w.toFixed(2) : null, evidence: c.pit?.state?.evidence || null, fastC: c.pit?.at ? +c.pit.at.fastC.toFixed(2) : null, boxC: c.pit?.at ? +c.pit.at.boxC.toFixed(2) : null,
       lastBox: c.pit?.input?.lastBox || null, stillFor: c.pit?.input ? +c.pit.input.stillFor.toFixed(1) : null, tel: app().src?.carAt?.(String(num), app().t)?.speed ?? null,
-      yOverFloor: c.pit?.at ? +(c.obj.position.y - c.pit.at.floor).toFixed(3) : null, yawDeg: +(c.yaw * 57.3).toFixed(1), crews: world.crews ? world.crews.group.children.reduce((a, m) => a + m.count, 0) : 0 });
+      yOverFloor: c.pit?.at ? +(c.obj.position.y - c.pit.at.floor).toFixed(3) : null, inRun: c.pit?.inRun != null ? +c.pit.inRun.toFixed(2) : null,
+      spot: c.pit?.spot ? { slot: c.pit.spot.slot, w: c.pit.spot.w, d: c.pit.spot.carSpot.d, fits: c.pit.spot.carSpot.fits, off: +Math.hypot(c.obj.position.x - c.pit.spot.carSpot.x, c.obj.position.z - c.pit.spot.carSpot.z).toFixed(2) } : null, yawDeg: +(c.yaw * 57.3).toFixed(1), crews: world.crews ? world.crews.group.children.reduce((a, m) => a + m.count, 0) : 0 });
   },
   // development: what is seen at screen point (x, y: −1…1) – the first few objects a ray from the camera meets, named
   // by their nearest named parent, with the distance and whether their material is shown

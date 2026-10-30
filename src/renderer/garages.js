@@ -16,6 +16,8 @@ import * as THREE from "./vendor/three.module.js";
 import { peopleMeshes } from "./crew.js";
 import { driverPanel, paintPanel } from "./pitscreens.js";
 import { teamKey } from "./pitorder.js";
+import { CAR_ENVELOPE } from "./carbounds.js";
+import { carSpotDepth } from "./garagespace.js";
 
 const STOP_MIN = 1500, STOP_MAX = 8000, LONG = 20000, STILL = 0.8;
 // (a standstill cut in two by a small move – a nudge, the data jumping a little – is one: runs that follow each other
@@ -451,6 +453,58 @@ export function planOverrides(G, drivers) {
 export const overridesFor = (facility, year, session = null, list = GARAGE_OVERRIDES) =>
   list.filter((o) => o.facility === facility && o.year === year && (!o.session || o.session === session)).flatMap((o) => o.teams.map((t) => ({ ...t, source: o.source })));
 
+// ---------- the zones (v0.49) ----------
+// The garages as spaces, apart from how they're drawn – what a car, a crew or the interior kit is placed by. Four
+// different things, never forced into one another: the building's physical bays (G.slots – the FIA drawing's, never cut to
+// the number of drivers), a driver's car work space (workSpaces: a whole bay, or half of one at a narrow garage), the
+// team's engineering bays (its other bays: nobody's car), and the team's ONE pit box in the lane, which both its drivers
+// share. A team with two drivers doesn't get two doors: a work space is wherever workSpaces put it.
+//   G: facilities.js garages ({ slots: [{ k, front, along, inward, width, height, ceil, depth, back, floor, depthFrom, … }] });
+//   teams: allocatePlaces' result (or null: the bays alone, kind "bay"). Every zone in its bay's frame: front (the
+//   opening's middle at the floor), along (+ to the pit exit), inward (+ into the garage), metres.
+// → [{ team (null: no team's), kind: "car" | "eng" | "bay" | "box", slot (bay k; null for the box), num (the driver of a
+//   car space), est (who works where is estimated – workSpaces), centre: [x, z] (the zone's middle on the floor), along,
+//   inward, w (its middle, m along from the bay's), width (of the zone), depth (the race bay's – built), back (the back
+//   area behind the partition, not built), doorW, doorH (the opening between the pillars, under the lintel), ceilingH,
+//   floorY, lowest (the lowest fixed thing over the race bay's floor beyond the door line: the boom's beam – its lines
+//   hang to the car by design), walk: [m clear beside the car, either side] | null, depthFrom ("map footprint" |
+//   "made-up outline" | "facility"), carSpot: { x, z, y, yaw, d, fits, why } | null (car spaces only: where its car
+//   stands – garagespace.js carSpotDepth, facing out of the garage), box: { u, off } (kind "box": along the garages, out
+//   from their front) }]
+// Stable for the interior kit (feat/v0.49-kit): fields are only ever added.
+export function garageZones(G, teams = null, E = CAR_ENVELOPE) {
+  if (!G?.slots?.length) return [];
+  const out = [], owner = new Map();
+  for (const t of teams || []) for (const k of t.slots || []) owner.set(k, t);
+  const P = (s, d, w) => [s.front[0] + s.inward[0] * d + s.along[0] * w, s.front[1] + s.inward[1] * d + s.along[1] * w];
+  const yawOut = (s) => Math.atan2(-s.inward[0], -s.inward[1]);
+  const base = (s, t, kind, w, width) => ({ team: t?.team ?? null, kind, slot: s.k, num: null, est: !!t?.estimated || kind === "car", centre: P(s, s.depth / 2, w), along: [...s.along], inward: [...s.inward], w, width,
+    depth: s.depth, back: s.back ?? 0, doorW: s.width, doorH: s.height, ceilingH: s.ceil, floorY: s.floor, lowest: +(s.ceil - 0.55 - 0.07).toFixed(2), walk: null, depthFrom: s.depthFrom || null, carSpot: null });
+  for (const s of G.slots) {
+    const t = owner.get(s.k), spaces = (t?.spaces || []).filter((x) => x.slot === s.k);
+    if (!t) { out.push(base(s, null, "bay", 0, s.width)); continue; }
+    if (!spaces.length) { out.push(base(s, t, "eng", 0, s.width)); continue; }
+    const part = s.width / spaces.length;
+    for (const sp of spaces) {
+      const z = base(s, t, "car", sp.w || 0, part); z.num = sp.num;
+      const cs = carSpotDepth(s.depth, E), side = (part - E.width) / 2;
+      const [x, zz] = P(s, cs.d, z.w);
+      // (too narrow for the car between its walls – a split bay – is no fit either)
+      const fits = cs.fits && side >= 0.1;
+      z.walk = [+side.toFixed(2), +side.toFixed(2)];
+      z.carSpot = { x, z: zz, y: s.floor + 0.017, yaw: yawOut(s), d: +cs.d.toFixed(3), fits, why: fits ? cs.why : side < 0.1 ? `work space ${part.toFixed(2)} m wide for a ${E.width} m car` : cs.why };
+      out.push(z);
+    }
+  }
+  for (const t of teams || []) {
+    if (t.box == null) continue;
+    const s = G.slots.reduce((p, q) => (Math.abs(q.uc - t.box) < Math.abs(p.uc - t.box) ? q : p));
+    const off = t.boxOff ?? 6, w = t.box - s.uc, c = P(s, -off, w);
+    out.push({ ...base(s, t, "box", w, 2.3), slot: null, centre: c, depth: 5.6, back: 0, doorW: null, doorH: null, ceilingH: null, lowest: null, depthFrom: null, est: t.link !== "confirmed" && t.from !== "box", box: { u: t.box, off } });
+  }
+  return out;
+}
+
 // ---------- the layer ----------
 // Shared geometry for the equipment (made once; never freed with a layer)
 // a small deterministic random sequence from a string (the same garage gets the same things)
@@ -564,7 +618,9 @@ function atlas(rows) {
 const textOn = (hex) => { const n = parseInt(hex.slice(1), 16), l = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); return l > 150 ? "#111111" : "#ffffff"; };
 
 // The layer for one allocation: returns a THREE.Group owning its geometry, materials and label texture.
-export function teamLayer(garages, teams, drivers, season = null) {
+// opts.kit (v0.49): the garage interior kit (garagekit/pitkit.js) furnishes the team bays – this layer then leaves out its
+// own simple equipment and booms (both would draw); its lining, floors, ceiling strips, boards and pit wall stay.
+export function teamLayer(garages, teams, drivers, season = null, opts = {}) {
   const S = shared(), group = new THREE.Group(); group.name = "pitTeams";
   group.userData.covers = [];   // (the pit wall stands' canopies: no rain under them – weather3d.js)
   group.userData.wallStands = [];   // (each team's stand as built: standcheck.js)
@@ -700,9 +756,11 @@ export function teamLayer(garages, teams, drivers, season = null) {
       // where it is, never a copy parked here.
       const fy = 0.016, floorCol = new THREE.Color(st.dark ? "#3b3f44" : "#c9ccce");
       quad(floor, at(s, s.depth / 2 + 0.1, 0, fy), along.clone().multiplyScalar(s.width - 0.08), inw.clone().multiplyScalar(s.depth - 0.25), up, null, floorCol);
-      const carL = Math.min(5.7, s.depth - 1.6), cw = 2.1, cd = 0.7 + carL / 2, cx = space ? space.w || 0 : 0;
+      // (v0.49: centred on where its car stands – garagespace.js carSpotDepth, the car facing out: the box from its nose to
+      // its tail with 0.05 m to spare; v0.48 squeezed it to the 4 m bay, 2.4 m long)
+      const spot = carSpotDepth(s.depth), carL = CAR_ENVELOPE.length + 0.1, cw = 2.1, cd = spot.d + (CAR_ENVELOPE.back - CAR_ENVELOPE.front) / 2, cx = space ? space.w || 0 : 0;
       const line = (c, ax, ay, colr) => quad(floor, c, ax, ay, up, null, colr), white = new THREE.Color(st.dark ? "#d8dadc" : "#f4f4f2"), yel = new THREE.Color("#e2b100");
-      if (role === "car" && s.width / ((t.drivers.filter((d) => d.slot === s.k).length) || 1) >= cw + 0.3) {
+      if (role === "car" && spot.fits && s.width / ((t.drivers.filter((d) => d.slot === s.k).length) || 1) >= cw + 0.3) {
         for (const sd of [-1, 1]) line(at(s, cd, cx + sd * cw / 2, fy + 0.008), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.06), white);
         for (const dd of [-1, 1]) line(at(s, cd + dd * carL / 2, cx, fy + 0.008), along.clone().multiplyScalar(cw), inw.clone().multiplyScalar(0.06), white);
         for (const sd of [-1, 1]) line(at(s, cd, cx + sd * (cw / 2 + 0.22), fy + 0.008), inw.clone().multiplyScalar(carL), along.clone().multiplyScalar(0.12), col);
@@ -713,7 +771,8 @@ export function teamLayer(garages, teams, drivers, season = null) {
       quad(panels, at(s, s.depth / 2 + 0.4, 0, s.ceil - 0.08), along.clone().multiplyScalar(s.width - 0.1), inw.clone().multiplyScalar(s.depth - 0.9), down, null, new THREE.Color(st.dark ? "#121417" : "#5d636a"));
       for (let d = 1.4; d < s.depth - 0.5; d += 1.8) quad(lights, at(s, d, 0, s.ceil - 0.1), along.clone().multiplyScalar(s.width * 0.7), inw.clone().multiplyScalar(0.12), down, null, null);
       const yaw = yawIn(s), sideRoom = (s.width - (role === "car" ? cw + 0.3 : 0)) / 2;
-      if (role === "car") {
+      if (opts.kit) { /* the kit furnishes this bay */ }
+      else if (role === "car") {
         // A car's bay. Overhead: the boom carrying the car's air, power and data lines out over it from the back wall,
         // its coiled lines hanging to the car (photos 2018, 2021: spiral lines from the ceiling to the car). By the walls:
         // tyre sets on their trolleys under blankets, the wheel guns on the wall, the front and rear jacks by the door,

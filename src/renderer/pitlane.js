@@ -31,6 +31,33 @@ export function pathFrame(pts) {
   return { pts, cum, len, at };
 }
 
+// The measured pit path with its fold-backs taken out: a point that doesn't get on along the path's way (over ±12 m) past
+// the last one kept is dropped – the measured paths step back 0.5–4 m at six venues (v0.49: Hungaroring 2025 at 590–600 m,
+// a 1.6 m step on, 4 m back, 4 m on again: ~8 m of path for 1.5 m of lane). Cars don't drive backwards: it is the data.
+// Placed on the folded path, the FIA drawing's equal garages there squeezed into nothing – Kick Sauber's middle garage at
+// Hungary 2025 was 0.05 m long (−0.45 m between its pillars) – v0.48 garage audit. → { pts, frame (pathFrame of pts), toU
+// (u along the measured path → u along this one: the same place, less the folds before it), folds: [[u from, u to]] }
+export function unfoldPath(pts, win = 12, minStep = 0.05) {
+  const fr = pathFrame(pts), keep = [0], folds = [];
+  for (let i = 1; i < pts.length; i++) {
+    const a = fr.at(Math.max(0, fr.cum[i] - win)), b = fr.at(Math.min(fr.len, fr.cum[i] + win)), dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
+    const p = pts[keep[keep.length - 1]], on = ((pts[i][0] - p[0]) * dx + (pts[i][1] - p[1]) * dz) / l;
+    if (on > minStep) keep.push(i);
+    else if (!folds.length || folds[folds.length - 1][1] < fr.cum[i - 1] - 1e-6) folds.push([fr.cum[i - 1], fr.cum[i]]); else folds[folds.length - 1][1] = fr.cum[i];
+  }
+  if (keep.length === pts.length) return { pts, frame: fr, toU: (u) => u, folds };
+  const kp = keep.map((i) => pts[i]), f2 = pathFrame(kp);
+  // each measured point's u on the new path: a kept one's own, a dropped one the last kept one's (no way on in a fold)
+  const uf = new Array(pts.length); let k = 0;
+  for (let i = 0; i < pts.length; i++) { if (keep[k + 1] === i) k++; uf[i] = f2.cum[k]; }
+  const toU = (u) => {
+    if (u <= 0) return u; if (u >= fr.len) return f2.len + (u - fr.len);
+    let i = 1; while (i < pts.length - 1 && fr.cum[i] < u) i++;
+    const f = (u - fr.cum[i - 1]) / (fr.cum[i] - fr.cum[i - 1] || 1); return uf[i - 1] + (uf[i] - uf[i - 1]) * f;
+  };
+  return { pts: kp, frame: f2, toU, folds };
+}
+
 // where a ray from (x, z) along (dx, dz) first crosses a ring's edges: the distance, or Infinity
 export function rayRing(x, z, dx, dz, ring) {
   let best = Infinity;

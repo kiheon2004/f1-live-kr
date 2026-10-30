@@ -34,6 +34,7 @@ import { weatherTruth, truthAt, forecastAt, newSurface, surfaceStep, waterAt, ru
 import { Streams } from "./rng.js";
 import { DT_MS, DT } from "./clock.js";
 import * as CMD from "./commands.js";
+import { availableCompounds, isCompound } from "./compounds.js";
 import { newTraffic, trafficSetup, trafficPre, trafficEnv, trafficPost, trafficAccount, trafficEnd, pathFactor, mergeClear, onPitExit, gridLateral, snapTraffic } from "./traffic.js";
 import { newAiState, aiPrePlans, aiStep } from "./ai.js";
 import * as CTL from "./control.js";
@@ -44,7 +45,6 @@ import { INCIDENTS } from "../data/params/incidents.js";
 import { carBase } from "../data/params/cars-base.js";
 import { energyParams } from "../data/params/energy.js";
 import { airDensity } from "../data/params/physics.js";
-import { DEFAULT_ALLOCATION } from "../data/params/tyres.js";
 import { values } from "../data/params/param.js";
 import { CARS_2025_TABLE, TRACK_TAU_2025 } from "../data/params/cars-2025.js";
 import { CARS_2026_TABLE, TRACK_TAU_2026 } from "../data/params/cars-2026.js";
@@ -52,7 +52,6 @@ import { CARS_2026_TABLE, TRACK_TAU_2026 } from "../data/params/cars-2026.js";
 // track grip factor τ where the calibration fitted one (from THAT race's speed traces – a circuit/conditions property,
 // not its result), else 1 (estimate: the validation showed ±3 s/lap without it – reported as a limit)
 const TEAM_CARS = { 2025: CARS_2025_TABLE, 2026: CARS_2026_TABLE }, TRACK_TAU = { ...TRACK_TAU_2025, ...TRACK_TAU_2026 };
-import NOMINATIONS from "../data/tyres/nominations.js";
 
 export const ENGINE_VERSION = "0.48.0-engine.1";
 export const STATE_VERSION = 1;
@@ -109,6 +108,7 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
   for (const c of state.cars) { if (c.where === "pit") c.s = T.pit.pitToLap(c.pit.u); c.armed = T.ahead(0, c.s) < T.L / 2; c.dist = c.armed ? c.s : c.s - T.L; }
   gridLateral(race);
   sortOrder(race);
+  for (const c of state.cars) noteTransitions(c, 0);
   log(race, { type: "start", cause: "scenario", effect: `${state.cars.length} cars, ${state.totalLaps} laps, seed ${state.seed}` });
   return race;
 }
@@ -127,9 +127,9 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
     profiles[e.num] = { prof: makeProfile(T.n), at: -1e9, phase: (sc.entries.indexOf(e) * 97) % REPROFILE.everyMs };
   }
   const rec = weatherRecord(sc.weather);
-  // race names (SOFT/MEDIUM/HARD) → the C-number Pirelli nominated for this event (research data; else the defaults, est)
-  const nomKey = sc.meta.id.replace(/_\d{4}-\d{2}-\d{2}_Race$/, ""), nom = NOMINATIONS.races[nomKey];
-  const alloc = nom ? { HARD: nom.H, MEDIUM: nom.M, SOFT: nom.S, INTERMEDIATE: "INTERMEDIATE", WET: "WET", est: false } : { ...DEFAULT_ALLOCATION, est: true };
+  // race names (SOFT/MEDIUM/HARD) → the C-number Pirelli nominated for this event (compounds.js: the one answer the engine,
+  // the AI and the screens share; research data, else the defaults, est)
+  const AV = availableCompounds(sc), alloc = { ...AV.alloc, est: AV.est };
   const tau = TRACK_TAU[sc.meta.id] ?? 1;
   race.cache = { T, PT, cars, drivers, profiles, alloc, tau, tauEst: !(sc.meta.id in TRACK_TAU), ep: energyParams(season), truth: weatherTruth(rec, { mode: race.state.weatherMode, seed: race.state.seed, minutes: 240 }),
     surface: race.cache?.surface || null, w: {}, carById: null, ghostProf: {} };
@@ -203,9 +203,23 @@ export function step(race) {
   controlEvents(race, flag0, phase0);
   // 6. order, the end
   sortOrder(race);
+  for (const car of S.cars) noteTransitions(car, t);
   if (S.finished && !S.results) finishRace(race, t);
   // 7. the team AI (only orders – applied from the next step, like the player's)
   if (S.ai) aiStep(race);
+}
+
+// A car's discrete state (lap / pit / garage, status, pit phase, the tyre fitted) changes at a step: each change is kept
+// with its sim time (car.trans, the last few, ≤ 60 s old) so the screen applies it at that time, not at the next snapshot
+// it happens to receive (v0.49 §4: a stop's new tyres were drawn before the work had ended). State, saved like the rest.
+const discOf = (c) => ({ where: c.where, status: c.status, phase: c.pit.phase, tyre: c.tyre.name, code: c.tyre.compound });
+function noteTransitions(car, t) {
+  const d = discOf(car), p = car.disc;
+  if (!p) { car.disc = d; car.trans = []; return; }
+  if (p.where === d.where && p.status === d.status && p.phase === d.phase && p.tyre === d.tyre && p.code === d.code) return;
+  const set = {}; for (const k in d) if (d[k] !== p[k]) set[k] = d[k];
+  car.trans.push({ t, set }); car.disc = d;
+  while (car.trans.length > 12 || (car.trans.length && car.trans[0].t < t - 60000)) car.trans.shift();
 }
 
 // the pit lane: race control's holds (red-flag queue, exit light, pit-lane start) ⊕ the stewards' penalty to serve
@@ -323,6 +337,7 @@ function moveLap(race, car, t, cap = null) {
   car.incIn = { u: onEnv ? Math.min(1 + 0.5 * (1 - IP.errU0.v), IP.errU0.v + IP.errGain.v * over) : 0, tyreOut: Math.min(1, (1 - wf) / 0.5), water: E.water, compound: car.tyre.name, braking: cs.aLong < -10 };
   // tyres and energy from what the car did
   const [pi, pe] = splitPower(cs.pDrive, E.pIce, E.pErs);
+  car.deployW = pe > 0 ? pe : 0;   // (the ERS power deployed this step: the snapshot's energy.deployKw)
   stepTyre(car.tyre, { v: car.v, aLat: car.aLat, aLong: car.aLong, heat: cp.C_tyre_heat * tyreHeatFactor(car.driver) * tv.heatMul, Tair: C.w.airT, Ttrack: C.w.trackT, water: E.water, abrasion: 1 }, DT);
   stepEnergy(car.energy, C.ep, { pIce: pi, pErs: pe, pBrake: cs.pBrake, iceFull: pi >= E.pIce * 0.999 && E.pIce > 0, otLap: tv.otLap }, DT, t);
   // the surface: a car entering a new segment
@@ -390,7 +405,11 @@ function movePit(race, car, t, ctx = {}) {
   }
   if (car.where === "pit") car.v = car.pit.v;
   if (ev === "unsafeRelease") RULES.onUnsafeRelease(race, T, car);
-  if (ev) log(race, { t, car: car.num, type: "pit:" + ev, cause: ev === "work" && car.pit.err ? car.pit.err.causes.join(", ") || "crew" : "pit", effect: ev === "work" ? `stationary ${car.pit.workS?.toFixed(2)} s${car.pit.err ? ` (slow wheel +${car.pit.err.add.toFixed(1)} s)` : ""}` : ev });
+  // (the work's length and a slow wheel are logged when the work ENDS – at its start the log would tell the screens the
+  // future: v0.49 §15, the stop's time is shown as it elapses)
+  const done = ev === "workDone" && car.pit.times?.work != null;
+  if (ev) log(race, { t, car: car.num, type: "pit:" + ev, cause: done && car.pit.err ? car.pit.err.causes.join(", ") || "crew" : "pit",
+    effect: done ? `stationary ${((t - car.pit.times.work) / 1000).toFixed(2)} s${car.pit.err ? ` (slow wheel +${car.pit.err.add.toFixed(1)} s)` : ""}` : ev === "work" ? "work started" : ev });
   // tyres cool in the lane (slow, no load), energy: the limiter (no deploy)
   stepTyre(car.tyre, { v: car.v, aLat: 0, aLong: 0, heat: 0, Tair: C.w.airT, Ttrack: C.w.trackT, water: 0, abrasion: 1 }, DT);
   car.wheelDist += car.v * DT;
@@ -473,24 +492,55 @@ export function classify(race) {
 
 // ---------- orders ----------
 
-export function command(race, cmd) { return CMD.submit(race.state.commands, race.state.t, cmd); }
+// The player's door: the order is the player's whatever its `by` field says (v0.49 §3: a spoofed "ai:<team>" can't reach
+// another team's cars). The team AI uses commandAs(race, cmd, "ai:<team>").
+export function command(race, cmd) { return commandAs(race, cmd, "player"); }
+export function commandAs(race, cmd, actor) { return CMD.submit(race.state.commands, race.state.t, cmd, actor, (c) => validateOrder(race, c)); }
+export const commandStatus = (race, id) => CMD.status(race.state.commands, id);
 
+// who may give this order to what, and its arguments against this race (at submit; applyOrder checks the state again)
+function validateOrder(race, c) {
+  const S = race.state, team = c.by.startsWith("ai:") ? c.by.slice(3) : S.userTeam;   // (the player's team: null in headless tools = any)
+  if (S.finished) return { ok: false, why: "race finished" };
+  let car = null;
+  if (c.car != null) {
+    car = S.cars.find((x) => x.num === c.car);
+    if (!car) return { ok: false, why: `no car ${c.car}` };
+    if (team && car.teamKey !== team) return { ok: false, why: "not your car" };
+  }
+  if (c.type === "teamOrder") {
+    const tk = c.team ?? car?.teamKey ?? team;
+    if (!tk || !S.cars.some((x) => x.teamKey === tk)) return { ok: false, why: `no team ${tk}` };
+    if (team && tk !== team) return { ok: false, why: "not your team" };
+    c.team = tk;
+  }
+  if (c.type === "pit" && c.args.compound != null && !isCompound(race.scenario, c.args.compound)) return { ok: false, why: `compound ${c.args.compound} not offered at this event` };
+  if (c.type === "plan") {
+    const st = c.args.stints;
+    for (const x of st) if (!isCompound(race.scenario, x.compound)) return { ok: false, why: `compound ${x.compound} not offered at this event` };
+    if (st[st.length - 1].toLap < S.totalLaps) return { ok: false, why: `plan ends at lap ${st[st.length - 1].toLap}, before the finish (${S.totalLaps})` };
+  }
+  return { ok: true };
+}
+
+// apply an order at its step: the race state decides (and nothing an order does may stop the race)
 function applyOrder(race, c, t) {
+  const v = validateOrder(race, c); if (!v.ok) return v;   // (the state may have moved since it was taken)
+  try { return applyOrder0(race, c, t); } catch (e) { log(race, { t, car: c.car, type: "orderError", cause: c.by, effect: String(e?.message || e) }); return { ok: false, why: "internal error: " + String(e?.message || e) }; }
+}
+function applyOrder0(race, c, t) {
   const S = race.state, car = c.car != null ? S.cars.find((x) => x.num === c.car) : null;
-  if (c.car != null && !car) return { ok: false, why: "no such car" };
-  // the player commands only the user team's cars (the AI its own) – a cross-team order is refused
-  if (car && c.by === "player" && S.userTeam && car.teamKey !== S.userTeam) return { ok: false, why: "not your car" };
   if (car && (car.status === "fin" || car.status === "dnf")) return { ok: false, why: `car ${car.status}` };
   switch (c.type) {
-    case "pace": if (!CMD.PACE.includes(c.args.mode)) return { ok: false, why: "unknown pace mode" }; setPaceMode(car.driver, c.args.mode); car.mode.pace = c.args.mode; return { ok: true };
-    case "energy": if (!CMD.ENERGY.includes(c.args.mode)) return { ok: false, why: "unknown energy mode" }; car.mode.energy = c.args.mode; return { ok: true };
+    case "pace": setPaceMode(car.driver, c.args.mode); car.mode.pace = c.args.mode; return { ok: true };
+    case "energy": car.mode.energy = c.args.mode; return { ok: true };
     case "pit": {
       // suspended (red flag) and stopped in the lane: the free tyre change (SR 57.4b / B5.14.4a), not a stop
       if (S.control?.flag === "red" && car.where === "pit") { const r = CTL.redTyreChange(race, race.cache.T, car, c.args.compound, (cc, cmp) => { cc.tyre = newTyre(race, cmp, race.cache.w.airT ?? 25); cc.redSets = (cc.redSets || 0) + 1; race.cache.profiles[cc.num].at = -1e9; }); log(race, { t, car: car.num, type: "redTyreChange", cause: c.by, effect: r.ok ? c.args.compound : `refused: ${r.why}` }); return r; }
       const r = pitCall(car, race.cache.T, { compound: c.args.compound, t }); if (r.ok && car.pit.call) car.pit.call.by = c.by; log(race, { t, car: car.num, type: "pitCall", cause: c.by, effect: r.ok ? `box for ${c.args.compound}: ${r.why}` : `refused: ${r.why}` }); return r; }
     case "pitCancel": { const r = pitCancel(car); log(race, { t, car: car.num, type: "pitCancel", cause: c.by, effect: r.ok ? "cancelled" : `refused: ${r.why}` }); return r; }
-    case "plan": if (!Array.isArray(c.args.stints) || !c.args.stints.length) return { ok: false, why: "no stints" }; car.plan = { stints: c.args.stints.map((x) => ({ compound: x.compound, toLap: x.toLap | 0 })), by: c.by }; car.planCalled = null; return { ok: true };
-    case "teamOrder": if (!CMD.TEAM_ORDER.includes(c.args.policy)) return { ok: false, why: "unknown policy" }; S.teamOrders[c.team || car?.teamKey] = { policy: c.args.policy, ...c.args }; return { ok: true };
+    case "plan": car.plan = { stints: c.args.stints.map((x) => ({ compound: x.compound, toLap: Math.min(x.toLap, S.totalLaps) })), by: c.by }; car.planCalled = null; return { ok: true };
+    case "teamOrder": S.teamOrders[c.team] = { policy: c.args.policy, ...c.args }; return { ok: true };
   }
   return { ok: false, why: "unhandled" };
 }
@@ -509,18 +559,34 @@ export function snapshot(race) {
     control: { phase: cs.phase, drs: cs.drs, overtake: cs.overtake, yellows: cs.yellows, msgs: cs.msgs },
     weather: { rain: w.rain ?? 0, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, water: avg(C.surface.hLine), est: !!w.est },
     cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
+      mode: { pace: c.mode.pace, energy: c.mode.energy },   // (the orders in force – the HUD shows them)
+      trans: c.trans ? c.trans.slice() : [],   // (discrete changes with their sim times – adapter3d applies them at render time)
       pen: { pendingS: c.pen.pendingS ?? 0, open: (c.pen.serve || []).filter((x) => !x.served).map((x) => x.kind) }, inc: c.inc && c.inc.until > S.t ? c.inc.kind : null, dmg: c.dmg || null, out: c.out || null, vscDelta: CTL.vscDelta(race, T, c),
       // (s null: not on the track any more – retired in the garage, or 3 s past its chequered flag: the cool-down lap
       // isn't simulated, so a finished car leaves the picture instead of standing on the line)
       where: c.where, s: c.where === "garage" || (c.status === "fin" && S.t - (c.finT ?? S.t) > 3000) ? null : c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
       ...snapTraffic(c),
-      tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: 0 }, fuel: c.energy.fuel,
-      pit: { phase: c.pit.phase, u: c.pit.u, workT0: c.pit.times?.work ?? null, workT1: c.pit.workEnd ?? null, err: c.pit.err, compound: c.pit.call?.compound ?? null },
-      gap: { leader: lead && c.lap === lead.lap ? gapSec(c, lead, T) : null, ahead: null } })) };
+      tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: c.where === "lap" && c.status === "run" ? Math.round((c.deployW || 0) / 1000) : 0 }, fuel: c.energy.fuel,
+      pit: snapPit(c.pit),
+      // (by race distance, not by completed laps: right after the leader crosses the line the cars behind have one lap
+      // fewer without being a lap down – v0.49: the tower showed "+1랩" for them)
+      gap: lead ? gapOf(c, lead, T) : { leader: null, ahead: null, lapsDown: 0 } })) };
+}
+// the pit state for the screen. workT1 is the engine's planned end of the work (the crew animation is fitted to it); a
+// screen must not show it as a number before render time reaches it (request §15: no future stationary time shown).
+// times: the phases' start times so far (entry, stop, queue, queueEnd, penEnd, work, workEnd – once done –, release);
+// holdT1: a penalty hold's end (its length is the stewards' published 5 / 10 s); noWork: a stop-and-go (nobody touches
+// the car); held: in "release" and held for a car coming down the fast lane (safe release)
+function snapPit(p) {
+  const tm = p.times || {};
+  return { phase: p.phase, u: p.u, workT0: tm.work ?? null, workT1: tm.work != null ? p.workEnd ?? null : null, err: tm.work != null ? p.err : null, compound: p.call?.compound ?? null,
+    times: { entry: tm.entry ?? null, stop: tm.stop ?? null, queue: tm.queue ?? null, queueEnd: tm.queueEnd ?? null, penEnd: tm.penEnd ?? null, work: tm.work ?? null, workEnd: tm.workEnd ?? null, release: tm.release ?? null },
+    holdT1: p.phase === "penalty" ? p.holdUntil ?? null : null, noWork: !!p.noWork, held: p.phase === "release" && !!p.unsafeRolled };
 }
 const avg = (a) => { let s = 0; for (const x of a) s += x; return a.length ? s / a.length : 0; };
 // the front wheels' steer for the screen: the path's curvature × wheelbase (kinematic, rad, + left)
 const steerOf = (T, c) => (c.where === "lap" ? Math.max(-0.4, Math.min(0.4, Math.atan(3.6 * T.at(T.kappaLine || T.kappa, c.s)))) : 0);
+const gapOf = (c, lead, T) => { const down = c === lead ? 0 : Math.max(0, Math.floor((lead.dist - c.dist) / T.L)); return { leader: down ? null : gapSec(c, lead, T), ahead: null, lapsDown: down }; };
 const gapSec = (c, lead, T) => (c === lead ? 0 : c.v > 1 ? +((lead.dist - c.dist) / Math.max(20, c.v)).toFixed(2) : null);
 
 // ---------- save / load ----------

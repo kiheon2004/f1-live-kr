@@ -248,6 +248,18 @@ SC/VSC는 속도 비율이 아니라: VSC는 차량별 델타 시간(최소 구�
 - 결과: `results()`는 rules.classify 행 + `gap`(초)·`lapsDown`·`stops`·`stints`·`acct {traffic≈, pit≈, pitQueue≈, penalty}`.
 - 저장: `state.control`, `state.incidents`, `car.inc/dmg/dmgKey/fin`이 상태에 포함, 복원 시 `refreshControlCache`.
 
+### 10.2 명령과 화면 시각 (v0.49)
+- 명령: 받을 때(`commands.shape` + `engine.validateOrder`: 차량·팀 존재, 소속, 모드, 이 이벤트의 컴파운드, 스틴트 끝 랩
+  순서와 결승 도달)와 적용할 때(상태: 리타이어·완주·경기 종료) 두 번 검사, 적용 중 예외는 거절로 기록. 명령을 내린 쪽은
+  호출 경로가 정한다: `command()` = 플레이어, AI는 `commandAs(race, cmd, "ai:<team>")`. `commandStatus(race, id)` =
+  queued / applied / refused(+이유, 단계).
+- 사용 가능 컴파운드: `compounds.js availableCompounds(scenario)` 하나를 엔진·AI·화면이 공유(지정 자료 + 인터·웨트,
+  없으면 추정 표시; 실제 경기에서 쓰인 목록은 쓰지 않음; 세트 재고 없음).
+- 이산 상태(본선/피트/차고, 상태, 피트 단계, 장착 타이어)의 변화는 차량별로 그 sim 시각과 함께 `car.trans`에 남고(최근
+  12개·60 s), 스냅샷 `trans`로 화면에 간다. adapter3d `frameCars()`는 이전 스냅샷 상태에서 시작해 렌더 시각이 지난
+  변화만 순서대로 적용한다(미리 보이지 않음). 정비 시간·느린 바퀴는 작업이 끝날 때 로그에 남는다.
+- 스냅샷 추가: `energy.deployKw`(실제 ERS 배치 출력), `mode {pace, energy}`, `pit` 단계 시각(일어난 것만), `err.wheel`.
+
 ## 11. 피트 (pit.js)
 
 단계: `call`(명령 접수) → `committed`(진입 결정 지점 `sIn − D_commit` 통과: 이후 취소 불가) → `entry`(감속, 분기)
