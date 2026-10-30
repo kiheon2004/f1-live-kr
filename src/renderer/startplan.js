@@ -77,7 +77,7 @@ export class StartHistory {
       // (a clock that runs again after a pause without a red flag isn't a start: the clock stops for a red flag only)
       const msgs = this.rcm.filter(([tm]) => tm <= ts + 1000 && tm > (out.length ? out[out.length - 1].t : -Infinity));
       const first = out.length === 0;
-      if (!first && !msgs.some(([, m]) => /RED FLAG|SUSPENDED|RESUM/.test(m))) { prev = ts; continue; }
+      if (!first && !msgs.some(([, m]) => /\bRED FLAG|SUSPENDED|RESUM/.test(m))) { prev = ts; continue; }
       let standing = first ? true : null;
       for (const [, m] of msgs) { if (/STANDING START/.test(m)) standing = true; else if (/ROLLING START|START BEHIND THE SAFETY CAR|WILL START BEHIND/.test(m)) standing = false; }
       let order = null, orderFrom = null;
@@ -123,7 +123,7 @@ export function startContext(hist, t) {
   let running = false; for (const [ts, run] of hist.clock) { if (ts > t) break; running = run; }
   if (running) return t - last.t < 900000 ? { ...last, ...say(hist.rcm.filter(([tm]) => tm <= t && tm > last.t), last) } : null;
   const msgs = hist.rcm.filter(([tm]) => tm <= t && tm > last.t);
-  if (!msgs.some(([, m]) => /RED FLAG|SUSPENDED/.test(m))) return null;
+  if (!msgs.some(([, m]) => /\bRED FLAG|SUSPENDED/.test(m))) return null;
   return { t: Infinity, n: done.length + 1, pending: true, ...say(msgs, { standing: null, order: null, orderFrom: null }) };
 }
 

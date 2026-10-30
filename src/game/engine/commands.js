@@ -12,15 +12,22 @@
 // is always "player", whatever the order says), the team AI submits through commandAs(race, cmd, "ai:<team>").
 // status(cs, id) → { state: "queued" | "applied" | "refused" | "unknown", why, stage, tAt, tEff } – what the screens show
 // (a queued order is not an applied one).
-export const TYPES = ["pace", "energy", "pit", "pitCancel", "plan", "teamOrder"];
+// v0.50: "delegate" hands kinds of decision (pace / energy / plan) of a car back to the team AI; "goal" sets the player's
+// goal assist for a car (assist.js turns it into pace / energy orders under the actor "goal:<team>", never the player's
+// name). Who controls each kind is engine state (state.own, engine.js ownership): only an APPLIED order moves it.
+export const TYPES = ["pace", "energy", "pit", "pitCancel", "plan", "teamOrder", "delegate", "goal"];
 export const PACE = ["attack", "balanced", "manage"];
 export const ENERGY = ["harvest", "balanced", "push", "overtake"];
 export const TEAM_ORDER = ["free", "hold", "swap"];
-export const NEEDS_CAR = new Set(["pace", "energy", "pit", "pitCancel", "plan"]);
+export const NEEDS_CAR = new Set(["pace", "energy", "pit", "pitCancel", "plan", "delegate", "goal"]);
+export const KINDS = ["pace", "energy", "plan"];   // the kinds of decision a car's control is split into
+export const GOALS = ["keep", "attack", "defend", "tyre", "save"];
+// the kind an order decides (null: none – a team order)
+export const kindOf = (type) => (type === "pace" ? "pace" : type === "energy" ? "energy" : type === "pit" || type === "pitCancel" || type === "plan" ? "plan" : null);
 
 export function newCommandState() { return { seen: {}, queue: [], log: [] }; }
 
-const isActor = (a) => a === "player" || /^ai:.+$/.test(String(a || ""));   // (team keys have spaces: "ai:Red Bull Racing")
+const isActor = (a) => a === "player" || /^(ai|goal):.+$/.test(String(a || ""));   // (team keys have spaces: "ai:Red Bull Racing")
 // the order's shape: { ok } or { ok: false, why } (nothing about the race – engine.validateOrder knows the race)
 export function shape(cmd) {
   if (!cmd || typeof cmd !== "object") return { ok: false, why: "not an order" };
@@ -31,8 +38,13 @@ export function shape(cmd) {
   switch (cmd.type) {
     case "pace": if (!PACE.includes(a.mode)) return { ok: false, why: `unknown pace mode ${a.mode}` }; break;
     case "energy": if (!ENERGY.includes(a.mode)) return { ok: false, why: `unknown energy mode ${a.mode}` }; break;
-    case "pit": if (a.compound != null && typeof a.compound !== "string") return { ok: false, why: "compound must be a name" }; break;
+    case "pit": if (a.compound != null && typeof a.compound !== "string") return { ok: false, why: "compound must be a name" }; if (a.setId != null && typeof a.setId !== "string") return { ok: false, why: "set id must be a name" }; break;
     case "teamOrder": if (!TEAM_ORDER.includes(a.policy)) return { ok: false, why: `unknown policy ${a.policy}` }; break;
+    case "delegate": if (!Array.isArray(a.kinds) || !a.kinds.length || a.kinds.some((k) => !KINDS.includes(k))) return { ok: false, why: `delegate: kinds must be some of ${KINDS.join(", ")}` }; break;
+    case "goal":
+      if (a.kind != null && !GOALS.includes(a.kind)) return { ok: false, why: `unknown goal ${a.kind}` };
+      if (a.toLap != null && (!Number.isInteger(a.toLap) || a.toLap < 1)) return { ok: false, why: "goal: target lap not a whole number" };
+      break;
     case "plan": {
       if (!Array.isArray(a.stints) || !a.stints.length) return { ok: false, why: "plan: no stints" };
       let prev = 0;

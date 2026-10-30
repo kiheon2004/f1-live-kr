@@ -54,13 +54,13 @@ export function compoundsFor(sc) {
 export const NO_INVENTORY = "세트 재고 없음 · 매번 새 세트 (이번 버전의 한계)";
 export const cmpChip = (c, extra = "") => `<i class="g-cmp cmp-${esc(c || "")}" title="${esc(CMP_KO[c] || c || "?")}">${esc(CMP_1[c] || "?")}</i>${extra}`;
 
-// the snapshot for the HUD at the render time. The cars come from the 3D adapter's frameCars() when there is one: their
-// discrete state (pit phase, tyre fitted, lap / pit, status) applied at the sim time the engine recorded for each change
-// (snapshot trans) – the HUD and the 3D view change together, never early. Without it: the newest snapshot at or before
-// the render time (runner.pair().a), never a newer one. Race-wide fields (flag, weather, lap) are that snapshot's.
+// the snapshot for the HUD at the render time – ONE picture for every screen (present.js field contract): race-wide
+// discrete fields (flag, phase, leader lap) and every car's discrete state at their recorded sim times, continuous values
+// interpolated, estimates from the older snapshot. Never a value from the newer snapshot before the render time reaches it.
+import { presentAt } from "./present.js";
 export function hudSnap(run, adapter = null) {
   const p = run?.pair?.(); if (!p) return null;
-  const base = p.a && p.a.t <= p.renderT ? p.a : p.b;
-  const fr = adapter?.frameCars?.();
-  return fr?.cars ? { ...base, t: fr.t, cars: fr.cars } : base;
+  const L = adapter?.scenario?.track?.L ?? run?.race?.cache?.T?.L ?? 1;
+  if (!p.a) return { ...p.b, cars: p.b.cars.map((c) => ({ ...c })) };
+  return presentAt(p.a, p.b, p.renderT, L);
 }

@@ -1,253 +1,305 @@
-// The race screen around the 3D view (request §13): a top bar (race, lap, flag, weather, clock, speed), a standings tower
-// on the right that folds and can be made wider or narrower, the team's two driver cards along the bottom with every
-// control of both cars always in reach, and between them the pit-work panel of the SELECTED car while it is in the pit
-// lane (else the race's events).
+// The race screen around the 3D view (v0.50 request §9-3, §9-4, §5-6): the 3D view in the middle, the standings tower on
+// the right, the team's two driver panels along the bottom (the same layout for both, so the two cars compare by place on
+// screen), a top bar with the race state and the clock, and docked panels on the left that open on demand (strategy,
+// car detail, forecast, events, team orders, alerts – racedock.js).
 //
-// Two different "which car" ideas, kept apart on screen:
-//   selected  the car whose card is highlighted and whose pit work the middle panel shows (click a card's name)
-//   camera    the car the 3D view follows (adapter ctx.focus – a tower row, the card's 카메라 button, or an automatic
-//             camera when one is active: adapter.camAuto = { num, why } set by the camera's own module)
-// Both cards keep their controls whichever car is selected or filmed.
+// Each driver panel shows the minimum to decide on, always for both cars: position, the gaps ahead / behind, the last lap
+// and its delta to the car's best, the tyre (compound, laps, life, temperature state), the fuel margin to the finish
+// (estimate), the battery, the next planned stop, the goal, who decides pace / energy / plan (AI / 직접 / 목표) – and the
+// key controls: pace, energy, goal, box (with the tyre and the set it will take, the stock, whether it can still be
+// cancelled and the team-mate's queue risk read BEFORE the call), cancel. Order states 접수 / 대기 / 적용 / 거절 with short
+// reasons (orders.js whyKo). Details (temperatures and their trend, energy per lap, traffic) are in the car panel.
 //
-// What is shown is what the engine gives at the RENDER time (the newest snapshot at or before it – never a later one: no
-// tyre change or pit release shown before the 3D view shows it – ui.js hudSnap). Fuel in kg. ERS deploy power as the engine
-// gives it (snapshot energy.deployKw, real since v0.49). "Laps of fuel" only as an estimate from the fuel this car really
-// used per lap so far.
-import { G, paint as paintAll, myCars, sendOrder, leaveRace } from "./gamehome.js";
+// Stable at any speed: every panel's DOM is built once (build()); paint() only changes texts, classes and widths. Nothing
+// appears / disappears inside a panel's control rows while the race runs (a control that can't act is disabled, not
+// removed), so a button is never under the pointer one moment and gone the next.
+//
+// Two different "which car" ideas, kept apart: SELECTED (the highlighted panel; the dock's car panels follow it) and
+// CAMERA (the car the 3D view follows – a tower row, the panel's 카메라 button, or the pit camera's automatic choice).
+//
+// Update rates (measured, report gameui.md): the loop calls paint() every 200 ms; the top bar, the panels and the toasts
+// every call (texts compared before writing), the tower every other call (cells compared, rows moved only when the order
+// changed), the dock at 1 Hz (racedock.js – the strategy editor only when its inputs change and nothing in it has focus).
+// Everything shown is the render-time picture (ui.js hudSnap – present.js), never the newest snapshot or the race state.
+import { G, myCars, sendOrder } from "./gamehome.js";
 import { SPEEDS } from "./runner.js";
-import { $, esc, raceKo, PACE_KO, ENERGY_KO, ORDER_KO, CMP_KO, FLAG_KO, PIT_KO, STATUS_KO, fmtT, pct, cmpChip, compoundsFor, NO_INVENTORY, hudSnap } from "./ui.js";
+import { $, esc, raceKo, PACE_KO, CMP_KO, FLAG_KO, PIT_KO, STATUS_KO, fmtT, cmpChip, compoundsFor, NO_INVENTORY, hudSnap } from "./ui.js";
 import { ST_KO, whyKo } from "./orders.js";
-import { PACE, ENERGY, TEAM_ORDER } from "../../game/engine/commands.js";
+import { PACE, ENERGY, TYPES as CMD_TYPES } from "../../game/engine/commands.js";
+import * as HM from "./hudmodel.js";
+import * as Dock from "./racedock.js";
 import * as SaveUI from "./saveui.js";
+import * as AlertsUI from "./alertsui.js";
 
-const TOWER_KEY = "f1kr:game:towerW";
+const TOWER_KEY = "f1kr:game:towerW", TOWER_MODE_KEY = "f1kr:game:towerMode";
 const IN_LANE = new Set(["entry", "lane", "approach", "penalty", "queue", "work", "release", "laneOut", "exit"]);
-const H = { built: false, pitCmp: {}, fuel: {}, ordersDirty: true, towerSlim: false, pp: null, ppTried: false, ppErr: null, lastEvN: -1 };
-
+const PACE_ORDER = ["manage", "balanced", "attack"];
+const H = { built: false, pitCmp: {}, fuel: {}, ordersDirty: true, towerSlim: false, towerMode: "leader", pp: null, ppTried: false, ppErr: null, n: 0, rows: new Map(), order: "", seen: new Map(), costs: { paints: 0, ms: 0, tower: 0, towerMs: 0, writes: 0 } };
+const season = () => G.sc?.meta?.season ?? G.season ?? 2025;
+export const hasGoal = () => CMD_TYPES.includes("goal");
+export const hasDelegate = () => CMD_TYPES.includes("delegate");
 
 export function build() {
-  const sc = G.sc, mine = myCars(sc), cmp = compoundsFor(sc);
-  let w = 300; try { w = Math.max(150, Math.min(460, +localStorage.getItem(TOWER_KEY) || 300)); } catch { /* default */ }
-  H.fuel = {}; H.lastEvN = -1;
-  for (const e of mine) if (!H.pitCmp[e.num] || !cmp.list.includes(H.pitCmp[e.num])) H.pitCmp[e.num] = nextPlanned(e.num) || "HARD";
-  $("gameBody").innerHTML = `<div class="gr">
+  const sc = G.sc, mine = myCars(sc);
+  let w = 236; try { w = Math.max(170, Math.min(420, +localStorage.getItem(TOWER_KEY) || 236)); H.towerMode = localStorage.getItem(TOWER_MODE_KEY) === "ahead" ? "ahead" : "leader"; } catch { /* default */ }
+  H.fuel = {}; H.rows = new Map(); H.order = ""; H.n = 0; H.seen = new Map();
+  for (const e of mine) if (!H.pitCmp[e.num]) H.pitCmp[e.num] = null;   // (null: the plan's next tyre, chosen at paint)
+  $("gameBody").innerHTML = `<div class="gr ${Dock.open() ? "dock-on" : ""}" id="grRoot">
     <header class="gr-top">
-      <div class="gr-ev"><b>${esc(raceKo(sc.meta.event))}</b><small>${G.dev ? "개발용 스냅샷" : "게임 · 실제 기록 아님"}</small></div>
-      <div class="gr-lap"><small>랩</small><b id="grLap">–</b></div>
-      <div class="gr-flag" id="grFlag">–</div>
+      <div class="gr-ev"><b>${esc(raceKo(sc.meta.event))}</b><span class="ui-badge info" title="게임 엔진이 계산한 경기 – 실제 경기 기록이 아니에요">${G.dev ? "개발용" : "게임"}</span></div>
+      <div class="gr-lap"><small>랩</small><b class="num" id="grLap">–</b></div>
+      <span class="ui-flag" id="grFlag">–</span>
       <div class="gr-wx" id="grWx"></div>
-      <div class="gr-clock"><small>경기 시각</small><b id="grClock">–</b></div>
-      <div class="gr-speeds" role="group" aria-label="배속">${SPEEDS.map((x) => `<button data-act="hud:speed" data-v="${x}" title="${x ? x + "배속" : "일시정지 (Space)"}">${x ? x + "×" : "❚❚"}</button>`).join("")}</div>
-      <span class="gr-ach" id="grAch"></span>
-      <label class="gr-auto" title="세이프티카·비·내 차 사고·피트 진입 때 1배속으로 (화면만)"><input type="checkbox" data-chg="hud:autoSlow" ${G.settings.autoSlow ? "checked" : ""}> 자동 감속</label>
+      <div class="gr-clock"><small>경기 시각</small><b class="num" id="grClock">–</b></div>
+      <div class="gr-speedbox">
+        <div class="ui-seg gr-speeds" role="group" aria-label="배속">${SPEEDS.map((x) => `<button data-act="hud:speed" data-v="${x}" title="${x ? x + "배속" : "일시정지 (Space)"}">${x ? x + "×" : "❚❚"}</button>`).join("")}</div>
+        <span class="gr-ach num" id="grAch"><small id="grAchL">실제</small> <b id="grAchV">–</b></span>
+      </div>
+      <span class="gr-auto" id="grAuto"></span>
       <span class="gr-gap"></span>
-      <button class="ghost small" data-act="hud:save" ${G.dev ? "disabled" : ""}>저장</button>
-      <button class="ghost small" data-act="go:menu">메뉴로</button>
+      <div class="ui-seg gr-docktabs" role="tablist" aria-label="패널">${Dock.TABS.map(([k, t]) => `<button data-act="hud:dock" data-v="${k}" role="tab" aria-selected="${Dock.open() === k}">${t}</button>`).join("")}</div>
+      <button class="ui-btn sm" data-act="hud:save" ${G.dev ? "disabled" : ""}>저장</button>
+      <button class="ui-btn sm ghost" data-act="go:menu">메뉴로</button>
     </header>
-    <div class="gr-mid">
-      <div class="gr-view" id="gameView"><div class="gr-tags"><span class="gr-tag" id="grSelTag"></span><span class="gr-tag cam" id="grCamTag"></span></div><div class="gr-note" id="grNote" hidden></div></div>
-      <aside class="gr-tower ${H.towerSlim ? "slim" : ""}" id="grTower" style="width:${H.towerSlim ? 150 : w}px">
-        <div class="gr-tower-h"><b>순위</b><span id="grTowerSub"></span><button class="ghost small" data-act="hud:tower" title="${H.towerSlim ? "펼치기" : "접기"}">${H.towerSlim ? "◀" : "▶"}</button></div>
-        <div class="gr-tw" id="grTw"></div><i class="gr-resize" id="grResize" title="끌어서 너비 조절"></i>
-      </aside>
-    </div>
-    <footer class="gr-bottom">
-      ${mine[0] ? card(mine[0], cmp) : "<section></section>"}
-      <section class="gr-center"><div class="gr-pit" id="grPit" hidden></div><div class="gr-events" id="grEvents"></div>
-        <div class="gr-team"><small>팀 지시</small>${TEAM_ORDER.map((p) => `<button data-act="hud:team" data-v="${p}">${ORDER_KO[p]}</button>`).join("")}<span class="gr-last" id="grTeamLast"></span></div></section>
-      ${mine[1] ? card(mine[1], cmp) : "<section></section>"}
-    </footer></div>`;
+    <aside class="gr-dock" id="grDock" aria-label="전략 패널"></aside>
+    <div class="gr-view" id="gameView"><div class="gr-tags"><span class="gr-tag" id="grSelTag"></span><span class="gr-tag cam" id="grCamTag"></span></div>
+      <div class="gr-toasts" id="grToasts" aria-live="polite"></div><div class="gr-note" id="grNote" hidden></div><div class="gr-pit pp" id="grPit" hidden></div></div>
+    <aside class="gr-tower ${H.towerSlim ? "slim" : ""}" id="grTower" style="width:${H.towerSlim ? 150 : w}px">
+      <div class="gr-tower-h"><b>순위</b>
+        <div class="ui-seg sm" role="group" aria-label="간격 기준"><button data-act="hud:towerMode" data-v="leader" aria-pressed="${H.towerMode === "leader"}">선두</button><button data-act="hud:towerMode" data-v="ahead" aria-pressed="${H.towerMode === "ahead"}">앞차</button></div>
+        <button class="ui-btn ghost sm icon" data-act="hud:tower" title="${H.towerSlim ? "펼치기" : "접기"}" aria-label="${H.towerSlim ? "순위표 펼치기" : "순위표 접기"}">${H.towerSlim ? "◀" : "▶"}</button></div>
+      <div class="gr-tw" id="grTw"><table class="gr-tw-t"><tbody id="grTwB"></tbody></table></div><i class="gr-resize" id="grResize" title="끌어서 너비 조절"></i>
+    </aside>
+    <footer class="gr-bottom">${mine.map((e) => card(e)).join("")}</footer></div>`;
   H.built = true; H.ordersDirty = true;
   wireResize();
+  Dock.build($("grDock"));
 }
-export function teardown() { H.built = false; }
-export const markOrders = () => { H.ordersDirty = true; };
+export function teardown() { H.built = false; Dock.teardown(); }
+export const markOrders = () => { H.ordersDirty = true; Dock.markDirty(); };
 
-function card(e, cmp) {
-  const n = esc(e.num);
+// one driver panel – the same layout for both cars; every control row is here from the start
+function card(e) {
+  const n = esc(e.num), EK = HM.energyKo(season()), cmp = compoundsFor(G.sc);
+  const seg = (k, list, ko) => `<div class="ui-seg sm" data-k="${k}" role="group" aria-label="${k === "pace" ? "페이스" : "에너지"}">${list.map((p) => `<button data-act="hud:${k}" data-num="${n}" data-v="${p}">${ko[p]}</button>`).join("")}</div>`;
   return `<section class="gr-card" data-car="${n}" style="--tc:${esc(e.colour || "#888")}">
-    <header class="gr-card-h"><button class="gr-selbtn" data-act="hud:sel" data-num="${n}" title="이 차를 선택 (가운데 패널이 이 차의 피트 작업을 보여줘요)">
-      <b class="gr-pos" data-f="pos">–</b><span class="gr-name"><b>${esc(e.tla)}</b><small>#${n} ${esc(e.name || "")}</small></span></button>
-      <span class="gr-status" data-f="status"></span><span class="gr-selmark" data-f="selmark">선택됨</span>
-      <button class="gr-cambtn" data-act="hud:cam" data-num="${n}" data-f="cam" title="3D 카메라가 이 차를 따라가요">카메라</button></header>
-    <div class="gr-stats">
-      <div class="gr-tyre"><span data-f="cmp"></span><span class="gr-kv"><b data-f="age">–</b><small>랩 사용</small></span>
-        <span class="gr-meter" title="타이어 마모율: 0% 새 타이어 → 100% 완전 마모 (남은 상태가 아니에요)"><small>마모율</small><i><em data-f="wearbar"></em></i><b data-f="wear">–</b></span></div>
-      <div class="gr-energy"><span class="gr-meter soc" title="배터리 충전 상태 (SoC)"><small>배터리</small><i><em data-f="socbar"></em></i><b data-f="soc">–</b></span>
-        <span class="gr-kv" title="지난 계산 단계의 ERS 출력 (엔진)"><small>ERS</small><b data-f="deploy">–</b></span>
-        <span class="gr-kv" title="연료 (kg)"><small>연료</small><b data-f="fuel">–</b><small data-f="fuelLaps"></small></span></div>
+    <header class="gc-h">
+      <button class="gc-sel" data-act="hud:sel" data-num="${n}" title="이 차를 선택 (패널의 상세가 이 차를 보여줘요)"><b class="gc-pos num" data-f="pos">–</b><span class="gc-name"><b>${esc(e.tla)}</b><small>#${n}</small></span></button>
+      <span class="ui-badge" data-f="status"></span>
+      <span class="gc-gaps num" title="앞차·뒤차와의 시간 차 (계측선 통과 기준, 자료 없으면 –)"><small>앞</small><b data-f="ahead">–</b><small>뒤</small><b data-f="behind">–</b></span>
+      <span class="gc-lapt num" title="최근 랩 · 이 차의 최고 랩 대비"><b data-f="last">–</b><em data-f="delta"></em></span>
+      <button class="ui-btn sm quiet gc-cam" data-act="hud:cam" data-num="${n}" data-f="cam" title="3D 카메라가 이 차를 따라가요">카메라</button>
+    </header>
+    <div class="gc-stats">
+      <span class="gc-tyre" title="타이어: 컴파운드 · 사용 랩 · 남은 수명(막대가 줄어들수록 마모) · 온도 상태"><span data-f="cmp"></span><small class="num" data-f="age"></small>
+        <span class="ui-meter" data-f="lifeM"><i><em data-f="lifebar"></em></i></span><b class="num" data-f="life">–</b><span class="ui-badge" data-f="temp"></span></span>
+      <span class="gc-kv" title="연료: 이 차가 지금까지 쓴 양으로 추정한 완주 여유 (게임 추정)"><small>연료 여유</small><b class="num" data-f="fuel">–</b></span>
+      <span class="gc-kv" title="배터리 충전 상태"><small>배터리</small><span class="ui-meter" data-f="socM"><i><em data-f="socbar"></em></i></span><b class="num" data-f="soc">–</b></span>
+      <span class="gc-kv" title="계획의 다음 피트 (랩 · 타이어)"><small>다음</small><b data-f="next">–</b></span>
     </div>
-    <div class="gr-ctl">
-      <div class="gr-seg" data-k="pace"><small>페이스 <em data-f="paceBy"></em></small>${PACE.slice().sort((a, b) => ["manage", "balanced", "attack"].indexOf(a) - ["manage", "balanced", "attack"].indexOf(b)).map((p) => `<button data-act="hud:pace" data-num="${n}" data-v="${p}">${PACE_KO[p]}</button>`).join("")}</div>
-      <div class="gr-seg" data-k="energy"><small>에너지 <em data-f="energyBy"></em></small>${ENERGY.map((p) => `<button data-act="hud:energy" data-num="${n}" data-v="${p}">${ENERGY_KO[p]}</button>`).join("")}</div>
-      <div class="gr-pitrow"><small>피트</small><span class="gr-chips">${cmp.list.map((c) => `<button class="gr-chip ${cmp.wet.includes(c) ? "wet" : ""}" data-act="hud:cmp" data-num="${n}" data-v="${c}" title="${esc(CMP_KO[c] || c)}">${cmpChip(c)}</button>`).join("")}</span>
-        <button class="gr-box" data-act="hud:box" data-num="${n}">박스</button><button class="gr-cancel" data-act="hud:cancel" data-num="${n}">취소</button></div>
-      <div class="gr-pitst" data-f="pit"></div>
+    <div class="gc-ctl">
+      <span class="gc-grp"><small>페이스<em data-f="ownPace"></em></small>${seg("pace", PACE.slice().sort((a, b) => PACE_ORDER.indexOf(a) - PACE_ORDER.indexOf(b)), PACE_KO)}</span>
+      <span class="gc-grp" title="${esc(HM.energyHelp(season()))}"><small>에너지<em data-f="ownEnergy"></em></small>${seg("energy", ENERGY, EK)}</span>
+      <span class="gc-grp"><select class="ui-select gc-goal" data-chg="hud:goal" data-num="${n}" ${hasGoal() ? "" : "disabled"} aria-label="운영 목표">
+        <option value="">${hasGoal() ? "목표 없음" : "목표: 엔진 연결 전"}</option>${HM.GOALS.map((g) => `<option value="${g}">${HM.GOAL_KO[g]}</option>`).join("")}</select></span>
     </div>
-    <div class="gr-last" data-f="last"></div>
+    <div class="gc-box">
+      <small>피트<em data-f="ownPlan"></em></small>
+      <select class="ui-select gc-cmp" data-chg="hud:cmp" data-num="${n}" aria-label="장착할 타이어">${cmp.list.map((c) => `<option value="${c}">${esc(CMP_KO[c] || c)}</option>`).join("")}</select>
+      <button class="ui-btn gc-boxbtn" data-act="hud:box" data-num="${n}">박스</button><button class="ui-btn sm" data-act="hud:cancel" data-num="${n}">취소</button>
+      <span class="gc-pre" data-f="pre"></span>
+    </div>
+    <div class="gc-foot">
+      <span class="gc-goalst" data-f="goal"></span>
+      <span class="gc-ord" data-f="ord"></span>
+      <button class="ui-btn sm quiet gc-deleg" data-act="hud:delegate" data-num="${n}" data-f="deleg" ${hasDelegate() ? "" : "disabled"} title="직접 지시한 페이스·에너지·계획을 팀 AI에게 다시 맡겨요">AI에 맡기기</button>
+    </div>
   </section>`;
 }
-// the next compound this car's plan fits (for the pit tyre's default)
-function nextPlanned(num) {
-  const c = G.run?.race.state.cars.find((x) => x.num === String(num)); if (!c?.plan) return null;
-  const s = c.plan.stints.find((x) => x.toLap > (c.lap || 0)), i = c.plan.stints.indexOf(s);
-  return c.plan.stints[i + 1]?.compound || null;
-}
-// whose decision a mode is now: the player's (an order of that kind given) or the team AI's
-function decidedBy(num, type) {
-  if (!G.run?.race.state.ai?.teams?.[G.teamKey]) return "";
-  return G.book.list.some((o) => o.car === String(num) && (o.type === type || (type === "plan" && ["pit", "pitCancel", "plan"].includes(o.type))) && (o.state === "applied" || o.state === "queued")) ? "내 지시" : "AI 조정";
-}
+
 const f = (root, k) => root.querySelector(`[data-f="${k}"]`);
-const setT = (el, s) => { if (el && el.textContent !== s) el.textContent = s; };
-const setH = (el, s) => { if (el && el._h !== s) { el._h = s; el.innerHTML = s; } };
+// (a text already there is changed in place – its node's data – rather than replaced: no node churn for the tower's gaps)
+const setT = (el, s) => { if (!el || el.textContent === s) return; const n = el.firstChild; if (n && n.nodeType === 3 && el.childNodes.length === 1 && s) n.data = s; else el.textContent = s; H.costs.writes++; };
+const setH = (el, s) => { if (el && el._h !== s) { el._h = s; el.innerHTML = s; H.costs.writes++; } };
+const setC = (el, cls) => { if (el && el.className !== cls) el.className = cls; };
+const setW = (el, frac) => { if (!el) return; const w = `${Math.round(Math.max(0, Math.min(1, frac ?? 0)) * 100)}%`; if (el.style.width !== w) el.style.width = w; };
 
 export function paint() {
   const R = G.run; if (!R || G.step !== "race") return;
   if (!H.built) build();
+  const t0 = performance.now();
   const snap = hudSnap(R, G.adapter); if (!snap) return;
   const sc = G.sc, ents = new Map(sc.entries.map((e) => [String(e.num), e])), T = R.renderT;
+  H.n++;
   // ---- top bar ----
   setT($("grLap"), `${Math.min(snap.leaderLap || 0, snap.totalLaps ?? Infinity)}/${snap.totalLaps ?? "?"}`);
-  const fl = $("grFlag"); setT(fl, FLAG_KO[snap.flag] || snap.flag || ""); fl.dataset.flag = snap.flag || "";
+  const fl = $("grFlag"), flag = snap.flag || "";
+  setT(fl, FLAG_KO[flag] || flag || "–"); setC(fl, `ui-flag ${{ green: "green", yellow: "yellow", sc: "sc", vsc: "vsc", red: "red", chequered: "chequered" }[flag] || ""}`);
   const w = snap.weather || {};
-  setH($("grWx"), `${w.airT != null ? `기온 ${Math.round(w.airT)}°` : ""}${w.trackT != null ? ` · 노면 ${Math.round(w.trackT)}°` : ""} · ${w.rain > 0.05 ? `<b class="rain">비</b>` : "건조"}${w.water > 0.05 ? ` · 노면 물 ${w.water.toFixed(1)} mm` : w.water > 0.005 ? " · 노면 젖음" : ""}${w.est ? ` <small title="비의 세기는 엔진 추정">(추정)</small>` : ""}`);
+  setH($("grWx"), `${w.airT != null ? `<span>기온 <b class="num">${Math.round(w.airT)}°</b></span>` : ""}${w.trackT != null ? `<span>노면 <b class="num">${Math.round(w.trackT)}°</b></span>` : ""}<span>${w.rain > 0.05 ? `<b class="rain">비</b>` : "건조"}${w.water > 0.05 ? ` · 물 ${w.water.toFixed(1)}mm` : w.water > 0.005 ? " · 젖음" : ""}</span>`);
   setT($("grClock"), fmtT(T));
-  const ach = R.paused ? 0 : R.achieved;
-  setH($("grAch"), R.paused ? `<b>일시정지</b>` : `실제 <b class="${R.behind ? "bad" : ""}">${ach.toFixed(1)}×</b>${R.behind ? ` <small class="bad" title="계산이 따라가지 못해 실제로 낼 수 있는 배속으로 진행 중">계산 한계</small>` : ""}${R.slowNote ? ` <small title="${esc(R.slowNote.why)}">자동 감속됨</small>` : ""}`);
-  document.querySelectorAll(".gr-speeds [data-v]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.v === (R.paused ? 0 : R.speed))));
+  // (the achieved speed: two text nodes updated in place – no markup rebuilt 5× a second)
+  setT($("grAchL"), R.paused ? "" : "실제"); setT($("grAchV"), R.paused ? "일시정지" : `${R.achieved.toFixed(1)}×`); setC($("grAchV"), R.behind && !R.paused ? "bad" : "");
+  setH($("grAuto"), R.slowNote ? `<span class="ui-badge warn" title="${esc(R.slowNote.why || "")}">${R.slowNote.action === "pause" ? "자동 정지" : "자동 감속"} · ${esc(String(R.slowNote.why || "").slice(0, 26))}</span>` : R.behind ? `<span class="ui-badge sc" title="계산이 따라가지 못해 실제로 낼 수 있는 배속으로 진행 중">계산 한계</span>` : "");
+  const req = R.paused ? 0 : R.speed;
+  // (paused: the pause button is pressed and the speed it resumes at is marked "held")
+  document.querySelectorAll(".gr-speeds [data-v]").forEach((b) => { const v = +b.dataset.v; b.setAttribute("aria-pressed", String(v === req)); b.classList.toggle("held", R.paused && v === R.speed && v > 0); });
   // ---- tags: selected vs camera ----
-  // (the car on screen: the automatic camera's subject while it directs, else the chosen focus)
   const focus = G.adapter?.ctx.focus, auto = G.adapter?.camAuto, onCam = String(auto?.num ?? focus ?? "");
   const tla = (n) => ents.get(String(n))?.tla || n || "–";
-  setH($("grSelTag"), `<small>조작 선택</small> <b>${esc(tla(G.sel))}</b>`);
-  setH($("grCamTag"), `<small>카메라</small> <b>${esc(tla(auto?.num ?? focus))}</b> <small>${auto ? `자동 연출${auto.why ? " · " + esc(auto.why) : ""}` : "직접 선택"}</small>`);
-  // ---- tower ----
-  const cars = [...snap.cars].sort((a, b) => a.pos - b.pos);
-  setT($("grTowerSub"), snap.dev ? "개발용" : "");
-  setH($("grTw"), `<table class="gr-tw-t">${cars.map((c) => { const e = ents.get(String(c.num)), mine = e?.teamKey === G.teamKey;
-    return `<tr class="${mine ? "mine" : ""} ${String(c.num) === onCam ? "focus" : ""} ${c.status === "dnf" ? "out" : ""}" data-act="hud:cam" data-num="${esc(c.num)}" title="카메라로 보기"><td class="p">${c.pos}</td><td class="n"><i style="background:${esc(e?.colour || "#888")}"></i>${esc(e?.tla || c.num)}</td>
-      <td class="g">${c.pos === 1 ? "선두" : gapTxt(c, cars[0])}</td><td class="s">${c.status === "pit" ? `<em class="pit">PIT</em>` : c.status === "dnf" ? "OUT" : c.status === "fin" ? "🏁" : c.pen?.open?.length ? `<em class="pen" title="${esc(c.pen.open.join(", "))}">P</em>` : ""}</td>
-      <td class="t">${cmpChip(c.tyre?.compound)}<small>${c.tyre?.age ?? ""}</small></td></tr>`; }).join("")}</table>`);
-  // ---- the cards ----
-  for (const e of myCars(sc)) paintCard(e, snap, T, onCam);
-  // ---- middle: the selected car's pit work, else the events ----
+  setH($("grSelTag"), `<small>선택</small> <b>${esc(tla(G.sel))}</b>`);
+  setH($("grCamTag"), `<small>카메라</small> <b>${esc(tla(auto?.num ?? focus))}</b>${auto ? ` <small>자동${auto.why ? " · " + esc(auto.why) : ""}</small>` : ""}`);
+  // ---- tower (every other call) ----
+  if (H.n % 2 === 1 || H.ordersDirty) { const a = performance.now(); paintTower(snap, ents, onCam); H.costs.tower++; H.costs.towerMs += performance.now() - a; }
+  // ---- the panels ----
+  const mine = myCars(sc);
+  for (const e of mine) paintCard(e, snap, T, onCam, mine);
+  // ---- the selected car's pit work over the view ----
   const sel = snap.cars.find((c) => String(c.num) === String(G.sel)), inLane = sel && sel.where === "pit" && IN_LANE.has(sel.pit?.phase);
-  const pitEl = $("grPit"), evEl = $("grEvents");
-  pitEl.hidden = !inLane; evEl.hidden = !!inLane;
-  if (inLane) { pitPanel(pitEl, sel, T, snap); if (pitEl.hidden) { evEl.hidden = false; paintEvents(evEl); } } else paintEvents(evEl);
-  const tl = G.book.last(null, ["teamOrder"]) || [...G.book.list].reverse().find((o) => o.type === "teamOrder");
-  setH($("grTeamLast"), tl ? orderLine(tl, false) : "");
-  const note = $("grNote"); if (G.saveNote) { note.hidden = false; note.className = `gr-note ${G.saveNote.ok ? "" : "bad"}`; setT(note, G.saveNote.text); } else note.hidden = true;
+  const pitCar = inLane ? sel : snap.cars.find((c) => mine.some((m) => String(m.num) === String(c.num)) && c.where === "pit" && IN_LANE.has(c.pit?.phase));
+  const pitEl = $("grPit");
+  if (pitCar) pitPanel(pitEl, pitCar, T, snap); else if (!pitEl.hidden) pitEl.hidden = true;
+  // ---- notices (alerts.js via gamehome: G.notices) ----
+  paintToasts();
+  // (the save note for 6 s after it changes – a failure stays until the next save)
+  const note = $("grNote"), sn = G.saveNote;
+  if (sn && sn !== H.note) { H.note = sn; H.noteAt = performance.now(); }
+  const showNote = sn && (!sn.ok || performance.now() - (H.noteAt || 0) < 6000);
+  if (showNote) { note.hidden = false; note.className = `gr-note ${sn.ok ? "" : "bad"}`; setT(note, sn.text); } else if (!note.hidden) note.hidden = true;
+  // ---- the dock (1 Hz, or at once after an order) ----
+  if (H.n % 5 === 0 || H.ordersDirty) Dock.paint(snap, T, { fuel: H.fuel });
   H.ordersDirty = false;
+  H.costs.paints++; H.costs.ms += performance.now() - t0;
 }
-const gapTxt = (c, lead) => { const g = c.gap && typeof c.gap === "object" ? c.gap.leader : c.gap; if (Number.isFinite(g)) return "+" + g.toFixed(1); const down = c.gap?.lapsDown; return down > 0 ? `+${down}랩` : ""; };
 
-function paintCard(e, snap, T, onCam) {
+// ---------- the tower: rows made once per car, cells updated, rows moved only when the order changed ----------
+function paintTower(snap, ents, onCam) {
+  const body = $("grTwB"); if (!body) return;
+  const cars = [...snap.cars].sort((a, b) => (a.pos ?? 99) - (b.pos ?? 99));
+  for (const c of cars) {
+    const k = String(c.num); let r = H.rows.get(k);
+    if (!r) {
+      const e = ents.get(k), tr = document.createElement("tr");
+      tr.dataset.act = "hud:cam"; tr.dataset.num = k; tr.title = "카메라로 보기";
+      tr.innerHTML = `<td class="p num"></td><td class="n"><i style="background:${esc(e?.colour || "#888")}"></i>${esc(e?.tla || k)}</td><td class="g num"></td><td class="t"></td><td class="s"></td>`;
+      if (e?.teamKey === G.teamKey) tr.classList.add("mine");
+      r = { tr, p: tr.children[0], g: tr.children[2], t: tr.children[3], s: tr.children[4], cls: "" };
+      H.rows.set(k, r);
+    }
+    setT(r.p, c.pos ? String(c.pos) : "–");
+    const g = c.pos === 1 ? "선두" : H.towerMode === "ahead" ? HM.fmtGap(c.gap?.ahead, c.gap?.aheadLaps) : HM.fmtGap(c.gap?.leader, c.gap?.lapsDown);
+    setT(r.g, g);
+    setH(r.t, `${cmpChip(c.tyre?.compound)}<small class="num">${c.tyre?.age ?? ""}</small>`);
+    setH(r.s, c.status === "pit" ? `<em class="pit">PIT</em>` : c.status === "dnf" ? `<em class="out">OUT</em>` : c.status === "fin" ? `<em class="fin">완주</em>` : c.pen?.open?.length ? `<em class="pen" title="미이행 페널티">P</em>` : "");
+    const cls = `${ents.get(k)?.teamKey === G.teamKey ? "mine" : ""} ${k === onCam ? "focus" : ""} ${c.status === "dnf" ? "out" : ""}`.trim();
+    if (r.cls !== cls) { r.cls = cls; r.tr.className = cls; }
+  }
+  const order = cars.map((c) => c.num).join(",");
+  if (order !== H.order) { H.order = order; for (const c of cars) body.appendChild(H.rows.get(String(c.num)).tr); }
+}
+
+// ---------- a driver panel ----------
+function paintCard(e, snap, T, onCam, mine) {
   const root = document.querySelector(`.gr-card[data-car="${CSS.escape(String(e.num))}"]`); if (!root) return;
   const c = snap.cars.find((x) => String(x.num) === String(e.num)); if (!c) return;
-  const stc = G.run.race.state.cars.find((x) => x.num === String(e.num));
+  const mate = snap.cars.find((x) => mine.some((m) => String(m.num) === String(x.num)) && String(x.num) !== String(e.num)) || null;
+  const out = c.status === "dnf" || c.status === "fin";
   root.classList.toggle("sel", String(G.sel) === String(e.num));
   root.classList.toggle("cam", onCam === String(e.num));
-  root.classList.toggle("out", c.status === "dnf" || c.status === "fin");
+  root.classList.toggle("out", out);
   setT(f(root, "pos"), c.pos ? `P${c.pos}` : "–");
-  setT(f(root, "status"), c.status === "pit" ? PIT_KO[c.pit?.phase] || "피트" : STATUS_KO[c.status] || c.status || "");
-  setT(f(root, "cam"), onCam === String(e.num) ? (G.adapter?.camAuto ? "카메라 ● 자동" : "카메라 ●") : "카메라");
+  const st = f(root, "status"), ph = c.pit?.phase || "none";
+  setT(st, c.status === "pit" ? PIT_KO[ph] || "피트" : ph === "called" ? "박스 요청" : ph === "committed" ? "진입 확정" : STATUS_KO[c.status] || c.status || "");
+  setC(st, `ui-badge ${c.status === "pit" || ph === "called" || ph === "committed" ? "info" : c.status === "dnf" ? "bad" : c.inc ? "warn" : ""}`);
+  setT(f(root, "cam"), onCam === String(e.num) ? "카메라 ●" : "카메라");
+  // gaps (timing line; "–" when there is no data – never 0), last lap and delta
+  const ahead = c.pos === 1 ? "선두" : HM.fmtGap(c.gap?.ahead, c.gap?.aheadLaps), bh = HM.gapBehind(snap.cars, e.num);
+  setT(f(root, "ahead"), ahead); setT(f(root, "behind"), bh.car ? HM.fmtGap(bh.g, bh.laps).replace("+", "") : "–");
+  setT(f(root, "last"), HM.fmtLapT(c.last?.t));
+  const d = HM.lapDelta(c.last, c.best), de = f(root, "delta"); setT(de, d); setC(de, d.startsWith("+") ? "t-lose" : d ? "t-gain" : "");
   // tyre
-  setH(f(root, "cmp"), `${cmpChip(c.tyre?.compound)}<small>${esc(CMP_KO[c.tyre?.compound] || c.tyre?.compound || "?")}</small>`);
-  setT(f(root, "age"), String(c.tyre?.age ?? "–"));
-  const wear = Number.isFinite(c.tyre?.wear) ? c.tyre.wear : null;
-  setT(f(root, "wear"), wear == null ? "–" : pct(wear)); const wb = f(root, "wearbar"); if (wb) { wb.style.width = `${Math.round((wear ?? 0) * 100)}%`; wb.className = wear > 0.6 ? "hi" : wear > 0.35 ? "mid" : ""; }
-  // energy (SoC) and fuel (kg) – the fuel estimate from this car's own use so far
+  const ty = c.tyre || {}, set = (c.sets || []).find((s) => s.state === "fitted");
+  setH(f(root, "cmp"), cmpChip(ty.compound).replace('class="g-cmp', `class="g-cmp${ty.used || set?.used ? " used" : ""}`));
+  setT(f(root, "age"), ty.age != null ? `${ty.age}랩` : "");
+  const L = HM.tyreLife(ty); setT(f(root, "life"), L.pct); setW(f(root, "lifebar"), L.life); setC(f(root, "lifeM"), `ui-meter ${L.cls}`);
+  const tt = HM.tyreTemp(ty), te = f(root, "temp"); setT(te, tt.key ? tt.label : "–"); setC(te, `ui-badge ${tt.cls}`); te.title = tt.key ? `${tt.label} – 작동 온도 ${Math.round(ty.win.lo)}–${Math.round(ty.win.hi)}°C, 지금 ${Math.round(ty.Tw)}°C` : tt.label;
+  // fuel margin (estimate from this car's own burn) and battery
+  const fm = fuelOf(c, snap), fe = f(root, "fuel");
+  setT(fe, fm ? `${fm.marginLaps >= 0 ? "+" : "−"}${Math.abs(fm.marginLaps).toFixed(fm.marginLaps > -1 && fm.marginLaps < 1 ? 1 : 0)}랩` : Number.isFinite(c.fuel) ? "계산 중" : "–");
+  setC(fe, `num ${fm && !fm.ok ? "t-lose" : ""}`);
   const soc = Number.isFinite(c.energy?.soc) ? c.energy.soc : null;
-  setT(f(root, "soc"), soc == null ? "–" : pct(soc)); const sb = f(root, "socbar"); if (sb) sb.style.width = `${Math.round((soc ?? 0) * 100)}%`;
-  setT(f(root, "deploy"), Number.isFinite(c.energy?.deployKw) ? `${Math.round(c.energy.deployKw)} kW` : "–");
-  setT(f(root, "fuel"), Number.isFinite(c.fuel) ? `${c.fuel.toFixed(1)} kg` : "–");
-  setT(f(root, "fuelLaps"), fuelLaps(c, snap));
-  // modes: the one in force (the engine's), an order still waiting shown as waiting – never as in force
-  const pace = c.mode?.pace ?? stc?.mode?.pace, energy = c.energy?.mode ?? stc?.mode?.energy;
-  for (const [k, cur] of [["pace", pace], ["energy", energy]]) {
-    const pend = G.book.pending(e.num, k);
-    root.querySelectorAll(`.gr-seg[data-k="${k}"] button`).forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.v === cur)); b.classList.toggle("pending", !!pend && pend.args?.mode === b.dataset.v); });
-    setT(f(root, k + "By"), decidedBy(e.num, k));
+  setT(f(root, "soc"), soc == null ? "–" : `${Math.round(soc * 100)}%`); setW(f(root, "socbar"), soc); setC(f(root, "socM"), `ui-meter ${soc != null && soc < 0.2 ? "warn" : "ok"}`);
+  // the next planned stop
+  const ns = (c.plan?.stints || []).find((x, k, a) => x.toLap > (c.lap || 0) && k < a.length - 1), nx = ns ? (c.plan.stints[c.plan.stints.indexOf(ns) + 1]?.compound) : null;
+  setH(f(root, "next"), c.plan ? (ns ? `${ns.toLap}랩 ${cmpChip(nx)}` : "없음") : "–");
+  // modes in force (the render-time picture), an order still waiting shown as waiting
+  for (const [k, cur] of [["pace", c.mode?.pace], ["energy", c.mode?.energy ?? c.energy?.mode]]) {
+    const pend = pendingShown(e.num, k, T);
+    root.querySelectorAll(`.ui-seg[data-k="${k}"] button`).forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.v === cur)); b.classList.toggle("pending", !!pend && pend.args?.mode === b.dataset.v); b.disabled = out; });
+    const own = HM.ownText(c.own, k); setT(f(root, k === "pace" ? "ownPace" : "ownEnergy"), own ? `· ${own}` : "");
   }
-  // pit
-  const sel = H.pitCmp[e.num];
-  root.querySelectorAll(`.gr-chip`).forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === sel)));
-  const ph = c.pit?.phase || "none", lane = IN_LANE.has(ph);
-  root.querySelector(".gr-box").disabled = lane || ph === "committed" || c.status === "dnf" || c.status === "fin";
-  root.querySelector(".gr-cancel").disabled = ph !== "called";
-  let pit = "";
-  if (ph === "called") pit = `<b>박스 요청됨</b> · ${cmpChip(c.pit.compound)} ${esc(CMP_KO[c.pit.compound] || c.pit.compound || "")} – 피트 입구 전까지 취소 가능`;
-  else if (ph === "committed") pit = `<b>피트 진입 확정</b> · ${cmpChip(c.pit.compound)} – 취소 불가`;
-  else if (lane) pit = `<b>${esc(PIT_KO[ph] || ph)}</b>${ph === "work" && Number.isFinite(c.pit.workT0) ? ` · 작업 ${((T - c.pit.workT0) / 1000).toFixed(1)}초 경과` : ""}${ph === "work" || ph === "queue" || ph === "approach" || ph === "lane" || ph === "entry" ? ` · 요청 ${cmpChip(c.pit.compound)}` : ""}`;
-  else pit = `<small class="muted">다음 계획 타이어 ${nextPlanned(e.num) ? cmpChip(nextPlanned(e.num)) : "–"} · 정차 ${stc?.pit?.stops ?? 0}회</small>`;
-  setH(f(root, "pit"), pit);
-  // the last order of this car and what became of it
+  setT(f(root, "ownPlan"), HM.ownText(c.own, "plan") ? `· 계획 ${HM.ownText(c.own, "plan")}` : "");
+  // goal (the select follows the engine unless the player is on it)
+  const gs = root.querySelector(".gc-goal"); if (gs && document.activeElement !== gs) { const v = c.goal && c.goal.state !== "done" ? c.goal.kind : ""; if (gs.value !== (v || "")) gs.value = v || ""; gs.disabled = !hasGoal() || out; }
+  const tlaOf = (n) => G.sc.entries.find((x) => String(x.num) === String(n))?.tla || (n ? "#" + n : "");
+  const ge = f(root, "goal");
+  if (c.goal) { setT(ge, `목표 ${HM.GOAL_SHORT[c.goal.kind] || c.goal.kind} · ${HM.GOAL_STATE_KO[c.goal.state] || c.goal.state}${HM.goalWhy(c.goal.why, tlaOf) ? " – " + HM.goalWhy(c.goal.why, tlaOf) : ""}`); setC(ge, `gc-goalst ${c.goal.state === "blocked" ? "t-lose" : c.goal.state === "waiting" ? "muted" : ""}`); }
+  else setT(ge, "");
+  // box: the tyre (the player's choice, else the plan's next), the set and stock, cancel window, the team-mate's risk
+  const cmpSel = root.querySelector(".gc-cmp"); let choice = H.pitCmp[e.num] || (ph === "called" ? c.pit?.compound : null) || nx || (ty.compound === "HARD" ? "MEDIUM" : "HARD");
+  if (cmpSel && document.activeElement !== cmpSel && cmpSel.value !== choice) cmpSel.value = choice;
+  if (cmpSel && Array.isArray(c.sets)) { const S = HM.setStock(c.sets).by; for (const o of cmpSel.options) { const t = `${CMP_KO[o.value] || o.value} · ${S[o.value]?.free ?? 0}세트`; if (o.textContent !== t) o.textContent = t; } }
+  const pv = HM.boxPreview(c, mate, choice), lane = IN_LANE.has(ph);
+  const boxB = root.querySelector(".gc-boxbtn"); boxB.disabled = out || lane || ph === "committed" || (!pv.ok && ph !== "called");
+  setT(boxB, ph === "called" ? "변경" : "박스"); boxB.title = ph === "called" ? "요청한 피트의 타이어를 바꿔요" : "다음 피트 입구에서 들어와요";
+  root.querySelector('[data-act="hud:cancel"]').disabled = ph !== "called";
+  if (cmpSel) cmpSel.disabled = out || lane || ph === "committed";
+  let pre;
+  if (lane) pre = `<b>${esc(PIT_KO[ph] || ph)}</b>${c.pit?.compound ? ` · ${cmpChip(c.pit.compound)} 장착 예정` : ""}`;
+  else if (ph === "called" || ph === "committed") pre = `<b>${ph === "called" ? "박스 요청됨" : "피트 진입 확정"}</b> · ${cmpChip(c.pit?.compound)} ${esc(CMP_KO[c.pit?.compound] || "")} · ${esc(pv.cancel)}${pv.mate.text ? ` · <span class="${pv.mate.risk === "high" ? "t-lose" : ""}">${esc(pv.mate.text)}</span>` : ""}`;
+  else if (out) pre = "";
+  else pre = !pv.ok ? `<span class="t-lose">${esc(pv.why)}</span>` : `박스 → ${cmpChip(choice)} ${Array.isArray(c.sets) ? `${esc(HM.setLabel(pv.set))} · 남은 ${pv.left}` : `<span class="muted">${esc(NO_INVENTORY)}</span>`} · ${esc(pv.cancel)}${pv.mate.text ? ` · <span class="${pv.mate.risk === "high" ? "t-lose" : ""}">${esc(pv.mate.text)}</span>` : ""}`;
+  setH(f(root, "pre"), pre);
+  // the last order of this car and what became of it (its state at the render time)
   const o = G.book.last(e.num);
-  setH(f(root, "last"), o ? orderLine(o, true) : `<small class="muted">지시 없음</small>`);
+  setH(f(root, "ord"), o ? orderLine(o, T) : "");
+  const dl = f(root, "deleg"); if (dl) dl.disabled = !hasDelegate() || out || !c.own || !["pace", "energy", "plan"].some((k) => c.own[k] === "player" || c.own[k] === "goal");
 }
-function orderLine(o, short) {
-  const why = o.why ? ` – ${esc(whyKo(o.why))}` : "";
-  return `<span class="gr-ord ${o.state}"><small>${fmtT(o.t)}</small> ${esc(o.text || o.type)} → <b>${esc(ST_KO[o.state] || o.state)}</b>${o.state === "applied" && o.type === "pit" ? " (피트 요청 등록)" : ""}${why}</span>`;
+// the order of a kind still waiting at render time (shown as pending on its button, never as the mode in force)
+function pendingShown(num, type, T) {
+  for (let i = G.book.list.length - 1; i >= 0; i--) { const o = G.book.list[i]; if (o.car !== String(num) || o.type !== type) continue; return (G.book.stateAt ? G.book.stateAt(o, T) : o.state) === "queued" ? o : null; }
+  return null;
 }
-// laps of fuel left at the rate this car has really burnt over its last laps (kg/lap from its own snapshots) – an estimate
-function fuelLaps(c, snap) {
+const ST_SHORT = { sending: "보내는 중", queued: "대기", applied: "적용", refused: "거절", rejected: "접수 거절", unknown: "확인 불가" };
+function orderLine(o, T) {
+  const s = G.book.stateAt ? G.book.stateAt(o, T) : o.state, why = (s === "refused" || s === "rejected") && o.why ? ` – ${esc(whyKo(o.why))}` : "";
+  return `<span class="gr-ord ${s}" title="${esc(ST_KO[s] || s)}">${esc(o.text || o.type)} <b>${esc(ST_SHORT[s] || s)}</b>${why}</span>`;
+}
+// fuel samples per car: one at each completed lap (render-time picture)
+function fuelOf(c, snap) {
   const h = H.fuel[c.num] || (H.fuel[c.num] = []);
-  if (!Number.isFinite(c.fuel)) return "";
-  if (!h.length || c.lap > h[h.length - 1].lap) { h.push({ lap: c.lap, fuel: c.fuel }); if (h.length > 6) h.shift(); }
-  const a = h[0], b = h[h.length - 1];
-  if (h.length < 3 || b.lap - a.lap < 2 || a.fuel - b.fuel <= 0) return "";
-  const burn = (a.fuel - b.fuel) / (b.lap - a.lap), left = c.fuel / burn, need = (snap.totalLaps ?? 0) - c.lap;
-  return ` · 약 ${Math.floor(left)}랩분 (추정${need > 0 ? `, 남은 ${need}랩` : ""})`;
+  if (Number.isFinite(c.fuel) && (!h.length || c.lap > h[h.length - 1].lap)) { h.push({ lap: c.lap, fuel: c.fuel }); if (h.length > 8) h.shift(); }
+  return HM.fuelMargin(h, c.fuel, c.lap, snap.totalLaps);
 }
 
-// the pit-work panel: the pit module's (pitpanel.js render(el, car, renderT, ctx)) when it is in this build; else the
-// phase and the elapsed time only – never the stop's future length, never a slow wheel before the work is over
-async function loadPitPanel() { if (H.ppTried) return; H.ppTried = true; try { const m = await import("./pitpanel.js"); const f = m.renderPitPanel || m.render; if (typeof f === "function") H.pp = { render: f }; } catch (e) { H.ppErr = String(e.message || e); } }
+// ---------- notices (alerts) as toasts over the view: the newest three, each for 8 s of wall time ----------
+function paintToasts() {
+  const el = $("grToasts"); if (!el) return;
+  const now = performance.now(), list = (G.notices || []).slice(-6);
+  for (const a of list) if (!H.seen.has(a.id)) H.seen.set(a.id, now);
+  const live = list.filter((a) => now - H.seen.get(a.id) < 8000).slice(-3).reverse();
+  const tlaOf = (n) => G.sc.entries.find((x) => String(x.num) === String(n))?.tla || "";
+  setH(el, live.map((a) => `<div class="ui-toast ${HM.noticeCls(a.level)}"><b>${esc(AlertsUI.RULE_KO[a.rule] || a.rule)}${a.car ? " · " + esc(tlaOf(a.car)) : ""}</b><span>${esc(a.text)}</span><small>${a.action === "pause" ? "자동 정지" : a.action === "slow" ? "1배속으로" : ""}</small></div>`).join(""));
+}
+
+// the pit-work panel: pitpanel.js render(el, car, renderT, ctx) – never the stop's future length
+async function loadPitPanel() { if (H.ppTried) return; H.ppTried = true; try { const m = await import("./pitpanel.js"); const fn = m.renderPitPanel || m.render; if (typeof fn === "function") H.pp = { render: fn }; } catch (e) { H.ppErr = String(e.message || e); } }
 function pitPanel(el, car, T, snap) {
   loadPitPanel();
   const e = G.sc.entries.find((x) => String(x.num) === String(car.num));
-  // (car: the adapter's render-time row – hudSnap; the pit module fills el and may hide it when the car isn't in the lane)
   if (H.pp) { try { H.pp.render(el, car, T, { tla: e?.tla || null, colour: e?.colour || null, entry: e, snapshot: snap, scenario: G.sc, team: G.teamKey }); return; } catch (err) { H.ppErr = String(err.message || err); H.pp = null; } }
-  const p = car.pit || {}, ph = p.phase;
-  const done = Number.isFinite(p.workT1) && T >= p.workT1;
-  setH(el, `<div class="gr-pit-h"><b>${esc(e?.tla || car.num)}</b> 피트 작업 <span class="gr-status">${esc(PIT_KO[ph] || ph)}</span></div>
-    <ol class="gr-pit-steps">${["entry", "lane", "approach", "work", "release", "exit"].map((k) => `<li class="${k === ph ? "on" : order(k) < order(ph) ? "done" : ""}">${esc(PIT_KO[k])}</li>`).join("")}</ol>
-    <p>${ph === "work" && Number.isFinite(p.workT0) ? `작업 ${((T - p.workT0) / 1000).toFixed(1)}초 경과` : ph === "queue" ? "팀 동료 정비가 끝나길 기다리는 중" : ph === "penalty" ? "시간 페널티 정지 – 끝나기 전에는 작업하지 않아요" : ph === "release" ? "작업 완료 · 안전 출발 확인 대기" : ""}
-      ${done && p.err ? ` · <b class="bad">정비 지연 (${esc(p.err.kind === "slow wheel" ? "바퀴 작업 지연" : p.err.kind)} +${(p.err.add ?? 0).toFixed(1)}초)</b>` : ""}</p>
-    <p class="muted">요청 타이어 ${cmpChip(p.compound)} · 장착 중 ${cmpChip(car.tyre?.compound)} ${esc(CMP_KO[car.tyre?.compound] || "")}${H.ppErr ? "" : ""}</p>`);
-}
-const PH_ORDER = ["called", "committed", "entry", "lane", "approach", "penalty", "queue", "work", "release", "exit"];
-const order = (k) => PH_ORDER.indexOf(k);
-
-const EV_KO = { "driver error": "실수", contact: "접촉", mechanical: "고장", rc: "레이스 컨트롤", stewards: "스튜어드", retired: "리타이어", sc: "세이프티카", vsc: "VSC", red: "적색기", green: "녹색기", chequered: "체커기",
-  pitCall: "피트 요청", pitCancel: "피트 요청 취소", pitEntry: "피트 진입", pitExit: "피트 출구", pitCommitted: "피트 진입 확정", pitLaneStart: "피트레인 출발", pitExitHold: "피트 출구 대기", start: "출발 준비", lightsOut: "출발",
-  finished: "완주", fuelEmpty: "연료 소진", ersEmpty: "배터리 소진", teamOrder: "팀 지시", teamOrderDone: "팀 지시 완료", redTyreChange: "적색기 중 타이어 교체",
-  overtake: "추월", lapping: "랩 추월", "pit:work": "정비 시작", "pit:workDone": "정비 완료", "pit:release": "출발 신호", "pit:queue": "앞차 정비 대기", "pit:penalty": "페널티 정지", "pit:lane": "피트레인", "pit:approach": "박스 접근", "pit:exit": "피트 출구", "pit:entry": "피트 진입", "pit:laneOut": "피트레인 출구" };
-// traffic's running commentary (who defends where, a pass given up, blue flags) – the engine's own log, too much for the panel
-const EV_SKIP = new Set(["defend", "attackAborted", "attack", "blueFlag", "yield", "pass"]);
-const effText = (x) => x == null ? "" : typeof x === "string" ? x : [x.kind, x.outcome && x.outcome !== "none" ? x.outcome : "", x.out ? `out (${x.out})` : "", x.stoppedS ? `${x.stoppedS}s 정지` : "", x.damage ? "손상" : "", x.fault ? `결함 ${x.fault}` : ""].filter(Boolean).join(" · ");
-// what an event says on screen. pit:work's own text carries the stop's length and any slow wheel, decided when the work
-// STARTS – never shown (request §15); at pit:workDone the time it really took (both events already drawn) is shown.
-function evDetail(e, all) {
-  if (e.type === "pit:work") return "";
-  if (e.type === "pit:workDone") { const w = all && [...all].reverse().find((x) => x.type === "pit:work" && x.car === e.car && x.t <= e.t); return w ? `정차 작업 ${((e.t - w.t) / 1000).toFixed(1)}초` : ""; }
-  if (e.type === "pitCall") { const m = /^box for (\w+): (.*)$/.exec(String(e.effect || "")); return m ? `${CMP_KO[m[1]] || m[1]} · ${whyKo(m[2])}` : /^refused: (.*)/.test(String(e.effect)) ? `거절 – ${whyKo(String(e.effect).slice(9))}` : ""; }
-  if (e.type === "pitCancel") return e.effect === "cancelled" ? "" : /^refused: (.*)/.test(String(e.effect)) ? `거절 – ${whyKo(String(e.effect).slice(9))}` : "";
-  if (/^pit:/.test(e.type)) return "";
-  // (traffic's passes: "passes HAM at T10" / "at straight (DRS zone 2)" → the car passed and where)
-  { const m = /^passes (\w+) at (.+)$/.exec(String(e.effect || "")); if (m) return `${m[1]} 앞으로 · ${m[2].replace(/^straight/, "직선").replace(/DRS zone (\d+)/, "DRS 구간 $1")}`; }
-  return e.effect ? effText(e.effect) : e.cause && typeof e.cause === "string" && e.cause !== "player" && e.cause !== "pit" ? e.cause : "";
-}
-export const evShown = (e) => !EV_SKIP.has(e.type) && !/^ai:/.test(String(e.cause || ""));
-export const evLine = (e, ents, all = null) => { const cars = e.car ? [e.car] : e.cars || []; const nm = (n) => ents?.get(String(n))?.tla || "#" + n; const d = evDetail(e, all);
-  return `<p class="${cars.some((n) => myCars().some((m) => String(m.num) === String(n))) ? "mine" : ""}">${fmtT(e.t ?? 0)}${e.lap ? ` L${e.lap}` : ""} <b>${esc(EV_KO[e.type] || e.type)}</b>${cars.length ? " " + cars.map((n) => esc(nm(n))).join(" ") : ""}${d ? ` · ${esc(d)}` : ""}</p>`; };
-function paintEvents(el) {
-  // (only events at or before the render time: the log runs ahead of what is drawn by up to a frame)
-  const T = G.run.renderT, ents = new Map(G.sc.entries.map((e) => [String(e.num), e]));
-  const past = G.events.filter((e) => (e.t ?? 0) <= T), ev = past.filter(evShown).slice(-7).reverse();
-  setH(el, ev.length ? ev.map((e) => evLine(e, ents, past)).join("") : `<p class="muted">사건 없음${G.dev ? " (개발용 스냅샷)" : ""}</p>`);
+  el.hidden = false;
+  setH(el, `<div class="pp-h"><b>${esc(e?.tla || car.num)}</b> <span>${esc(PIT_KO[car.pit?.phase] || "")}</span></div>`);
 }
 
 // ---------- the tower's width ----------
@@ -256,7 +308,7 @@ function wireResize() {
   h.onpointerdown = (ev) => {
     if (H.towerSlim) return;
     const x0 = ev.clientX, w0 = tw.offsetWidth; h.setPointerCapture(ev.pointerId);
-    h.onpointermove = (m) => { tw.style.width = `${Math.max(180, Math.min(460, w0 + (x0 - m.clientX)))}px`; };
+    h.onpointermove = (m) => { tw.style.width = `${Math.max(170, Math.min(420, w0 + (x0 - m.clientX)))}px`; };
     h.onpointerup = () => { h.onpointermove = null; try { localStorage.setItem(TOWER_KEY, String(tw.offsetWidth)); } catch { /* per-viewer only */ } dispatchEvent(new Event("resize")); };
   };
 }
@@ -265,26 +317,40 @@ function wireResize() {
 export function onClick(act, b) {
   const num = b.dataset.num, v = b.dataset.v, R = G.run; if (!R) return;
   const tla = num ? G.sc.entries.find((e) => String(e.num) === String(num))?.tla || num : "";
-  if (act === "speed") { R.setSpeed(+v); R.slowNote = null; paint(); return; }
-  if (act === "sel") { G.sel = String(num); import("./gamehome.js").then((m) => m.applyRacePrefs()); paint(); return; }
+  if (act === "speed") { if (+v > 0) R.manual ? R.manual(+v) : R.setSpeed(+v); else { R.slowNote = null; R.pause(); } paint(); return; }
+  if (act === "sel") { G.sel = String(num); import("./gamehome.js").then((m) => m.applyRacePrefs()); Dock.markDirty(); paint(); return; }
   if (act === "cam") { G.adapter?.ctx.setFocus(String(num)); if (G.adapter?.camAuto) G.adapter.camAuto = null; paint(); return; }
   if (act === "tower") { H.towerSlim = !H.towerSlim; build(); paint(); dispatchEvent(new Event("resize")); return; }
+  if (act === "towerMode") { H.towerMode = v === "ahead" ? "ahead" : "leader"; try { localStorage.setItem(TOWER_MODE_KEY, H.towerMode); } catch { /* per-viewer only */ } document.querySelectorAll('[data-act="hud:towerMode"]').forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === H.towerMode))); H.ordersDirty = true; paint(); return; }
+  if (act === "dock") { Dock.toggle(v); $("grRoot")?.classList.toggle("dock-on", !!Dock.open()); document.querySelectorAll('[data-act="hud:dock"]').forEach((x) => x.setAttribute("aria-selected", String(x.dataset.v === Dock.open()))); requestAnimationFrame(() => dispatchEvent(new Event("resize"))); H.ordersDirty = true; paint(); return; }
   if (act === "save") { SaveUI.savePrompt(); return; }
+  const EK = HM.energyKo(season());
   if (act === "pace") { sendOrder("pace", num, { mode: v }, `${tla} 페이스 ${PACE_KO[v]}`); return; }
-  if (act === "energy") { sendOrder("energy", num, { mode: v }, `${tla} 에너지 ${ENERGY_KO[v]}`); return; }
-  if (act === "cmp") {
-    H.pitCmp[num] = v;
-    // (a call already standing: the new tyre goes to the engine as a fresh pit order – commands.js / pit.js change the
-    // standing call's compound; otherwise only the choice is remembered for the 박스 button)
-    const c = hudSnap(R, G.adapter)?.cars.find((x) => String(x.num) === String(num));
-    if (c?.pit?.phase === "called") sendOrder("pit", num, { compound: v }, `${tla} 피트 타이어 → ${CMP_KO[v] || v}`);
-    paint(); return;
+  if (act === "energy") { sendOrder("energy", num, { mode: v }, `${tla} 에너지 ${EK[v]}`); return; }
+  if (act === "box") {
+    const snap = hudSnap(R, G.adapter), c = snap?.cars.find((x) => String(x.num) === String(num));
+    const cmpSel = document.querySelector(`.gr-card[data-car="${CSS.escape(String(num))}"] .gc-cmp`), cmp = H.pitCmp[num] || cmpSel?.value;
+    const set = Array.isArray(c?.sets) ? HM.pickSet(c.sets, cmp) : null;
+    sendOrder("pit", num, set ? { compound: cmp, setId: set.id } : { compound: cmp }, `${tla} 박스 ${CMP_KO[cmp] || cmp}`); return;
   }
-  if (act === "box") { const cmp = H.pitCmp[num]; sendOrder("pit", num, { compound: cmp }, `${tla} 박스 (${CMP_KO[cmp] || cmp})`); return; }
   if (act === "cancel") { sendOrder("pitCancel", num, {}, `${tla} 피트 취소`); return; }
-  if (act === "team") { sendOrder("teamOrder", null, { policy: v }, `팀 지시 ${ORDER_KO[v]}`); return; }
+  if (act === "delegate") { sendOrder("delegate", num, { kinds: ["pace", "energy", "plan"] }, `${tla} AI에 맡김`); return; }
+  Dock.onClick?.(act, b);
 }
 export function onChange(act, t) {
-  if (act === "autoSlow") { G.settings.autoSlow = t.checked; import("./gamehome.js").then((m) => { m.saveSettings(); if (G.run) G.run.autoSlow = G.settings.autoSlow ? m.autoSlowRule() : null; }); }
+  const num = t.dataset.num, R = G.run; if (!R) return;
+  const tla = num ? G.sc.entries.find((e) => String(e.num) === String(num))?.tla || num : "";
+  if (act === "cmp") {
+    H.pitCmp[num] = t.value;
+    // (a call already standing: the new tyre goes to the engine at once as a fresh pit order – it moves the reservation)
+    const c = hudSnap(R, G.adapter)?.cars.find((x) => String(x.num) === String(num));
+    if (c?.pit?.phase === "called") { const set = Array.isArray(c.sets) ? HM.pickSet(c.sets, t.value) : null; sendOrder("pit", num, set ? { compound: t.value, setId: set.id } : { compound: t.value }, `${tla} 피트 타이어 → ${CMP_KO[t.value] || t.value}`); }
+    paint(); return;
+  }
+  if (act === "goal") { const k = t.value || null; sendOrder("goal", num, { kind: k }, k ? `${tla} 목표: ${HM.GOAL_KO[k]}` : `${tla} 목표 해제`); t.blur(); return; }
+  Dock.onChange?.(act, t);
 }
+export const onInput = (act, t) => Dock.onInput?.(act, t);
+export const hudCosts = () => ({ paints: H.costs.paints, msAvg: H.costs.paints ? +(H.costs.ms / H.costs.paints).toFixed(3) : null, tower: H.costs.tower, towerMsAvg: H.costs.tower ? +(H.costs.towerMs / H.costs.tower).toFixed(3) : null, writes: H.costs.writes, dock: Dock.costs() });
 export { NO_INVENTORY };
+export { evLine, evShown } from "./racedock.js";

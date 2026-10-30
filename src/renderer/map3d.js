@@ -45,6 +45,8 @@ import { createWeather } from "./weather3d.js";
 import { updateGameCars, paintGameHud, pitPoint } from "./game/cars3d.js";
 import { createPitCam } from "./game/pitcam.js";
 import { createPitKit } from "./garagekit/pitkit.js";
+import { createSpecHud } from "./spectator/hud.js";
+import { pickTags, cameraCar } from "./spectator/layout.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -66,6 +68,7 @@ let wx = null;                // the session's weather in the view (weather3d.js
 let world = null;             // built circuit: { key, samples, grid, center, size, … }
 let cars = new Map();         // racing number → car record
 let camMode = "heli", visible = false, lastT = 0, lastBuildCheck = 0;
+let specHud = null;           // the spectator HUD (spectator/hud.js) – live / replay; hidden in the game's mode
 const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0), tmpV2 = new THREE.Vector2();
 
 // ---------- setup ----------
@@ -119,6 +122,9 @@ function init() {
   canvas.addEventListener("click", (e) => { if (look.dragged) { look.dragged = false; return; } pickCar(e); });
   canvas.addEventListener("dblclick", () => { if (camMode === "heli") setCam("chase"); else resetLook(); });
   initLook();
+  // (v0.50: the spectator HUD – built before the camera buttons are bound: its own [data-cam] buttons are bound with them)
+  specHud = createSpecHud(host, specApi);
+  host.dataset.mode = game ? "game" : "spec"; if (game) specHud.setGame(true);
   document.querySelectorAll("[data-cam]").forEach((b) => b.addEventListener("click", () => setCam(b.dataset.cam)));
   document.getElementById("cam3dPrev").addEventListener("click", () => cycleCar(-1));
   document.getElementById("cam3dNext").addEventListener("click", () => cycleCar(1));
@@ -221,7 +227,7 @@ const kitNearSet = new Set();
 function kitNear() {
   kitNearSet.clear();
   const teamOf = (num) => num != null && (pitTeams.teams || []).find((t) => (t.drivers || []).some((d) => String(d.num) === String(num)))?.team;
-  const a = teamOf(app()?.focus), b = game ? teamOf(gamePitCam?.S?.subject) : null;
+  const a = teamOf(camNum()), b = game ? teamOf(gamePitCam?.S?.subject) : null;
   if (a) kitNearSet.add(a); if (b) kitNearSet.add(b);
   return kitNearSet;
 }
@@ -548,6 +554,7 @@ function updateCrews(frame) {
   const A = app(), src = A.src, m = pitModelFor(G), drivers = src?.state.DriverList || {}, list = [], loose = [], byTeam = new Map();
   const policy = pitWorkPolicy();
   let shown = null;
+  pitWork.clear();
   for (const r of frame.values()) if (r.team) { const a = byTeam.get(r.team) || []; a.push({ num: r.num, state: r.state, u: r.u, boxU: r.input.boxU, lastBox: r.input.lastBox, stillFor: r.input.stillFor, input: r.input }); byTeam.set(r.team, a); }
   for (const [team, cs] of byTeam) {
     const ph = crewPhase(cs); if (ph.phase === "none" || ph.f <= 0.01) continue;
@@ -578,6 +585,9 @@ function updateCrews(frame) {
       let L;
       if (ph.phase === "work") {
         L = stopChoreo(plan, ph.since || 0, dims, left);
+        // (what the panel says of the work: the stage drawn now – never when it will end)
+        const cnt = (a) => a.reduce((n, x) => n + (x ? 1 : 0), 0);
+        pitWork.set(ph.num, { kind: "tyres", from: plan.from, off: cnt(L.car.off), fitted: cnt(L.car.fitted), done: cnt(L.car.done), lifted: L.car.lift[0] + L.car.lift[1] > 0.005 });
         if (car && c) { applyLift(car, L.car, dims); liftedCars.add(ph.num); if (plan.compound && L.car.off.every((o) => !o) && stopClockDone(plan, ph.since)) setCompound(car.model, plan.compound); }
       } else L = changeWalk(ph.phase, ph.f, dims, at.boxC, left);
       list.push(...crewAt(where, L.figures, colour));
@@ -585,6 +595,7 @@ function updateCrews(frame) {
       shown = shown || plan.from;
       continue;
     }
+    if (ph.phase === "work" && plan) pitWork.set(ph.num, { kind: plan.kind, from: plan.from, off: 0, fitted: 0, done: 0, lifted: false });
     list.push(...crewAt(where, crewLayout(ph.phase, ph.f, at.boxC, left), colour));
   }
   world.crews.place(list, loose, camera.position);
@@ -606,10 +617,18 @@ function restoreCar(c) {
   if (!c.lifted) return;
   c.model.position.y = 0; c.model.userData.wheels.forEach((w, i) => setWheelOff(c.model, i, false)); c.lifted = false;
 }
+// v0.50: the small provenance notes stack in one place (#notes3d – the HUD's "자료 출처 메모" widget; in the game's mode
+// bottom left as before), each with its own line and order instead of five absolutely placed boxes
+const NOTE_ORDER = { camNote3d: 0, startLightNote: 1, supportNote: 2, pitWorkNote: 3, pitTeamNote: 4 };
+function noteLine(id) {
+  const el = document.createElement("div"); el.id = id; el.className = "note3d-line" + (id === "camNote3d" ? " cam" : ""); el.style.order = NOTE_ORDER[id] ?? 9;
+  (document.getElementById("notes3d") || host)?.appendChild(el);
+  return el;
+}
 function pitWorkNote(text) {
   let el = document.getElementById("pitWorkNote");
-  if (!el && text) { el = document.createElement("div"); el.id = "pitWorkNote"; el.style.cssText = "position:absolute;left:12px;bottom:62px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:3"; host?.appendChild(el); }
-  if (el) { if (el.textContent !== (text || "")) el.textContent = text || ""; el.hidden = !text; }
+  if (!el && text) { el = noteLine("pitWorkNote"); }
+  if (el) { if (el.textContent !== (text || "")) el.textContent = text || ""; if (el.hidden !== !text) el.hidden = !text; }
 }
 // the pit lane's direction at (x, z) – the way the cars go – if that's in front of a facility's garages (0–16 m out),
 // else null
@@ -629,8 +648,8 @@ function pitLaneDir(x, z) {
 // a small note in the 3D view saying the team garages are an inference, and from what
 function pitTeamNote(text) {
   let el = document.getElementById("pitTeamNote");
-  if (!el && text) { el = document.createElement("div"); el.id = "pitTeamNote"; el.style.cssText = "position:absolute;left:12px;bottom:40px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:3"; host?.appendChild(el); }
-  if (el) { el.textContent = text || ""; el.hidden = !text; }
+  if (!el && text) { el = noteLine("pitTeamNote"); }
+  if (el) { if (el.textContent !== (text || "")) el.textContent = text || ""; if (el.hidden !== !text) el.hidden = !text; }
 }
 // (Map3D.boardsDiag – a pure function of the pit building, the session's data, the layer and the camera: boardStatus
 // in garages.js says why each board is or isn't there; this adds what only the scene can say)
@@ -1626,7 +1645,7 @@ function updateCars(dt) {
   const drivers = src.state.DriverList || {}, lines = src.state.TimingData?.Lines || {};
   const appLines = src.state.TimingAppData?.Lines || {}, isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || "");
   const seen = new Set();
-  const focusNum = A.focus || leader();
+  const focusNum = camNum();
   const k = 1 - Math.exp(-dt * 25), kSlow = 1 - Math.exp(-dt * 5);   // the heading is smooth already: only a touch of damping
   const F = sm?.frame, kBody = 1 - Math.exp(-dt * 12);
   if (F) traffic(sm, F, A.t, dt, pos);
@@ -2300,22 +2319,22 @@ function supportNote(plan, models) {
   if (world?.marshals?.note) parts.push(world.marshals.note);
   const text = parts.join(" · ") || null;
   let el = document.getElementById("supportNote");
-  if (!el && text) { el = document.createElement("div"); el.id = "supportNote"; el.style.cssText = "position:absolute;left:12px;bottom:106px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:5"; document.getElementById("startLightNote")?.parentElement?.appendChild(el) || document.body.appendChild(el); }
-  if (el) { el.hidden = !text; if (text && el.textContent !== text) el.textContent = text; }
+  if (!el && text) { el = noteLine("supportNote"); }
+  if (el) { if (el.hidden !== !text) el.hidden = !text; if (text && el.textContent !== text) el.textContent = text; }
 }
 // the gantry's reds before a standing start (startplan.js startLights: a replay's estimate – the data has lights out only)
 function updateStartLights(src, t) {
   const lamps = world?.group.getObjectByName("grid")?.userData.lamps;
   // (no gantry or source: no lights and no note left from before)
-  if (!lamps || !src) { const el = document.getElementById("startLightNote"); if (el) el.hidden = true; return; }
+  if (!lamps || !src) { const el = document.getElementById("startLightNote"); if (el && !el.hidden) el.hidden = true; return; }
   // (a replay's standing starts at the moment the field set off by its telemetry where that differs from the race clock's
   // – the clock isn't always lights out; live: as the clock says, nothing ahead)
   const L = startLights(shownStarts(src, t), t, { live: !!src.isLive });
   lamps.forEach((m, i) => { const on = i < L.lit; if ((m.emissiveIntensity > 0.5) !== on) { m.emissiveIntensity = on ? 1.1 : 0.04; m.color.set(on ? 0x500000 : 0x180505); m.emissive.set(on ? 0xff0a00 : 0xff2a1a); } });
   const note = L.est ? "출발 신호: 데이터에는 소등 시각만 있어요 – 빨간불이 켜지는 시점은 추정(1초 간격, 소등 2초 전 5개 점등)" : null;
   let el = document.getElementById("startLightNote");
-  if (!el && note) { el = document.createElement("div"); el.id = "startLightNote"; el.style.cssText = "position:absolute;left:12px;bottom:84px;padding:3px 8px;border-radius:6px;background:rgba(14,16,19,.72);color:#cfd6dd;font-size:11px;pointer-events:none;z-index:3"; host?.appendChild(el); }
-  if (el) { el.hidden = !note; if (note && el.textContent !== note) el.textContent = note; }
+  if (!el && note) { el = noteLine("startLightNote"); }
+  if (el) { if (el.hidden !== !note) el.hidden = !note; if (note && el.textContent !== note) el.textContent = note; }
 }
 // The steering wheels' screens: each driver's own data at the moment shown (wheelscreen.js) on the cars drawn close up –
 // the cockpit car first, then the nearest – four at most; the others show the neutral face. A new session starts clean.
@@ -2327,7 +2346,7 @@ let wheelScreensFor = null;
 function updateWheelScreens(src, t) {
   const key = app()?.sourceKey?.()?.replace(/:\d+$/, "") || null;
   if (key !== wheelScreensFor) { wheelScreens.reset(); for (const c of cars.values()) setWheelScreen(c.model, null); wheelScreensFor = key; }
-  const focusNum = app().focus || leader(), cockpit = camMode === "onboard" || camMode === "eye";
+  const focusNum = camNum(), cockpit = camMode === "onboard" || camMode === "eye";
   const list = [...cars.values()].filter((c) => c.obj.visible && c.model.userData.lod === "near")
     .map((c) => ({ num: c.num, c, d: cockpit && c.num === focusNum ? -1 : camera.position.distanceTo(c.obj.position) })).sort((a, b) => a.d - b.d);
   const { have, lost } = wheelScreens.assign(list);
@@ -2391,6 +2410,21 @@ function leader() {
   const lines = app().src?.state.TimingData?.Lines || {};
   return Object.keys(lines).find((n) => lines[n].Position === "1") || null;
 }
+// v0.50 §8-3: the car the camera films, the driver selected for information (app().focus) and the comparison driver
+// (app().compare) are three things. 따라가기 (camFollow, the HUD's switch – a UI preference) on: the camera films the
+// selected driver, as before; off: the camera keeps its own pick (camPick: ◀ ▶, "이 차 보기") while the selection
+// changes freely. The game's mode keeps its own rule (the camera on the selected car – game/racehud.js).
+let camPick = null, camFollow = true, camPickFor = null;
+function camNum() {
+  if (game) return app().focus || leader();
+  return cameraCar({ follow: camFollow, camPick, focus: app()?.focus, leader: leader(), exists: (n) => cars.has(n) });
+}
+function setFollow(on) {
+  on = !!on;
+  if (on === camFollow) return;
+  if (!on) camPick = camNum(); else camPick = null;
+  camFollow = on;
+}
 
 // Name tags readable at any distance; cars at their real size (or larger from high up, by choice).
 // Cars are drawn at their real size; from the helicopter they can be drawn larger to be told apart (the map
@@ -2399,7 +2433,7 @@ function leader() {
 // close up (over ~260 px, or the car the cockpit cameras are in) the cockpit interior, hands and steering wheel;
 // under ~26 px no wheel covers or lights either (the corners' drums and the 2022–25 front fences stay – v0.43).
 function scaleForView() {
-  const H = hostH || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H, big = geoSettings().bigCars === true, focusNum = app().focus || leader();
+  const H = hostH || 1, f = 2 * Math.tan((camera.fov * Math.PI) / 360) / H, big = geoSettings().bigCars === true, focusNum = camNum();
   for (const c of cars.values()) {
     const dist = camera.position.distanceTo(c.obj.position);
     const s = camMode === "heli" && big ? Math.min(7, Math.max(1, dist / 115)) : 1;
@@ -2414,7 +2448,33 @@ function scaleForView() {
   }
   declutterLabels();
 }
+// v0.50 §8-6 (live / replay): tags limited by distance, importance and occlusion – spectator/layout.js pickTags: the
+// selected, compared and filmed cars always (on screen, not behind a building), then by race position, a few per camera.
+// Occlusion: a ray from the camera to the tag against the world's occluders (los.js firstHit), a few cars a frame, each
+// car's answer kept ~0.3 s. The game's mode keeps its own rule (gameDeclutter).
+const TAG_RECHECK = 300;
 function declutterLabels() {
+  if (game) return gameDeclutter();
+  const A = app(), lines = A.src?.state.TimingData?.Lines || {}, W = hostW, H = hostH, sel = A.focus, cmp = A.compare || null, cam = camNum();
+  const now = performance.now(), occ = world?.occluders || [], cands = [];
+  let rays = 0;
+  for (const c of cars.values()) {
+    if (!c.label.sp.visible) continue;
+    tmp2.copy(c.obj.position); tmp2.y += 1.6; tmp2.project(camera);
+    const dist = camera.position.distanceTo(c.obj.position);
+    // (occlusion: only what can matter – near enough to be tagged, in front of the camera; the oldest answers first)
+    if (occ.length && tmp2.z < 1 && dist > 12 && (c.tagAt == null || now - c.tagAt > TAG_RECHECK) && rays < 6) {
+      rays++; c.tagAt = now;
+      tmp.copy(c.obj.position); tmp.y += 1.4; tmp.sub(camera.position); const far = tmp.length() - 2; tmp.normalize();
+      c.tagHidden = far > 0 && firstHit(occ, camera.position, tmp, far) != null;
+    }
+    cands.push({ num: c.num, x: (tmp2.x * 0.5 + 0.5) * W, y: (-tmp2.y * 0.5 + 0.5) * H, behind: tmp2.z > 1, dist, rank: +lines[c.num]?.Position || 99,
+      sel: c.num === sel, cmp: c.num === cmp, cam: c.num === cam && camMode !== "heli", hidden: !!c.tagHidden && !(c.num === sel && dist < 12) });
+  }
+  const keep = pickTags(cands, { mode: camMode, w: W, h: H, tagW: 64, tagH: 24 });
+  for (const c of cars.values()) if (c.label.sp.visible && !keep.has(c.num)) c.label.sp.visible = false;
+}
+function gameDeclutter() {
   const lines = app().src?.state.TimingData?.Lines || {}, W = hostW, H = hostH, taken = [], go = game ? game.order() : null;
   const posOf = (n) => (go ? go.indexOf(n) + 1 || 99 : +lines[n]?.Position || 99);
   const list = [...cars.values()].filter((c) => c.label.sp.visible)
@@ -2451,7 +2511,7 @@ function camNoteSet(text) {
   if (text === camNote) return;
   camNote = text;
   let el = document.getElementById("camNote3d");
-  if (!el && text) { el = document.createElement("div"); el.id = "camNote3d"; el.style.cssText = "position:absolute;left:84px;top:12px;max-width:46%;padding:4px 9px;border-radius:6px;background:rgba(14,16,19,.78);color:#e3e8ee;font-size:12px;line-height:1.4;pointer-events:none;z-index:4"; host?.appendChild(el); }
+  if (!el && text) { el = noteLine("camNote3d"); }
   if (el) { el.textContent = text; el.hidden = !text; }
 }
 function carNoteFor(num, c) {
@@ -2466,7 +2526,7 @@ function updateCamera(dt) {
   if (camMode === "inspect") return;
   // the game's pit view: posed by game/pitcam.js (its shots, occlusion checks and director); the live view never has it
   if (camMode === "pit") { if (game) { gamePitView(dt); return; } setCam("chase"); }
-  const num = A.focus || leader(), c = cars.get(num), shown = !!c?.obj.visible;
+  const num = camNum(), c = cars.get(num), shown = !!c?.obj.visible;
   // (a seek – the session's time jumping, or going back – starts the chase rig's swing and height over too)
   const t = A.t, jumped = camFor.t != null && (t < camFor.t - 50 || t - camFor.t > 2000);
   camFor.t = t;
@@ -2623,7 +2683,7 @@ function setCam(mode) {
   if (mode === "heli") {
     // take over from wherever the chase camera was, orbiting – and following – the selected car (when it is drawn;
     // else the view stays where it is, free)
-    const c = cars.get(app().focus || leader()), shown = !!c?.obj.visible;
+    const c = cars.get(camNum()), shown = !!c?.obj.visible;
     camera.fov = 50; camera.updateProjectionMatrix();
     if (shown) {
       controls.target.copy(c.pos); heli.follow = true;
@@ -2642,7 +2702,7 @@ function cycleCar(dir) {
   const lines = app().src?.state.TimingData?.Lines || {};
   const order = game ? game.order().filter((n) => cars.get(n)?.obj.visible) : Object.keys(lines).filter((n) => cars.get(n)?.obj.visible).sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
   if (!order.length) return;
-  const cur = order.indexOf(app().focus || leader());
+  const cur = order.indexOf(camNum());
   app().setFocus(order[(cur + dir + order.length) % order.length]);
 }
 function pickCar(e) {
@@ -2704,6 +2764,101 @@ function paintHud() {
   const full = html + tel;
   if (hud.dataset.html !== full) { hud.innerHTML = full; hud.dataset.html = full; }
 }
+
+// ---------- the spectator HUD's view of this module (spectator/hud.js) ----------
+// The keep-clear zones of the cockpit cameras (§8-1): where the ridden car's steering wheel (with the hands round its
+// rim), its two mirrors and the view's centre are on screen now (host px) – measured from the model, so another car,
+// lens or window shape gives its own. [] outside the cockpit cameras or with no car drawn.
+const kcV = new THREE.Vector3();
+function mirrorBoxes(model) {
+  let mesh = null; model.traverse((o) => { if (!mesh && o.isMesh && o.name === "mirrors") mesh = o; });
+  const pos = mesh?.geometry?.attributes?.position; if (!pos) return [];
+  const side = [null, null];
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), k = x >= 0 ? 0 : 1, b = side[k] || (side[k] = new THREE.Box3());
+    b.expandByPoint(kcV.set(x, pos.getY(i), pos.getZ(i)));
+  }
+  return side.filter(Boolean).map((b) => ({ mesh, pts: [0, 1, 2, 3, 4, 5, 6, 7].map((j) => new THREE.Vector3(j & 1 ? b.max.x : b.min.x, j & 2 ? b.max.y : b.min.y, j & 4 ? b.max.z : b.min.z)) }));
+}
+function wheelBox(wheel) {
+  wheel.updateWorldMatrix(true, true);
+  const box = new THREE.Box3(), inv = new THREE.Matrix4().copy(wheel.matrixWorld).invert(), m = new THREE.Matrix4(), p = new THREE.Vector3();
+  const walk = (o) => {
+    if (o !== wheel && /^hand[LR]$/.test(o.name)) { p.setFromMatrixPosition(m.multiplyMatrices(inv, o.matrixWorld)); box.expandByPoint(p.clone().addScalar(0.07)); box.expandByPoint(p.clone().addScalar(-0.07)); return; }
+    if (o.isMesh && o.geometry?.attributes?.position) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); box.union(o.geometry.boundingBox.clone().applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld))); }
+    for (const c of o.children) walk(c);
+  };
+  walk(wheel);
+  // (the wheel's face only: the column behind it runs 0.24 m and the gloves stand out towards the driver – corners a hand's
+  // breadth from the eye project over the whole screen)
+  box.min.z = box.max.z = 0;
+  return box;
+}
+function screenRect(pts, pad = 0) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) { kcV.copy(p).project(camera); if (kcV.z > 1) return null; const x = (kcV.x * 0.5 + 0.5) * hostW, y = (-kcV.y * 0.5 + 0.5) * hostH; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const w = x1 - x0, h = y1 - y0, px = w * pad, py = h * pad;
+  x0 = Math.max(0, x0 - px); y0 = Math.max(0, y0 - py); x1 = Math.min(hostW, x1 + px); y1 = Math.min(hostH, y1 + py);
+  return x1 > x0 && y1 > y0 ? { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) } : null;
+}
+function keepClearZones() {
+  if (!(camMode === "onboard" || camMode === "eye") || !world) return [];
+  const c = cars.get(camNum()); if (!c?.obj.visible) return [];
+  const u = c.model.userData, out = [];
+  c.model.updateWorldMatrix(true, true); camera.updateMatrixWorld();
+  if (u.wheel) {
+    // (the wheel's own parts and the gloves on its rim, in the wheel's frame – it turns with the steering; the arms run
+    // back past the camera and are left out: their box would cover the whole screen)
+    if (!u.specWheel) u.specWheel = wheelBox(u.wheel);
+    const b = u.specWheel, M = u.wheel.matrixWorld;
+    const r = screenRect([0, 1, 2, 3, 4, 5, 6, 7].map((j) => new THREE.Vector3(j & 1 ? b.max.x : b.min.x, j & 2 ? b.max.y : b.min.y, j & 4 ? b.max.z : b.min.z).applyMatrix4(M)), 0.12);
+    if (r) out.push({ ...r, what: "wheel" });
+  }
+  if (u.specMirrors === undefined) u.specMirrors = mirrorBoxes(c.model);
+  for (const m of u.specMirrors) { const r = screenRect(m.pts.map((p) => p.clone().applyMatrix4(m.mesh.matrixWorld)), 0.25); if (r) out.push({ ...r, what: "mirror" }); }
+  // (the view's centre: the road ahead and, onboard, the halo's opening – 30–70 % across, 12–58 % down)
+  out.push({ x: Math.round(hostW * 0.3), y: Math.round(hostH * 0.12), w: Math.round(hostW * 0.4), h: Math.round(hostH * 0.46), what: "centre" });
+  return out;
+}
+// What the pit panel may say about car num (pitstate.js inference up to the moment shown; the crew's shown stage)
+const pitWork = new Map();
+function pitInfoFor(num) {
+  const r = cars.get(num)?.pit; if (!r?.state) return null;
+  const i = r.input || {};
+  return { state: r.state.state, stillFor: i.stillFor || 0, penalty: i.penalty || null, timePen: i.timePen || 0, lastBox: i.lastBox || null, work: pitWork.get(num) || null };
+}
+// The ready / loading state: the circuit being built, or the filmed car not placed yet just after a session (re)opened
+// (a session loading – the timing screen's own progress events, f1kr-load: the circuit on screen is still the last one)
+let specLoad = null;
+addEventListener("f1kr-load", (e) => { specLoad = e.detail?.pct >= 100 ? null : { pct: e.detail?.pct ?? 0, text: String(e.detail?.text || "").replace(/\s*·\s*$/, ""), at: performance.now() }; });
+addEventListener("f1kr-loaded", () => { specLoad = null; });
+function specReady() {
+  const A = app(), note = document.getElementById("note3d");
+  if (specLoad && !game) {
+    if (document.getElementById("load")?.disabled === false || performance.now() - specLoad.at > 30000) specLoad = null;   // (failed or gone quiet)
+    else return { busy: true, text: "세션을 불러오는 중…", sub: `${specLoad.text} ${specLoad.pct}%` };
+  }
+  if (!A?.src || !note.hidden) return { busy: false };
+  const geo = document.getElementById("geo3dStatus"), sub = geo && !geo.hidden ? geo.textContent : "";
+  if (!world) return { busy: true, text: "3D 서킷을 만드는 중…", sub };
+  if (camMode === "heli" || camMode === "inspect") return { busy: false };
+  const c = cars.get(camNum());
+  if ((!c || !c.obj.visible) && performance.now() - (world.builtAt || 0) < 8000) return { busy: true, text: "차량 위치를 준비하는 중…", sub: sub || "차를 찾으면 바로 비춰요" };
+  return { busy: false };
+}
+function cycleCam(dir) {
+  if (game || camFollow) { cycleCar(dir); return; }
+  const lines = app().src?.state.TimingData?.Lines || {};
+  const order = Object.keys(lines).filter((n) => cars.get(n)?.obj.visible).sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
+  if (!order.length) return;
+  const cur = order.indexOf(camNum());
+  camPick = order[(cur + dir + order.length) % order.length];
+}
+const specApi = {
+  app: () => app(), leader: () => leader(), camNum: () => camNum(), camMode: () => camMode,
+  follow: () => camFollow, setFollow, cycleCam, filmSelected: () => { camPick = app()?.focus || camPick; },
+  pitInfo: pitInfoFor, ready: specReady, keepClear: keepClearZones,
+};
 
 // ---------- real surroundings ----------
 // Settings: imagery "eox" (free Sentinel-2) | "google" (needs the user's key) | "off" (generic look), and layers.
@@ -3011,8 +3166,9 @@ function ensureWorld(now) {
   if (world && world.sourceKey === key && Math.abs(pts.length - world.pts) < 400) return;
   disposeWorld();
   sepMemory = {};
+  if (camPickFor !== sessionOf(key)) { camPick = null; camPickFor = sessionOf(key); }   // (the camera's own pick is per session)
   world = buildWorld(pts);
-  if (world) { world.sourceKey = key; world.pts = pts.length; cornerMarks(); addGrid(); addPitLane(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
+  if (world) { world.builtAt = performance.now(); world.sourceKey = key; world.pts = pts.length; cornerMarks(); addGrid(); addPitLane(); frameCircuit(); applyLighting(); loadGeo(world); refreshShadows(); }
   note.hidden = !!world;
 }
 // game mode: the circuit from the scenario's own lap (the same buildWorld, the same real surroundings), built once per
@@ -3453,7 +3609,7 @@ function addCorners() {
 function updateCorners(dt) {
   const C = world?.corners; if (!C) return;
   const mode = ["near", "all", "off"].includes(geoSettings().corners) ? geoSettings().corners : "near";
-  const A = app(), focus = A.focus || leader(), c = cars.get(focus);
+  const A = app(), focus = camNum(), c = cars.get(focus);
   const riding = camMode === "chase" || camMode === "onboard" || camMode === "eye";
   let carS = null;
   if (riding && c?.has) { carS = c.onTrack && c.st?.s != null ? c.st.s : c.sample ? cornerS(c.sample.i) : null; }
@@ -3501,8 +3657,8 @@ function frame(now) {
   realPart("facilities")?.userData.update?.(camera.position);
   updatePitTeams();
   // (the kit's near teams and its one light – cheap unless the focused / pit-camera team changed)
-  if (pitKit && pitTeams.group?.visible !== false) pitKit.update({ near: kitNear(), cam: camera.position, focus: app()?.focus });
-  if (!devNoHud) paintHud();
+  if (pitKit && pitTeams.group?.visible !== false) pitKit.update({ near: kitNear(), cam: camera.position, focus: camNum() });
+  if (!devNoHud) { if (game) paintHud(); else specHud?.frame(now); }
   // glare points: pixels per metre at 1 m away, fading into the haze as the fog does; time for blinking lights
   NL.time.value = now / 1000;
   GLOW.scale.value = renderer.getDrawingBufferSize(tmpV2).y / (2 * Math.tan((camera.fov * Math.PI) / 360));
@@ -3530,7 +3686,7 @@ function updateMirrors() {
   if (!mirrorPass) mirrorPass = createMirrorPass();
   if (mirrorSetting === null) { const o = geoSettings(); mirrorSetting = { set: o.mirrors, q: QUALITY[o.quality] ? o.quality : "balanced" }; }
   mirrorStrained = mirrorStrain(mirrorStrained, perf.late, perf.calm);
-  const ride = camMode === "onboard" || camMode === "eye", num = ride ? app().focus || leader() : null, c = num ? cars.get(num) : null;
+  const ride = camMode === "onboard" || camMode === "eye", num = ride ? camNum() : null, c = num ? cars.get(num) : null;
   const view = ride ? camMode + ":" + num : "";
   const run = () => mirrorPass.update(renderer, scene, camera, c?.obj.visible ? c.model : null, mirrorMode(mirrorSetting.set, mirrorSetting.q, mirrorStrained), view, mirrorAux);
   if (!mirrorProbeReq) return run();
@@ -3704,7 +3860,7 @@ const gameKit = {
   setCamByDirector(m) { pitCamDirecting = true; try { setCam(m); } finally { pitCamDirecting = false; } },
   pitTeamsGroup: () => pitTeams.group || null, nightLit,
   THREE, get camera() { return camera; }, cars, lifted: gameLifted, ROAD_LIFT,
-  world: () => world, camMode: () => camMode, focus: () => app().focus || leader(),
+  world: () => world, camMode: () => camMode, focus: () => camNum(),
   carFor, paintLabel, scaleForView, applyLift, restoreCar, pitModelFor,
   pitG: () => pitTeams.G || null, pitTeams: () => pitTeams.teams || null, pitZones: () => pitTeams.zones || null,
   groundAt: (x, z) => { const R = world?.real; const g = R?.groundAt ? R.groundAt(x, z) : null; return Number.isFinite(g) ? g : groundY(x, z); },
@@ -3752,7 +3908,7 @@ function gameNote(fr) {
   note.dataset.game = msg ? "1" : "";
 }
 // the chase / onboard bar: the focused car's game state (game/cars3d.js paintGameHud – labelled game data, no telemetry)
-function gameHud(hud) { paintGameHud(hud, game, app().focus || leader()); }
+function gameHud(hud) { paintGameHud(hud, game, camNum()); }
 // The teams at their boxes in game mode: the boxes as allocated (pitorder.js – the previous season's constructors' order
 // along the lane, the circuit's measured boxes), for the scenario's own entry list; no inference from positions. The pit
 // wall's screens show the game's tower, marked as the game's.
@@ -3807,6 +3963,7 @@ function gameAttach(adapter) {
   for (const id of ["supportNote", "startLightNote", "pitWorkNote", "pitTeamNote", "camNote3d"]) { const el = document.getElementById(id); if (el) el.hidden = true; }
   camNote = "";
   game = adapter;
+  specHud?.setGame(true); if (host) host.dataset.mode = "game";
   for (const x of cars.values()) x.stab = null;
   chase.init = false; camInit = false; camFor = { num: null, world: null };
   return "attached";
@@ -3818,6 +3975,7 @@ function gameDetach() {
   game.unbind?.();
   disposeWorld(); geoJob++; lastBuildCheck = 0; wx?.reset(); gameLifted.clear();
   game = null;
+  specHud?.setGame(false); if (host) host.dataset.mode = "spec";
   if (livePitTeams) { pitTeams = livePitTeams; livePitTeams = null; forgetPitTeams(); }
   chase.init = false; camInit = false; camFor = { num: null, world: null };
   const n = document.getElementById("note3d"); if (n) { n.hidden = true; n.dataset.game = ""; }
@@ -3825,6 +3983,17 @@ function gameDetach() {
 }
 
 window.Map3D = {
+  // development (v0.50 spectator HUD): its state / layout / cost, presets and the editor from scripts, the follow switch,
+  // the camera's own pick, the cockpit's keep-clear zones and the car tags drawn now
+  spec: {
+    state: () => JSON.stringify({ ...specHud?.dev.state(), follow: camFollow, camPick, cam: camNum(), focus: app()?.focus || null, compare: app()?.compare || null, mode: camMode }),
+    cost: () => JSON.stringify(specHud?.dev.cost() || null), resetCost: () => specHud?.dev.resetCost(),
+    preset: (p) => specHud?.dev.preset(p), set: (id, patch) => specHud?.dev.set(id, patch), reset: () => specHud?.dev.reset(), edit: (on) => specHud?.dev.edit(on),
+    follow: (on) => { if (on != null) setFollow(on); return camFollow; }, pick: (num) => { camPick = num == null ? null : String(num); return camNum(); },
+    zones: () => JSON.stringify(keepClearZones()), layout: () => JSON.stringify(specHud?.dev.layout() || null),
+    tags: () => JSON.stringify([...cars.values()].filter((c) => c.label.sp.visible).map((c) => c.num)),
+    pit: (num) => JSON.stringify(pitInfoFor(String(num || camNum()))),
+  },
   game: {
     attach: gameAttach,
     detach: gameDetach,
@@ -3920,7 +4089,7 @@ window.Map3D = {
     return new Promise((done) => {
       const r = [], t0 = performance.now();
       devRec = () => {
-        const c = cars.get(num || app().focus || leader()); if (!c || !c.spinW) return;
+        const c = cars.get(num || camNum()); if (!c || !c.spinW) return;
         r.push([app().t, c.spinW[0], c.speed, c.onTrack ? "track" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.est ? "est" : "other", c.model.userData.profile.FR, c.spinSrc, c.spinD, app().src.carAt?.(c.num, app().t)?.speed ?? null]);
         if (performance.now() - t0 < secs * 1000) return;
         devRec = null;
@@ -3943,12 +4112,12 @@ window.Map3D = {
     });
   },
   // development: a car's wheel angles now – [session ms, front °, rear °, distance m (null: the path rules), source]
-  spinOf(num) { const c = cars.get(num || app().focus || leader()); return c?.spinW ? JSON.stringify([app().t, +(c.spinW[0] * 180 / Math.PI).toFixed(3), +(c.spinW[1] * 180 / Math.PI).toFixed(3), c.spinD == null ? null : +c.spinD.toFixed(3), c.spinSrc]) : null; },
+  spinOf(num) { const c = cars.get(num || camNum()); return c?.spinW ? JSON.stringify([app().t, +(c.spinW[0] * 180 / Math.PI).toFixed(3), +(c.spinW[1] * 180 / Math.PI).toFixed(3), c.spinD == null ? null : +c.spinD.toFixed(3), c.spinSrc]) : null; },
   recordLive(secs = 8) {
     return new Promise((done) => {
       const r = { t: [], dt: [], yaw: [], pitch: [], roll: [], y: [], side: [], steer: [], wheel: [], st: [] }, e = new THREE.Euler(), t0 = performance.now();
       devRec = (now, dt) => {
-        const c = cars.get(app().focus || leader()); if (!c) return;
+        const c = cars.get(camNum()); if (!c) return;
         e.setFromQuaternion(camera.quaternion, "YXZ");
         r.t.push(now); r.dt.push(dt * 1000); r.yaw.push(e.y); r.pitch.push(e.x); r.roll.push(e.z); r.y.push(camera.position.y);
         r.side.push(camera.position.x * Math.cos(c.yaw) - camera.position.z * Math.sin(c.yaw));
@@ -5002,7 +5171,7 @@ window.Map3D = {
   // development: where points of the ridden car land on screen (0..1 from the top left) with the cockpit camera as it
   // is – for comparing with onboard footage. pts: { name: [x, y, z] in car metres }
   projectCar(pts) {
-    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(camNum()); if (!c) return "no car";
     c.model.updateWorldMatrix(true, true); camera.updateMatrixWorld(true);
     const out = { fov: +camera.fov.toFixed(2), aspect: +camera.aspect.toFixed(3), pitch: +(c.model.rotation.x * 57.3).toFixed(2), roll: +(c.model.rotation.z * 57.3).toFixed(2) };
     for (const [k, p] of Object.entries(pts)) { const v = new THREE.Vector3(...p).applyMatrix4(c.model.matrixWorld).project(camera); out[k] = [+((v.x + 1) / 2).toFixed(3), +((1 - v.y) / 2).toFixed(3)]; }
@@ -5106,14 +5275,14 @@ window.Map3D = {
   // development (v0.42): the focused car's steering wheel alone (its body, arms – and with hands false its gloves – hidden)
   // for close looks at the wheel; false shows them again
   wheelSolo(on = true, hands = true) {
-    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(camNum()); if (!c) return "no car";
     const st = c.model.getObjectByName("steering"), keep = (o) => { for (let p = o; p; p = p.parent) if (p === st) return hands || !/glove/i.test(o.name); return false; };
     c.model.traverse((o) => { if (o.isMesh) { if (on && !keep(o)) { o.userData.soloHid = o.visible; o.visible = false; } else if (!on && o.userData.soloHid != null) { o.visible = o.userData.soloHid; delete o.userData.soloHid; } } });
     return "ok";
   },
   // development: the camera as it is – mode, lens, near plane, its place in the focused car's frame (cockpit checks)
   camInfo() {
-    const c = cars.get(app().focus || leader()); let rel = null;
+    const c = cars.get(camNum()); let rel = null;
     if (c) { c.model.updateWorldMatrix(true, false); rel = camera.position.clone().applyMatrix4(c.model.matrixWorld.clone().invert()).toArray().map((v) => +v.toFixed(3)); }
     return { mode: camMode, fov: +camera.fov.toFixed(2), near: camera.near, aspect: +camera.aspect.toFixed(3), rel, look: { ...look, down: undefined } };
   },
@@ -5121,7 +5290,7 @@ window.Map3D = {
   // the eye actually sees of which mesh), "wire": wireframe, "double": both faces drawn (a face turned the wrong way
   // shows up), "normals": the normals as colours; null: the car's own materials back
   carDiag(mode = "colors") {
-    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(camNum()); if (!c) return "no car";
     const COL = { painted: 0xd02020, carbon: 0x2050d0, wing: 0x8040c0, rim: 0xf0d000, tub: 0x20b040, headrest: 0x00c0c0, torso: 0xe040e0, helmet: 0xffffff, arm: 0xff8000, gauntlet: 0xffa060, glove: 0xffc090, gloveLo: 0xffc090 }, seen = new Set();
     c.model.traverse((o) => {
       if (!o.isMesh || seen.has(o)) return; seen.add(o);
@@ -5140,7 +5309,7 @@ window.Map3D = {
   // development (v0.44): the focused car's kit drawn in loud zone colours (kit.js zones: gloves, sleeves, harness) – on a
   // copy of its material, put back with kitDiag(false); partVis hides / shows the focused car's parts by name
   kitDiag(on = true) {
-    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(camNum()); if (!c) return "no car";
     const k = c.model.userData.kitMat; let n = 0;
     c.model.traverse((o) => {
       if (!o.isMesh) return;
@@ -5157,21 +5326,21 @@ window.Map3D = {
   // development (v0.45): the focused car's glove look and how each look's material is lit – patched (the light field /
   // tunnel lamps: nightLit), its night glow and environment map – to check a look switched by night or in a tunnel
   gloveState() {
-    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(camNum()); if (!c) return "no car";
     const u = c.model.userData, st = (m) => ({ patched: Object.prototype.hasOwnProperty.call(m, "onBeforeCompile"), glow: +m.emissiveIntensity.toFixed(3), env: !!m.envMap, onCar: u.kitMat === m });
     return JSON.stringify({ num: app().focus, look: u.kitMode, night: nightNow, readable: st(u.kitMats.readable), real: st(u.kitMats.real) });
   },
-  partVis(name, on) { const c = cars.get(app().focus || leader()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
+  partVis(name, on) { const c = cars.get(camNum()); if (!c) return "no car"; let n = 0; c.model.traverse((o) => { if (o.name === name) { o.visible = !!on; n++; } }); return n; },
   // development: the focused driver's arm axes on/off (drawArmDiag)
   // v0.47: the focused car's arms' swing now – q per arm (0 beside the body, 1 across; armswap.js), the wheel drawn and
   // the steering history's at this moment (deg), and whether the swing came from the history (swapAt) or frame to frame
-  armQ(num) { const A = app(), c = cars.get(num || A.focus || leader()), u = c?.model.userData; if (!u?.arms) return null; const h = u.hist && u.armT != null ? u.hist(u.armT) : null; return { num: num || A.focus || leader(), t: u.armT, q: u.arms.map((a) => a.q), wheelDeg: +(u.wheel.rotation.z * 57.29578).toFixed(2), histDeg: h == null ? null : +(h * 57.29578).toFixed(2), from: h == null ? "frames" : "history", lod: u.lod, near: u.near.visible }; },
+  armQ(num) { const A = app(), c = cars.get(num || camNum()), u = c?.model.userData; if (!u?.arms) return null; const h = u.hist && u.armT != null ? u.hist(u.armT) : null; return { num: num || camNum(), t: u.armT, q: u.arms.map((a) => a.q), wheelDeg: +(u.wheel.rotation.z * 57.29578).toFixed(2), histDeg: h == null ? null : +(h * 57.29578).toFixed(2), from: h == null ? "frames" : "history", lod: u.lod, near: u.near.visible }; },
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones
   // development: hold the focused car's wings at a fraction (0 shut … 1 open; null: back to the estimate / data)
   aeroHold(v = null) { devAeroHold = v; return "ok"; },
   aeroState(num = null) {
-    const c = cars.get(num || app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(num || camNum()); if (!c) return "no car";
     const Z = world?.aeroZones, u = c.model.userData;
     return JSON.stringify({ num: c.num, ...c.aeroState, open: +(c.aero ?? 0).toFixed(3), spec: u.aeroSpec?.id, conf: u.aeroSpec?.conf, zones: Z ? { official: !!Z.official, src: Z.official?.src || "estimated (long straights)", spans: Z.spans.map((q) => [Math.round(q.a), Math.round(q.b)]), L: Math.round(Z.L) } : null, s: c.st ? Math.round(((c.st.s % (Z?.L || 1)) + (Z?.L || 1)) % (Z?.L || 1)) : null });
   },
@@ -5219,7 +5388,7 @@ window.Map3D = {
   },
   // development: look at the focused car from a given offset (metres, car frame)
   inspect(dx, dy, dz) {
-    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(camNum()); if (!c) return "no car";
     setCam("heli"); controls.enabled = false; visible && (camMode = "inspect");
     const yaw = c.yaw, f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)), r = new THREE.Vector3(f.z, 0, -f.x);
     camera.position.copy(c.pos).addScaledVector(r, dx).addScaledVector(UP, dy).addScaledVector(f, dz);
@@ -5229,7 +5398,7 @@ window.Map3D = {
   // development: a static look at the focused car from (x, y, z) to (tx, ty, tz), both in the car's own frame (+x its
   // left, +y up, +z its nose; metres) – the cockpit's parts up close (fine gloves on)
   inspectAt(x, y, z, tx, ty, tz, fov = 35) {
-    const c = cars.get(app().focus || leader()); if (!c) return "no car";
+    const c = cars.get(camNum()); if (!c) return "no car";
     setCam("heli"); controls.enabled = false; visible && (camMode = "inspect");
     c.model.updateWorldMatrix(true, true); setCockpit(c.model, true); setDetail(c.model, "near");
     camera.position.set(x, y, z).applyMatrix4(c.model.matrixWorld); camera.up.set(0, 1, 0);
@@ -5341,7 +5510,7 @@ window.Map3D = {
   },
   debug: () => JSON.stringify({ cam: camera?.position.toArray().map(Math.round), target: controls?.target.toArray().map(Math.round), fov: camera?.fov, aspect: camera?.aspect,
     size: world && [world.size.x, world.size.y, world.size.z].map(Math.round), host: host && [host.clientWidth, host.clientHeight], cars: cars.size, mode: camMode,
-    paint: (() => { const c = cars.get(app()?.focus || leader()); const m = c?.model.children[1]?.material; return m && { color: m.color.getHexString(), emissive: m.emissive.getHexString(), ei: m.emissiveIntensity }; })(),
-    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(app()?.focus || leader()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), pitchDeg: +(c.pitch * 57.3).toFixed(2), modelPitchDeg: +(c.model.rotation.x * 57.3).toFixed(2), camPitchDeg: +(new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ").x * 57.3).toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], camDist: +camera.position.distanceTo(c.pos).toFixed(2), visible: c.obj.visible, inScene: !!c.obj.parent, est: c.est?.est || null }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, cap60: !!perf.cap, late: perf.late, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
+    paint: (() => { const c = cars.get(camNum()); const m = c?.model.children[1]?.material; return m && { color: m.color.getHexString(), emissive: m.emissive.getHexString(), ei: m.emissiveIntensity }; })(),
+    sun: [sun?.color.getHexString(), sun && +sun.intensity.toFixed(2), sunDir.toArray().map((v) => +v.toFixed(2))], night: nightNow, follow: (() => { const c = cars.get(camNum()); if (!c) return null; const v = c.pos.clone().project(camera); return { pos: c.pos.toArray().map(Math.round), yaw: +c.yaw.toFixed(2), pitchDeg: +(c.pitch * 57.3).toFixed(2), modelPitchDeg: +(c.model.rotation.x * 57.3).toFixed(2), camPitchDeg: +(new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ").x * 57.3).toFixed(2), steer: +(c.steer || 0).toFixed(3), wheel: +(c.model.userData.wheel?.rotation.z || 0).toFixed(2), lod: c.model.userData.lod, chaseYaw: +chase.yaw.toFixed(2), speed: Math.round(c.speed), screen: [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)], camDist: +camera.position.distanceTo(c.pos).toFixed(2), visible: c.obj.visible, inScene: !!c.obj.parent, est: c.est?.est || null }; })(), hitches: { frames: perf.frames, over30ms: perf.spikes, worstMs: Math.round(perf.worst * 1000) }, key: world?.sourceKey, mem: { geo: renderer?.info.memory.geometries, tex: renderer?.info.memory.textures, calls: renderer?.info.render.calls, tris: renderer?.info.render.triangles, heapMB: Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576) }, fps: perf.fps, ratio: perf.ratio, cap60: !!perf.cap, late: perf.late, loc: app()?.location?.(), width: world?.width && +world.width.toFixed(1), measured: world?.samples?.measured && +world.samples.measured.toFixed(2), street: world?.street, real: !!world?.real, info: world?.real?.info }),
 };
 window.dispatchEvent(new Event("map3d-ready"));
