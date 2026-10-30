@@ -27,6 +27,7 @@ import * as SaveUI from "./saveui.js";
 import * as Pre from "./prerace.js";
 import * as Hud from "./racehud.js";
 import * as Res from "./results.js";
+import * as AlertsUI from "./alertsui.js";
 
 const SETTINGS_KEY = "f1kr:game:settings";
 const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: false, garageQuality: "auto", alerts: defaultAlertSettings() };
@@ -281,7 +282,7 @@ function finishRace() {
   G.result = { dev: G.dev, scenarioId: G.sid, seed: G.seed, team: G.teamKey, t: snap.t, engine: G.dev ? null : G.engine?.ENGINE_VERSION || null, classification,
     accounts, events: (R.engine.events ? R.engine.events(R.race, -1) : G.events).slice(-300), orders: G.book.list, commandLog: R.race.state.commands?.log || null,
     runOpts: G.dev ? null : G.runOpts, stints: res?.rows ? Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.stints || null])) : null, points: res?.rows ? Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.points ?? null])) : null,
-    loadedFrom: G.loadedFrom };
+    loadedFrom: G.loadedFrom, analysis: (() => { try { return !G.dev && G.engine?.analysis ? G.engine.analysis(R.race) : null; } catch { return null; } })() };
   G.lastResult = G.result;
   if (!G.dev) API.saveResult(G.sid, { kind: "game-result", label: "게임 결과 (실제 기록 아님)", ...G.result }).then((r) => { G.result.saved = r?.file || (r?.ok === false ? null : "ok"); if (r?.ok === false) G.result.saveErr = r.why; paint(); }, (e) => { G.result.saveErr = String(e.message || e); paint(); });
   stopRace();
@@ -291,7 +292,7 @@ function finishRace() {
 // ---------- events: each screen's module gets its own actions (data-act="<module>:<what>") ----------
 $("homeGameBtn")?.addEventListener("click", open);
 $("gameExit").addEventListener("click", () => close());
-const MODS = { menu: Menu, save: SaveUI, pre: Pre, hud: Hud, res: Res };
+const MODS = { menu: Menu, save: SaveUI, pre: Pre, hud: Hud, res: Res, alerts: AlertsUI };
 $("game").addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;
   const [mod, act] = b.dataset.act.split(":");

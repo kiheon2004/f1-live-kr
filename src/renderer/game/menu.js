@@ -12,6 +12,7 @@
 // safeRight (the driver cards' column) is passed too, for when the scene takes it.
 import { G, go, paint, seasons, teamsOf, racesOf, menuRace, toPrerace, saveSettings, autoSlowRule, applyRacePrefs } from "./gamehome.js";
 import { $, esc, teamKo, raceKo, fmtT } from "./ui.js";
+import { safeFrac } from "./hudmodel.js";
 import * as API from "./gameapi.js";
 import * as SaveUI from "./saveui.js";
 
@@ -62,7 +63,6 @@ function safeArea(host) {
   const H = host.getBoundingClientRect(), W = H.width || innerWidth, L = $("gmLeft")?.getBoundingClientRect(), R = $("gmRight")?.getBoundingClientRect();
   return safeFrac(W, L ? L.right - H.left : 0, R && R.width ? H.right - R.left : 0);
 }
-export const safeFrac = (W, leftPx, rightPx, margin = 28) => ({ left: Math.min(0.6, Math.max(0, (leftPx + margin) / W)), right: Math.min(0.6, Math.max(0, rightPx > 0 ? (rightPx + margin) / W : 0)) });
 function reframe() {
   const host = $("gGarage3d"), m = MG.mod; if (!host || !m?.setSafe || G.step !== "menu") return;
   const sf = safeArea(host);
@@ -194,10 +194,10 @@ function settingsHtml() {
   return `<h4 class="g-sub">저장</h4>
     ${chk("autosave", "자동 저장", `${S.autosaveLaps}랩마다 '자동' 슬롯에 저장 (경기 계산에는 영향 없음)`)}
     ${sel("autosaveLaps", "자동 저장 간격", "선두 기준 랩 수", [1, 3, 5, 10].map((n) => [n, n + "랩"]))}
+    <h4 class="g-sub">중요한 순간 알림</h4>
+    ${alertsSettings ? alertsSettings() : ""}
     <h4 class="g-sub">경기 화면</h4>
-    ${alertsSettings ? alertsSettings() : chk("autoSlow", "중요 상황 자동 감속", "세이프티카·비·내 차 사고·피트 진입 때 1배속으로 (화면만 – 경기 결과는 같음)")}
     ${chk("autoPitCam", "피트 자동 연출", "내 차가 피트에 들어오면 피트 카메라가 장면을 골라요 (다른 시점을 직접 고르면 그게 우선)")}
-    ${chk("pitSlow", "피트 장면 자동 감속", "내 차의 정비 장면에서 잠시 1배속으로 – 끝나면 원래 배속 (경기 결과는 같음)")}
     <h4 class="g-sub">차고 메뉴</h4>
     ${sel("garageQuality", "차고 화질", `지금: ${{ high: "높음 – 바닥 반사 켜짐", medium: "보통", low: "낮음 – 반사·고해상도 끔" }[q]} · 레이스 화면과 따로 계산`, [["auto", "자동 (3D 화질 설정 따름)"], ["high", "높음 (바닥 반사)"], ["medium", "보통"], ["low", "낮음"]])}
     ${chk("garageOrbit", "차고 카메라 천천히 회전", "메뉴 화면의 감상용 움직임")}

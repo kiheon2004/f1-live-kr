@@ -19,14 +19,18 @@ const WHY = [
   [/^not suspended/, "적색기 중단 상태가 아님"], [/^not stopped in the pit lane/, "피트레인에 정지해 있지 않음"],
   [/^after the 5-minute signal/, "5분 신호 이후 (타이어 교체 불가)"], [/^finished/, "경기 종료"],
   [/^compound .* not offered/, "이 경기에서 쓸 수 없는 타이어"], [/^compound must be a name/, "타이어 이름이 아님"], [/: no car$/, "차량 지정 없음"], [/^no car /, "그런 차량이 없음"],
-  [/^no team /, "그런 팀이 없음"], [/^race finished/, "경기 종료"], [/^not an order/, "올바른 지시가 아님"], [/^internal error/, "엔진 내부 오류"],
+  [/^no team (?!AI)/, "그런 팀이 없음"], [/^race finished/, "경기 종료"], [/^not an order/, "올바른 지시가 아님"], [/^internal error/, "엔진 내부 오류"],
   [/^plan ends at lap (\d+), before the finish \((\d+)\)/, "계획이 경기 끝 전에 끝남"], [/^plan: stint (\d+) ends at lap/, "스틴트 종료 랩 순서 오류"],
+  [/^no set of (\w+) left/, (m) => `${TY[m[1]] || m[1]} 세트가 남지 않음`], [/^set .* not available/, "그 세트는 쓸 수 없음 (장착 중·사용 완료)"], [/^plan needs (\d+) sets? of (\w+), (\d+) left/, (m) => `계획에 ${TY[m[2]] || m[2]} 세트 ${m[1]}개 필요 – ${m[3]}개 남음`],
+  [/^no team AI for this car/, "이 차는 팀 AI가 운영하지 않음"], [/^not a player car/, "내가 운영하는 차가 아님"], [/^unknown goal/, "알 수 없는 목표"], [/^delegate: kinds must be/, "맡길 항목이 올바르지 않음"],
+  [/^goal: target lap not a whole number/, "목표 랩이 정수가 아님"],
   [/^plan: stint \d+ has no compound/, "타이어 없는 스틴트"], [/^plan: stint \d+ end lap not a whole number/, "종료 랩이 정수가 아님"], [/^plan: no stints/, "스틴트 없음"],
 ];
+const TY = { SOFT: "소프트", MEDIUM: "미디엄", HARD: "하드", INTERMEDIATE: "인터", WET: "웨트" };
 export function whyKo(why) {
   if (why == null || why === "") return "";
   const s = String(why);
-  for (const [re, ko] of WHY) if (re.test(s)) return ko;
+  for (const [re, ko] of WHY) { const m = re.exec(s); if (m) return typeof ko === "function" ? ko(m) : ko; }
   return s;
 }
 

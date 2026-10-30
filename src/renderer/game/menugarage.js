@@ -81,7 +81,9 @@ function ensureRenderer(host) {
   r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; r.shadowMap.autoUpdate = false;   // (redrawn when the scene changes: render())
   MG.canvas = c; MG.renderer = r; MG.host = host;
   MG.ro = new ResizeObserver(() => { resize(); kick(); }); MG.ro.observe(host || document.body);
-  c.addEventListener("webglcontextlost", (e) => { e.preventDefault(); MG.err = "context lost"; stopLoop(); });
+  // (a context lost while shown is an error; the loss hide() itself causes – forceContextLoss on the canvas being thrown
+  // away – is not: v0.49 kept that "context lost" and the next show() reported a failure over a working picture)
+  c.addEventListener("webglcontextlost", (e) => { e.preventDefault(); if (c !== MG.canvas || !MG.on) return; MG.err = "context lost"; stopLoop(); });
   resize();
   return r;
 }
@@ -348,6 +350,7 @@ function mgFrame(t) {
 export function show(o = {}) {
   if (typeof document === "undefined") return Promise.resolve({ error: "no DOM" });
   if (o.quality && QUALITY[o.quality]) MG.quality = o.quality;
+  MG.err = null;
   const gen = ++MG.gen, key = `${o.season}|${o.teamKey}`;
   MG.req = { season: o.season, teamKey: o.teamKey, focusNum: o.focusNum ?? null }; MG.lastShow = { ...o };
   if (o.safeLeft != null || o.safeRight != null) setSafe(o.safeLeft ?? MG.safeLeft, o.safeRight ?? 0, false);
