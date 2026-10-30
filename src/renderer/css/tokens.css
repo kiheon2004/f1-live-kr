@@ -1,0 +1,77 @@
+/* LiveTimingKR design tokens (v0.50) – ONE system for the three areas:
+ *   live       the timing screen and the globe home (body / #home / the panels)          → css/live.css
+ *   spectator  the 3D view's HUD over the circuit (#map3d and its overlays)              → css/spectator.css
+ *   game       the strategy game (#game)                                                  → css/game.css
+ * Every area uses these tokens and the shared components (css/components.css); an area file may add layout, never its
+ * own palette, font, unit style or button shape. Meanings are fixed across areas:
+ *   purple = overall best, green = personal best / OK, yellow = caution / yellow flag, orange = SC / VSC,
+ *   red = danger / red flag / a refused order, accent (red-orange) = the ONE primary action of a view and the live dot –
+ *   never every button. Team colours identify a team (a thin bar / dot) and are never used as a state.
+ * Colour is never the only signal: tyres carry their letter, flags their word, sectors / laps their marker.
+ * Font: Pretendard Variable (SIL OFL 1.1, fonts/PRETENDARD-LICENSE.txt), bundled – no network. Numbers tabular.
+ */
+@font-face {
+  font-family: "Pretendard"; src: url("../fonts/PretendardVariable.woff2") format("woff2-variations"), url("../fonts/PretendardVariable.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  /* surfaces: neutral charcoal, three steps up from the page */
+  --bg-0: #0f1114;      /* page */
+  --bg-1: #15181c;      /* panel */
+  --bg-2: #1b1f24;      /* raised: header, table head, input */
+  --bg-3: #242930;      /* hover / pressed / selected row */
+  --line: #2a3038;      /* borders */
+  --line-soft: #1f242a; /* separators inside a panel */
+  --scrim: rgb(8 9 11 / 0.72);      /* behind a dialog; HUD backing over 3D */
+  --hud-bg: rgb(15 17 20 / 0.86);   /* a HUD panel over the 3D view (no blur) */
+  /* text */
+  --text-1: #e9edf1; --text-2: #a7b1bc; --text-3: #737d88; --text-inv: #0f1114;
+  /* the one accent and the focus ring */
+  --accent: #ff4b3e; --accent-ink: #ffffff; --accent-soft: rgb(255 75 62 / 0.14);
+  --focus: #f3f5f7;
+  /* state meanings (shared by timing, HUD and game) */
+  --best: #b46cff;  --best-soft: rgb(180 108 255 / 0.16);   /* overall best (purple) */
+  --ok: #38c96a;    --ok-soft: rgb(56 201 106 / 0.14);      /* personal best / OK / gaining */
+  --warn: #f0c030;  --warn-soft: rgb(240 192 48 / 0.15);    /* caution, yellow flag, pending */
+  --sc: #f2952e;    --sc-soft: rgb(242 149 46 / 0.15);      /* SC / VSC */
+  --bad: #ea3d33;   --bad-soft: rgb(234 61 51 / 0.15);      /* danger, red flag, refused, losing */
+  --info: #7aa7d8;  --info-soft: rgb(122 167 216 / 0.13);   /* neutral info: estimates, "자료 없음", pit lane */
+  --sel: #e9edf1;   --sel-bg: rgb(233 237 241 / 0.07);      /* the selected driver: a light bar + raised row */
+  --cmp-bg: rgb(122 167 216 / 0.07);                         /* the comparison driver */
+  /* tyres (always with their letter) */
+  --tyre-s: #ea3d33; --tyre-m: #f0c030; --tyre-h: #e6e9ec; --tyre-i: #38c96a; --tyre-w: #3f8cff;
+  /* type */
+  --font: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "SF Mono", Menlo, Consolas, ui-monospace, monospace;   /* code / ids only – times use --font with tabular figures */
+  --fs-2xs: 10.5px; --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 18px; --fs-2xl: 24px;
+  --fw-reg: 450; --fw-med: 560; --fw-bold: 680;
+  --lh: 1.4;
+  /* space (4 px grid with a 2 and 6) */
+  --s-1: 2px; --s-2: 4px; --s-3: 6px; --s-4: 8px; --s-5: 12px; --s-6: 16px; --s-7: 24px; --s-8: 32px;
+  /* borders and radius (small: data UI, not cards everywhere) */
+  --bw: 1px; --r-1: 3px; --r-2: 5px; --r-3: 8px;
+  /* controls */
+  --ctl-h: 28px; --ctl-h-sm: 24px; --hit: 24px;   /* min click target 24 px */
+  /* layers */
+  --z-hud: 10; --z-panel: 20; --z-menu: 40; --z-toast: 60; --z-modal: 80; --z-tip: 90;
+  /* motion (0 under reduced motion) */
+  --t-fast: 120ms; --t-med: 200ms; --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* shadow: only for things that float (menus, dialogs, toasts) */
+  --shadow-float: 0 10px 28px rgb(0 0 0 / 0.45);
+}
+@media (prefers-reduced-motion: reduce) { :root { --t-fast: 0ms; --t-med: 0ms; } }
+:root[data-reduce-motion="1"] { --t-fast: 0ms; --t-med: 0ms; }
+
+/* base */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg-0); color: var(--text-1); font: var(--fw-reg) var(--fs-md) / var(--lh) var(--font); -webkit-font-smoothing: antialiased; }
+button, select, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.num, .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--text-2); }
+.faint { color: var(--text-3); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

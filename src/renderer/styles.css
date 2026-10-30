@@ -1,10 +1,8 @@
 /* Layout: header + status strip, then leaderboard (left) beside map and tabbed panel (right), player bar at the bottom. */
 :root {
-  --bg: #0e1013; --panel: #161a1f; --panel-2: #1c2128; --line: #2a3038; --line-2: #1d2229; --ink: #e8ecf0; --muted: #8b96a3;
-  --accent: #ff4655; --green: #3ccf6e; --purple: #b46cff; --yellow: #f2c230; --red: #e8392f; --sc: #f29a30; --focus: #ffffff;
-  --font: "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
-  --mono: "SF Mono", Menlo, Consolas, ui-monospace, monospace;
-  color-scheme: dark;
+  /* legacy names → the v0.50 tokens (css/tokens.css); area files use the tokens directly */
+  --bg: var(--bg-0); --panel: var(--bg-1); --panel-2: var(--bg-2); --line-2: var(--line-soft); --ink: var(--text-1); --muted: var(--text-2);
+  --green: var(--ok); --purple: var(--best); --yellow: var(--warn); --red: var(--bad);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
