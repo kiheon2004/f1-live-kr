@@ -34,6 +34,7 @@ import { streamFor } from "./rng.js";
 import { COMPOUNDS, TYRE_THERMAL as TH } from "../data/params/tyres.js";
 import { PACE_MODES, DRIVER_DEFAULT, UTIL_MAX } from "../data/params/drivers.js";
 import { PIT } from "../data/params/pit.js";
+import { ALLOC as INV_ALLOC } from "./inventory.js";
 import { WEATHER } from "../data/params/weather.js";
 import { airDensity } from "../data/params/physics.js";
 import { AI } from "../data/params/ai.js";
@@ -245,6 +246,8 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
       if (ms.length > R - 1) continue;
       const used = [...(st.used || []), f.name, ...ms], sets = (st.sets || (st.cur ? 1 : 0)) + (st.cur ? 0 : 1) + ms.length;
       if (!ruleOk(M.rule, used, sets)) continue;
+      // the sets in hand (inventory.js; v0.50): pre-race the first stint takes one too; a plan needing more is not a plan
+      if (st.stock && !fitsStock(st.stock, st.cur ? ms : [f.name, ...ms])) continue;
       // g(r): best cost of the fresh stints ms over r laps (min-convolution), with arg tables to rebuild
       let g = new Float64Array(R + 1).fill(BIG); g[0] = 0; const args = [];
       for (const c of ms) {
@@ -276,6 +279,7 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
 }
 
 // stints → the engine's plan order: [{ compound, toLap }] (toLap = in-lap of each stop; last = total)
+const fitsStock = (stock, list) => { const need = {}; for (const c of list) need[c] = (need[c] || 0) + 1; for (const c in need) if (need[c] > (stock[c] || 0)) return false; return true; };
 export function toPlan(st, cand) {
   let lap = st.lap; const stints = [];
   for (const s of cand.stints) { lap += s.laps; stints.push({ compound: s.compound, toLap: lap }); }
@@ -500,7 +504,8 @@ export function preRaceStrategy(race, team, { top = 4, start = {} } = {}) {
   const scns = scenarios(M, est, view, "pre");
   const firstStop = [];
   const cars = M.nums.map((num, i) => {
-    const st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0 };
+    const carS = S.cars.find((c) => c.num === num), stock = {}; for (const x of carS?.sets || []) stock[x.compound] = (stock[x.compound] || 0) + 1;   // (pre-race: every set of the allocation)
+    const st = { num, lap: 0, total: S.totalLaps, cur: null, used: [], sets: 0, stock: carS?.sets ? stock : null };
     let cands = evaluate(M, est, st, planCandidates(M, est, st, { top: 10 }).filter((c) => !start[num] || c.stints[0].compound === start[num]), scns);
     // the second car: the same first in-lap as its teammate costs it a queue behind the teammate's stop (cars close on
     // the grid run close early on) – the same plan a lap either side is offered and scored with that
@@ -534,6 +539,10 @@ export function preRaceStrategy(race, team, { top = 4, start = {} } = {}) {
     pitLoss: { s: +loss.toFixed(1), sc: +pitLoss(M, est, "sc").toFixed(1), vsc: +pitLoss(M, est, "vsc").toFixed(1), lane: +M.lanePrior.toFixed(1), freeStretch: +M.refPit.toFixed(1), stationary: PIT.workBase.v,
       text: `피트레인 약 ${M.lanePrior.toFixed(1)}초(정차 ${PIT.workBase.v}초 포함) − 같은 구간 본선 ${M.refPit.toFixed(1)}초 = 손실 약 ${loss.toFixed(1)}초 (SC 중 약 ${pitLoss(M, est, "sc").toFixed(1)}초)` },
     rule: { ...M.rule, compounds: M.av.dry, compoundSource: M.av.source },
+    // the tyre sets each car has (inventory.js – the game's assumed allocation, never the real weekend's)
+    inventory: { est: INV_ALLOC.est, source: INV_ALLOC.source, cars: Object.fromEntries(M.nums.map((n) => [n, (S.cars.find((c) => c.num === n)?.sets || []).map((x) => ({ id: x.id, compound: x.compound, used: x.used, laps: x.laps, wear: x.wear }))])) },
+    // what the estimate leaves out (shown with it): the energy modes are not in the stint model (pace modes are)
+    limits: ["에너지 모드(회수·사용)의 효과는 이 예상에 들어 있지 않아요 – 페이스 모드만 반영", "교통·세이프티카·사고는 확률적 범위로만 반영돼요"],
     cars, conflicts,
     compare: cars.length === 2 && cars[0].best && cars[1].best ? { diffS: +(cars[1].best.mean - cars[0].best.mean).toFixed(1), same: cars[0].best.key === cars[1].best.key } : null };
 }
@@ -542,3 +551,62 @@ function describe(c, st, bestMean) {
   return { key: c.stints.map((s) => `${s.compound[0]}${s.laps}`).join("-"), plan, stints: c.stints.map((s) => ({ compound: s.compound, laps: s.laps, mode: s.mode })),
     stops: c.stops, window: c.window, mean: +c.mean.toFixed(1), sd: +c.sd.toFixed(1), sdRel: +c.sdRel.toFixed(1), p10: +c.p10.toFixed(1), p90: +c.p90.toFixed(1), vsBest: +(c.mean - bestMean).toFixed(1) };
 }
+
+// ---------- in-race pit alternatives for the player (v0.50 request §5-2) ----------
+// For one of the player's cars: box at the next entry ("now"), one lap later, two laps later, or keep the present plan.
+// Only what this team can know: its own car (tyre, plan, sets), the public timing-line gaps of everyone, the team's own
+// pit-loss estimate (the AI's learnt lane time when it runs, else the model's prior), its tyre model for its own laps.
+// Rivals' plans, fuel, wear are NOT read – their stops are not predicted here (said in `assumptions`).
+// Each option: the stop lap, the expected loss as a range, the rejoin position range against the field AS IT IS NOW (gaps
+// unchanged – an assumption shown with it), the cars expected just ahead / behind at the rejoin, traffic there, the new
+// tyre's warm-up, the teammate queue risk, the rules check, the set it would take, and – for the later options – the
+// model's lap-time difference of running the old tyre those laps instead of the new one (an estimate, rounded on screen).
+export function pitOptions(race, num) {
+  const S = race.state, car = S.cars.find((c) => c.num === String(num)); if (!car || car.status !== "run") return null;
+  const team = car.teamKey, M = teamModel(race, team), est = S.ai?.teams?.[team]?.est || { g: 1, off: {}, lane: M.lanePrior, stintLife: {} };
+  const flag = flagOf(race), loss = pitLoss(M, est, flag), lossLo = loss - 1.0, lossHi = loss + 2.0;
+  const ns = (car.plan?.stints || []).find((x, k, a) => x.toLap > car.lap && k < a.length - 1);
+  const nextName = (car.plan?.stints || [])[(car.plan?.stints || []).indexOf(ns) + 1]?.compound || (car.tyre.name === "HARD" ? "MEDIUM" : "HARD");
+  // the field's gaps behind the leader now (s, timing line); cars without a gap (retired, no data) are left out
+  const field = [];
+  for (const x of S.cars) { if (x.status !== "run") continue; const g = gapToLeader(race, x); if (g != null) field.push({ num: x.num, tla: x.tla, team: x.teamKey, g, pit: x.where === "pit" }); }
+  const me = field.find((x) => x.num === car.num); if (!me) return { est: true, options: [], why: "noGap" };
+  const mate = S.cars.find((x) => x.teamKey === team && x.num !== car.num && x.status === "run");
+  const mateStop = mate ? (mate.pit.phase !== "none" ? mate.lap + 1 : (mate.plan?.stints || []).find((x, k, a) => x.toLap > mate.lap && k < a.length - 1)?.toLap ?? null) : null;
+  const mateGap = mate ? (() => { const a = field.find((x) => x.num === mate.num); return a ? Math.abs(a.g - me.g) : null; })() : null;
+  const used = [...new Set([...car.laps.map((l) => l.compound), car.tyre.name])];
+  const stock = car.sets ? car.sets.filter((s) => s.compound === nextName && (s.state === "free" || s.state === "reserved")) : null;
+  const age = car.tyre.laps, mode = car.mode.pace;
+  const rejoin = (extra) => {
+    const lo = me.g + lossLo + extra, hi = me.g + lossHi + extra, others = field.filter((x) => x.num !== car.num);
+    const posBest = 1 + others.filter((x) => x.g < lo).length, posWorst = 1 + others.filter((x) => x.g < hi).length;
+    const mid = (lo + hi) / 2, ahead = others.filter((x) => x.g <= mid).sort((a, b) => b.g - a.g)[0] || null, behind = others.filter((x) => x.g > mid).sort((a, b) => a.g - b.g)[0] || null;
+    const near = others.filter((x) => Math.abs(x.g - mid) < 1.5).length;
+    return { pos: [posBest, posWorst], ahead: ahead && { num: ahead.num, tla: ahead.tla, gap: +(mid - ahead.g).toFixed(1) }, behind: behind && { num: behind.num, tla: behind.tla, gap: +(behind.g - mid).toFixed(1) }, traffic: near >= 2 ? "busy" : near === 1 ? "one" : "clear" };
+  };
+  const opt = (kind, k) => {
+    const stopLap = kind === "keep" ? ns?.toLap ?? null : car.lap + 1 + k;
+    if (stopLap == null || stopLap >= S.totalLaps) return { kind, stopLap, possible: false, why: kind === "keep" ? "noStopPlanned" : "tooLate" };
+    const laps = stopLap - car.lap - 1;
+    // the model's cost of the extra laps on the old tyre vs the new one (own car only; no traffic, no flag)
+    let delta = 0; for (let i = 0; i < laps; i++) delta += lapTime(M, est, car.num, car.tyre.name, mode, age + 1 + i) - lapTime(M, est, car.num, nextName, mode, i);
+    const r = rejoin(kind === "now" ? 0 : delta);
+    const queue = mateStop != null && Math.abs(mateStop - stopLap) <= 0 && mateGap != null && mateGap < PIT.workBase.v + AI.queueMargin ? +(PIT.workBase.v + AI.queueMargin - mateGap).toFixed(1) : 0;
+    const rule = ruleOk(M.rule, [...used, nextName], 1 + car.pit.stops + 1);
+    return { kind, stopLap, possible: true, compound: nextName, set: stock ? (stock.find((s) => !s.used) || stock[0] || null) : null, sets: stock ? stock.length : null,
+      loss: [+lossLo.toFixed(1), +lossHi.toFixed(1)], flag, rejoin: r, oldTyreCost: kind === "now" ? 0 : +delta.toFixed(1),
+      warmup: warmNote(nextName, race.cache.w?.trackT), queue, mate: mate ? { num: mate.num, stop: mateStop, gap: mateGap != null ? +mateGap.toFixed(1) : null } : null, rule: { ok: rule, text: M.rule?.text || null } };
+  };
+  return { est: true, t: S.t, lap: car.lap, now: { compound: car.tyre.name, age, life: +(1 - car.tyre.wear).toFixed(2) },
+    assumptions: ["다른 차의 간격이 지금과 같다고 가정 (상대 팀의 피트 계획은 알 수 없음)", "손실 범위: 팀이 관측한 피트레인 시간 기준 −1 ~ +2초", "이전 타이어 비용은 팀의 타이어 모델 추정 (교통·플래그 제외)"],
+    options: [opt("now", 0), opt("plus1", 1), opt("plus2", 2), opt("keep", 0)] };
+}
+// a car's gap to the leader from the timing-line history (engine.js lineGapOf), null without data
+function gapToLeader(race, x) {
+  const S = race.state, lead = S.cars.find((c) => c.num === S.order[0]); if (!lead) return null;
+  if (x === lead) return 0;
+  const T = race.cache.T; if (Math.floor((lead.dist - x.dist) / T.L) > 0) return null;   // (a lap down: not in the same race for the rejoin)
+  const g = race.hooks?.lineGap ? race.hooks.lineGap(x, lead) : null;
+  return g == null ? null : g;
+}
+const warmNote = (name, trackT) => (WETS.includes(name) ? "wet" : name === "HARD" && (trackT ?? 30) < 25 ? "slowWarm" : "oneLap");

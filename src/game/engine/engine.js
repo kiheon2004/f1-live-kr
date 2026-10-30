@@ -35,6 +35,8 @@ import { Streams } from "./rng.js";
 import { DT_MS, DT } from "./clock.js";
 import * as CMD from "./commands.js";
 import { availableCompounds, isCompound } from "./compounds.js";
+import * as INV from "./inventory.js";
+import { assistStep } from "./assist.js";
 import { newTraffic, trafficSetup, trafficPre, trafficEnv, trafficPost, trafficAccount, trafficEnd, pathFactor, mergeClear, onPitExit, gridLateral, snapTraffic } from "./traffic.js";
 import { newAiState, aiPrePlans, aiStep } from "./ai.js";
 import * as CTL from "./control.js";
@@ -53,7 +55,11 @@ import { CARS_2026_TABLE, TRACK_TAU_2026 } from "../data/params/cars-2026.js";
 // not its result), else 1 (estimate: the validation showed ±3 s/lap without it – reported as a limit)
 const TEAM_CARS = { 2025: CARS_2025_TABLE, 2026: CARS_2026_TABLE }, TRACK_TAU = { ...TRACK_TAU_2025, ...TRACK_TAU_2026 };
 
-export const ENGINE_VERSION = "0.48.0-engine.1";
+// 0.50: tyre sets (inventory.js) – a plan the sets can't run is refused, so a race whose team plans needed more sets of a
+// compound than the assumed allocation runs differently from 0.49; races within the allocation are unchanged (the same
+// steps, orders and draws). Ownership, the goal assist, the timing-line history and the presentation transitions are
+// state the race's motion never reads.
+export const ENGINE_VERSION = "0.50.0-engine.1";
 export const STATE_VERSION = 1;
 
 // ---------- creation ----------
@@ -69,13 +75,16 @@ export function createRace(opts) {
   const race = createRace0({ ...rest, plans: { ...pre, ...(rest.plans || {}) } });
   race.state.ai = newAiState(race, { teams });
   for (const team in race.state.ai.teams) for (const num in race.state.ai.teams[team].cars) { const p = pre[num]; if (p && !rest.plans?.[num]) race.state.ai.teams[team].cars[num].modes = p.stints.map((s, i) => ({ toLap: s.toLap, mode: p.modes[i] })); }
+  // the player's cars start with every kind of decision on the team AI when it runs their team (handed over kind by kind
+  // by the player's applied orders, handed back by "delegate")
+  for (const num in race.state.own) if (race.state.ai.teams[race.state.cars.find((c) => c.num === num).teamKey]) for (const k of CMD.KINDS) race.state.own[num][k] = "ai";
   return race;
 }
 function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real", carParams = null, driverParams = null, plans = null, tyreWear = 1 }) {
   const sc = scenario, season = sc.meta.season;
   const state = { v: STATE_VERSION, engine: ENGINE_VERSION, t: 0, step: 0, seed: seed >>> 0, scenarioId: sc.meta.id, season, tyreWear,
     userTeam, weatherMode, totalLaps: sc.race.laps, phase: "grid", finished: false, leaderLap: 0, chequeredAt: null,
-    cars: [], order: [], boxes: null, commands: CMD.newCommandState(), teamOrders: {}, log: [], results: null };
+    cars: [], order: [], boxes: null, commands: CMD.newCommandState(), teamOrders: {}, log: [], results: null, own: {}, rtrans: [], rtransCut: 0 };
   const race = { state, scenario: sc, cache: null, rng: new Streams(seed) };
   buildCache(race, { carParams, driverParams });
   const T = race.cache.T, w0 = truthAt(race.cache.truth, 0);
@@ -87,18 +96,20 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
     const g = slots.get(e.num), dp = race.cache.drivers[e.num];
     const plan = plans?.[e.num] || defaultPlan(sc, e.num);
     const start = plan.stints[0].compound;
+    const sets = INV.newSets(e.num, race.cache.alloc.names, start);
     const car = { num: e.num, teamKey: e.teamKey, team: e.team, tla: e.tla, color: e.colour, driverId: e.num, grid: g?.pos ?? null,
       pitStart: pitStarters.has(e.num), status: "grid", out: null, where: "lap",
       s: g && Number.isFinite(g.s) ? T.wrap(g.s) : T.wrap(T.pit.sOut), d: g?.d ?? 0, v: 0, aLong: 0, aLat: 0, steer: 0, wheelDist: 0,
       lap: 0, armed: false, dist: 0, lapT0: 0, laps: [], sector: 0, secT0: 0, secs: [],
-      tyre: newTyre(race, start, w0.airT),
+      tyre: newTyre(race, start, w0.airT, sets.find((x) => x.state === "fitted")),
       energy: createEnergy(race.cache.ep, {}), driver: createDriver(dp), mode: { pace: "balanced", energy: "balanced" },
-      plan, pit: newPitState(), traffic: newTraffic(),
+      plan, plan0: { stints: plan.stints.map((x) => ({ ...x })), by: plan.by || null }, sets, pit: newPitState(), traffic: newTraffic(), tl: { g: null, ts: [] }, goal: null,
       pen: { pendingS: 0, finalS: 0, serve: [] }, acct: { traffic: 0, pit: 0, other: 0 } };
     // behind the line at the start: its first crossing starts lap 1 (not a lap done); ahead of it (some grids): armed
     car.armed = T.ahead(0, car.s) < T.L / 2;
     car.dist = car.armed ? car.s : car.s - T.L;
     state.cars.push(car);
+    if (userTeam && e.teamKey === userTeam) state.own[e.num] = newOwn("player");
   }
   // race control places the grid (the scenario's measured slots) and the pit-lane starters (in the lane, held at its end
   // until the field has passed the pit exit), and schedules the start: the lights, each driver's reaction and launch
@@ -108,7 +119,8 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
   for (const c of state.cars) { if (c.where === "pit") c.s = T.pit.pitToLap(c.pit.u); c.armed = T.ahead(0, c.s) < T.L / 2; c.dist = c.armed ? c.s : c.s - T.L; }
   gridLateral(race);
   sortOrder(race);
-  for (const c of state.cars) noteTransitions(c, 0);
+  { const pos = posMap(state); for (const c of state.cars) noteTransitions(c, 0, pos); }
+  noteRace(state, 0);
   log(race, { type: "start", cause: "scenario", effect: `${state.cars.length} cars, ${state.totalLaps} laps, seed ${state.seed}` });
   return race;
 }
@@ -129,7 +141,7 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   const rec = weatherRecord(sc.weather);
   // race names (SOFT/MEDIUM/HARD) → the C-number Pirelli nominated for this event (compounds.js: the one answer the engine,
   // the AI and the screens share; research data, else the defaults, est)
-  const AV = availableCompounds(sc), alloc = { ...AV.alloc, est: AV.est };
+  const AV = availableCompounds(sc), alloc = { ...AV.alloc, est: AV.est, names: AV.list.map((c) => c.name) };
   const tau = TRACK_TAU[sc.meta.id] ?? 1;
   race.cache = { T, PT, cars, drivers, profiles, alloc, tau, tauEst: !(sc.meta.id in TRACK_TAU), ep: energyParams(season), truth: weatherTruth(rec, { mode: race.state.weatherMode, seed: race.state.seed, minutes: 240 }),
     surface: race.cache?.surface || null, w: {}, carById: null, ghostProf: {} };
@@ -140,15 +152,21 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   // contacts (functions: never saved, set again on load)
   race.hooks = { control: { mayOvertake: CTL.mayOvertake, drsAllowed: CTL.drsAllowed, activeAeroAllowed: CTL.activeAeroAllowed, overtakeModeAllowed: CTL.overtakeModeAllowed }, incidents: { contact: INC.contact },
     // (complying with a blue flag: giving way – to any car –, or the lapping car already in the middle of its pass)
-    traffic: { yielding: (c, f) => c.traffic?.role === "yield" || (f.traffic?.with === c.num && ["att", "done"].includes(f.traffic.role)) } };
+    traffic: { yielding: (c, f) => c.traffic?.role === "yield" || (f.traffic?.with === c.num && ["att", "done"].includes(f.traffic.role)) },
+    // (the timing-line gap for read-only helpers – strategy.pitOptions)
+    lineGap: (c, x) => lineGap(c, x) };
   trafficSetup(race);
 }
 
 // a set of tyres by its race name: the model's compound is the event's C-number; the name is kept for rules and screens
-function newTyre(race, name, airT) {
-  const C = race.cache, code = C.alloc[name] || name, ty = createTyre(code, { T0: fitTemp(race.state.season, code, airT ?? 25), kwScale: race.state.tyreWear ?? 1 });   // (tyreWear: a sensitivity knob, 1 = the model)
-  ty.name = name; return ty;
+function newTyre(race, name, airT, set = null) {
+  const C = race.cache, code = C.alloc[name] || name, ty = createTyre(code, { T0: fitTemp(race.state.season, code, airT ?? 25), kwScale: race.state.tyreWear ?? 1, wear0: set?.wear || 0, laps0: set?.laps || 0, km0: set?.km || 0 });   // (tyreWear: a sensitivity knob, 1 = the model)
+  ty.name = name; if (set?.id) ty.setId = set.id; return ty;
 }
+// fit a set at the end of the work (or a red-flag change): the reserved / best free one; the old set back to the garage
+const fitSet = (race, car, name, setId = null) => { car.tyre = INV.fit(car, name, setId, (s) => newTyre(race, name, race.cache.w.airT ?? 25, s)); race.cache.profiles[car.num].at = -1e9; };
+// who controls a player's car, kind by kind ("ai" | "player" | "goal"), and the last applied order that set each
+const newOwn = (who) => ({ pace: who, energy: who, plan: who, by: {} });
 
 // the scenario's weather columns (s from lights out) → weather.js records (ms)
 function weatherRecord(W) {
@@ -174,7 +192,7 @@ export function step(race) {
   const t = S.t + DT_MS;
   // (the start is race control's: lights, reactions, launches – the formation lap is not simulated: tyres preset, est)
   // 1. orders
-  for (const c of CMD.due(S.commands, t)) CMD.record(S.commands, c, t, applyOrder(race, c, t));
+  for (const c of CMD.due(S.commands, t)) { const res = applyOrder(race, c, t); CMD.record(S.commands, c, t, res); noteOwner(race, c, res, t); }
   // 2. weather (once a second, on the second)
   if (t % 1000 === 0) { truthAt(C.truth, t, C.w); surfaceStep(C.surface, C.w, 1); }
   else if (C.w.rain == null) truthAt(C.truth, t, C.w);
@@ -203,23 +221,51 @@ export function step(race) {
   controlEvents(race, flag0, phase0);
   // 6. order, the end
   sortOrder(race);
-  for (const car of S.cars) noteTransitions(car, t);
+  { const pos = posMap(S); for (const car of S.cars) noteTransitions(car, t, pos); }
+  noteRace(S, t);
   if (S.finished && !S.results) finishRace(race, t);
-  // 7. the team AI (only orders – applied from the next step, like the player's)
+  // 7. the team AI and the player's goal assist (only orders – applied from the next step, like the player's own)
   if (S.ai) aiStep(race);
+  assistStep(race);
 }
 
-// A car's discrete state (lap / pit / garage, status, pit phase, the tyre fitted) changes at a step: each change is kept
-// with its sim time (car.trans, the last few, ≤ 60 s old) so the screen applies it at that time, not at the next snapshot
-// it happens to receive (v0.49 §4: a stop's new tyres were drawn before the work had ended). State, saved like the rest.
-const discOf = (c) => ({ where: c.where, status: c.status, phase: c.pit.phase, tyre: c.tyre.name, code: c.tyre.compound });
-function noteTransitions(car, t) {
-  const d = discOf(car), p = car.disc;
-  if (!p) { car.disc = d; car.trans = []; return; }
-  if (p.where === d.where && p.status === d.status && p.phase === d.phase && p.tyre === d.tyre && p.code === d.code) return;
-  const set = {}; for (const k in d) if (d[k] !== p[k]) set[k] = d[k];
+// A car's discrete state changes at a step: each change is kept with its sim time (car.trans) so the screen applies it at
+// that time, not at the next snapshot it happens to receive (v0.49 §4: a stop's new tyres were drawn before the work had
+// ended; v0.50 §3-2: lap, position and the modes in force too – the tower showed the newer snapshot's order early).
+// Kept: the last TRANS_N changes not older than TRANS_MS; transCut = the time of the newest change dropped – a screen
+// whose older snapshot is from before transCut can't replay that stretch exactly and shows the older state until then
+// (presentation contract: reports/lead.md). State, saved like the rest; the race's motion never reads it.
+export const TRANS_N = 48, TRANS_MS = 120000;
+const discOf = (c, pos) => ({ where: c.where, status: c.status, phase: c.pit.phase, tyre: c.tyre.name, code: c.tyre.compound, setId: c.tyre.setId ?? null, lap: c.lap, pos: pos.get(c.num), pace: c.mode.pace, emode: c.mode.energy });
+const posMap = (S) => new Map(S.order.map((n, i) => [n, i + 1]));
+function noteTransitions(car, t, pos) {
+  const d = discOf(car, pos), p = car.disc;
+  if (!p) { car.disc = d; car.trans = []; car.transCut = 0; return; }
+  let set = null; for (const k in d) if (d[k] !== p[k]) (set ||= {})[k] = d[k];
+  if (!set) return;
   car.trans.push({ t, set }); car.disc = d;
-  while (car.trans.length > 12 || (car.trans.length && car.trans[0].t < t - 60000)) car.trans.shift();
+  while (car.trans.length > TRANS_N || (car.trans.length && car.trans[0].t < t - TRANS_MS)) car.transCut = car.trans.shift().t;
+}
+// the race-wide discrete state the same way: flag, phase, the leader's lap
+function noteRace(S, t) {
+  const d = { flag: S.control?.flag ?? "green", phase: S.phase, leaderLap: S.leaderLap }, p = S.rdisc;
+  if (!p) { S.rdisc = d; return; }
+  let set = null; for (const k in d) if (d[k] !== p[k]) (set ||= {})[k] = d[k];
+  if (!set) return;
+  S.rtrans.push({ t, set }); S.rdisc = d;
+  while (S.rtrans.length > TRANS_N || (S.rtrans.length && S.rtrans[0].t < t - TRANS_MS)) S.rtransCut = S.rtrans.shift().t;
+}
+
+// ownership: an APPLIED order moves the kind it decides to the player (pace / energy / plan); a refused one changes
+// nothing (v0.50 §3-1: a refused order stopped the AI's assist). delegate / goal set it in applyOrder0. The AI's and the
+// goal assist's own orders never change it.
+function noteOwner(race, c, res, t) {
+  if (!res.ok || c.by !== "player") return;
+  const own = race.state.own?.[c.car], k = CMD.kindOf(c.type); if (!own || !k) return;
+  own[k] = "player"; own.by[k] = { id: c.id, t, type: c.type };
+  // (a manual pace or energy order ends the goal assist: both kinds stay as they are, now the player's)
+  const car = race.state.cars.find((x) => x.num === c.car);
+  if (car?.goal && (k === "pace" || k === "energy")) { car.goal = null; for (const kk of ["pace", "energy"]) if (own[kk] === "goal") { own[kk] = "player"; own.by[kk] = { id: c.id, t, type: c.type }; } }
 }
 
 // the pit lane: race control's holds (red-flag queue, exit light, pit-lane start) ⊕ the stewards' penalty to serve
@@ -300,7 +346,7 @@ function envFor(race, car, tv = null) {
 }
 
 function moveLap(race, car, t, cap = null) {
-  const S = race.state, C = race.cache, T = C.T, cp = carOf(race, car), tv = trafficEnv(race, car), E = envFor(race, car, tv);
+  const S = race.state, C = race.cache, T = C.T, cp = carOf(race, car), tv = trafficEnv(race, car), E = envFor(race, car, tv), d0 = car.dist;
   // race control: a grip-use factor (yellow, a moment), the launch (reaction is in the go time; launch quality scales the
   // traction-limited power below the MGU-K's speed – est), and a speed cap (VSC delta, SC queue, an incident)
   if (cap) {
@@ -355,6 +401,7 @@ function moveLap(race, car, t, cap = null) {
   // line crossing
   lineCrossing(race, car, s0, car.s, cs.crossed, t - DT_MS + Math.round(cs.tCross * 1000));
   car.dist = car.armed ? car.lap * T.L + car.s : car.s - T.L;
+  noteLine(race, car, d0, t);
   // the traffic time account: a free "ghost" of this car (same envelope, power, mass, non-traffic caps; no traffic) runs
   // beside it while traffic influences it – the loss is the time difference at the same distance (traffic.js)
   trafficAccount(race, car, ghostModels(E));
@@ -391,13 +438,14 @@ function ghostModels(E) {
 }
 
 function movePit(race, car, t, ctx = {}) {
-  const S = race.state, C = race.cache, T = C.T;
+  const S = race.state, C = race.cache, T = C.T, d0 = car.dist;
   const others = S.cars.filter((o) => o.where === "pit").map((o) => ({ num: o.num, team: o.teamKey, phase: o.pit.phase, u: o.pit.u, v: o.pit.v }));
   const sPrev = T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * T.ahead(T.pit.sIn, T.pit.sOut));
   let ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others,
     penaltyS: ctx.penaltyS || 0, noBox: !!ctx.noBox, holdU: ctx.holdU ?? null, noWork: !!ctx.noWork,
     stack: S.cars.some((o) => o !== car && o.teamKey === car.teamKey && o.pit.times?.release && t - o.pit.times.release < 30000),
-    onWorkDone: (cc, cmp) => { cc.tyre = newTyre(race, cmp, C.w.airT ?? 25); C.profiles[cc.num].at = -1e9; } }, undefined);
+    onWorkDone: (cc, cmp) => fitSet(race, cc, cmp, cc.pit.call?.setId ?? null) }, undefined);
+  if (car.pit.phase === "laneOut" || car.pit.phase === "exit" || car.pit.phase === "none") INV.releaseStale(car);   // (a stop without a tyre change keeps no set reserved)
   // the merge: the car waits at the end of the exit road while joining would force a car on the lap to brake or move
   if (ev === "exit" && !mergeClear(race, car)) {
     const p = car.pit; p.phase = "exit"; p.u = T.pit.L - 0.01; p.v = Math.min(p.v, 10); delete p.times.exit; ev = null;
@@ -435,6 +483,30 @@ function movePit(race, car, t, ctx = {}) {
   const span = T.ahead(T.pit.sIn, T.pit.sOut), sNow = car.where === "pit" ? T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * span) : car.s;
   if (car.where === "pit") { const crossed = T.ahead(sPrev, sNow) < T.L / 2 && sNow < sPrev; lineCrossing(race, car, sPrev, sNow, crossed, t); car.s = sNow; }
   car.dist = car.armed ? car.lap * T.L + (car.where === "pit" ? sNow : car.s) : (car.where === "pit" ? sNow : car.s) - T.L;
+  noteLine(race, car, d0, t);
+}
+
+// The timing-line history (v0.50 §3-5): the sim time each car passed each of TL_N points round the lap (every L/TL_N m of
+// race distance, like timing loops), the last two laps kept. A gap between two cars is then the time between their passes
+// of the same point – the newest point the car behind has passed – not a distance divided by a speed. State (saved); the
+// race's motion never reads it.
+export const TL_N = 40;
+function noteLine(race, car, d0, t) {
+  const sp = race.cache.T.L / TL_N, tl = car.tl || (car.tl = { g: null, ts: [] }), g1 = Math.floor(car.dist / sp);
+  if (tl.g == null || g1 < tl.g) { tl.g = g1; return; }
+  if (g1 === tl.g) return;
+  const dd = car.dist - d0;
+  for (let g = tl.g + 1; g <= g1; g++) { const f = dd > 0 ? Math.max(0, Math.min(1, (g * sp - d0) / dd)) : 1; tl.ts.push([g, Math.round(t - DT_MS + DT_MS * f)]); }
+  tl.g = g1; while (tl.ts.length > 2 * TL_N + 4) tl.ts.shift();
+}
+// the time (s) between x's and c's passes of the newest point c has passed; null when x has no record of it (x more than
+// two laps ahead, or no pass yet)
+export const lineGapOf = (c, x) => lineGap(c, x);
+function lineGap(c, x) {
+  const a = c.tl?.ts, b = x.tl?.ts; if (!a?.length || !b?.length) return null;
+  const [g, tc] = a[a.length - 1];
+  for (let i = b.length - 1; i >= 0; i--) { if (b[i][0] === g) return (tc - b[i][1]) / 1000; if (b[i][0] < g) break; }
+  return null;
 }
 
 // the time the car would take from the pit branch (sIn) to the merge (sOut) on the lap at its free pace (s): one forward
@@ -455,7 +527,7 @@ function lineCrossing(race, car, s0, s1, crossed, tCross) {
   car.lap++;
   const lapT = (tCross - car.lapT0) / 1000; car.lapT0 = tCross;
   const inLap = car.pit.times?.entry != null || car.where === "pit";
-  car.laps.push({ n: car.lap, t: +lapT.toFixed(3), compound: car.tyre.name, wear: +car.tyre.wear.toFixed(4), fuel: +car.energy.fuel.toFixed(2), soc: +socFrac(car.energy, race.cache.ep).toFixed(3), pit: inLap, mode: car.mode.pace });
+  car.laps.push({ n: car.lap, t: +lapT.toFixed(3), compound: car.tyre.name, wear: +car.tyre.wear.toFixed(4), fuel: +car.energy.fuel.toFixed(2), soc: +socFrac(car.energy, race.cache.ep).toFixed(3), pit: inLap, mode: car.mode.pace, emode: car.mode.energy, tr: +car.acct.traffic.toFixed(2), Ts: +car.tyre.Ts.toFixed(1), Tc: +car.tyre.Tc.toFixed(1) });
   tyreLap(car.tyre); energyLap(car.energy);
   if (car.lap > S.leaderLap) S.leaderLap = car.lap;
   // (the chequered flag and each car's finish are race control's: control.js onLine)
@@ -469,7 +541,10 @@ function planCall(race, car, t) {
   if (!next || car.lap < cur.toLap - 1 || car.lap >= race.state.totalLaps - 1) return;
   if (car.planCalled === cur.toLap) return;
   car.planCalled = cur.toLap;
+  const rs = INV.reserve(car, next.compound);
+  if (!rs.ok) { log(race, { t, car: car.num, type: "pitCall", cause: `plan (${p.by || "team"})`, effect: `refused: ${rs.why}` }); return; }
   const r = pitCall(car, race.cache.T, { compound: next.compound, t }); car.pit.call && (car.pit.call.by = p.by || "plan");
+  if (r.ok && car.pit.call) car.pit.call.setId = rs.set?.id ?? null; else INV.releaseStale(car);
   log(race, { t, car: car.num, type: "pitCall", cause: `plan (${p.by || "team"})`, effect: r.ok ? `box for ${next.compound}: ${r.why}` : `refused: ${r.why}` });
 }
 
@@ -500,7 +575,7 @@ export const commandStatus = (race, id) => CMD.status(race.state.commands, id);
 
 // who may give this order to what, and its arguments against this race (at submit; applyOrder checks the state again)
 function validateOrder(race, c) {
-  const S = race.state, team = c.by.startsWith("ai:") ? c.by.slice(3) : S.userTeam;   // (the player's team: null in headless tools = any)
+  const S = race.state, team = c.by.startsWith("ai:") ? c.by.slice(3) : c.by.startsWith("goal:") ? c.by.slice(5) : S.userTeam;   // (the player's team: null in headless tools = any)
   if (S.finished) return { ok: false, why: "race finished" };
   let car = null;
   if (c.car != null) {
@@ -515,11 +590,21 @@ function validateOrder(race, c) {
     c.team = tk;
   }
   if (c.type === "pit" && c.args.compound != null && !isCompound(race.scenario, c.args.compound)) return { ok: false, why: `compound ${c.args.compound} not offered at this event` };
+  // the sets (inventory.js): a free set of that compound (or the named one), or the one the standing call already holds
+  if (c.type === "pit" && c.args.compound != null && car?.sets && !(S.control?.flag === "red" && car.where === "pit")) {
+    const held = car.sets.find((x) => x.state === "reserved" && x.compound === c.args.compound && (c.args.setId == null || x.id === c.args.setId));
+    if (!held && !INV.pickFree(car.sets, c.args.compound, c.args.setId ?? null)) return { ok: false, why: c.args.setId != null ? `set ${c.args.setId} not available` : `no set of ${c.args.compound} left` };
+  }
   if (c.type === "plan") {
     const st = c.args.stints;
     for (const x of st) if (!isCompound(race.scenario, x.compound)) return { ok: false, why: `compound ${x.compound} not offered at this event` };
     if (st[st.length - 1].toLap < S.totalLaps) return { ok: false, why: `plan ends at lap ${st[st.length - 1].toLap}, before the finish (${S.totalLaps})` };
+    // every stint after the one running needs a set of its compound (a used set may be fitted again: free + reserved)
+    if (car?.sets) { const need = {}, have = INV.stockMap(car); for (const x of st.filter((x) => x.toLap > car.lap).slice(1)) need[x.compound] = (need[x.compound] || 0) + 1;
+      for (const k in need) if (need[k] > (have[k] || 0)) return { ok: false, why: `plan needs ${need[k]} sets of ${k}, ${have[k] || 0} left` }; }
   }
+  if (c.type === "delegate" && !S.ai?.teams?.[car.teamKey]) return { ok: false, why: "no team AI for this car" };
+  if ((c.type === "delegate" || c.type === "goal") && !S.own?.[car.num]) return { ok: false, why: "not a player car" };
   return { ok: true };
 }
 
@@ -536,9 +621,30 @@ function applyOrder0(race, c, t) {
     case "energy": car.mode.energy = c.args.mode; return { ok: true };
     case "pit": {
       // suspended (red flag) and stopped in the lane: the free tyre change (SR 57.4b / B5.14.4a), not a stop
-      if (S.control?.flag === "red" && car.where === "pit") { const r = CTL.redTyreChange(race, race.cache.T, car, c.args.compound, (cc, cmp) => { cc.tyre = newTyre(race, cmp, race.cache.w.airT ?? 25); cc.redSets = (cc.redSets || 0) + 1; race.cache.profiles[cc.num].at = -1e9; }); log(race, { t, car: car.num, type: "redTyreChange", cause: c.by, effect: r.ok ? c.args.compound : `refused: ${r.why}` }); return r; }
-      const r = pitCall(car, race.cache.T, { compound: c.args.compound, t }); if (r.ok && car.pit.call) car.pit.call.by = c.by; log(race, { t, car: car.num, type: "pitCall", cause: c.by, effect: r.ok ? `box for ${c.args.compound}: ${r.why}` : `refused: ${r.why}` }); return r; }
-    case "pitCancel": { const r = pitCancel(car); log(race, { t, car: car.num, type: "pitCancel", cause: c.by, effect: r.ok ? "cancelled" : `refused: ${r.why}` }); return r; }
+      if (S.control?.flag === "red" && car.where === "pit") { const r = CTL.redTyreChange(race, race.cache.T, car, c.args.compound, (cc, cmp) => { fitSet(race, cc, cmp, c.args.setId ?? null); cc.redSets = (cc.redSets || 0) + 1; }); log(race, { t, car: car.num, type: "redTyreChange", cause: c.by, effect: r.ok ? c.args.compound : `refused: ${r.why}` }); return r; }
+      // (the set first: a call the sets can't serve is refused whole; a call that isn't taken frees what it reserved)
+      const rs = c.args.compound != null && (car.pit.phase === "none" || car.pit.phase === "called") ? INV.reserve(car, c.args.compound, c.args.setId ?? null) : { ok: true, set: null };
+      if (!rs.ok) { log(race, { t, car: car.num, type: "pitCall", cause: c.by, effect: `refused: ${rs.why}` }); return rs; }
+      const r = pitCall(car, race.cache.T, { compound: c.args.compound, t });
+      if (r.ok && car.pit.call) { car.pit.call.by = c.by; if (rs.set) car.pit.call.setId = rs.set.id; }
+      INV.releaseStale(car);
+      log(race, { t, car: car.num, type: "pitCall", cause: c.by, effect: r.ok ? `box for ${c.args.compound}: ${r.why}` : `refused: ${r.why}` }); return r; }
+    case "pitCancel": { const r = pitCancel(car); INV.releaseStale(car); log(race, { t, car: car.num, type: "pitCancel", cause: c.by, effect: r.ok ? "cancelled" : `refused: ${r.why}` }); return r; }
+    case "delegate": {
+      const own = S.own[car.num];
+      for (const k of c.args.kinds) { own[k] = "ai"; own.by[k] = { id: c.id, t, type: "delegate" }; }
+      if (car.goal && c.args.kinds.some((k) => k === "pace" || k === "energy")) car.goal = null;
+      for (const k of ["pace", "energy"]) if (own[k] === "goal") own[k] = "player";
+      // (the AI looks again at its next decision – its lap decision or an event; nudge it now)
+      const A = S.ai?.teams?.[car.teamKey]; if (A?.cars?.[car.num]) A.cars[car.num].nextFull = 0;
+      log(race, { t, car: car.num, type: "delegate", cause: c.by, effect: c.args.kinds.join(",") }); return { ok: true };
+    }
+    case "goal": {
+      const own = S.own[car.num], k = c.args.kind ?? null;
+      if (!k) { car.goal = null; for (const kk of ["pace", "energy"]) if (own[kk] === "goal") { own[kk] = "player"; own.by[kk] = { id: c.id, t, type: "goal" }; } }
+      else { car.goal = { kind: k, toLap: c.args.toLap ?? null, state: "active", why: null, since: t, at: -1e9, sent: {} }; for (const kk of ["pace", "energy"]) { own[kk] = "goal"; own.by[kk] = { id: c.id, t, type: "goal" }; } }
+      log(race, { t, car: car.num, type: "goal", cause: c.by, effect: k || "off" }); return { ok: true };
+    }
     case "plan": car.plan = { stints: c.args.stints.map((x) => ({ compound: x.compound, toLap: Math.min(x.toLap, S.totalLaps) })), by: c.by }; car.planCalled = null; return { ok: true };
     case "teamOrder": S.teamOrders[c.team] = { policy: c.args.policy, ...c.args }; return { ok: true };
   }
@@ -554,24 +660,40 @@ export function forecast(race) { return forecastAt(race.cache.truth, race.state.
 
 export function snapshot(race) {
   const S = race.state, C = race.cache, T = C.T, w = C.w, order = S.order, pos = new Map(order.map((n, i) => [n, i + 1]));
-  const lead = S.cars.find((c) => c.num === order[0]), cs = CTL.controlSnapshot(race, T);
-  return { t: S.t, scenarioId: S.scenarioId, totalLaps: S.control.fin.target, leaderLap: S.leaderLap, flag: cs.flag, sc: cs.sc,
+  const lead = S.cars.find((c) => c.num === order[0]), cs = CTL.controlSnapshot(race, T), byNum = new Map(S.cars.map((c) => [c.num, c]));
+  // the car directly ahead on the road order (a retired car isn't anyone's "ahead")
+  const aheadOf = new Map(); { let prev = null; for (const n of order) { const c = byNum.get(n); if (c.status === "dnf") continue; aheadOf.set(n, prev); prev = c; } }
+  return { t: S.t, scenarioId: S.scenarioId, totalLaps: S.control.fin.target, leaderLap: S.leaderLap, flag: cs.flag, sc: cs.sc, phase: S.phase,
+    rtrans: S.rtrans ? S.rtrans.slice() : [], rtransCut: S.rtransCut || 0, inventory: { est: INV.ALLOC.est, source: INV.ALLOC.source },
     control: { phase: cs.phase, drs: cs.drs, overtake: cs.overtake, yellows: cs.yellows, msgs: cs.msgs },
     weather: { rain: w.rain ?? 0, airT: w.airT ?? null, trackT: w.trackT ?? null, wind: w.wind ?? null, water: avg(C.surface.hLine), est: !!w.est },
     cars: S.cars.map((c) => ({ num: c.num, teamKey: c.teamKey, team: c.team, tla: c.tla, color: c.color, status: c.where === "pit" && c.status === "run" ? "pit" : c.status, pos: pos.get(c.num), lap: c.lap,
       mode: { pace: c.mode.pace, energy: c.mode.energy },   // (the orders in force – the HUD shows them)
-      trans: c.trans ? c.trans.slice() : [],   // (discrete changes with their sim times – adapter3d applies them at render time)
+      trans: c.trans ? c.trans.slice() : [], transCut: c.transCut || 0,   // (discrete changes with their sim times – adapter3d applies them at render time)
       pen: { pendingS: c.pen.pendingS ?? 0, open: (c.pen.serve || []).filter((x) => !x.served).map((x) => x.kind) }, inc: c.inc && c.inc.until > S.t ? c.inc.kind : null, dmg: c.dmg || null, out: c.out || null, vscDelta: CTL.vscDelta(race, T, c),
       // (s null: not on the track any more – retired in the garage, or 3 s past its chequered flag: the cool-down lap
       // isn't simulated, so a finished car leaves the picture instead of standing on the line)
       where: c.where, s: c.where === "garage" || (c.status === "fin" && S.t - (c.finT ?? S.t) > 3000) ? null : c.s, u: c.where === "pit" ? c.pit.u : null, v: c.v, a: c.aLong, steer: steerOf(T, c), wheelDist: c.wheelDist,
       ...snapTraffic(c),
-      tyre: { compound: c.tyre.name, code: c.tyre.compound, wear: c.tyre.wear, Ts: c.tyre.Ts, Tc: c.tyre.Tc, age: c.tyre.laps }, energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: c.where === "lap" && c.status === "run" ? Math.round((c.deployW || 0) / 1000) : 0 }, fuel: c.energy.fuel,
+      tyre: tyreSnap(c), energy: { soc: socFrac(c.energy, C.ep), mode: c.mode.energy, deployKw: c.where === "lap" && c.status === "run" ? Math.round((c.deployW || 0) / 1000) : 0, lapUsedMJ: +(c.energy.lapDeploy / 1e6).toFixed(2), lapHarvMJ: +(c.energy.lapHarvest / 1e6).toFixed(2) }, fuel: c.energy.fuel,
       pit: snapPit(c.pit),
+      last: lastLap(c), best: bestLap(c),
       // (by race distance, not by completed laps: right after the leader crosses the line the cars behind have one lap
       // fewer without being a lap down – v0.49: the tower showed "+1랩" for them)
-      gap: lead ? gapOf(c, lead, T) : { leader: null, ahead: null, lapsDown: 0 } })) };
+      gap: lead ? gapOf(c, lead, aheadOf.get(c.num), T) : { leader: null, ahead: null, lapsDown: 0, how: null },
+      // the player's own cars: the plan, the sets, who controls what, the goal assist (other teams' are not public)
+      ...(S.own?.[c.num] ? { plan: { stints: c.plan.stints.map((x) => ({ ...x })), by: c.plan.by || null }, stops: c.pit.stops, sets: (c.sets || []).map((x) => ({ ...x })),
+        own: { pace: S.own[c.num].pace, energy: S.own[c.num].energy, plan: S.own[c.num].plan }, ownBy: JSON.parse(JSON.stringify(S.own[c.num].by)), goal: c.goal ? { kind: c.goal.kind, toLap: c.goal.toLap, state: c.goal.state, why: c.goal.why, since: c.goal.since } : null } : {}) })) };
 }
+// the tyre for the screen: compound, wear (0 new → 1 gone) and life (1 − wear: what is left – the two never share a bar),
+// surface / core temperatures, the window temperature the grip uses and that compound's window (tyre.js)
+function tyreSnap(c) {
+  const ty = c.tyre, cp = compoundParams(ty.compound);
+  return { compound: ty.name, code: ty.compound, wear: ty.wear, life: 1 - ty.wear, Ts: ty.Ts, Tc: ty.Tc, Tw: windowTemp(ty), win: cp ? { lo: cp.winLo, hi: cp.winHi } : null, age: ty.laps, used: !!ty.used, setId: ty.setId ?? null };
+}
+const lastLap = (c) => { const l = c.laps[c.laps.length - 1]; return l ? { n: l.n, t: l.t, pit: !!l.pit } : null; };
+// the best lap: laps not in or out of the pit lane
+function bestLap(c) { let b = null; for (let i = 0; i < c.laps.length; i++) { const l = c.laps[i]; if (l.pit || (i > 0 && c.laps[i - 1].pit)) continue; if (!b || l.t < b.t) b = { n: l.n, t: l.t }; } return b; }
 // the pit state for the screen. workT1 is the engine's planned end of the work (the crew animation is fitted to it); a
 // screen must not show it as a number before render time reaches it (request §15: no future stationary time shown).
 // times: the phases' start times so far (entry, stop, queue, queueEnd, penEnd, work, workEnd – once done –, release);
@@ -586,8 +708,43 @@ function snapPit(p) {
 const avg = (a) => { let s = 0; for (const x of a) s += x; return a.length ? s / a.length : 0; };
 // the front wheels' steer for the screen: the path's curvature × wheelbase (kinematic, rad, + left)
 const steerOf = (T, c) => (c.where === "lap" ? Math.max(-0.4, Math.min(0.4, Math.atan(3.6 * T.at(T.kappaLine || T.kappa, c.s)))) : 0);
-const gapOf = (c, lead, T) => { const down = c === lead ? 0 : Math.max(0, Math.floor((lead.dist - c.dist) / T.L)); return { leader: down ? null : gapSec(c, lead, T), ahead: null, lapsDown: down }; };
-const gapSec = (c, lead, T) => (c === lead ? 0 : c.v > 1 ? +((lead.dist - c.dist) / Math.max(20, c.v)).toFixed(2) : null);
+// gaps (s): to the leader and to the car directly ahead, from the timing-line history (how "line"); a car stopped, retired
+// or before its first timing point has none (null – "no data", never 0); finished cars by their finish times
+function gapOf(c, lead, ahead, T) {
+  const down = c === lead ? 0 : Math.max(0, Math.floor((lead.dist - c.dist) / T.L));
+  if (c === lead) return { leader: 0, ahead: null, lapsDown: 0, how: "line" };
+  if (c.status === "dnf") return { leader: null, ahead: null, lapsDown: down, how: null };
+  const fin = (x, y) => (x.finT != null && y.finT != null ? +((x.finT - y.finT) / 1000).toFixed(3) : null);
+  const g = (x) => { if (!x) return null; const f = fin(c, x); if (f != null) return f; const v = lineGap(c, x); return v == null ? null : +v.toFixed(3); };
+  const aheadDown = ahead ? Math.max(0, Math.floor((ahead.dist - c.dist) / T.L)) : 0;
+  return { leader: down ? null : g(lead), ahead: ahead && !aheadDown ? g(ahead) : null, aheadLaps: aheadDown, lapsDown: down, how: "line" };
+}
+
+// ---------- the race explained (v0.50 §5-7) ----------
+// For each of the player's cars (or the cars asked for): the plan before the start and every plan change after it (who –
+// player / team AI / the plan itself –, when), the stints actually run, the player's orders and what became of them,
+// the team AI's recorded decisions, each stop's loss in parts, the traffic loss lap by lap, the weather / flag changes
+// and the events of that car. Read-only; nothing here is a counterfactual – "what if" is not computed.
+export function analysis(race, nums = null) {
+  const S = race.state, want = nums ? new Set(nums.map(String)) : new Set(Object.keys(S.own || {}));
+  const flags = S.log.filter((e) => ["sc", "vsc", "red", "green", "yellow", "lightsOut", "chequered", "rainStart", "rainEnd"].includes(e.type)).map((e) => ({ t: e.t, lap: e.lap, type: e.type }));
+  const out = { t: S.t, finished: S.finished, totalLaps: S.totalLaps, flags, cars: {} };
+  for (const c of S.cars) {
+    if (!want.has(c.num)) continue;
+    const plans = [{ t: 0, lap: 0, by: c.plan0?.by || "pre-race", stints: c.plan0?.stints || [] }];
+    for (const o of S.commands.log) if (o.car === c.num && o.type === "plan" && o.ok && o.stage !== "submit") plans.push({ t: o.tEff, lap: lapAt(c, o.tEff), by: o.by, stints: o.args.stints });
+    const stints = []; let prev = null;
+    for (const l of c.laps) { const last = stints[stints.length - 1]; if (last && !prev?.pit && last.compound === l.compound) { last.toLap = l.n; last.laps++; } else stints.push({ compound: l.compound, fromLap: l.n, toLap: l.n, laps: 1 }); prev = l; }
+    const orders = S.commands.log.filter((o) => o.car === c.num && (o.by === "player" || o.by.startsWith("goal:"))).map((o) => ({ t: o.tAt, tEff: o.tEff, type: o.type, args: o.args, by: o.by, ok: o.ok, why: o.why, stage: o.stage }));
+    const ai = (S.ai?.teams?.[c.teamKey]?.decisions || []).filter((d) => d.num === c.num).map((d) => ({ t: d.t, lap: d.lap, why: d.why, plan: d.plan, gain: d.gain ?? null }));
+    const traffic = []; let tr0 = 0; for (const l of c.laps) { if (l.tr != null) { traffic.push({ lap: l.n, loss: +(l.tr - tr0).toFixed(2) }); tr0 = l.tr; } }
+    const events = S.log.filter((e) => e.car === c.num || (e.cars || []).includes(c.num)).filter((e) => !["defend", "attackAborted", "attack", "blueFlag", "yield"].includes(e.type)).map((e) => ({ t: e.t, lap: e.lap, type: e.type, cause: typeof e.cause === "string" ? e.cause : null, effect: typeof e.effect === "string" ? e.effect : e.effect?.kind || null }));
+    out.cars[c.num] = { num: c.num, tla: c.tla, plans, stints, orders, ai, pitParts: c.acct.pitParts || [], traffic, trafficTotal: +c.acct.traffic.toFixed(2), pitTotal: +c.acct.pit.toFixed(2), events, laps: c.laps.map((l) => ({ n: l.n, t: l.t, compound: l.compound, pit: l.pit, mode: l.mode, emode: l.emode ?? null })) };
+  }
+  return out;
+}
+// the lap a car was on at time t (its lap records' end times)
+function lapAt(c, t) { let el = c.laps.length ? 0 : null, acc = 0; for (const l of c.laps) { acc += l.t * 1000; if (acc > t) return l.n; el = l.n; } return el == null ? 0 : el + 1; }
 
 // ---------- save / load ----------
 
@@ -601,6 +758,7 @@ export function loadRace(json, scenario, opts = {}) {
   if (o.scenarioId !== scenario.meta.id) throw new Error(`save is for ${o.scenarioId}, not ${scenario.meta.id}`);
   const race = { state: o.state, scenario, cache: null, rng: Streams.load(o.rng) };
   buildCache(race, opts);
+  migrate(race);
   // the envelopes as they were: recompute each at the same inputs, with the same last-computed time
   Object.assign(race.cache.w, o.cacheMeta.w);
   for (const car of race.state.cars) {
@@ -609,6 +767,23 @@ export function loadRace(json, scenario, opts = {}) {
   }
   CTL.refreshControlCache(race, race.cache.T);
   return race;
+}
+// a save from before v0.50: the state v0.50 adds (none of it moves the race) – ownership from the APPLIED player orders
+// (v0.49 counted refused ones too: §3-1), the assumed tyre sets less the stints run, empty timing-line / transition data
+function migrate(race) {
+  const S = race.state, names = race.cache.alloc.names;
+  if (!S.own) { S.own = {}; if (S.userTeam) for (const c of S.cars) if (c.teamKey === S.userTeam) {
+    const aiRuns = !!S.ai?.teams?.[c.teamKey], o = newOwn(aiRuns ? "ai" : "player");
+    for (const l of S.commands.log) { const k = CMD.kindOf(l.type); if (k && l.by === "player" && l.ok && l.car === c.num) { o[k] = "player"; o.by[k] = { id: l.id, t: l.tEff, type: l.type }; } }
+    S.own[c.num] = o; } }
+  S.rtrans ||= []; S.rtransCut ||= 0;
+  for (const c of S.cars) {
+    if (!c.sets) c.sets = INV.migrateSets(c, names);
+    if (!c.tl) c.tl = { g: null, ts: [] };
+    if (!c.plan0) c.plan0 = { stints: c.plan.stints.map((x) => ({ ...x })), by: c.plan.by || null };
+    if (c.goal === undefined) c.goal = null;
+    if (c.disc && c.disc.lap === undefined) { c.disc = null; c.trans = []; }   // (rebuilt at the next step with the v0.50 fields)
+  }
 }
 // recompute a car's envelope for its present inputs and mark it computed at `at` (load: the same envelope the saved run
 // had, since its inputs then are its stored state now – the profile depends only on state saved with the car)

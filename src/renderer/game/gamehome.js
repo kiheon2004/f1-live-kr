@@ -16,8 +16,11 @@
 import { createGameAdapter } from "./adapter3d.js";
 import { GameRunner, orderId } from "./runner.js";
 import { TYPES as CMD_TYPES } from "../../game/engine/commands.js";
-import { $, esc, loadCompounds } from "./ui.js";
+import { $, esc, loadCompounds, hudSnap } from "./ui.js";
+import { checkAlerts, clockAction, newAlertState, defaultAlertSettings } from "./alerts.js";
 import { OrderBook } from "./orders.js";
+import { unsaved } from "./saverev.js";
+import { spaceAllowed } from "./keys.js";
 import * as API from "./gameapi.js";
 import * as Menu from "./menu.js";
 import * as SaveUI from "./saveui.js";
@@ -26,7 +29,7 @@ import * as Hud from "./racehud.js";
 import * as Res from "./results.js";
 
 const SETTINGS_KEY = "f1kr:game:settings";
-const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: false };
+const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: false, alerts: defaultAlertSettings() };
 function loadSettings() { try { return { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}) }; } catch { return { ...DEFAULT_SETTINGS }; } }
 
 export const G = {
@@ -34,6 +37,9 @@ export const G = {
   plans: {}, plansFor: null, engine: null, engineErr: null, strat: null,
   run: null, adapter: null, raf: 0, dev: false, events: [], book: new OrderBook(), result: null, mapHome: null, lastPaint: 0,
   sel: null, settings: loadSettings(), dirtyT: null, savedT: null, lastAutoLap: 0, modal: null, saveNote: null, loadedFrom: null,
+  // v0.50 §3-3: the race on screen (a new generation per race started / loaded) and its change counter (steps run, orders
+  // sent); savedRev: the revision the last successful save of THIS race holds
+  raceGen: 0, rev: 0, savedRev: -1, alerts: null, notices: [], pendingEv: [],
 };
 export const saveSettings = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(G.settings)); } catch { /* per-viewer convenience only */ } };
 
@@ -159,25 +165,26 @@ export async function startRace({ dev = false, devOpts = {}, race = null, runOpt
     engine = { step: E.step, snapshot: E.snapshot, command: E.command, events: E.events, results: E.results, commandStatus: E.commandStatus };
   }
   G.dev = dev; G.events = []; G.book = new OrderBook(); G.result = null; G.lastAutoLap = race.state?.leaderLap || 0;
+  G.raceGen++; G.rev = 0; G.savedRev = ui ? 0 : -1; G.alerts = newAlertState(); G.notices = []; G.pendingEv = [];
   // (a loaded save: the orders it was given, as the screen last knew them – a queued one is re-read from the engine's state)
   if (Array.isArray(ui?.orders)) { G.book.list = ui.orders.map((o) => ({ ...o })); G.book.update(race, null); }
-  G.run = new GameRunner(race, engine, { autoSlow: G.settings.autoSlow ? autoSlowRule() : null });
-  G.run.listeners.add((ev) => { G.events.push(...ev); if (G.events.length > 400) G.events.splice(0, G.events.length - 400); });
+  G.run = new GameRunner(race, engine, { autoSlow: null });   // (alerts.js decides automatic slowing – loop below)
+  G.run.listeners.add((ev) => { G.events.push(...ev); if (G.events.length > 400) G.events.splice(0, G.events.length - 400); G.pendingEv.push(...ev); if (G.pendingEv.length > 400) G.pendingEv.splice(0, G.pendingEv.length - 400); });
   G.adapter = createGameAdapter({ scenario: sc, source: G.run, label: dev ? "개발용" : "게임" });
   applyRacePrefs();
   const mine = myCars(sc);
   G.sel = ui?.sel && mine.some((e) => String(e.num) === String(ui.sel)) ? String(ui.sel) : String(mine[0]?.num ?? "");
   G.adapter.ctx.setFocus(ui?.focus || G.sel || null);
   for (const o of initialOrders) sendOrder(o.type, o.car, o.args, o.text || null);
-  G.dirtyT = race.state.t; G.savedT = ui ? race.state.t : null;
+  G.dirtyT = race.state.t; G.savedT = ui ? race.state.t : null;   // (kept for the dev hooks; saved state is G.rev / G.savedRev)
   go("race");
   Hud.build();
   lendMap();
   window.Map3D?.game.attach(G.adapter);
   applyRacePrefs();
   if (ui?.cam) window.Map3D?.game.setCam?.(ui.cam);
-  if (ui) G.run.setSpeed(0); else G.run.setSpeed(1);   // (a loaded race waits paused: the player looks first)
-  if (ui?.speed) G.run.speed = ui.speed;
+  // (a loaded race waits paused at the speed it was saved with: resume continues at that speed – v0.50 §3-4)
+  if (ui) { if (ui.speed > 0) G.run.speed = ui.speed; G.run.pause(); } else G.run.setSpeed(1);
   loop();
 }
 // the settings the race's view takes: the pit camera's auto-direction and auto-slow, the team's cars it follows (the
@@ -188,18 +195,16 @@ export function applyRacePrefs() {
   try { pc.auto?.(!!G.settings.autoPitCam); pc.slow?.(!!G.settings.pitSlow); pc.cars?.([G.sel, ...myCars().map((e) => String(e.num))].filter((x, i, a) => x && a.indexOf(x) === i)); } catch { /* the view's own problem */ }
 }
 // the engine's events that may slow the clock (screen only; the engine is told nothing)
-const AUTO_SLOW = new Set(["sc", "vsc", "red", "rainStart", "incident", "chequered", "fuelEmpty", "ersEmpty"]);
-const MINE_INC = new Set(["driver error", "contact", "mechanical", "retired"]);
-const MINE_SLOW = new Set(["pitCommitted", "pitEntry"]);
-export const autoSlowRule = () => ({ to: 1, match: (e) => AUTO_SLOW.has(e.type) || ((MINE_SLOW.has(e.type) || (MINE_INC.has(e.type) && e.effect?.kind !== "moment")) && myCars(G.sc).some((x) => String(x.num) === String(e.car) || (e.cars || []).map(String).includes(String(x.num)))) });
+// (v0.49's single auto-slow rule – replaced by alerts.js in the loop; kept so older callers set nothing)
+export const autoSlowRule = () => null;
 function loop() {
   cancelAnimationFrame(G.raf);
   const tick = () => {
     if (!G.run) return;
     const n = G.run.frame();
-    if (n) G.dirtyT = G.run.race.state.t;
+    if (n) { G.dirtyT = G.run.race.state.t; G.rev++; }
     const now = performance.now();
-    if (now - G.lastPaint > 200) { G.lastPaint = now; if (G.book.update(G.run.race, G.run.engine)) Hud.markOrders(); Hud.paint(); }
+    if (now - G.lastPaint > 200) { G.lastPaint = now; runAlerts(); if (G.book.update(G.run.race, G.run.engine)) Hud.markOrders(); Hud.paint(); }
     autosaveCheck();
     if (G.run.race.state.finished && !G.result && !G.dev) finishRace();   // (the chequered flag is the leader's: the rest still run)
     G.raf = requestAnimationFrame(tick);
@@ -220,7 +225,20 @@ export function stopRace() {
   G.run = null; G.adapter = null;
 }
 // a race running (not finished) with steps run since the last save
-export const needsLeavePrompt = () => !!G.run && !G.dev && !G.result && G.dirtyT != null && G.dirtyT !== G.savedT && G.run.race.state.t > 0;
+export const needsLeavePrompt = () => !!G.run && !G.dev && !G.result && unsaved(G) && (G.run.race.state.t > 0 || G.rev > 0);
+// the chosen alerts (alerts.js) on the events that the render time has reached and the render-time picture; the clock is
+// only ever slowed / paused by them (manual speed wins: an alert doesn't fire again within its cooldown)
+function runAlerts() {
+  const R = G.run; if (!R || G.dev) return;
+  const T = R.renderT, due = G.pendingEv.filter((e) => (e.t ?? 0) <= T); if (due.length) G.pendingEv = G.pendingEv.filter((e) => (e.t ?? 0) > T);
+  const on = G.settings.autoSlow, settings = on ? { ...defaultAlertSettings(), ...(G.settings.alerts || {}) } : Object.fromEntries(Object.keys(defaultAlertSettings()).map((k) => [k, (G.settings.alerts || {})[k] === "off" ? "off" : "note"]));
+  let fc = null; try { fc = G.engine?.forecast ? G.engine.forecast(R.race) : null; } catch { fc = null; }
+  const list = checkAlerts(G.alerts, { events: due, snap: hudSnap(R, G.adapter), forecast: fc, mine: myCars().map((e) => String(e.num)), settings, t: T });
+  if (!list.length) return;
+  for (const a of list) { G.notices.push(a); } if (G.notices.length > 20) G.notices.splice(0, G.notices.length - 20);
+  const act = clockAction(list, R.speed), top = list[0];
+  if (act.pause || act.slowTo != null) R.auto(act, { t: top.t, type: top.rule, why: top.text, action: act.pause ? "pause" : "slow" });
+}
 // leave the race for the menu (asked first when unsaved)
 export function leaveRace({ force = false } = {}) {
   if (!force && needsLeavePrompt()) { SaveUI.leavePrompt("menu"); return; }
@@ -248,7 +266,7 @@ export function sendOrder(type, car, args, text) {
   const cmd = { id: orderId(type), type, car: car == null ? null : String(car), team: G.teamKey, args: args || {}, by: "player" };
   const r = G.run.command(cmd) || { ok: false, why: "응답 없음" };
   const o = G.book.add({ id: cmd.id, type, car: cmd.car, args: cmd.args, text: text || "", t: G.run.race.state.t }, r);
-  G.dirtyT = (G.dirtyT ?? 0) + 0.001;   // (an order is a change to save even while paused)
+  G.dirtyT = (G.dirtyT ?? 0) + 0.001; G.rev++;   // (an order is a change to save even while paused)
   Hud.markOrders(); Hud.paint();
   return o;
 }
@@ -282,10 +300,14 @@ $("game").addEventListener("click", (e) => {
 });
 $("game").addEventListener("change", (e) => { const t = e.target.closest("[data-chg]"); if (!t) return; const [mod, act] = t.dataset.chg.split(":"); MODS[mod]?.onChange?.(act, t, e); });
 $("game").addEventListener("input", (e) => { const t = e.target.closest("[data-inp]"); if (!t) return; const [mod, act] = t.dataset.inp.split(":"); MODS[mod]?.onInput?.(act, t, e); });
-// Space: pause / resume in the race (not while typing in a field)
+// Space: pause / resume in the race (v0.50 §3-4). Not while typing (input / textarea / select / contenteditable, IME
+// composition), not while a dialog is open, not on key repeat (a held key toggles once), and not when a button or other
+// control has the focus – there Space is that control's own key (its click), never a second, global toggle.
 addEventListener("keydown", (e) => {
-  if (!G.on || G.step !== "race" || !G.run || e.target.closest?.("input, select, textarea")) return;
-  if (e.code === "Space") { e.preventDefault(); if (G.run.paused) G.run.setSpeed(G.run.speed || 1); else G.run.setSpeed(0); Hud.paint(); }
+  if (!G.on || G.step !== "race" || !G.run) return;
+  if (e.code === "Space" && e.repeat && !e.target?.closest?.("input, select, textarea, [contenteditable]")) { e.preventDefault(); return; }
+  if (!spaceAllowed(e, !!G.modal || !!document.querySelector(".ui-scrim:not([hidden])"))) return;
+  e.preventDefault(); G.run.slowNote = null; G.run.toggle(); Hud.paint();
 });
 
 // development hooks (console / screenshot harness): the dev race is reachable only from here – never from the screens

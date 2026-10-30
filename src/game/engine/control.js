@@ -357,8 +357,10 @@ function crossings(race, T, K, c, P) {
 function minTimeApplies(race, c, cc) {
   const ctl = race.state.control;
   if (ctl.flag === "vsc" || ctl.flag === "red") return true;
-  // SC: until the car crosses SC line 1 the second time (SR 55.7 / B5.13), and while waved past the SC
-  if (ctl.flag === "sc") return cc.l1 < 2 || cc.perm === "wave";
+  // SC: until the car crosses SC line 1 the second time (SR 55.7 / B5.13). A car waved past the SC drives at the passing
+  // pace instead (caps: passPace × the SC's) – v0.50: held to the minimum time it never caught a SC lapping faster than
+  // that, stayed "waved" for 30 laps and kept the SC out (Monaco 2025 seed 1)
+  if (ctl.flag === "sc") return cc.l1 < 2 && cc.perm !== "wave";
   return false;
 }
 
@@ -461,6 +463,9 @@ function scStep(race, T, K, P) {
   }
   // a car that passed the SC rejoins the queue's tail: no longer "toQueue" once it is within ten lengths of a queued car
   for (const c of S.cars) { const cc = ctl.cars[c.num]; if (cc.perm === "toQueue" && onTrack(c)) { const p = pred(race, T, c); if (p && p.gap <= P.queueMax.v * P.carLen.v && !p.isSC) cc.perm = null; } }
+  // a waved car that has ended up in the queue anyway (a stop under the SC put it behind queued cars): it is a queued car
+  // now – it can't pass them, so its wave-by is over (v0.50: one such car kept "waved" for 30 laps held the SC out)
+  for (const c of S.cars) { const cc = ctl.cars[c.num]; if (cc.perm === "wave" && onTrack(c)) { const p = pred(race, T, c); if (p && !p.isSC && p.gap <= P.queueMax.v * P.carLen.v && p.obj && ctl.cars[p.obj.num]?.perm == null && sc.caught) cc.perm = null; } }
   // last lap: the SC comes in at the end of it, cars take the flag without overtaking (SR 55.17 / B5.13)
   if (!sc.lastLap && lead && lapsOf(lead, T) + 1 >= ctl.fin.target) sc.lastLap = true;
   if (crossed(0)) scLine(race, T, K, P);
@@ -496,7 +501,10 @@ function scLine(race, T, K, P) {
   sc.line++;
   if (sc.st !== "out" || sc.lastLap) return;
   const lead = leaderCar(race);
-  const passed = S.cars.every((c) => !onTrack(c) || !["wave", "unlap"].includes(ctl.cars[c.num].perm));
+  // (after "LAPPED CARS MAY NOW OVERTAKE" the SC comes in at the end of the FOLLOWING lap – SR 55.14 / B5.13, the rules
+  // files' lappedCars – whether or not every lapped car has got round yet; v0.50: waiting for them let a lapped car that
+  // kept stopping hold the SC out for 30 laps – Monaco 2025 seed 1)
+  const passed = S.cars.every((c) => !onTrack(c) || !(ctl.cars[c.num].perm === "wave" || (ctl.cars[c.num].perm === "unlap" && !(sc.unlap && sc.line > sc.unlap.line))));
   const ready = S.t >= ctl.clearAt && sc.caught && passed && (sc.noUnlap || (sc.unlap && sc.line > sc.unlap.line)) && (sc.unlap || allQueued(race, T, K));
   const unlapPending = !sc.noUnlap && !sc.unlap && seasonRules(race).safetyCar?.value?.lappedCars;
   if (!ready || unlapPending) return;
@@ -724,7 +732,7 @@ export function caps(race, T, car, P = CONTROL) {
   const f = ctl.flag;
   if (f === "vsc" || f === "red" || (f === "sc" && minTimeApplies(race, car, cc))) lim(ghostCap(race, T, K, car, cc, pos, P), f === "vsc" ? "VSC delta" : "minimum sector time");
   // unlapping / driving round to the back of the queue: "an appropriate speed" – quicker than the queue so it gets there
-  if (f === "sc" && (cc.perm === "unlap" || cc.perm === "toQueue")) lim(K.sc[T.idx(pos)] * P.passPace.v, "passing the queue at an appropriate speed");
+  if (f === "sc" && (cc.perm === "unlap" || cc.perm === "toQueue" || cc.perm === "wave")) lim(K.sc[T.idx(pos)] * P.passPace.v, cc.perm === "wave" ? "waved past the safety car" : "passing the queue at an appropriate speed");
   if (f === "sc" || f === "red") {
     const sc = ctl.sc;
     const toGrid = cc.gridS != null && (!sc || sc.st === "pit" || sc.st === "gone");

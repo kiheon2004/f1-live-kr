@@ -24,7 +24,8 @@ export function ersCap(es, ep, mode, v, otEligible = false) {
   if (es.lapDeploy >= allowance) return 0;
   // 2026 speed cap (rule formula, season data): normal P ≤ capA − capB·v_kmh below capCut; Overtake P ≤ otA − otB·v_kmh
   const vk = v * 3.6;
-  const cap = ot ? E.otA - E.otB * vk : vk >= E.capCut ? 0 : E.capA - E.capB * vk;
+  // (C5.2.8 i: 1800 − 5·v below 340 km/h, then 6900 − 20·v down to 0 at 345 – v0.50: the second segment, was a cut at 340)
+  const cap = ot ? E.otA - E.otB * vk : vk >= (E.capCut2 ?? E.capCut) ? 0 : vk >= E.capCut ? (E.capA2 ?? 0) - (E.capB2 ?? 0) * vk : E.capA - E.capB * vk;
   const pMax = Math.max(0, Math.min(E.pK, cap));
   return pMax * M.deployFrac;
 }
