@@ -387,7 +387,7 @@
       else if (hasShape && !liveStatus.positions) note = "차량 위치는 F1 TV로 로그인하면 표시돼요.";
     }
     if ($("mapNote").textContent !== note) $("mapNote").textContent = note;
-    $("mapNote").hidden = !note;
+    if ($("mapNote").hidden !== !note) $("mapNote").hidden = !note;   // (only when it changes: was ~60–90 DOM writes/s)
   }
 
   // ---------- frame loop ----------
