@@ -1470,6 +1470,9 @@
   window.F1KR = {
     get src() { return src; }, get t() { return mode === "replay" ? t : live.now(); }, get mode() { return mode; },
     get focus() { return focus; }, get circuit() { return circuit; },
+    // v0.50: the comparison driver (Shift+click in the table) – the 3D HUD marks it and may set it (Shift+click in its tower)
+    get compare() { return compare; },
+    setCompare(n) { compare = n && n !== focus ? String(n) : null; renderAll(true); },
     // the playback rate shown (0 paused; live: 1 unless paused) – the 3D view's wheel smear (wheelspin.js)
     get rate() { return mode === "replay" ? (playing ? speed : 0) : live?.paused ? 0 : 1; },
     // Circuit location as F1 names it ("Monte Carlo", "Kuala Lumpur") and the local start hour of the session.
