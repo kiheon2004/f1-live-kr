@@ -152,7 +152,9 @@ function buildCache(race, { carParams = null, driverParams = null } = {}) {
   // contacts (functions: never saved, set again on load)
   race.hooks = { control: { mayOvertake: CTL.mayOvertake, drsAllowed: CTL.drsAllowed, activeAeroAllowed: CTL.activeAeroAllowed, overtakeModeAllowed: CTL.overtakeModeAllowed }, incidents: { contact: INC.contact },
     // (complying with a blue flag: giving way – to any car –, or the lapping car already in the middle of its pass)
-    traffic: { yielding: (c, f) => c.traffic?.role === "yield" || (f.traffic?.with === c.num && ["att", "done"].includes(f.traffic.role)) } };
+    traffic: { yielding: (c, f) => c.traffic?.role === "yield" || (f.traffic?.with === c.num && ["att", "done"].includes(f.traffic.role)) },
+    // (the timing-line gap for read-only helpers – strategy.pitOptions)
+    lineGap: (c, x) => lineGap(c, x) };
   trafficSetup(race);
 }
 
