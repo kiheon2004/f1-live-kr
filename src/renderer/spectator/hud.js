@@ -43,7 +43,7 @@ export function createSpecHud(host, api) {
   let prefs = loadPrefs(window.localStorage), editing = false, small = false, cockpit = false, gameOn = false;
   const last = { tower: 0, strip: 0, driver: 0, tel: 0, pit: 0, ready: 0, zones: 0 };
   const cost = { ms: 0, frames: 0, worst: 0, layouts: 0, built: 0 };
-  let zones = [], layoutDue = true, placed = {}, baseScale = 1;
+  let zones = [], layoutDue = true, placed = {}, baseScale = 1, lastT = null;
 
   const root = h("div", "spec-hud"); root.id = "specHud"; root.setAttribute("aria-label", "3D 관전 HUD");
   const W = {};
@@ -395,6 +395,10 @@ export function createSpecHud(host, api) {
     if (root.dataset.cam !== mode) { root.dataset.cam = mode; layoutDue = true; }
     if (ck !== cockpit) { cockpit = ck; setCls(root, "cockpit", ck); layoutDue = true; last.tower = 0; if (!ck) zones = []; }
     if (now - last.ready >= RATE.ready) { last.ready = now; paintReady(); }
+    // (a seek – the session's time jumping or going back – repaints everything in this frame, with the 3D picture)
+    const t = A?.t;
+    if (t != null && lastT != null && (t < lastT - 50 || t - lastT > Math.max(2000, (A.rate || 1) * 1000))) last.strip = last.tower = last.driver = last.tel = last.pit = 0;
+    lastT = t;
     if (A?.src) {
       if (now - last.strip >= RATE.strip) { last.strip = now; paintStrip(A); paintCam(A); }
       if (now - last.tower >= RATE.tower && prefs.widgets.tower.on && !small) { last.tower = now; paintTower(A); }
