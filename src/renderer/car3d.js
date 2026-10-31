@@ -1853,6 +1853,14 @@ export const STEER_RATIO = 10;
 // past ~90°: R. Smedley, F1.com 2019-06-01, "at most tracks, the driver turns his steering wheel 90 degrees", M). Within
 // ±90° the wheel is where it was at any speed.
 export const LOCK = { slow: 15, fast: 25 };
+// v0.52 (request §11, measured): the steering never asks for more cornering than the car can do. The path's curvature the
+// wheel is turned by (map3d pathSteer) is the lap line's (at the car's offset), not the line the car really takes: at a
+// fast chicane – Monaco's swimming pool at ~225 km/h – it asked for 8.4 g and the wheel went to its 90° stop and back
+// the other way within 30 m (2025 Monaco, Leclerc, measured with Map3D.wheelTrace; Hungary's fastest corner 5.6 g). The
+// curvature is held to what LAT_G_MAX of cornering gives at the speed: κ ≤ a / v². 6 g: about the most a 2022–26 car
+// pulls in the fastest corners (F1 and Pirelli figures ~5–6 g – M); a slow corner is never limited (at 25 m/s, R ≥ 10.6 m).
+export const LAT_G_MAX = 6;
+export const gripKappa = (kappa, speed) => { const lim = speed > 0.5 ? (LAT_G_MAX * 9.81) / (speed * speed) : Infinity; return Math.max(-lim, Math.min(lim, kappa)); };
 export const lockFor = (speed) => (speed == null ? Math.PI / 2 : (90 + (LOCK_MAX - 90) * Math.max(0, Math.min(1, (LOCK.fast - speed) / (LOCK.fast - LOCK.slow)))) * Math.PI / 180);
 // t: the session's time (ms) – the lowered arm's swing across goes by it (armswap.js); without it, the hands stay on the
 // grips beside the body (the plan – a pure function of the angle). speed (m/s): the car's – the lock (lockFor); without

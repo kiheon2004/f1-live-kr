@@ -26,7 +26,7 @@ import { circuitVerdict, pitsUpToWall } from "./pitwallcheck.js";
 import { standstills, PitInference, allocatePlaces, allocationKey, teamLayer, overridesFor, planOverrides, boardStatus, seeThrough, paintPitScreens, updateTeamScreens, garageZones } from "./garages.js";
 import { createMirrorPass, mirrorMode, mirrorStrain } from "./mirrors.js";
 import { probeMirrorPass, samePipeline, glassVsPicture, rendererState, flatFill, glassPixels, glassOnScreen } from "./mirrorprobe.js";
-import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO, lockFor } from "./car3d.js";
+import { makeCar, setKitMode, setCompound, setAero, setWheels, setWheelOff, wheelIsOn, setSmear, setDetail, setCarEnvironment, profileFor, wheelParts, TYRE_COLOURS, setWheelScreen, setLeds, setCockpit, setFlagLights, STEER_RATIO, lockFor, gripKappa } from "./car3d.js";
 import { kitMode } from "./kit.js";
 import { carLeds, profileForWheel } from "./shiftlights.js";
 import { stepWheel, smearOf, odometerAt, wrapAngle } from "./wheelspin.js";
@@ -47,6 +47,7 @@ import { createPitCam } from "./game/pitcam.js";
 import { createPitKit } from "./garagekit/pitkit.js";
 import { createSpecHud } from "./spectator/hud.js";
 import { pickTags, cameraCar } from "./spectator/layout.js";
+import { EYE_PITCH, cockpitFov as lensFov, HEAD, headYawFor, eyeTurned } from "./eyecam.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -1263,15 +1264,38 @@ function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = 
 
 // ---------- cars ----------
 // The car model itself lives in car3d.js (2026 regulations, team liveries).
-let _shadow;
-function shadowTex() {
-  if (_shadow) return _shadow;
-  const c = document.createElement("canvas"); c.width = c.height = 64;
-  const x = c.getContext("2d"), r = x.createRadialGradient(32, 32, 4, 32, 32, 32);
-  r.addColorStop(0, "rgba(0,0,0,0.55)"); r.addColorStop(1, "rgba(0,0,0,0)");
-  x.fillStyle = r; x.fillRect(0, 0, 64, 64);
-  _shadow = new THREE.CanvasTexture(c); _shadow.userData.shared = true;   // (one for every car)
-  return _shadow;
+const _shadow = {};
+function shadowTex(prof = null) {
+  // v0.52 (request §11, the car on the ground): the car's own plan under it – the floor's broad dark plate between the
+  // axles (5 cm off the road: the sky's light can't get under it), the nose and the gearbox narrower, and each tyre's
+  // contact patch darkest – blurred; one texture per era (its axles and track), shared by every car of it. It was one
+  // round blob (darkest in the middle, an ellipse 2.4 × 5.8 m): the car seemed to hover with nothing under its wheels.
+  // The same one plane and draw call as before.
+  const key = prof ? prof.era : "blob";
+  if (_shadow[key]) return _shadow[key];
+  const c = document.createElement("canvas"), x = c.getContext("2d");
+  if (!prof) {
+    c.width = c.height = 64; const r = x.createRadialGradient(32, 32, 4, 32, 32, 32);
+    r.addColorStop(0, "rgba(0,0,0,0.55)"); r.addColorStop(1, "rgba(0,0,0,0)"); x.fillStyle = r; x.fillRect(0, 0, 64, 64);
+  } else {
+    // (the canvas: the plane's 2.4 × 5.8 m at 50 px a metre; its top the car's tail – the plane lies face up, its +y the car's −z)
+    const k = 50, W = (c.width = 120), H = (c.height = 290), px = (mx) => W / 2 + mx * k, pz = (mz) => H / 2 - mz * k;
+    const box = (x0, z0, x1, z1, a, r) => { x.fillStyle = `rgba(0,0,0,${a})`; x.beginPath(); x.roundRect(px(x0), pz(z1), (x1 - x0) * k, (z1 - z0) * k, r * k); x.fill(); };
+    x.filter = "blur(7px)";
+    box(-0.95, prof.RZ + 0.3, 0.95, prof.FZ - 0.6, 0.5, 0.25);       // the floor's plate (to its edge under the sidepods)
+    box(-0.3, prof.FZ - 0.8, 0.3, prof.FZ + 1.0, 0.3, 0.15);         // the nose and the front wing's middle
+    box(-0.45, prof.RZ - 0.75, 0.45, prof.RZ + 0.4, 0.34, 0.15);     // the gearbox and the diffuser
+    // (each tyre: the shade round its foot – the road a hand's breadth round the contact patch sees little sky –, then the
+    // patch itself darkest)
+    for (const [z, tw] of [[prof.FZ, prof.FW], [prof.RZ, prof.RW]]) for (const sd of [-1, 1]) {
+      const cx = sd * (prof.W / 2 - tw / 2);
+      x.filter = "blur(5px)"; box(cx - tw / 2 - 0.1, z - 0.32, cx + tw / 2 + 0.1, z + 0.32, 0.45, 0.12);
+      x.filter = "blur(2px)"; box(cx - tw / 2, z - 0.12, cx + tw / 2, z + 0.12, 0.7, 0.04);
+    }
+    x.filter = "none";
+  }
+  const t = new THREE.CanvasTexture(c); t.userData.shared = true;   // (one for every car of the era)
+  return (_shadow[key] = t);
 }
 
 // Name tag that keeps the same size on screen.
@@ -1318,7 +1342,7 @@ function carFor(num, d) {
   const obj = new THREE.Group();
   const model = makeCar({ teamName: d.TeamName, teamColour: d.TeamColour, number: num, season, date, kit: geoSettings().gloves });
   if (nightNow) setCarEnvironment(model, carEnvironment(true), 0.6);
-  { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(), transparent: true, depthWrite: false }));
+  { const sh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 5.8), new THREE.MeshBasicMaterial({ map: shadowTex(model.userData.profile), transparent: true, depthWrite: false }));
     sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; sh.name = "contactShadow"; sh.userData.notCar = true; model.add(sh); }
   if (nightNow) lightCar(model, true);
   // cars don't go into the (static) shadow map; the soft contact shadow under each car does the job
@@ -1338,7 +1362,7 @@ function carDims(c) {
   const m = c.model, inv = new THREE.Matrix4(); m.updateWorldMatrix(true, true); inv.copy(m.matrixWorld).invert();
   let f = 0, b = 0, h = 0;
   m.traverse((o) => {
-    if (!o.isMesh || !o.geometry || o.material?.map === shadowTex()) return;
+    if (!o.isMesh || !o.geometry || o.name === "contactShadow") return;
     if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
     dimBox.copy(o.geometry.boundingBox).applyMatrix4(dimM.multiplyMatrices(inv, o.matrixWorld));
     f = Math.max(f, dimBox.max.z); b = Math.max(b, -dimBox.min.z); h = Math.max(h, dimBox.max.x, -dimBox.min.x);
@@ -1550,10 +1574,13 @@ let devRawTracks = false, devNoShake = false, devMotion = false, devRec = null, 
 const KA = [0, 0, 0], KB = [0, 0, 0], KC = [0, 0, 0];   // (the steering's curvature: three points of the path)
 // On the track: the front wheels' steer (rad) from the path's curvature where the car is (st: its track coordinates) –
 // the frame's own steering (updateCars) and its history (wheelHistOf) by the one rule
+function pathKappa(F, s, d, fwd, h) {
+  F.at(s - fwd * h, d, KA); F.at(s, d, KB); F.at(s + fwd * h, d, KC);
+  return wrap(Math.atan2(KC[0] - KB[0], KC[2] - KB[2]) - Math.atan2(KB[0] - KA[0], KB[2] - KA[2])) / h;
+}
 function pathSteer(F, st, speed) {
   const fwd = st.vs >= 0 ? 1 : -1, h = Math.max(4, Math.min(12, Math.abs(st.vs) * 0.15));
-  F.at(st.s - fwd * h, st.d, KA); F.at(st.s, st.d, KB); F.at(st.s + fwd * h, st.d, KC);
-  const kappa = wrap(Math.atan2(KC[0] - KB[0], KC[2] - KB[2]) - Math.atan2(KB[0] - KA[0], KB[2] - KA[2])) / h;
+  const kappa = gripKappa(pathKappa(F, st.s, st.d, fwd, h), speed);   // (v0.52: no more than the car's grip – car3d gripKappa)
   return Math.max(-0.4, Math.min(0.4, Math.atan(3.4 * kappa) + (0.01 * speed * speed * kappa) / 9.81));
 }
 // v0.47 (request §2): the steering wheel's turn (rad, as car3d's wheel.rotation.z) at any moment of the session – the
@@ -1839,6 +1866,13 @@ function updateCars(dt) {
       c.steer = c.steer == null || jumped ? steer : c.steer + (steer - c.steer) * (1 - Math.exp(-dt * 5));
     }
     c.steerT = A.t;
+    // v0.52: the driver's head into the bend (eyecam.js headYawFor) – the eye camera's car only: on the track from the
+    // path's curvature 0.5–1.5 s ahead at this speed (a function of the moment shown, like the steering); elsewhere
+    // from the steering, eased
+    if (camMode === "eye" && num === focusNum) {
+      if (st && c.speed > 3) { const fwd = st.vs >= 0 ? 1 : -1, h = Math.max(4, Math.min(12, Math.abs(st.vs) * 0.15)); c.headYaw = headYawFor(HEAD.ahead.map((tau) => gripKappa(pathKappa(F, st.s + fwd * c.speed * tau, st.d, fwd, h), c.speed)), c.speed); }
+      else { const aim = c.speed > 3 ? headYawFor([Math.tan(c.steer || 0) / 3.4], c.speed) : 0; c.headYaw = (c.headYaw || 0) + (aim - (c.headYaw || 0)) * (1 - Math.exp(-dt * 3)); }
+    } else c.headYaw = 0;
     if (devSteer != null && num === focusNum) c.steer = devSteerNow();
     setWheels(c.model, devSpin != null && num === focusNum ? (performance.now() / 1000) * devSpin * 2 * Math.PI : c.spinW, c.steer, devSteer != null && num === focusNum ? performance.now() : A.t, devSteer != null && num === focusNum ? 0 : c.speed, devSteer != null && num === focusNum ? null : wheelHistOf(c, num, sm));   // (v0.45: the session's time – the lowered arm's swing goes by it, armswap.js; v0.46: the speed – past ±90° only at a slow corner, car3d lockFor; v0.47: the steering's history – the swing read from it)
     if (devArmDiag && num === focusNum) drawArmDiag(c.model);
@@ -2568,11 +2602,15 @@ function updateCamera(dt) {
     // parent's from the last render – the camera then sat one frame back, a metre behind the airbox at 200 km/h)
     c.model.updateWorldMatrix(true, true);
     const u = c.model.userData, eye = camMode === "eye";
-    camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
+    // (a game's car: from the engine's front-wheel angle – no path ahead here; game/cars3d.js sets c.steer)
+    const hy = !eye || !headTurn ? 0 : game ? headYawFor([Math.tan(c.steer || 0) / 3.4], c.speed || 0) : c.headYaw || 0;
+    if (hy) { eyeTurned([u.mounts.eye.x, u.mounts.eye.y, u.mounts.eye.z], hy, EYE_AT); camera.position.set(EYE_AT[0], EYE_AT[1], EYE_AT[2]).applyMatrix4(c.model.matrixWorld); }
+    else camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
     c.model.getWorldQuaternion(qTmp);
     // (the T-cam as the car's profile has it – fitted to the team's onboard footage where there is one; the eyes ahead,
     // a touch down)
-    shakeE.set(eye ? EYE_PITCH : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI + (eye ? 0 : ((u.profile.tcamYaw || 0) * Math.PI) / 180), 0, "YXZ");
+    // (v0.52: the eyes turn with the driver's head into the bend – eyecam.js; the T-cam is bolted to the car)
+    shakeE.set(eye ? EYE_PITCH : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI + (eye ? hy : ((u.profile.tcamYaw || 0) * Math.PI) / 180), 0, "YXZ");
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
@@ -2638,13 +2676,16 @@ function setNear(n) { if (camera.near !== n) { camera.near = n; camera.updatePro
 // EYE_HFOV, as tall
 // as the window's shape makes it; zooming sets a vertical angle of its own)
 const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 0, dragged: false, down: null };
+// (v0.52: the eye camera turns with the driver's head into bends – on unless turned off: Map3D.headTurn(false), kept)
+const EYE_AT = [0, 0, 0];
+let headTurn = (() => { try { return localStorage.getItem("f1kr:eyeHead") !== "off"; } catch { return true; } })();
 function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 0; }
 // v0.42: the eyes' lens 80° wide (it was 95°: the steering wheel ~30 % of the picture's width against ~45 % in the
 // helmet camera's frames – research/cockpit.md: that camera ~75–85° wide, L) and looking down 8° (it was 3.4°) – the
 // horizon a third of the way down, the wheel's top a little under it, as in those frames (the eyes 2 cm lower too, the
 // profiles' eye: ~3.5 cm over the wheel's top, Z 0.70–0.76 m in the research – L)
-const EYE_HFOV = 80, EYE_PITCH = -0.14;
-const cockpitFov = (eye, tcamHfov = 72) => look.fov || Math.max(35, Math.min(100, (2 * Math.atan(Math.tan(((eye ? EYE_HFOV : tcamHfov) * Math.PI) / 360) / (camera.aspect || 1.6)) * 180) / Math.PI));
+// (v0.52: the lens and the aim in eyecam.js – the measuring tools use the same numbers)
+const cockpitFov = (eye, tcamHfov = 72) => look.fov || lensFov(eye, camera.aspect, tcamHfov);
 function initLook() {
   const active = () => camMode === "chase" || camMode === "onboard" || camMode === "eye";
   canvas.addEventListener("pointerdown", (e) => {
@@ -5340,6 +5381,50 @@ window.Map3D = {
   // v0.47: the focused car's arms' swing now – q per arm (0 beside the body, 1 across; armswap.js), the wheel drawn and
   // the steering history's at this moment (deg), and whether the swing came from the history (swapAt) or frame to frame
   armQ(num) { const A = app(), c = cars.get(num || camNum()), u = c?.model.userData; if (!u?.arms) return null; const h = u.hist && u.armT != null ? u.hist(u.armT) : null; return { num: num || camNum(), t: u.armT, q: u.arms.map((a) => a.q), wheelDeg: +(u.wheel.rotation.z * 57.29578).toFixed(2), histDeg: h == null ? null : +(h * 57.29578).toFixed(2), from: h == null ? "frames" : "history", lod: u.lod, near: u.near.visible }; },
+  // development (v0.52, request §11): the focused car's driver's-eye view measured on the frame as drawn – what share of
+  // the picture the arms, gloves, wheel, its display and the body take, the forward window, the mirrors and the display
+  // hidden by a hand, near-plane cuts (eyeview.js); and the HUD's panels over the wheel / hands (their boxes, px²)
+  async eyeView(W = 320) {
+    const c = cars.get(camNum()); if (!c?.model) return "no car";
+    const E = await import("./eyeview.js"); c.model.updateWorldMatrix(true, true); camera.updateMatrixWorld();
+    const m = E.measureEyeView(c.model, camera, W), r = canvas.getBoundingClientRect(), hud = [];
+    for (const el of document.querySelectorAll("#map3d .spec-w")) {
+      const b = el.getBoundingClientRect(); if (!b.width || !b.height || getComputedStyle(el).visibility === "hidden" || el.hidden) continue;
+      const box = [(b.left - r.left) / r.width, (b.top - r.top) / r.height, (b.right - r.left) / r.width, (b.bottom - r.top) / r.height];
+      const over = {}; for (const k of ["wheel", "display", "arm", "glove"]) { const q = m.boxes[k]; if (!q) continue; const w = Math.min(box[2], q[2]) - Math.max(box[0], q[0]), h = Math.min(box[3], q[3]) - Math.max(box[1], q[1]); if (w > 0 && h > 0) over[k] = Math.round(w * h * r.width * r.height); }
+      if (Object.keys(over).length) hud.push({ el: el.className || el.id, over });
+    }
+    return JSON.stringify({ cam: camMode, num: camNum(), size: [Math.round(r.width), Math.round(r.height)], fov: +camera.fov.toFixed(1), wheelDeg: +((c.model.userData.wheel?.rotation.z || 0) * 180 / Math.PI).toFixed(1), speed: Math.round((c.speed || 0) * 3.6), ...m, hud });
+  },
+  // development (v0.52): car num's steering wheel angle (deg, + = turned left, as the arms get it) every `step` ms of the
+  // session over [t0, t1], from the smoothed tracks (the same as the arms' history: pathSteer, the lock by speed) –
+  // [s since t0, wheel deg, km/h, lap position m]
+  wheelTrace(num, t0, t1, step = 100) {
+    const sm = smoothFor(app().src); if (!sm?.frame) return "no tracks";
+    const out = [], st = {};
+    for (let ms = t0; ms <= t1; ms += step) {
+      const q = sm.state(num, ms, st); if (!q) { out.push(null); continue; }
+      const v = Math.hypot(q.vs, q.vd), L = lockFor(v), w = Math.max(-L, Math.min(L, -(v > 3 ? pathSteer(sm.frame, q, v) : 0) * STEER_RATIO));
+      out.push([+((ms - t0) / 1000).toFixed(1), +(w * 180 / Math.PI).toFixed(1), Math.round(v * 3.6), Math.round(((q.s % sm.frame.L) + sm.frame.L) % sm.frame.L)]);
+    }
+    return JSON.stringify(out);
+  },
+  // (v0.52) the focused car's contact shadow: its texture (per era), its plane's height and the road's under the car's
+  // middle and its four tyres (a ray down through the world's meshes) – is it on the road or under it
+  contactShadow() {
+    const c = cars.get(camNum()); if (!c) return "no car"; c.model.updateWorldMatrix(true, true);
+    const sh = c.model.getObjectByName("contactShadow"), p = new THREE.Vector3(), ray = new THREE.Raycaster(), hits = [];
+    const u = c.model.userData.profile;
+    for (const [x, z] of [[0, 0], [u.W / 2 - u.FW / 2, u.FZ], [-(u.W / 2 - u.FW / 2), u.FZ], [u.W / 2 - u.RW / 2, u.RZ], [-(u.W / 2 - u.RW / 2), u.RZ]]) {
+      p.set(x, 0.03, z).applyMatrix4(c.model.matrixWorld); ray.set(new THREE.Vector3(p.x, p.y + 5, p.z), new THREE.Vector3(0, -1, 0));
+      let h = null; world.group.traverseVisible((o) => { if (!o.isMesh || o.isInstancedMesh) return; try { for (const q of ray.intersectObject(o, false)) if (!h || q.distance < h.distance) h = q; } catch {} });
+      hits.push(h ? +(p.y - h.point.y).toFixed(3) : null);
+    }
+    return JSON.stringify({ tex: sh?.material.map?.image ? [sh.material.map.image.width, sh.material.map.image.height] : null, planeOverRoad: hits });
+  },
+  // (v0.52) the eye camera's turn with the driver's head into bends: on / off (kept in this computer's settings); no
+  // argument: the state and the head's turn now (deg)
+  headTurn(on) { if (on != null) { headTurn = !!on; try { localStorage.setItem("f1kr:eyeHead", headTurn ? "on" : "off"); } catch {} } const c = cars.get(camNum()); return JSON.stringify({ on: headTurn, deg: c ? +((c.headYaw || 0) * 180 / Math.PI).toFixed(1) : null }); },
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones
   // development: hold the focused car's wings at a fraction (0 shut … 1 open; null: back to the estimate / data)

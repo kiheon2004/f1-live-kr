@@ -116,6 +116,20 @@ export function seenShare(car, eye, mesh, out = []) {
 }
 
 // The pass. update() once a frame before the main render; three is the module (tests pass a mock renderer).
+// v0.52: how much of a quad (corners projected, NDC x / y) lies inside the picture (−1..1 both ways): its area clipped
+// to the frame over its whole area (Sutherland–Hodgman against the four edges); 1 for a quad of no area
+export function inPicture(q) {
+  const area = (P) => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], r = P[(i + 1) % P.length]; a += p[0] * r[1] - r[0] * p[1]; } return Math.abs(a) / 2; };
+  let P = q.map((c) => [c.x, c.y]); const all = area(P); if (!(all > 1e-12)) return 1;
+  for (const [ax, sg] of [[0, 1], [0, -1], [1, 1], [1, -1]]) {
+    const out = [], inside = (p) => sg * p[ax] <= 1;
+    for (let i = 0; i < P.length; i++) { const p = P[i], r = P[(i + 1) % P.length], ip = inside(p), ir = inside(r);
+      if (ip) out.push(p);
+      if (ip !== ir) { const t = (sg - p[ax]) / (r[ax] - p[ax]); out.push([p[0] + (r[0] - p[0]) * t, p[1] + (r[1] - p[1]) * t]); } }
+    P = out; if (!P.length) return 0;
+  }
+  return area(P) / all;
+}
 export function createMirrorPass(three = THREE) {
   const cams = [new three.PerspectiveCamera(), new three.PerspectiveCamera()];
   for (const c of cams) c.matrixAutoUpdate = true;
@@ -183,7 +197,13 @@ export function createMirrorPass(three = THREE) {
       // shows of it is a sliver, measured as nothing in the app's frames)
       if (!(st.seen[i] >= 0.5) || !frustum.intersectsSphere(sphere)) { st.stats.skipped++; continue; }
       shown++;
-      if (screenArea(renderer, camera, W, s.hw, s.hh) >= MIN_PX) large++;
+      // (v0.52: a glass mostly out of the picture (under 60 % of it inside the frame) counts as a small one – kept, or the plain glass when no glass in view is
+      // whole: the eye camera's head turned into a bend brings the inner mirror in at the frame's side, and its live
+      // picture took the eye camera at Monaco from ~87 to ~68 fps (the pass ~6 ms a render) for a mirror half out of
+      // the picture – measured, reports v052. screenArea leaves the glass' corners projected)
+      const area = screenArea(renderer, camera, W, s.hw, s.hh);
+      const edge = area !== Infinity && inPicture(corners) < 0.6;
+      if (area >= MIN_PX && !edge) large++;
       else if (st.drawn[i]) { st.stats.skipped++; continue; }   // (small: this view's picture kept on the sliver)
       const due = !st.drawn[i] || st.frame - st.last[i] >= M.every;
       if (!due) continue;

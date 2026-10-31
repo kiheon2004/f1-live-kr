@@ -325,7 +325,14 @@ function vegGeometries() {
   const lobe = (seed) => noisy(new THREE.IcosahedronGeometry(1, 0), 0.3, seed);   // 20 faces each: thousands of trees stay cheap
   const trunk = new THREE.CylinderGeometry(0.22, 0.38, 4, 5, 1, true); trunk.translate(0, 2, 0);
   const broad = merge([[lobe(1), 0, 5.4, 0, 2.6, 2.2, 2.6], [lobe(2), 1.5, 4.6, 0.6, 1.8], [lobe(3), -1.3, 4.8, -0.7, 1.9], [lobe(4), 0.2, 6.6, -0.3, 1.6]]);
-  const conifer = merge([[new THREE.ConeGeometry(2.6, 4.2, 7), 0, 4.2, 0], [new THREE.ConeGeometry(2.0, 3.6, 7), 0, 6.3, 0], [new THREE.ConeGeometry(1.3, 3.0, 6), 0, 8.2, 0]]);
+  // (v0.52, request §11 – angular vegetation: the tiers' rims were regular 7-gons on one level, the crown read as three
+  // stacked cones; now 9 sides, each rim corner pulled in or out and dropped by its own amount – a ragged, drooping
+  // edge –, and the normals softened further below. +18 triangles a conifer (63 → 81; the caps kept: seen from below)
+  const tier = (r, h, n, seed) => { const g = new THREE.ConeGeometry(r, h, n), p = g.attributes.position, rr = rand(seed), k = new Map();
+    for (let i = 0; i < p.count; i++) { const y = p.getY(i); if (y > -h / 2 + 1e-4) continue; const key = p.getX(i).toFixed(3) + "," + p.getZ(i).toFixed(3);
+      if (!k.has(key)) k.set(key, [0.8 + rr() * 0.4, -rr() * 0.22 * h]); const [f, dy] = k.get(key); p.setXYZ(i, p.getX(i) * f, y + dy, p.getZ(i) * f); }
+    g.computeVertexNormals(); return g; };
+  const conifer = merge([[tier(2.6, 4.2, 9, 21), 0, 4.2, 0], [tier(2.0, 3.6, 9, 22), 0, 6.3, 0], [tier(1.3, 3.0, 7, 23), 0, 8.2, 0]]);
   const conTrunk = new THREE.CylinderGeometry(0.18, 0.3, 3, 5); conTrunk.translate(0, 1.5, 0);
   // palm: a gently leaning, ringed trunk and 9 fronds arching down from the top
   const palmTrunk = new THREE.CylinderGeometry(0.17, 0.26, 9, 5, 4, true);
@@ -353,7 +360,7 @@ function vegGeometries() {
     }
     g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   };
-  soften(broad, 5.4, 3.4); soften(conifer, 5.6, 4.6, 0.6); soften(shrub, 0.7, 1.1); soften(palmTop, 9, 2, 0.4);
+  soften(broad, 5.4, 3.4); soften(conifer, 5.6, 4.6, 0.78); soften(shrub, 0.7, 1.1); soften(palmTop, 9, 2, 0.4);
   const rock = noisy(new THREE.IcosahedronGeometry(1, 1), 0.55, 11); rock.scale(1, 0.62, 0.9); rock.translate(0, 0.25, 0);
   VEG = { trunk, broad, conifer, conTrunk, palmTrunk, palmTop, shrub, rock };
   return VEG;
