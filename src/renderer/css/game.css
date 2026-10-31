@@ -498,5 +498,6 @@ body.game-on { grid-template-rows: auto 1fr; }
     .gc-ctl { gap: var(--s-3); }
     .gc-goal { width: 92px; }
   }
+  @media (max-width: 1400px) { .gc-h { overflow: hidden; } .gc-name small, .gc-lapt small { display: none; } .gc-h .gc-cam { padding: 0 var(--s-3); flex: none; } }
   @media (max-height: 640px) { .gr-view .note3d, .gr-view #notes3d .note3d-line:not(.cam) { display: none; } }   /* (the source notes give way to the camera tools in a short view) */
 }
