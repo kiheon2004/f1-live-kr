@@ -489,7 +489,19 @@ FACADES.yasPaddock = { width: () => 7.5, draw(g, w, h, lit) {
   if (!lit) { g.fillStyle = "#ddd2bd"; g.fillRect(0, yPx(h, 12.6), w * 0.08, yPx(h, 6.6) - yPx(h, 12.6)); g.fillRect(w * 0.92, yPx(h, 12.6), w * 0.08, yPx(h, 6.6) - yPx(h, 12.6)); }
 } };
 // height of the garage band (openings, their frames) in each pit-side facade texture
-const GARAGE_TOP = { pitGlass: 4.8, pitStand: 5.6, imolaBox: 4.6 };
+// Monaco (v0.53): the teams' temporary modules – a low garage storey, the glazed first floor (the teams' pit wall room,
+// built as geometry: pitBuilding's upperRoom) and a glazed second floor behind a balcony under a white canopy band (CC0
+// photos 2022-05-23, Commons "Circuit de Monaco - Pit Lane"; heights estimated from them – docs/research/monaco_pitwall.md).
+// The texture's bands where no room is built in front of it (past the garages' run): the garage storey's cladding, the
+// first floor's glazing, the second floor's glazing, the band under the roof.
+FACADES.monacoPit = { width: (p) => p.garagePitch || 5.5, draw(g, w, h, lit) {
+  g.fillStyle = lit ? "#000" : "#e6e8ea"; g.fillRect(0, 0, w, h);
+  if (!lit) { g.fillStyle = "#2f3438"; g.fillRect(0, yPx(h, 4.0), w, yPx(h, 0) - yPx(h, 4.0)); g.fillStyle = "#f2f3f3"; g.fillRect(0, yPx(h, 4.3), w, yPx(h, 4.0) - yPx(h, 4.3)); }
+  glassBand(g, w, h, 4.3, 7.0, ["#3d5966", "#22343e"], w / 4, 0, lit);
+  if (!lit) { g.fillStyle = "#f2f3f3"; g.fillRect(0, yPx(h, 7.3), w, yPx(h, 7.0) - yPx(h, 7.3)); }
+  glassBand(g, w, h, 7.3, 10.0, ["#4f6b79", "#253743"], w / 4, 0, lit);
+} };
+const GARAGE_TOP = { pitGlass: 4.8, pitStand: 5.6, imolaBox: 4.6, monacoPit: 4.0 };
 // a garage's pillars (each 0.5 m along the front, between two openings) and the least opening a bay is built with
 const FW = 0.5, MIN_OPEN = 0.5;
 function facadeTex(name, p, lit) {
@@ -503,6 +515,11 @@ const roofTex = () => canvasTex("roofSeams", 64, 64, (g, w, h) => { g.fillStyle 
 const checkerTex = () => canvasTex("darkChecker", 128, 128, (g, w, h) => {
   g.fillStyle = "#2b2f33"; g.fillRect(0, 0, w, h); g.fillStyle = "#3c4247";
   for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if ((i + j) % 2) g.fillRect((i * w) / 4, (j * h) / 4, w / 4, h / 4);
+});
+// a slab's edge in black and white squares, two rows (Monaco's modules – photos): one repeat 0.6 m along
+const checkerBandTex = () => canvasTex("checkerBand", 64, 16, (g, w, h) => {
+  g.fillStyle = "#f4f4f2"; g.fillRect(0, 0, w, h); g.fillStyle = "#16181a";
+  for (let j = 0; j < 2; j++) for (let i = 0; i < 8; i++) if ((i + j) % 2) g.fillRect((i * w) / 8, (j * h) / 2, w / 8, h / 2);
 });
 const panelTex = () => canvasTex("greyPanels", 128, 128, (g, w, h) => {
   g.fillStyle = "#d4d7da"; g.fillRect(0, 0, w, h); g.fillStyle = "rgba(60,64,68,0.35)";
@@ -651,6 +668,14 @@ function pitBuilding(ctx, p) {
   const frontV = (uu) => { const [a, b, f] = stationAt(uu); return sideV(a, 1) + (sideV(b, 1) - sideV(a, 1)) * f; };
   const floorAt = (uu) => { const g = baseAt(uu); if (!ctx.surfaceAt) return g; const [x, z] = P(uu, frontV(uu) + vTrack * 1.5), [x1, z1] = P(uu, frontV(uu) + vTrack * 2.5); const sy = ctx.surfaceAt(x, z, [x1 - x, z1 - z]); return Number.isFinite(sy) ? Math.max(g, sy) : g; };
   const inGarages = (uu) => G > 0 && uu >= gStart - 1e-6 && uu <= gEnd + 1e-6;
+  // A first-floor room over the garages, glazed to the pit lane (p.upperRoom – Monaco: the teams' pit wall is "built inside,
+  // directly above the garage", Red Bull 2021; the first floor "shared with the pit wall gantry", Williams 2023): its floor
+  // slab on the garages' front (the top of their openings, G) and cantilevered `front` m out over the lane, its glazing at
+  // that edge, its back wall `deep` m behind the garages' front, its ceiling the second floor's slab, which runs on out to
+  // a balcony with a railing. Heights from the garages' floor (floorAt – the same reference as the openings, the facade
+  // over them and the teams' stands: wallAt). Sizes: estimates from photos (docs/research/monaco_pitwall.md).
+  const UR = p.upperRoom && G > 0 ? { ...p.upperRoom } : null;
+  if (UR) { UR.floor = G + UR.slab; UR.ceil = UR.floor + UR.h; UR.top = UR.ceil + UR.slab; }
   // walls along both long sides, station to station
   for (let i = 0; i + 1 < stations.length; i++) {
     const a = stations[i], b = stations[i + 1], ga = baseAt(a.u), gb = baseAt(b.u);
@@ -660,8 +685,10 @@ function pitBuilding(ctx, p) {
       if (side > 0 && !block && inGarages(a.u) && inGarages(b.u)) {
         // over the garages: the facade from the top of their openings (its texture's bands kept at their heights over
         // the garage floor); under the floor, the plinth
-        const fa = floorAt(a.u), fb = floorAt(b.u);
-        F.poly(key, [[x0, fa + G, z0], [x1, fb + G, z1], [x1, yb, z1], [x0, ya, z0]], [[u0, G / H], [u1, G / H], [u1, (yb - fb) / H], [u0, (ya - fa) / H]], outV(side));
+        // (a first-floor room built over them – Monaco, upperRoom below: the facade from its ceiling's slab up; the room's
+        // own back wall, floor and glazing stand under it)
+        const fa = floorAt(a.u), fb = floorAt(b.u), y0 = UR ? UR.top : G;
+        F.poly(key, [[x0, fa + y0, z0], [x1, fb + y0, z1], [x1, yb, z1], [x0, ya, z0]], [[u0, y0 / H], [u1, y0 / H], [u1, (yb - fb) / H], [u0, (ya - fa) / H]], outV(side));
         if (fa > ga + 0.02 || fb > gb + 0.02) F.poly("panels", [[x0, ga, z0], [x1, gb, z1], [x1, fb, z1], [x0, fa, z0]], null, outV(side));
         continue;
       }
@@ -673,6 +700,38 @@ function pitBuilding(ctx, p) {
         continue;
       }
       F.poly(key, [[x0, ga, z0], [x1, gb, z1], [x1, yb, z1], [x0, ya, z0]], [[u0, 0], [u1, 0], [u1, (yb - gb) / H], [u0, (ya - ga) / H]], outV(side));
+    }
+  }
+  // the first-floor room over the garages (UR, above), along the garages' run: at the stations (the front is straight
+  // between them – frontV – so its edges follow the garages' front and the facade over it exactly) and the run's ends
+  if (UR) {
+    const us = [gStart, ...stations.map((st) => st.u).filter((uu) => uu > gStart + 0.05 && uu < gEnd - 0.05), gEnd];
+    const Q = (uu, d, y) => { const [x, z] = P(uu, frontV(uu) + vTrack * d); return [x, floorAt(uu) + y, z]; };
+    const o = outV(1), up = [0, 1, 0], dn = [0, -1, 0], f = UR.front, bk = -UR.deep, bal = UR.balcony;
+    for (let i = 0; i + 1 < us.length; i++) {
+      const a = us[i], b = us[i + 1], L = b - a, q = (d0, d1, y) => [Q(a, d0, y), Q(b, d0, y), Q(b, d1, y), Q(a, d1, y)];
+      F.poly("slab", q(f, 0, G), null, dn);                                                        // the floor slab's soffit over the lane
+      F.poly("checkerBand", [Q(a, f, G), Q(b, f, G), Q(b, f, UR.floor), Q(a, f, UR.floor)], [[a / 0.6, 0], [b / 0.6, 0], [b / 0.6, 1], [a / 0.6, 1]], o);   // its edge (the checkered band – photos)
+      F.poly("garFloor", q(bk, f, UR.floor + 0.01), [[0, 0], [L / 3, 0], [L / 3, (f - bk) / 3], [0, (f - bk) / 3]], up);   // the room's floor
+      F.poly("roomGlass", [Q(a, f, UR.floor), Q(b, f, UR.floor), Q(b, f, UR.ceil), Q(a, f, UR.ceil)], null, o);     // its glazing
+      F.poly("garPanel", [Q(a, bk, UR.floor), Q(b, bk, UR.floor), Q(b, bk, UR.ceil), Q(a, bk, UR.ceil)], [[a / 1.2, 0], [b / 1.2, 0], [b / 1.2, 1], [a / 1.2, 1]], o);   // its back wall
+      F.poly("garCeil", q(f, bk, UR.ceil), null, dn);                                              // its ceiling
+      // the second floor's slab: over the room and on out to the balcony's edge – its top, soffit beyond the glass, edge, railing
+      F.poly("slab", q(0, bal.depth, UR.top), null, up);
+      F.poly("slab", q(bal.depth, f, UR.ceil), null, dn);
+      F.poly("checkerBand", [Q(a, bal.depth, UR.ceil), Q(b, bal.depth, UR.ceil), Q(b, bal.depth, UR.top), Q(a, bal.depth, UR.top)], [[a / 0.6, 0], [b / 0.6, 0], [b / 0.6, 1], [a / 0.6, 1]], o);
+      F.poly("rail", [Q(a, bal.depth, UR.top), Q(b, bal.depth, UR.top), Q(b, bal.depth, UR.top + bal.rail), Q(a, bal.depth, UR.top + bal.rail)], [[0, 0], [1, 0], [1, 1], [0, 1]], o);
+    }
+    // the glazing's mullions, one every quarter of a garage's pitch (on its outer face)
+    const mull = (gEnd - gStart) / Math.max(1, Math.round((gEnd - gStart) / (gp / 4)));
+    for (let uu = gStart; uu <= gEnd + 1e-6; uu += mull) { const a = Math.max(gStart, uu - 0.04), b = Math.min(gEnd, uu + 0.04); F.poly("garFrame", [Q(a, f + 0.02, UR.floor), Q(b, f + 0.02, UR.floor), Q(b, f + 0.02, UR.ceil), Q(a, f + 0.02, UR.ceil)], null, o); }
+    // the run's ends: the room closed (glass), the slabs' and the balcony's ends
+    for (const [uu, dir] of [[gStart, -1], [gEnd, 1]]) {
+      const n = [u[0] * dir, 0, u[1] * dir];
+      F.poly("roomGlass", [Q(uu, bk, UR.floor), Q(uu, f, UR.floor), Q(uu, f, UR.ceil), Q(uu, bk, UR.ceil)], null, n);
+      F.poly("slab", [Q(uu, 0, G), Q(uu, f, G), Q(uu, f, UR.floor), Q(uu, 0, UR.floor)], null, n);
+      F.poly("slab", [Q(uu, 0, UR.ceil), Q(uu, bal.depth, UR.ceil), Q(uu, bal.depth, UR.top), Q(uu, 0, UR.top)], null, n);
+      F.poly("rail", [Q(uu, 0, UR.top), Q(uu, bal.depth, UR.top), Q(uu, bal.depth, UR.top + bal.rail), Q(uu, 0, UR.top + bal.rail)], [[0, 0], [1, 0], [1, 1], [0, 1]], n);
     }
   }
   // end walls
@@ -967,11 +1026,16 @@ function pitBuilding(ctx, p) {
         const f = Math.max(0, Math.min(1, (uu - W[i].u) / (W[i + 1].u - W[i].u)));
         return (vS[i] + (vS[i + 1] - vS[i]) * f - frontV(uu)) * vTrack;
       };
-      wallAt = pw.stands === "upper" ? (uu) => {
-        // (the teams' stands upstairs: a gantry on the first floor over the garages, out over the boxes, its people facing
-        // the lane – Monaco)
-        const [x, z] = P(uu, frontV(uu) + vTrack * 0.9);
-        return { p: [x, floorAt(uu) + 3.4, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]], upper: true };
+      wallAt = pw.stands === "upper" ? (uu, half = 0) => {
+        // (the teams' stands upstairs – Monaco: in the first-floor room over the garages (UR), on its floor, against its
+        // glazing, the people facing the lane. v0.36–v0.52 put a free deck 3.4 m up, 0.05–1.65 m out from the garages'
+        // front with nothing under or behind it: in front of the openings' tops, under the building's first floor (G
+        // 4.8 m) – floating, the user's report. Without a room (no upperRoom), none: there is nothing to stand on.)
+        if (!UR) return null;
+        // (with its half length: inside the room end to end)
+        const q = gEnd - gStart > 2 * half + 0.2 ? Math.max(gStart + half + 0.1, Math.min(gEnd - half - 0.1, uu)) : (gStart + gEnd) / 2, [x, z] = P(q, frontV(q) + vTrack * (UR.front - 0.05));
+        return { p: [x, floorAt(q) + UR.floor, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]], upper: true,
+          room: { glass: 0.05, back: UR.front + UR.deep, ceil: UR.h, balcony: UR.balcony.depth - UR.front + 0.05, balconyY: UR.top - UR.floor, rail: UR.balcony.rail } };
       } : (uu, half = 0) => {
         // (on the walkway, the pit lane's side of the wall – a mapped one too: v0.45 put it on that wall's track side,
         // between it and the tarmac, where 2.4 m were left, else none)
@@ -1115,7 +1179,10 @@ function pitBuilding(ctx, p) {
   const project = (x, z) => { const uu = (x - ax.c[0]) * u[0] + (z - ax.c[1]) * u[1], vv = (x - ax.c[0]) * v[0] + (z - ax.c[1]) * v[1]; return { u: uu, off: (vv - frontV(Math.max(gStart, Math.min(gEnd, uu)))) * vTrack }; };
   // (for the pit lane across – map3d.js pitModel: the wall's face to the lane, metres out from the garages' front, and
   // the garages' floor height, both along the garages)
-  const garages = slots.length ? { slots, pitch: gp, top: G, depth, gStart, gEnd, project, interior, wallAt, wallFace, wallOut, wallFrom, openRail, railU, floorAt, plan: plan ? { ...p.bays.meta, ...planInfo } : null } : null;
+  // (the first-floor room, for the checks: its floor, ceiling, glazing and back wall at u – heights over the ground's 0,
+  // metres out from the garages' front)
+  const upperRoom = UR ? (uu) => ({ floor: floorAt(uu) + UR.floor, under: floorAt(uu) + G, ceil: floorAt(uu) + UR.ceil, glass: UR.front, back: -UR.deep, balcony: UR.balcony.depth, inRun: inGarages(uu) }) : null;
+  const garages = slots.length ? { slots, pitch: gp, top: G, depth, upperRoom, gStart, gEnd, project, interior, wallAt, wallFace, wallOut, wallFrom, openRail, railU, floorAt, plan: plan ? { ...p.bays.meta, ...planInfo } : null } : null;
   return { meshes, footprint, occupancy, garages, top: Math.max(...stations.map((st) => roofAt(st.u))) + (bl ? bl.tip - Math.max(...prof.map((q) => q[1])) : 0),
     info: { length: +(uMax - uMin).toFixed(1), width: +Math.max(...stations.map((s2) => s2.v1 - s2.v0)).toFixed(1), garagePitch: +pitch.toFixed(2),
       profile: prof.map(([a, b2]) => [+(a - uMin).toFixed(1), +b2.toFixed(1)]), bladeRoot: rootH && +rootH.toFixed(1),
@@ -1140,6 +1207,7 @@ function facilityMaterial(key, p) {
     case "bladeTop": return std({ color: "#d9dcdf", roughness: 0.45, metalness: 0.3 });
     case "bladeSide": return std({ color: "#c9cdd1", map: panelTex(), roughness: 0.5, metalness: 0.2 });
     case "checker": return std({ color: 0xffffff, map: checkerTex(), roughness: 0.6 });
+    case "checkerBand": return std({ color: 0xffffff, map: checkerBandTex(), roughness: 0.6 });
     case "slab": return std({ color: "#e4e5e3", roughness: 0.8 });
     // the garages: dark frames, a light epoxy floor, white walls and ceiling, light strips (lit day and night)
     case "pitWall": return std({ color: "#d9d9d4", roughness: 0.85 });
@@ -1161,6 +1229,8 @@ function facilityMaterial(key, p) {
     case "garBeam": return std({ color: "#8f959b", roughness: 0.5, metalness: 0.5 });
     case "garLight": return std({ color: "#ffffff", emissive: "#fff6e8", emissiveIntensity: 1.0, roughness: 0.4 });
     case "rail": return std({ color: "#c7d3d8", roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.55 });
+    // (a room's glazing seen through: the people and screens behind it – Monaco's first floor, upperRoom)
+    case "roomGlass": return std({ color: "#a9c4cf", roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
     case "column": return std({ color: "#eceeee", roughness: 0.5, metalness: 0.2 });
     // (no environment map in the scene: a strongly metallic surface would show black – brushed, light silver)
     case "pod": return std({ color: "#d7dce0", roughness: 0.35, metalness: 0.3 });
@@ -1400,7 +1470,7 @@ export const PLAIN_PIT_WALL = { height: 1.1, thick: 0.5, fence: 3.0, walk: 1.5, 
 // plus a fast lane – estimate), garages about half the usual width (Williams: "roughly half the width" – 5.5 m, an
 // estimate), and the teams' stands on the first floor over their garages (Horner, Autosport 2016:
 // "the pitwall is upstairs"). Widths and heights are estimates; no FIA drawing gives them.
-export const PIT_LAYOUTS = { 22: { side: "right", front: 8, depth: 14, keepOff: 2, height: 12, pitch: 5.5, pitWall: { height: 1.2, thick: 0.6, fence: 2.6, walk: 0, deck: 0, at: 11, stands: "upper" },
+export const PIT_LAYOUTS = { 22: { side: "right", front: 8, depth: 14, keepOff: 2, height: 11, pitch: 5.5, pitWall: { height: 1.2, thick: 0.6, fence: 2.6, walk: 0, deck: 0, at: 11, stands: "upper" },
   src: "FIA Monaco GP pit lane drawings 2025 V2 / 2026 V1; Williams 2023-05-23; Autosport 2016-05-29 – sizes estimated" } };
 // The pit building's height where the map gives none (or only guessed one) – per venue, from docs/research/pitbuildings.md
 // (v0.36): storeys as the sources say, the height published (est: false) or the storeys times a typical storey
@@ -1427,7 +1497,16 @@ export const PIT_HEIGHTS = {
 // band – Spielberg's – and left out: in the app it read as one dull slab over the first floor's glass ribbons.) Terrace ~10 m up, canopies to ~15–16 m (L–M). The
 // map's 15.1 m for the building (Overture, no OSM height) reads as the building with its canopies – so the walls stop
 // at the terrace (heightOverMap) and the canopies stand on it. Not the 2027 rebuild (an extra floor from Nov 2026).
+// Monaco (v0.53, docs/research/monaco_pitwall.md): the teams' temporary modules as the photos show them (CC0, Commons,
+// 2022-05-23 – none found for 2025/2026; Williams 2023 and Red Bull 2021 describe the same three floors): a garage storey
+// ~4 m, the first floor glazed to the lane and standing ~1 m out over it on its slab (its soffit and checkered edge seen
+// from the lane), the teams' pit wall in it ("built inside, directly above the garage" – Red Bull; "the first floor … is
+// also shared with the pit wall gantry" – Williams), a balcony along the second floor ~2 m out with a railing (the team's
+// banner on it), the roof's white band over it. Every size an estimate from the photos (people, forklifts – M).
+const MONACO_ROOM = { slab: 0.3, h: 2.7, front: 1.0, deep: 3.0, balcony: { depth: 2.0, rail: 1.1 } };
 export const PIT_LOOKS = {
+  22: { facade: { pit: "monacoPit", paddock: "paddockPanels" }, upperRoom: MONACO_ROOM, overhang: { pit: 2.2, paddock: 0.5, end: 0.5 },
+    src: "Monaco: garage storey, glazed first floor (the teams' pit wall), balcony, roof band – CC0 photos 2022; Red Bull 2021, Williams 2023 – sizes estimated" },
   39: { heightOverMap: true, roofRail: 1.1, tents: { spacing: 11.5, peak: 3.8, lift: 1.4, cover: 0.86 },
     src: "Monza: 2 storeys + roof terrace (Il Giorno 2026-02-09), GP-weekend canopies on it (Commons photos) – heights estimated" },
 };
