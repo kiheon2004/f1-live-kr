@@ -511,7 +511,9 @@ function pitSurfaceY(x, z, y, floor, inRun) {
 // garage's floor, facing the pit lane) – v0.48 pushed it 2.5 m sideways into whatever garage it stood in front of, turned
 // along the lane, through pillars, benches and the engineers' desks. No work space known: the inner lane where it stands.
 function garageDraw(c, r, v, G) {
-  const z = r.spot, at = r.at, near = r.input.boxU != null && Math.abs(r.u - r.input.boxU) <= (r.input.boxTol ?? PIT.atBox);
+  // (at its box: this visit's stand there – v0.53; the place against the box's tolerance alone flicked between the box
+  // and the fast lane, 5.8 m, as the feed's frozen position wobbled at its edge – Hungary 2025, car 87 retired in its box)
+  const z = r.spot, at = r.at, near = !!r.input.visit?.box || (r.input.boxU != null && Math.abs(r.u - r.input.boxU) <= (r.input.boxTol ?? PIT.atBox));
   const from = { u: r.u, off: near && at.ok ? at.boxC : at.fastC }, [ax, az] = at.along, laneYaw = Math.atan2(ax, az);
   if (!z) { const d = (at.ok ? at.boxC : at.fastC) - r.off; v.x = r.x - at.inward[0] * d; v.z = r.z - at.inward[1] * d; v.y = v.y + (at.floor + 0.004 - v.y) * r.inRun; c.yaw = laneYaw; return; }
   const s = G.slots[z.slot], cs = z.carSpot, q = garagePath(r.state.w, from, { u: s.uc + z.w, off: -cs.d }, at.ok ? at.boxC : at.fastC);

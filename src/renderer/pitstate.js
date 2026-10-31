@@ -65,6 +65,9 @@ export function pitState(c, P = PIT) {
   if (c.retired) {
     ev.push("retired / stopped (timing)");
     if (standing) { ev.push("wheeled into the garage (estimate)"); return { state: "retired", lane: "garage", w: ss(0, P.garageIn, Math.min(c.retiredFor ?? Infinity, c.stillFor)), evidence: ev }; }
+    // (v0.53: moving, on this visit's own way – into its box and out – like any car: v0.52 put it straight in its box
+    // or the fast lane by the box's tolerance, a jump across)
+    if (c.visit?.ways && box) { const s = visitState(c, d, tol, standing, ev, P); s.state = "retired"; return s; }
     return { state: "retired", lane: box && Math.abs(d) <= tol ? "box" : "fast", w: 1, evidence: ev };
   }
   // v0.53: this pit visit's own stops (c.visit – visitPlan: where it stood in the inner lane, where at its box, from its
@@ -132,7 +135,9 @@ function visitState(c, d, tol, standing, ev, P) {
   if (c.penalty === "drive-through") return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
   // the way in: to where it will stand (the record), else the queue place
   const end = first ? Math.min(W.queueU, first.u) : W.queueU, from = end - inLenTo(W, end);
-  if (c.u < from || d > tol) return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
+  // (the record's stand ahead: on along the way to it, even where it stands past the box's tolerance on the way – a car
+  // creeping up to a stand at the tolerance's edge flicked to the fast lane and back, 6 m, Hungary 2025 car 87)
+  if (c.u < from || (!first && d > tol) || (first && c.u > first.u + 3)) return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
   if (first) { ev.push("its stop ahead (record)", `way in ${(end - from).toFixed(0)} m (estimate)`); const w = c.u >= end ? 1 : q5((c.u - from) / (end - from)); return { state: "to box", lane: "box", w, path: { kind: "in", from, to: end }, evidence: ev }; }
   // live: not known whether it stops – slowing under the limit on the way in (its slowest since the way began: never
   // back out once across, never across while at the limit)
