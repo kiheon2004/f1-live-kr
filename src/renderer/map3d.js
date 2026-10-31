@@ -20,7 +20,8 @@ import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./mars
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection, laneSectionAt } from "./pitlane.js";
 import { createPitTrace } from "./pitcheck.js";
-import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, garagePath, PIT } from "./pitstate.js";
+import { boxWays, inLenTo } from "./pitpath.js";
+import { pitState, pathW, visitStands, visitPlan, runBlend, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, garagePath, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
 import { circuitVerdict, pitsUpToWall } from "./pitwallcheck.js";
@@ -394,12 +395,16 @@ function pitFrame(src, t, lag, isRace) {
     // (standing and speed from its positions: in the box the telemetry's wheel speed jumps while the car is jacked up)
     const trk = src.tracks?.cars?.[num];
     const speed = trk ? posSpeed(trk, t) : (cars.get(num)?.speed ?? 0), stillFor = trk ? standingForPos(trk, t) : 0;
-    const ls = trk ? lastStandPos(trk, t) : null; let lastBox = null;
-    if (ls && tm?.box != null) { const q = [0, 0, 0]; if (src.tracks?.at?.(num, ls.t1, q)) { const pu = G.project(q[0] * DM - c0.x, -(q[1] * DM - c0.z)).u; if (Math.abs(pu - tm.box) <= Math.min(PIT.atBox, tolOf.get(team) ?? PIT.atBox)) lastBox = { endU: pu, ago: (t - ls.t1) / 1000, t0: ls.t0, t1: ls.t1 }; } }
+    // (v0.53: this visit's own stops – its stand at its box, a double stack's queue place – and the ways in and out at
+    // its box; the last box stop from this visit only, never a previous visit's)
+    const tol = Math.min(PIT.atBox, tolOf.get(team) ?? PIT.atBox), ways = tm?.box != null ? waysOf(G, m, tm.box) : null;
+    const visit = trk && ways ? pitVisitOf(src, S, num, trk, t, G, tm.box, tol, ways) : null;
+    let lastBox = null;
+    if (visit?.box && !visit.box.open && t >= visit.box.t1) lastBox = { endU: visit.box.u, ago: (t - visit.box.t1) / 1000, t0: visit.box.t0, t1: visit.box.t1 };
     let pitStart = null;
     if (ctx && carKind(S.hist, ctx, num, t).kind === "pit") pitStart = speed <= PIT.still ? "queue" : "go";
     const inRun = pr.off > -3 && pr.off < 40;
-    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), retiredFor: outFor(S.hist, num, t), teammateInBox: false, lastBox, boxTol: tolOf.get(team) } });
+    out.set(num, { num, team, x, z, u: inRun ? pr.u : null, off: pr.off, input: { u: inRun ? pr.u : null, gStart: G.gStart, gEnd: G.gEnd, inPit, onLane, speed, stillFor, boxU: tm?.box ?? null, boxFrom: tm ? (tm.link === "order" ? "order" : "stops") : null, penalty: pen.get(num) || null, timePen: timePen.get(num) || 0, pitStart, race: isRace, retired: S.hist.flagAt(num, "Retired", t) || S.hist.flagAt(num, "Stopped", t), retiredFor: outFor(S.hist, num, t), teammateInBox: false, lastBox, boxTol: tolOf.get(team), visit, t } });
   }
   for (const r of out.values()) r.state = pitState(r.input);
   // (a teammate in the box – or still pulling out of it – and this car standing or creeping up behind: a double stack)
@@ -410,12 +415,44 @@ function pitFrame(src, t, lag, isRace) {
     // inner lane where it stands, never pushed through a garage's front)
     if (r.state.lane === "garage") { r.spot = (pitTeams.zones || []).find((z) => z.kind === "car" && z.num === r.num) || null; r.state.evidence.push(r.spot ? `parked at its work space, bay ${r.spot.slot} (estimate)` : "no work space known: left in the inner lane"); }
     const at = m.at(r.u), want = laneOffsetOf(r.state, at, r.off, r.u, G.gStart, G.gEnd);
-    // the way across changing along the lane: the heading turns by it (pulling into / out of the box)
-    const ahead = laneOffsetOf(pitState({ ...r.input, u: r.u + 1 }), m.at(r.u + 1), r.off, r.u + 1, G.gStart, G.gEnd);
-    const inRun = Math.min(ss01((r.u - (G.gStart - PIT.ends)) / PIT.ends), ss01(((G.gEnd + PIT.ends) - r.u) / PIT.ends));
-    Object.assign(r, { at, want, turn: Math.atan2(ahead - want, 1), inRun });
+    // the way across changing along the lane: the heading turns by its slope (pulling into / out of the box) – the same
+    // way a metre either side (pathW: the state's own way, not a state worked out again elsewhere; the old states
+    // without one: as before)
+    const offAt = (u) => { const w = pathW(r.state.path, u); return laneOffsetOf(w == null ? pitState({ ...r.input, u }) : { lane: r.state.lane, w }, m.at(u), r.off, u, G.gStart, G.gEnd); };
+    const slope = r.state.lane === "garage" ? 0 : (offAt(r.u + 1) - offAt(r.u - 1)) / 2;
+    Object.assign(r, { at, want, turn: Math.atan(slope), inRun: runBlend(r.u, G.gStart, G.gEnd) });
   }
   return out;
+}
+// A team's ways in and out at its box (pitpath.js boxWays): the distance across there (this circuit's cross section: the
+// fast lane's centre to the box's), the room to the neighbouring boxes – per pit model and box allocation
+const waysMemo = { teams: null, G: null, map: new Map() };
+function waysOf(G, m, boxU) {
+  if (waysMemo.teams !== pitTeams.teams || waysMemo.G !== G) Object.assign(waysMemo, { teams: pitTeams.teams, G, map: new Map() });
+  const k = Math.round(boxU * 10); let w = waysMemo.map.get(k);
+  if (!w) { const cs = m.at(boxU), boxes = (pitTeams.teams || []).filter((q) => q.box != null).map((q) => q.box); w = boxWays(boxU, boxes, cs.ok ? cs.fastC - cs.boxC : 0); waysMemo.map.set(k, w); }
+  return w;
+}
+// This pit visit's stands (pitstate.js visitStands / visitPlan): a replay the record's whole visit (the InPit flag's, its
+// positions to 3 s past it), live only up to now – kept per visit (a live one again as its positions grow). A stand
+// counts only on the pit path (laneTestFor: not the grid or the track beside the lane) and in front of the garages.
+const visitMemo = new Map();
+function pitVisitOf(src, S, num, trk, t, G, boxU, tol, ways) {
+  const live = !!src.isLive, ch = S.hist.flags.get(num + ":InPit"), vs = pitVisits(ch, live ? t : Infinity);
+  const v = vs.find(([a, b]) => a - 15000 <= t && (b == null || b + 5000 >= t)) || null;
+  const tA = v ? v[0] - 5000 : t - 60000, tB = live ? t : v && v[1] != null ? v[1] + 3000 : t + 60000;
+  const key = `${v ? v[0] : Math.floor(t / 30000)}|${boxU.toFixed(1)}|${tol.toFixed(1)}|${live ? trk.n : ""}`;
+  let e = visitMemo.get(num);
+  if (!e || e.key !== key || e.trk !== trk) {
+    const c0 = world.center, lt = laneTestFor.test;
+    const uOf = (i) => { const x = trk.x[i] * DM - c0.x, z = -(trk.y[i] * DM - c0.z); if (!lt(x, z)) return null; const pr = G.project(x, z); return pr.off > -3 && pr.off < 40 && pr.u > G.gStart - PIT.ends && pr.u < G.gEnd + PIT.ends ? pr.u : null; };
+    const stands = visitStands(trk, tA, tB, uOf), plan = visitPlan(stands, boxU, tol);
+    e = { key, trk, stands, plan, live, tA }; if (visitMemo.size > 200) visitMemo.clear(); visitMemo.set(num, e);
+  }
+  // (live: its slowest since the way in began – a car slowing into its box goes across once, never back out)
+  let vMin = null;
+  if (live && !e.plan.box) { const end = e.plan.first ? Math.min(ways.queueU, e.plan.first.u) : ways.queueU, from = end - inLenTo(ways, end); vMin = posSpeed(trk, t); for (let i = trk.n - 1, k = 0; i > 0 && trk.t[i] >= e.tA && k < 80; i--, k++) { if (trk.t[i] > t) continue; const x = trk.x[i] * DM - world.center.x, z = -(trk.y[i] * DM - world.center.z), u = G.project(x, z).u; if (u < from) break; const dt = (trk.t[i] - trk.t[i - 1]) / 1000; if (dt > 0 && dt < 3) vMin = Math.min(vMin, Math.hypot(trk.x[i] - trk.x[i - 1], trk.y[i] - trk.y[i - 1]) * DM / dt); } }
+  return { ways, first: e.plan.first, box: e.plan.box, live, vMin, stands: e.stands.length };
 }
 // seconds since the car's Retired or Stopped flag was last set (up to t); null: neither set
 function outFor(hist, num, t) {
@@ -436,23 +473,38 @@ function nearestOnPath(x, z) {
   return best;
 }
 const ss01 = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
-// Draws car c (at v, heading c.yaw) as its pit state says: across the lane, on the lane's surface, turned along it
+// Draws car c (at v, heading c.yaw) as its pit state says: across the lane, on the lane's surface, turned along it.
+// v0.53: the heading is the lane's own – along it to the pit exit (garages.js: a pit building's `along` points there), turned
+// by the slope of the way across (pitFrame's turn) – in front of the garages always, eased to the car's own heading over the
+// run's ends. Not the measured pit path's direction: that path folds back on itself at six venues (pitlane.js
+// unfoldPath), and its tangent there turned the car round for a frame or two (Hungary 2025: cars 14, 81 and 22 by the
+// last boxes, 180°), nor only below 6 m/s or while turning (the lane's direction against the feed's line's).
 function pitDraw(c, r, v) {
   c.pit = r; if (r.u == null || r.want == null) return;
-  const G = pitTeams.G, s = r.at.slot, d = r.want - r.off;
+  const G = pitTeams.G, d = r.want - r.off;
   if (r.state.lane === "garage") { garageDraw(c, r, v, G); return; }
+  const [ax, az] = r.at.along, [ix, iz] = r.at.inward;
   // from the raw position (r.x, r.z: the feed's, where r.off was measured), moved across to where its state puts it
-  v.x = r.x - s.inward[0] * d; v.z = r.z - s.inward[1] * d;
-  // on the lane's surface in front of the garages, easing to the ground the entry / exit roads lie on
-  v.y = v.y + (r.at.floor + 0.004 - v.y) * r.inRun;
-  // standing, along the lane; moving across, turned by the slope of the way across
-  if (c.speed < 6 || r.turn) {
-    // (the way along: the measured pit path's – from the entry to the exit; the heading before a seek can be anything)
-    const ax = s.along[0], az = s.along[1], q = nearestOnPath(r.x, r.z), fwd = q && q.d < 25 ? (ax * q.tx + az * q.tz >= 0 ? 1 : -1) : Math.sin(c.yaw) * ax + Math.cos(c.yaw) * az >= 0 ? 1 : -1;
-    const ox = -s.inward[0], oz = -s.inward[1], k = Math.sin(r.turn * fwd), cs = Math.cos(r.turn);
-    const fx = ax * fwd * cs + ox * k, fz = az * fwd * cs + oz * k;
-    c.yaw = Math.atan2(fx, fz);
-  }
+  v.x = r.x - ix * d; v.z = r.z - iz * d;
+  v.y = pitSurfaceY(v.x, v.z, v.y, r.at.floor, r.inRun);
+  const k = Math.sin(r.turn), cs = Math.cos(r.turn), laneYaw = Math.atan2(ax * cs - ix * k, az * cs - iz * k);
+  c.yaw = r.inRun >= 1 ? laneYaw : wrap(c.yaw + wrap(laneYaw - c.yaw) * r.inRun);
+}
+// The height a pit car is drawn at: in front of the garages the lane's floor (the drawn tarmac: pitLaneMeshes, at the
+// garages' floor); over the run's ends what is drawn under it – the tarmac's ends, falling to the ground over 20 m, then
+// the ground (a ray straight down onto the tarmac mesh only – a few dozen triangles –, else the terrain's own height),
+// eased to the height the car had from its track (y) over the last quarter of the way to the feed's line. v0.52 eased the
+// floor to that height over the 40 m: past the tarmac the cars hung up to 0.63 m over the ground (Hungary 2025, the exit
+// road; a ray down, Map3D.pitPathScan).
+const surfRay = new THREE.Raycaster(), surfDown = new THREE.Vector3(0, -1, 0), surfFrom = new THREE.Vector3();
+function pitSurfaceY(x, z, y, floor, inRun) {
+  if (inRun >= 1) return floor + 0.004;
+  const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"), R = world?.real;
+  let s = null;
+  if (tm) { surfFrom.set(x, floor + 3, z); surfRay.set(surfFrom, surfDown); surfRay.far = 8; const h = surfRay.intersectObject(tm, false)[0]; if (h) s = h.point.y + 0.004; }
+  if (s == null && R?.groundAt) { const g = R.groundAt(x, z); if (Number.isFinite(g)) s = g + 0.02; }
+  if (s == null) return y + (floor + 0.004 - y) * inRun;
+  return y + (s - y) * Math.min(1, inRun * 4);
 }
 // v0.49: a car going into its garage (pitstate.js garagePath): along the inner lane to in front of its own work space,
 // turning to face out, then tail first straight in through the door to its car spot (garages.js garageZones: on the
@@ -460,9 +512,8 @@ function pitDraw(c, r, v) {
 // along the lane, through pillars, benches and the engineers' desks. No work space known: the inner lane where it stands.
 function garageDraw(c, r, v, G) {
   const z = r.spot, at = r.at, near = r.input.boxU != null && Math.abs(r.u - r.input.boxU) <= (r.input.boxTol ?? PIT.atBox);
-  const from = { u: r.u, off: near && at.ok ? at.boxC : at.fastC }, ax = at.slot.along[0], az = at.slot.along[1];
-  const q0 = nearestOnPath(r.x, r.z), fwd = q0 && q0.d < 25 ? (ax * q0.tx + az * q0.tz >= 0 ? 1 : -1) : 1, laneYaw = Math.atan2(ax * fwd, az * fwd);
-  if (!z) { const s0 = at.slot, d = (at.ok ? at.boxC : at.fastC) - r.off; v.x = r.x - s0.inward[0] * d; v.z = r.z - s0.inward[1] * d; v.y = v.y + (at.floor + 0.004 - v.y) * r.inRun; c.yaw = laneYaw; return; }
+  const from = { u: r.u, off: near && at.ok ? at.boxC : at.fastC }, [ax, az] = at.along, laneYaw = Math.atan2(ax, az);
+  if (!z) { const d = (at.ok ? at.boxC : at.fastC) - r.off; v.x = r.x - at.inward[0] * d; v.z = r.z - at.inward[1] * d; v.y = v.y + (at.floor + 0.004 - v.y) * r.inRun; c.yaw = laneYaw; return; }
   const s = G.slots[z.slot], cs = z.carSpot, q = garagePath(r.state.w, from, { u: s.uc + z.w, off: -cs.d }, at.ok ? at.boxC : at.fastC);
   v.x = s.front[0] + s.along[0] * (q.u - s.uc) - s.inward[0] * q.off; v.z = s.front[1] + s.along[1] * (q.u - s.uc) - s.inward[1] * q.off;
   // (the lane's floor, then the garage's – one level: facilities.js lays the garage floors at the lane's height)
@@ -565,8 +616,8 @@ function updateCrews(frame) {
     const at = m.at(tm.box), s = at.slot, c = ph.phase === "work" ? cars.get(ph.num) : null;
     const bx = s.front[0] + s.along[0] * (tm.box - s.uc) - s.inward[0] * at.boxC, bz = s.front[1] + s.along[1] * (tm.box - s.uc) - s.inward[1] * at.boxC;
     // (no car there: the box's frame faces the way the cars go – along the measured pit path)
-    const q = c ? null : nearestOnPath(bx, bz), rev = q && q.d < 25 && s.along[0] * q.tx + s.along[1] * q.tz < 0;
-    const yaw = c ? c.yaw : Math.atan2(rev ? -s.along[0] : s.along[0], rev ? -s.along[1] : s.along[1]);
+    // (facing the way the cars go: the building's `along`, + to the pit exit – not the measured path's tangent, which folds)
+    const yaw = c ? c.yaw : Math.atan2(s.along[0], s.along[1]);
     const where = c ? { x: c.pos.x, y: at.floor + 0.004, z: c.pos.z, yaw } : { x: bx, y: at.floor + 0.004, z: bz, yaw };
     // (the layouts are written with the garages on the car's left: mirrored otherwise)
     const left = Math.sign(Math.cos(yaw) * s.inward[0] - Math.sin(yaw) * s.inward[1]) || 1;
@@ -3911,15 +3962,19 @@ const gameKit = {
   carFor, paintLabel, scaleForView, applyLift, restoreCar, pitModelFor,
   pitG: () => pitTeams.G || null, pitTeams: () => pitTeams.teams || null, pitZones: () => pitTeams.zones || null,
   groundAt: (x, z) => { const R = world?.real; const g = R?.groundAt ? R.groundAt(x, z) : null; return Number.isFinite(g) ? g : groundY(x, z); },
-  // a point on the pit lane moved across into the box (k 0 → 1: the lane's line → the box's offset from the garages), on
-  // the lane's floor inside the garages' run – the pit building's own lane model (pitlane.js, as pitDraw does live)
-  pitAcross(x, z, k) {
+  // v0.53: the pit lane at a point of the engine's pit path – in the pit building's frame (garages.js project: u along
+  // the garages, + to the exit; off m out from their fronts), the lane across there (pitlane.js, the building's own lane
+  // model, as pitDraw has it in a replay): the fast lane's centre, the box's, the lane's directions, its floor, and how
+  // far into the garages' run (1 inside, 0 past the ends: the feed's line). cars3d.js draws the engine's state on it.
+  pitLane(x, z) {
     const G = pitTeams.G; if (!G || !world) return null;
     const pr = G.project(x, z); if (!(pr.off > -3 && pr.off < 40) || pr.u < G.gStart - PIT.ends || pr.u > G.gEnd + PIT.ends) return null;
-    const at = pitModelFor(G).at(pr.u), sl = at.slot, d = ((at.boxC ?? pr.off) - pr.off) * k;
-    const inRun = Math.min(ss01((pr.u - (G.gStart - PIT.ends)) / PIT.ends), ss01(((G.gEnd + PIT.ends) - pr.u) / PIT.ends));
-    return { x: x - sl.inward[0] * d, z: z - sl.inward[1] * d, y: at.floor + 0.004, inRun, turn: Math.atan2((at.boxC ?? pr.off) - pr.off, 12) };
+    const at = pitModelFor(G).at(pr.u);
+    return { u: pr.u, off: pr.off, fastC: at.fastC, boxC: at.ok ? at.boxC : at.fastC, along: at.along, inward: at.inward, floor: at.floor + 0.004, inRun: runBlend(pr.u, G.gStart, G.gEnd) };
   },
+  pitSurfaceY: (x, z, y, floor, inRun) => pitSurfaceY(x, z, y, floor, inRun),
+  // the cross section's distance from the fast lane to the box at a point (the ways' length – pitpath.js boxWays)
+  pitAcrossAt(x, z) { const L = gameKit.pitLane(x, z); return L ? L.fastC - L.boxC : null; },
 };
 function gameCars(dt) {
   const fr = updateGameCars(gameKit, game, dt);
@@ -3940,7 +3995,7 @@ gamePitCam = createPitCam(gameKit);
 let gamePitTrace = null;
 function gameTraceFrame(fr, dt) {
   const G = pitTeams.G; if (!G) return;
-  if (!gamePitTrace.trace) { const m = pitModelFor(G); gamePitTrace.trace = createPitTrace({ project: G.project, inner: (u) => m.at(Math.max(G.gStart, Math.min(G.gEnd, u))).inner ?? 0, boxes: (pitTeams.teams || []).filter((q) => q.box != null).map((q) => q.box) }); }
+  if (!gamePitTrace.trace) { const m = pitModelFor(G); gamePitTrace.trace = createPitTrace({ project: G.project, inner: (u) => m.at(Math.max(G.gStart, Math.min(G.gEnd, u))).inner ?? 0, boxes: (pitTeams.teams || []).filter((q) => q.box != null).map((q) => q.box), run: [G.gStart, G.gEnd] }); }
   const list = [];
   for (const [num, c] of cars) {
     const g = c.game; if (!c.has || !c.obj.visible || !g || g.where !== "pit") continue;
@@ -4551,7 +4606,8 @@ window.Map3D = {
     const S = startState(src, t1), wins = [];
     for (const [k, ch] of S.hist.flags) { if (!k.endsWith(":InPit")) continue; const num = k.split(":")[0]; if (nums && !nums.includes(num)) continue; for (const [a, b] of pitVisits(ch, t1)) if ((b ?? t1) >= t0 && a <= t1) wins.push([Math.max(t0, a - 3000), Math.min(t1, (b ?? t1) + 3000)]); }
     wins.sort((a, b) => a[0] - b[0]); const W = []; for (const w of wins) { const l = W[W.length - 1]; if (l && w[0] <= l[1] + 1000) l[1] = Math.max(l[1], w[1]); else W.push([...w]); }
-    const trace = createPitTrace({ project: G.project, inner: (u) => m.at(Math.max(G.gStart, Math.min(G.gEnd, u))).inner ?? 0, boxes: (pitTeams.teams || []).filter((q) => q.box != null).map((q) => q.box) });
+    const trace = createPitTrace({ project: G.project, inner: (u) => m.at(Math.max(G.gStart, Math.min(G.gEnd, u))).inner ?? 0, boxes: (pitTeams.teams || []).filter((q) => q.box != null).map((q) => q.box), run: [G.gStart, G.gEnd] });
+    const spinPrev = new Map(), spinStill = { max: 0, n: 0 }, D2R = 180 / Math.PI;
     const rayEvery = o.ray ?? 1, rc = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0), heights = {}, hWorst = [];
     let fakeT = t0, frames = 0, lastRay = -Infinity; const tA = performance.now();
     window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
@@ -4566,6 +4622,10 @@ window.Map3D = {
             const r = c.pit; if (!c.has || !c.obj.visible || !r || r.u == null || r.u < G.gStart - PIT.ends || r.u > G.gEnd + PIT.ends) continue;
             const P = c.obj.position;
             list.push({ num, x: P.x, z: P.z, yaw: c.model.rotation.y, speed: r.input.speed, state: r.state.state, team: r.team, boxU: r.input.boxU });
+            // (the wheels of a car standing in its box: turned how fast – the record's wheel speed jumps while it is jacked up)
+            const sw = c.spinW?.[0], ps = spinPrev.get(num);
+            if (sw != null && ps != null && ["in box", "stop-go", "waiting (double stack)"].includes(r.state.state) && r.input.stillFor > 0.5) { const rate = Math.abs(wrap(sw - ps)) / dt * D2R; if (rate > spinStill.max) Object.assign(spinStill, { max: +rate.toFixed(1), num, t: +((fakeT - st0) / 1000).toFixed(1) }); spinStill.n++; }
+            spinPrev.set(num, sw);
             if (ray && world.real) {
               rc.set(new THREE.Vector3(P.x, P.y + 2.5, P.z), down); rc.far = 6; rc.camera = camera;
               const h = rc.intersectObject(world.real.group, true).find((x) => x.object.visible !== false && !x.object.isSprite && !x.object.isPoints && !x.object.isLine);
@@ -4581,7 +4641,7 @@ window.Map3D = {
     } finally { window.F1KR = real; }
     const rep = trace.report();
     for (const H of Object.values(heights)) { H.max = +H.max.toFixed(3); H.min = +H.min.toFixed(3); }
-    return JSON.stringify({ frames, windows: W.length, ms: Math.round(performance.now() - tA), facility: G.facility, run: [Math.round(G.gStart), Math.round(G.gEnd)], ...rep, heights, heightWorst: hWorst.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap)).slice(0, 12) });
+    return JSON.stringify({ frames, windows: W.length, ms: Math.round(performance.now() - tA), facility: G.facility, run: [Math.round(G.gStart), Math.round(G.gEnd)], ...rep, wheelsStanding: spinStill, heights, heightWorst: hWorst.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap)).slice(0, 12) });
   },
   // development: the grandstands as built – each with the nearest corner (F1's corner numbers for this circuit and
   // season), which side of the track it is on (L/R in the race's direction), how far along from that corner (m), its

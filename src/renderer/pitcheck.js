@@ -10,12 +10,14 @@
 //                    the lanes (pitlane.js crossSection inner): before its stop (the way in) and after it (the way out) –
 //                    and how far past its stop place it still was in there
 // Pure: the caller hands each frame's cars; nothing here reads the scene.
-//   geo: { project(x, z) → { u, off }, inner(u) → the line between the lanes (m out), boxes: [u] (every team's box) }
+//   geo: { project(x, z) → { u, off }, inner(u) → the line between the lanes (m out), boxes: [u] (every team's box),
+//   run: [u0, u1] the garages' run }
 
 const D = 180 / Math.PI, wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export function createPitTrace(geo, o = {}) {
   const still = o.still ?? 0.4, slipMin = o.slipMin ?? 0.05;
+  const overlap = { frames: 0, pairs: new Map() };
   const cars = new Map(), stops = [], top = { lat: [], yaw: [], slip: [], curv: [], slide: [] };
   const keep = (arr, v, extra) => { arr.push([v, extra]); if (arr.length > 40) { arr.sort((a, b) => b[0] - a[0]); arr.length = 20; } };
   const close = (num, c) => {
@@ -28,10 +30,11 @@ export function createPitTrace(geo, o = {}) {
     // t: s (session clock), dt: s since the last frame; list: [{ num, x, z, yaw (scene yaw: atan2(dx, dz)), speed (m/s,
     // the data's / engine's), state (string), team, boxU (its box, garages' u; null unknown), inPit (bool) }]
     frame(t, dt, list) {
-      const here = new Set();
+      const here = new Set(), placed = [];
       for (const q of list) {
         here.add(q.num);
         const pr = geo.project(q.x, q.z), inner = geo.inner(pr.u);
+        placed.push([q, pr]);
         let c = cars.get(q.num);
         if (!c || t - c.t > 1.5 * dt + 0.5) { if (c) close(q.num, c); c = { t, u: pr.u, off: pr.off, x: q.x, z: q.z, yaw: q.yaw, standing: 0, visit: null }; cars.set(q.num, c); }
         if (!c.visit) c.visit = { t0: +t.toFixed(2), boxU: q.boxU == null ? null : +q.boxU.toFixed(1), team: q.team || null, states: [], stand: null, innerBefore: 0, innerAfter: 0, innerAfterS: 0, pastStand: 0, maxLat: 0, maxYaw: 0, maxSlip: 0, maxCurv: 0, maxSlide: 0 };
@@ -56,7 +59,8 @@ export function createPitTrace(geo, o = {}) {
             if (step > 0.2) keep(top.curv, curv, { num: q.num, t: +t.toFixed(2), u: +pr.u.toFixed(1), state: q.state });
           }
           // standing on the garages' side: its stop (the longest); moving there before / after it
-          const inIn = pr.off < inner;
+          // (in front of the garages only: past the run's ends there is no working lane – the entry / exit roads)
+          const inIn = pr.off < inner && (!geo.run || (pr.u >= geo.run[0] && pr.u <= geo.run[1]));
           if (!moving) { c.standing += dt; if (inIn && c.standing > 1 && (!v.stand || c.standing > v.stand.s)) v.stand = { u: +pr.u.toFixed(1), off: +pr.off.toFixed(2), s: +c.standing.toFixed(1), t: +t.toFixed(1) }; }
           else {
             c.standing = 0;
@@ -66,6 +70,11 @@ export function createPitTrace(geo, o = {}) {
         Object.assign(c, { t, u: pr.u, off: pr.off, x: q.x, z: q.z, yaw: q.yaw });
       }
       for (const [num, c] of cars) if (!here.has(num) && t - c.t > 0.5) { close(num, c); cars.delete(num); }
+      // two cars drawn on top of each other (a car ~5.6 m long, 2 m wide: closer than 5 m along and 1.9 m across)
+      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+        const [a, pa] = placed[i], [b, pb] = placed[j], du = Math.abs(pa.u - pb.u), dof = Math.abs(pa.off - pb.off);
+        if (du < 5 && dof < 1.9) { overlap.frames++; const k = a.num + "-" + b.num; if (!overlap.pairs.has(k)) overlap.pairs.set(k, { a: a.num, b: b.num, t: +t.toFixed(1), u: +pa.u.toFixed(1), du: +du.toFixed(2), doff: +dof.toFixed(2), states: [a.state, b.state] }); }
+      }
     },
     report() {
       for (const [num, c] of cars) close(num, c);
@@ -77,6 +86,7 @@ export function createPitTrace(geo, o = {}) {
         worst: { latStepM: worst("maxLat"), yawStepDeg: worst("maxYaw"), slipDeg: worst("maxSlip"), curv: worst("maxCurv"), slideMs: worst("maxSlide"),
           innerAfterM: worst("innerAfter"), innerAfterS: worst("innerAfterS"), pastStandM: worst("pastStand"), innerBeforeM: worst("innerBefore") },
         median: (() => { const m = (k) => { const a = withStop.map((s) => s[k]).sort((x, y) => x - y); return a.length ? a[a.length >> 1] : null; }; return { innerAfterM: m("innerAfter"), pastStandM: m("pastStand"), innerBeforeM: m("innerBefore") }; })(),
+        overlap: { frames: overlap.frames, pairs: [...overlap.pairs.values()].slice(0, 12) },
         top: { lat: sorted(top.lat), yaw: sorted(top.yaw), slip: sorted(top.slip), curv: sorted(top.curv), slide: sorted(top.slide) },
         list: stops,
       };

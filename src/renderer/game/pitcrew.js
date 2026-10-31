@@ -149,7 +149,9 @@ export function teamBox(K, A, tm, boxU) {
   if (P && boxU != null) { const pp = pitPointOf(P, boxU, world.center), pr = G.project(pp.x, pp.z); if (pr && Number.isFinite(pr.u)) { bu = pr.u; (K.boxDiag || (K.boxDiag = {}))[tm.team] = { engine: +pr.u.toFixed(2), painted: +tm.box.toFixed(2), off: +pr.off.toFixed(2) }; } }
   const at = m.at(bu), s = at.slot;
   const x = s.front[0] + s.along[0] * (bu - s.uc) - s.inward[0] * at.boxC, z = s.front[1] + s.along[1] * (bu - s.uc) - s.inward[1] * at.boxC;
-  const yaw = P && boxU != null ? pitPointOf(P, boxU, { x: 0, z: 0 }).yaw : Math.atan2(s.along[0], s.along[1]);
+  // (v0.53: the lane's own direction to the exit – the way cars3d.js draws the car standing in its box –, not the engine
+  // path's heading, which is the feed's one line and follows its wobbles)
+  const yaw = Math.atan2((at.along || s.along)[0], (at.along || s.along)[1]);
   const left = Math.sign(Math.cos(yaw) * s.inward[0] - Math.sin(yaw) * s.inward[1]) || 1;
   return { x, z, y: at.floor + 0.004, yaw, left, boxC: at.boxC, at, s };
 }
