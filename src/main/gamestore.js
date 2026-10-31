@@ -84,6 +84,10 @@ class GameStore {
   async importScenario(file) {
     const s = await readJson(file).catch((e) => { throw new Error("읽을 수 없는 파일이에요: " + String(e.message || e)); });
     if (!s || s.format !== "f1kr-game-scenario" || !s.meta?.id) throw new Error("게임 시나리오 파일이 아니에요");
+    // (v0.51: the content too – the same check the builder runs; a damaged file is refused here, not when a race starts)
+    const { validateScenario } = await import("../game/data/scenario.js");
+    const v = validateScenario(s);
+    if (!v.ok) throw new Error("시나리오 내용이 올바르지 않아요: " + v.errors.slice(0, 3).join("; "));
     const sid = String(s.meta.id).replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 120);
     return this.writeScenario(sid, s);
   }
