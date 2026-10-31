@@ -127,8 +127,15 @@ export function pitStep(car, T, ctx, P = PIT) {
     // misjudges it (chance per such release, seeded): an unsafe release, a rules matter
     const threat = ctx.others.some((o) => o.num !== car.num && (o.phase === "lane" || o.phase === "approach" || o.phase === "laneOut" || o.phase === "entry") && o.u < p.u && o.u > p.u - Math.max(10, o.v * P.releaseGap.v) && o.v > 3);
     let go = !threat;
-    if (threat && !p.unsafeRolled) { p.unsafeRolled = true; if (ctx.rng.chance(P.unsafeRelease.v)) { go = true; ev = "unsafeRelease"; } }
-    if (go) { p.phase = "laneOut"; p.times.release = ctx.t; p.unsafeRolled = false; if (box.occupant === car.num) box.occupant = null; }
+    // (counted for the audit – v0.52 §9-1: releases, those with a car coming (a draw is made once per such release),
+    // unsafe ones, the time held; state only, nothing reads it back)
+    const cur = p.relCur || (p.relCur = { t0: ctx.t, threat: false, unsafe: false, holdMs: 0 });
+    if (threat && !p.unsafeRolled) { p.unsafeRolled = true; cur.threat = true; if (ctx.rng.chance(P.unsafeRelease.v)) { go = true; ev = "unsafeRelease"; cur.unsafe = true; } }
+    if (!go) cur.holdMs += Math.round(ctx.dt * 1000);
+    if (go) {
+      p.phase = "laneOut"; p.times.release = ctx.t; p.unsafeRolled = false; if (box.occupant === car.num) box.occupant = null;
+      (p.relLog ||= []).push({ t: ctx.t, threat: cur.threat, draw: cur.threat, unsafe: cur.unsafe, holdMs: cur.holdMs, inLane: ctx.others.length, wet: !!ctx.wet }); p.relCur = null;
+    }
   }
   if ((p.phase === "laneOut" || (ctx.noBox && p.phase === "lane")) && p.u >= L.limEnd) { p.phase = "exit"; p.times.limEnd = ctx.t; }
   // move along the path (the cap above; accelerate at the launch rate, slow at the approach rate)
