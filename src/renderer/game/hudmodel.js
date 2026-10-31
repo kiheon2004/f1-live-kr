@@ -445,3 +445,11 @@ export function storyRows(S, ordText = (x) => x.type) {
   for (const r of out) if (r.kind === "goalrun" && r.n === 1) { r.kind = "order"; r.text = r.first; }
   return out;
 }
+
+// v0.53 §12-4: a card's status badge only when the car is NOT plainly running – in the pit lane, a box called or
+// committed, an incident, finished or out. "주행 중" on both cards all race long was a badge that never said anything.
+export function plainRunning(c) {
+  if (!c) return false;
+  const ph = c.pit?.phase || "none";
+  return c.status === "run" && ph === "none" && !c.inc;
+}

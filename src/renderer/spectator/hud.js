@@ -16,12 +16,12 @@
 // Editing (HUD 편집): presets 관전 / 분석 / 최소 HUD, show / hide, drag, scale (− / +, keys), reset – saved as a UI
 // preference only (layout.js loadPrefs / savePrefs). Layout runs on a resize, a preference change, a camera change, a
 // widget's own size change and – in the cockpit cameras – every half second against the keep-clear zones map3d measures.
-import { WIDGETS, WIDGET_IDS, PRESETS, PRESET_IDS, nextCols, loadPrefs, savePrefs, applyPreset, resetWidgets, setWidget, stepScale, placeRect, anchorFor, avoidZones, clampRect } from "./layout.js";
-import { flagOf, gapText, gapSec, hms, parseClock, playText, tyreLetter, pitText } from "./hudtext.js";
+import { WIDGETS, WIDGET_IDS, PRESETS, PRESET_IDS, nextCols, loadPrefs, savePrefs, applyPreset, resetWidgets, setWidget, stepScale, placeRect, anchorFor, avoidZones, clampRect, towerKey } from "./layout.js";
+import { flagOf, gapText, gapSec, hms, parseClock, playText, tyreLetter, pitText, camNoteShort } from "./hudtext.js";
 
 const RATE = { tower: 500, strip: 500, driver: 500, tel: 100, pit: 200, ready: 250, zones: 500 };
 const ORDER = ["cam", "strip", "driver", "tower", "pit", "notes"];   // layout priority (who keeps its place)
-const ROW_H = 20;
+const ROW_H = 22;
 const CAM_SVG = '<svg class="cam-ico" viewBox="0 0 16 12" aria-hidden="true"><rect x="1" y="2.5" width="10" height="8" rx="1.5"/><path d="M11 5.5l4-2.5v7l-4-2.5z"/></svg>';
 const esc = (x) => String(x ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const hex = (c) => (/^[0-9a-f]{6}$/i.test(c || "") ? "#" + c : "#888888");
@@ -67,9 +67,9 @@ export function createSpecHud(host, api) {
   host.appendChild(root); host.appendChild(notes);
 
   // ---------- the widgets' static parts ----------
-  W.strip.inner.innerHTML = '<span class="ui-flag" data-k="flag"></span><span class="st-lap num" data-k="lap"></span><span class="st-clock num" data-k="clock"></span><span class="ui-badge" data-k="play"></span><span class="ui-badge info" data-k="wx" hidden></span>';
+  W.strip.inner.innerHTML = '<span class="ui-flag" data-k="flag"></span><span class="st-lap num" data-k="lap"></span><span class="st-clock num" data-k="clock"></span><span class="ui-badge" data-k="play"></span><span class="ui-badge info" data-k="wx" hidden></span><button class="ui-btn sm ghost st-notes" data-act="notes" aria-expanded="false" aria-controls="notes3d" hidden title="이 장면에서 추정하거나 자료가 없는 부분의 설명 (메디컬카·차고·출발 신호 등)">자료 메모 <b class="num" data-k="ncount"></b></button>';
   W.tower.inner.innerHTML = '<header class="tw-h"><span>순위</span><button class="tw-hcol" data-act="cols" data-k="hgap" title="값 바꾸기: 앞 차 간격 → 선두와 차이 → 둘 다(타이어·피트 포함)"></button></header><ol class="tw-rows"></ol><p class="tw-empty faint" hidden>순위 자료 없음</p>';
-  W.driver.inner.innerHTML = `<div class="dc-main"><i class="dc-bar"></i><b class="dc-pos num"></b><span class="dc-name"><b></b><small></small></span>
+  W.driver.inner.innerHTML = `<div class="dc-main"><i class="dc-bar"></i><b class="dc-pos num"></b><span class="dc-name"><b></b><small></small></span><span class="ui-badge dc-est" data-k="est" hidden></span>
     <span class="dc-kv"><small>선두와</small><b class="num" data-k="gap"></b></span><span class="dc-kv"><small>앞 차</small><b class="num" data-k="int"></b></span>
     <span class="dc-kv"><small>최근 랩</small><b class="num" data-k="lastlap"></b></span><span class="dc-kv dc-more"><small>최고 랩</small><b class="num" data-k="best"></b></span>
     <span class="dc-kv"><small>타이어</small><b data-k="tyre"></b></span><span class="dc-kv dc-more"><small>피트</small><b class="num" data-k="pits"></b></span>
@@ -81,8 +81,12 @@ export function createSpecHud(host, api) {
       <button data-cam="heli" title="헬리콥터 시점 · 끌어서 돌리기 · 스크롤로 확대">헬기</button><button data-cam="chase" title="중계 카메라처럼 차 뒤에서 따라가요">추적</button><button data-cam="onboard" title="온보드 카메라(T-cam)">온보드</button><button data-cam="eye" title="1인칭: 드라이버의 눈">1인칭</button>
     </div>
     <span class="cam-car"><button class="ui-btn sm icon ghost" data-act="prev" title="카메라: 앞 순위 차" aria-label="카메라: 앞 순위 차">◀</button><span class="cam-who" title="카메라가 보는 차">${CAM_SVG}<b data-k="camwho">–</b></span><button class="ui-btn sm icon ghost" data-act="next" title="카메라: 뒤 순위 차" aria-label="카메라: 뒤 순위 차">▶</button></span>
-    <button class="ui-btn sm" data-act="follow" aria-pressed="true" title="켜면 드라이버를 고를 때 카메라도 그 차로 가요 · 끄면 카메라는 ◀ ▶로 따로 움직여요">따라가기: 켬</button>
-    <button class="ui-btn sm ghost" data-act="edit" aria-pressed="false" title="HUD 편집: 프리셋, 표시/숨김, 위치·크기 (스페이스바 재생 · ←/→ 이동 · Esc 닫기)">HUD</button>`;
+    <span class="spec-menu-wrap"><button class="ui-btn sm ghost" data-act="menu" id="specMenuBtn" title="카메라 따라가기 · HUD 배치 · 지도·그래픽">설정</button>
+      <div class="ui-menu spec-menu" id="specMenu" hidden>
+        <label class="ui-check" role="menuitemcheckbox" title="켜면 드라이버를 고를 때 카메라도 그 차로 가요 · 끄면 카메라는 ◀ ▶로 따로 움직여요"><input type="checkbox" data-act="follow"> 선택한 차를 카메라가 따라가기</label>
+        <hr><button role="menuitem" data-act="edit">HUD 배치 편집…</button><button role="menuitem" data-act="hudreset">HUD 위치 초기화</button>
+        <hr><button role="menuitem" data-act="geo">지도·그래픽 설정…</button>
+      </div></span>`;
   W.pit.inner.innerHTML = '<header class="pt-h"><b data-k="ptitle"></b><span class="ui-drv"><i data-k="pbar"></i><b data-k="pwho"></b></span></header><dl class="pt-rows"></dl>';
   editor.innerHTML = `<header class="ui-ph"><span>HUD 편집</span><span class="grow"></span><button class="ui-btn sm ghost" data-ed="cancel" aria-label="취소하고 닫기">닫기</button></header>
     <div class="ed-body"><div class="ui-seg" role="group" aria-label="프리셋">${PRESET_IDS.map((p) => `<button data-preset="${p}">${esc(PRESETS[p].name)}</button>`).join("")}</div>
@@ -92,7 +96,7 @@ export function createSpecHud(host, api) {
   const q = (id, k) => W[id].inner.querySelector(`[data-k="${k}"]`);
 
   // ---------- tower rows: built per driver set, then only text / order changed ----------
-  let towerKey = "", rows = new Map();
+  let towerSig = "", rows = new Map();
   const tw = { order: [], start: 0, room: 0, lastIdx: 0 };   // (the tower as shown: order, first row on screen, rows on screen)
   function buildTower(drivers, nums) {
     const ol = W.tower.inner.querySelector(".tw-rows"); ol.textContent = ""; rows = new Map();
@@ -111,7 +115,7 @@ export function createSpecHud(host, api) {
     const nums = Object.keys(lines).filter((n) => drivers[n]);
     const empty = W.tower.inner.querySelector(".tw-empty"); setHid(empty, nums.length > 0);
     const key = nums.slice().sort().join(",") + "|" + nums.map((n) => drivers[n]?.TeamColour).join("");
-    if (key !== towerKey) { towerKey = key; buildTower(drivers, nums); layoutDue = true; }
+    if (key !== towerSig) { towerSig = key; buildTower(drivers, nums); layoutDue = true; }
     const order = nums.slice().sort((a, b) => (+lines[a].Position || 99) - (+lines[b].Position || 99));
     const cols = cockpit ? "int" : prefs.widgets.tower.cols || "int", full = cols === "full";
     setCls(W.tower.outer, "full", full); setText(q("tower", "hgap"), cockpit ? "앞뒤 차 · 간격" : full ? "선두 · 간격 ▾" : cols === "gap" ? "선두와 ▾" : "간격 ▾");
@@ -180,6 +184,9 @@ export function createSpecHud(host, api) {
     const pb = q("strip", "play"); setText(pb, p.ko); setAttr(pb, "class", "ui-badge " + p.cls);
     const w = s.WeatherData, wx = q("strip", "wx"), rain = w?.Rainfall === "1";
     setHid(wx, !w); if (w) { setText(wx, `${rain ? "비 · " : ""}노면 ${w.TrackTemp}°`); setCls(wx, "warn", rain); setCls(wx, "info", !rain); }
+    // the provenance notes: closed by default (detail on demand) – the strip says how many there are and opens them
+    const nn = notes.querySelectorAll(".note3d-line:not([hidden])").length, nb = W.strip.inner.querySelector(".st-notes");
+    setHid(nb, !nn && !prefs.widgets.notes.on); setText(q("strip", "ncount"), nn || ""); setAttr(nb, "aria-expanded", String(!!prefs.widgets.notes.on));
   }
 
   // ---------- selected driver ----------
@@ -193,6 +200,9 @@ export function createSpecHud(host, api) {
     setText(W.driver.inner.querySelector(".dc-pos"), l.Position ? `P${l.Position}` : "P–");
     setText(W.driver.inner.querySelector(".dc-name b"), KO ? KO.surname(d.Tla, d.LastName) : d.LastName || d.Tla);
     setText(W.driver.inner.querySelector(".dc-name small"), `${d.Tla || num} · ${(KO?.TEAMS?.[d.TeamName]) || d.TeamName || ""}`);
+    // (the filmed car's position source in two words – the whole sentence stays in the notes and the tooltip)
+    const cn = document.getElementById("camNote3d"), est = q("driver", "est"), sh = camNoteShort(cn && !cn.hidden ? cn.textContent : "");
+    setHid(est, !sh); if (sh) { setText(est, sh.ko); setAttr(est, "class", "ui-badge dc-est " + sh.cls); if (est.title !== cn.textContent) est.title = cn.textContent; }
     const leader = l.Position === "1", gap = gapText(l.GapToLeader || l.TimeDiffToFastest), int = gapText(l.IntervalToPositionAhead?.Value || l.TimeDiffToPositionAhead);
     const g = q("driver", "gap"), iv = q("driver", "int");
     setText(g, leader ? "선두" : gap || "–"); setCls(g, "t-none", !leader && !gap);
@@ -238,7 +248,7 @@ export function createSpecHud(host, api) {
     setCls(W.cam.inner.querySelector(".cam-who"), "diff", diff);
     const cw = W.cam.inner.querySelector(".cam-who"), tt = diff ? `카메라: ${d?.Tla || cam} · 선택: ${A.src?.state.DriverList?.[A.focus]?.Tla || A.focus} (다른 차)` : "카메라가 보는 차";
     if (cw.title !== tt) cw.title = tt;
-    const fb = W.cam.inner.querySelector('[data-act="follow"]'); setAttr(fb, "aria-pressed", String(api.follow())); setText(fb, api.follow() ? "따라가기: 켬" : "따라가기: 끔");
+    const fb = W.cam.inner.querySelector('input[data-act="follow"]'); if (fb.checked !== api.follow()) fb.checked = api.follow();
   }
 
   // ---------- pit panel ----------
@@ -255,12 +265,15 @@ export function createSpecHud(host, api) {
     }
     const body = W.pit.inner.querySelector(".pt-rows"), wasHidden = W.pit.outer.classList.contains("idle");
     setCls(W.pit.outer, "idle", !show && !editing);
-    if (!show) { if (editing) { setText(q("pit", "ptitle"), "피트 정보"); setText(q("pit", "pwho"), ""); if (body.__h !== "ed") { body.__h = "ed"; body.innerHTML = '<dt></dt><dd class="faint">차가 피트 레인에 들어오면 나와요</dd>'; } } if (!wasHidden && !editing) layoutDue = true; return; }
+    if (!show) { if (editing) { setHid(body, false); setText(q("pit", "ptitle"), "피트 정보"); setText(q("pit", "pwho"), ""); if (body.__h !== "ed") { body.__h = "ed"; body.innerHTML = '<dt></dt><dd class="faint">차가 피트 레인에 들어오면 나와요</dd>'; } } if (!wasHidden && !editing) layoutDue = true; return; }
     if (wasHidden) layoutDue = true;
     const d = A.src?.state.DriverList?.[who];
-    setText(q("pit", "ptitle"), show.title); setText(q("pit", "pwho"), d?.Tla || who); setBg(q("pit", "pbar"), hex(d?.TeamColour));
+    setText(q("pit", "pwho"), d?.Tla || who); setBg(q("pit", "pbar"), hex(d?.TeamColour));
     setAttr(W.pit.outer, "data-tone", show.cls || "");
-    const html = show.rows.map((r) => `<dt>${esc(r.k)}</dt><dd class="${esc(r.cls)}">${esc(r.v)}</dd>`).join("");
+    // (one unlabelled line – "피트 레인 출발 · 출발", "차고 · 차고 안" – goes on the title line: no second box saying it again)
+    const one = show.rows.length === 1 && !show.rows[0].k ? show.rows[0] : null;
+    setText(q("pit", "ptitle"), one ? `${show.title} · ${one.v}` : show.title); setHid(body, !!one);
+    const html = one ? "" : show.rows.map((r) => `<dt>${esc(r.k)}</dt><dd class="${esc(r.cls)}">${esc(r.v)}</dd>`).join("");
     if (body.__h !== html) { body.__h = html; body.innerHTML = html; }
   }
 
@@ -302,7 +315,7 @@ export function createSpecHud(host, api) {
     }
     // (the timing layout's own buttons over the view – 2D / 3D, expand, map settings – are kept clear in every camera)
     const hr = host.getBoundingClientRect();
-    const fixed = [...(host.parentElement?.querySelectorAll(":scope > .view-switch, :scope > #expandMap") || []), host.querySelector("#geo3dBtn")]
+    const fixed = [...(host.parentElement?.querySelectorAll(":scope > .view-switch, :scope > #expandMap, :scope > #detailBtn") || []), host.querySelector("#geo3dBtn")]
       .filter((e) => e && e.offsetParent).map((e) => { const b = e.getBoundingClientRect(); return { x: b.left - hr.left, y: b.top - hr.top, w: b.width, h: b.height }; })
       .filter((r) => r.w > 0 && r.h > 0 && r.x < vw && r.y < vh && r.x + r.w > 0 && r.y + r.h > 0);
     const out = avoidZones(rects, fixed.concat(cockpit && !editing ? zones : []), vw, vh);
@@ -327,10 +340,9 @@ export function createSpecHud(host, api) {
     if (!on && editing && !keep && editBefore) { prefs = editBefore; savePrefs(window.localStorage, prefs); }   // (취소: back to before the edit)
     if (!on) editBefore = null;
     editing = !!on; setCls(root, "editing", editing); editor.hidden = !editing;
-    setAttr(W.cam.inner.querySelector('[data-act="edit"]'), "aria-pressed", String(editing));
     for (const id of WIDGET_IDS) W[id].grip.tabIndex = editing ? 0 : -1;
     if (editing) { editReturn = document.activeElement; applyPrefsToDom(); editor.querySelector("[data-preset]")?.focus(); }
-    else { applyPrefsToDom(); api.setFollow(prefs.follow); (editReturn && document.contains(editReturn) ? editReturn : W.cam.inner.querySelector('[data-act="edit"]')).focus?.(); editReturn = null; }
+    else { applyPrefsToDom(); api.setFollow(prefs.follow); (editReturn && document.contains(editReturn) && editReturn.offsetParent ? editReturn : menuBtn).focus?.(); editReturn = null; }
     last.pit = 0; layoutDue = true;
   }
   const commit = (p) => { prefs = p; savePrefs(window.localStorage, prefs); applyPrefsToDom(); };
@@ -385,12 +397,23 @@ export function createSpecHud(host, api) {
   root.addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]"); if (!b) return;
     const act = b.dataset.act;
+    if (act === "menu" || act === "follow") return;   // (UIKit.menu owns the button; the checkbox is its change event)
     if (act === "prev" || act === "next") api.cycleCam(act === "prev" ? -1 : 1);
-    else if (act === "follow") { const on = !api.follow(); api.setFollow(on); prefs.follow = on; savePrefs(window.localStorage, prefs); paintCam(api.app()); }
     else if (act === "edit") setEditing(!editing, true);
+    else if (act === "hudreset") { commit(resetWidgets(prefs)); api.toast?.("HUD를 지금 프리셋의 기본 위치로 되돌렸어요."); }
+    // (after this click has finished: the settings pop-up closes on any click outside itself – this one included)
+    else if (act === "geo") setTimeout(() => { const g = document.getElementById("geo3dBtn"); if (g) { g.__opener = menuBtn; g.click(); } }, 0);
+    else if (act === "notes") { commit(setWidget(prefs, "notes", { on: !prefs.widgets.notes.on })); last.strip = 0; }
     else if (act === "cols") commit(setWidget(prefs, "tower", { cols: nextCols(prefs.widgets.tower.cols || "int") }));
     else if (act === "film") api.filmSelected();
     last.driver = last.tower = 0;
+  });
+  // the settings menu (UIKit.menu: ↑↓ between items, Escape closes and gives the focus back, a click outside closes)
+  const menuBtn = W.cam.inner.querySelector("#specMenuBtn"), menuEl = W.cam.inner.querySelector("#specMenu");
+  window.UIKit?.menu?.(menuBtn, menuEl);
+  menuEl.addEventListener("change", (e) => {
+    if (e.target.dataset?.act !== "follow") return;
+    const on = !!e.target.checked; api.setFollow(on); prefs.follow = on; savePrefs(window.localStorage, prefs); paintCam(api.app());
   });
   W.tower.inner.addEventListener("click", (e) => {
     const li = e.target.closest("[data-num]"); if (!li || editing) return;
@@ -401,14 +424,13 @@ export function createSpecHud(host, api) {
   W.tower.inner.addEventListener("keydown", (e) => {
     const li = e.target.closest?.("[data-num]"); if (!li || editing) return;
     // (the rows ON SCREEN in their screen order – v0.52 §8: the DOM order and the hidden ".off" rows were used; Home / End
-    // are the ends of the rows shown – selecting a driver re-centres the short view on it)
-    const all = towerVisible(), i = all.indexOf(li); tw.lastIdx = Math.max(0, i);
-    let to = null;
-    if (e.key === "ArrowDown") to = all[Math.min(all.length - 1, i + 1)]; else if (e.key === "ArrowUp") to = all[Math.max(0, i - 1)];
-    else if (e.key === "Home") to = all[0]; else if (e.key === "End") to = all[all.length - 1];
-    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (e.repeat) return; const A = api.app(); if (e.shiftKey && A.setCompare) A.setCompare(li.dataset.num === A.compare ? null : li.dataset.num); else A.setFocus(li.dataset.num); last.driver = last.tower = 0; return; }
-    if (to && to !== li) { e.preventDefault(); for (const r of rows.values()) r.li.tabIndex = -1; to.tabIndex = 0; to.focus(); tw.lastIdx = all.indexOf(to); }
-    else if (to) e.preventDefault();
+    // are the ends of the rows shown – selecting a driver re-centres the short view on it. The decision: layout.js towerKey)
+    const all = towerVisible(), nums = all.map((x) => x.dataset.num), k = towerKey(e, nums, li.dataset.num);
+    tw.lastIdx = Math.max(0, all.indexOf(li));
+    if (!k) return;
+    e.preventDefault(); if (e.key === "Enter" || e.key === " ") e.stopPropagation();   // (Space here is the row's, never also play / pause)
+    if (k.select) { const A = api.app(); if (k.compare && A.setCompare) A.setCompare(k.select === A.compare ? null : k.select); else A.setFocus(k.select); last.driver = last.tower = 0; return; }
+    if (k.focus) { const to = all[nums.indexOf(k.focus)]; for (const r of rows.values()) r.li.tabIndex = -1; to.tabIndex = 0; to.focus(); tw.lastIdx = all.indexOf(to); }
   });
   W.tower.outer.title = "클릭: 드라이버 선택 · Shift+클릭: 비교 드라이버 · 키보드: ↑↓ 이동, Enter 선택, Shift+Enter 비교";
   new ResizeObserver(() => { layoutDue = true; }).observe(host);
