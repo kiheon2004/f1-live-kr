@@ -4231,6 +4231,48 @@ window.Map3D = {
       parts: rec.dbg ? { lineDirDeg: hf(un(rec.dbg.map((r) => r[0])), D), sideTermDeg: hf(rec.dbg.map((r) => r[1]), D), sCm: hf(rec.dbg.map((r) => r[2]), 100), dCm: hf(rec.dbg.map((r) => r[3]), 100), vs: hf(rec.dbg.map((r) => r[4]), 1), dDataCm: hf(rec.dbg.map((r) => r[5]), 100), offCm: hf(rec.dbg.map((r) => r[6]), 100), ...(() => { const sd = (ix, iz) => { const rx = resid(rec.dbg.map((r) => r[ix])), rz = resid(rec.dbg.map((r) => r[iz])); return rms(rx.map((x, i) => x * Math.cos(rec.byaw[i]) - rz[i] * Math.sin(rec.byaw[i])), 100); }; return { p0SideCm: sd(7, 8), posSideCm: sd(9, 10), sepCm: hf(rec.dbg.map((r) => Math.hypot(r[11], r[12])), 100), kerbShare: +(rec.dbg.filter((r) => r[13]).length / rec.dbg.length).toFixed(2), onTrack: +(rec.dbg.filter((r) => r[14]).length / rec.dbg.length).toFixed(2) }; })() } : null,
       body: { heightCm: hf(rec.by, 100), yawDeg: hf(un(rec.byaw), D), pitchDeg: hf(rec.bpitch, D), rollDeg: hf(rec.broll, D) } });
   },
+  // development (v0.53 §4–5): every car's FINAL drawn pose (after separate()) driven through updateCars over [t0, t1]
+  // (stream ms) at `fps`, and what in it no car can do: a step faster than its own telemetry speed allows (a jump), a
+  // height change faster than any road's slope at that speed (a lift), a heading swing, the body pitched / rolled past
+  // a few degrees, the drawn height off the road under it. Each anomaly with the path the car was posed from (trk: the
+  // steadied tracks, pit: pitDraw, raw: the feed's positions, est: a placement without data, grid) before and after.
+  poseScan(t0, t1, o = {}) {
+    const src = app().src; if (!world || !src) return "no world";
+    if (!smoothFor(src) && !o.raw) return "pending";
+    const fps = o.fps ?? 30, dt = 1 / fps, real = window.F1KR, st0 = src.startTime?.() || 0, nums = o.nums ? o.nums.map(String) : null;
+    let fakeT = t0;
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    const prev = new Map(), out = [], byKind = {}, cnt = {}, tags = {}, worst = {}, R = world.real, add = (kind, num, mag, extra) => { cnt[kind] = (cnt[kind] || 0) + 1; if (!worst[kind] || mag > worst[kind]) worst[kind] = mag; const per = o.perKind ?? 300; byKind[kind] = (byKind[kind] || 0) + 1; if (byKind[kind] <= per) out.push({ t: +((fakeT - st0) / 1000).toFixed(2), num, kind, mag: +mag.toFixed(2), ...extra }); };
+    const tagOf = (c) => c.est ? "est" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.grid && c.grid.state !== "free" ? "grid" : c.onTrack ? "trk" : "raw";
+    const groundY = (x, z) => { const [s, d] = world.grid.nearest(x, z, 2); const g = R?.groundAt ? R.groundAt(x, z) : null; return s && d < Math.max(s.L ?? 7, -(s.R ?? -7)) + 1.5 ? s.p.y : g; };
+    let frames = 0; const tA = performance.now(), ft = [];
+    try {
+      for (fakeT = t0; fakeT <= t1; fakeT += dt * 1000) {
+        const f0 = performance.now(); updateCars(dt); ft.push(performance.now() - f0); frames++;
+        for (const [num, c] of cars) {
+          if (nums && !nums.includes(num)) continue;
+          if (!c.has || !c.obj.visible) { prev.delete(num); continue; }
+          const P = c.obj.position, tg = tagOf(c), q = prev.get(num), tel = src.carAt?.(num, fakeT), vt = tel ? tel.speed / 3.6 : null, sNow = c.st && c.onTrack ? Math.round(((c.st.s % world.frame.L) + world.frame.L) % world.frame.L) : null;
+          tags[tg.split(":")[0]] = (tags[tg.split(":")[0]] || 0) + 1;
+          if (q) {
+            const step = Math.hypot(P.x - q.x, P.z - q.z), allow = (Math.max(vt ?? 0, q.v ?? 0, c.speed || 0) * 1.25 + 8) * dt + 0.15;
+            const base = { tag: q.tag === tg ? tg : q.tag + ">" + tg, s: sNow, v: Math.round((vt ?? c.speed ?? 0) * 3.6), x: +P.x.toFixed(1), y: +P.y.toFixed(2), z: +P.z.toFixed(1) };
+            if (step > allow) add("jump", num, step, { ...base, allow: +allow.toFixed(2) });
+            const dy = Math.abs(P.y - q.y), yAllow = (0.2 * Math.max(step / dt, 5) + 0.6) * dt;   // (20 % slope at the speed it moved, + 0.6 m/s)
+            if (dy > yAllow) add("lift", num, dy, base);
+            const dyaw = Math.abs(wrap(c.yaw - q.yaw));
+            if (dyaw > Math.max(0.12, (c.speed || 0) / 12 * dt * 1.5 + 0.05) && step > 0.02) add("yaw", num, dyaw * 57.3, base);
+            if (q.tag !== tg) add("switch", num, step, base);
+          }
+          if (Math.abs(c.model.rotation.x) > 0.09 || Math.abs(c.model.rotation.z) > 0.06) add("tilt", num, Math.max(Math.abs(c.model.rotation.x), Math.abs(c.model.rotation.z)) * 57.3, { tag: tg });
+          if (frames % Math.max(1, Math.round(fps / 2)) === 0) { const g = groundY(P.x, P.z); if (g != null && Math.abs(P.y - g) > (o.hTol ?? 0.6)) add("height", num, P.y - g, { tag: tg, x: +P.x.toFixed(1), z: +P.z.toFixed(1), ground: +g.toFixed(2) }); }
+          prev.set(num, { x: P.x, y: P.y, z: P.z, yaw: c.yaw, tag: tg, v: vt });
+        }
+      }
+    } finally { window.F1KR = real; }
+    ft.sort((a, b) => a - b);
+    return JSON.stringify({ frames, ms: Math.round(performance.now() - tA), updateMs: [ft[ft.length >> 1], ft[Math.floor(ft.length * 0.99)]].map((v) => +v.toFixed(2)), tags, counts: cnt, worst: Object.fromEntries(Object.entries(worst).map(([k, v]) => [k, +v.toFixed(2)])), list: out });
+  },
   // development: across-track spread of all cars at the sharpest corners (d: + left of the lap line, metres)
   spreadAt(k = 6) {
     const src = app().src, S = world.samples, n = world.n, c0 = world.center;
