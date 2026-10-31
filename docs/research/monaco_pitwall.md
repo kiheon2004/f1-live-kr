@@ -92,4 +92,22 @@ the walkway between the pit lane and the track, with the wall and fence on the t
 - In the app: `Map3D.upperCheck()` (the same check on the stands as built, plus rays through the drawn facility:
   floor, ceiling, glass, slab over the lane), `Map3D.pitWallOrder`, `Map3D.standCheck`, `Map3D.garageCheck`, and fixed
   cameras (`Map3D.viewPits` / `viewLane` / `viewPitWall` – placed from the garage slots and the track's edge, the same in
-  both builds) for 2025 and 2026. Results: reports/monaco.md (work folder).
+  both builds) for 2025 and 2026.
+
+### App results (2025 and 2026 race replays, v0.53 against v0.52.0)
+
+| Check | v0.52.0 | v0.53 2025 | v0.53 2026 |
+|---|---|---|---|
+| `upperCheck`: stands on the room's floor, inside the glass, under the ceiling, rays floor / ceiling / glass / slab | – (no room) | 10/10 ok; floor rays 0.288–0.292 (want 0.29), glass 1.15–1.18 m ahead of a seat, slab 3.00 m over the lane at 1 m (G 4.0) | 10/10 ok, same figures |
+| `pitWallOrder` | 10 ok (standY 3.4: it never measured "floating") | 10 ok, standY 4.3 | 10 ok |
+| `standCheck` | ok | ok (no railing opened, no overlaps) | ok |
+| `garageCheck` (garage kit, cars in their bays) | 22/22 cars fit, headroom 2.81 m (2026) | all fit | 22/22, 0 hits, headroom 2.01 m (lower storey: openings 3.45 m, the kit's boom 2.45 m at its lowest) |
+
+The first app run of v0.53 placed the stand along the building's axis. `upperCheck` found the stands up to 0.45 m
+through the glass at one end and 0.5 m short of it at the other, because the garages' front bends between garages,
+and ±0.035 m off the floor where the lane falls. Placement now follows the glass's chord and slope. The node test
+covers a bent, sloping lane.
+
+Known, not changed: the 2026 replay has 11 teams but 10 stands, the same in v0.52.0 (a team without a box gets no
+stand). The team's name band over its garages sits just under the new slab's edge, so from above the edge hides its
+top few centimetres.
