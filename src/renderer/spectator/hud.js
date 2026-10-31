@@ -300,13 +300,15 @@ export function createSpecHud(host, api) {
     layoutDue = false; cost.layouts++;
     const vw = host.clientWidth, vh = host.clientHeight; if (!vw || !vh) return;
     small = vw < 720; setCls(root, "small", small);
+    // (the full window narrowed by the detail panel: the small layout, but the flag and the session state stay on screen)
+    setCls(root, "xp", !!host.closest(".map-card.expanded"));
     // (a big window: everything a little larger – 12 px type over a 1920 px wide picture reads small; the viewer's scale on top)
     const base = vw >= 1600 ? 1.15 : 1;
     if (base !== baseScale) { baseScale = base; applyPrefsToDom(); layoutDue = false; }
     const rects = [];
     for (const id of ORDER) {
       const o = W[id].outer, p = prefs.widgets[id];
-      if (!p.on || o.classList.contains("idle") || (small && (id === "tower" || id === "notes"))) { placed[id] = null; continue; }
+      if (!p.on || o.classList.contains("idle") || (small && (id === "tower" || id === "notes" || (id === "strip" && !root.classList.contains("xp"))))) { placed[id] = null; continue; }
       const b = id === "notes" ? notes.getBoundingClientRect() : o.getBoundingClientRect();
       const w = Math.ceil(b.width), hh = Math.ceil(b.height);
       if (id === "notes" && (!w || !hh)) { placed[id] = null; continue; }
@@ -330,7 +332,7 @@ export function createSpecHud(host, api) {
     }
   }
   // the small (not expanded) map: fixed places, nothing to edit
-  function smallSpec(id) { return { cam: { ax: "l", ay: "t", dx: 8, dy: 8 }, driver: { ax: "c", ay: "b", dx: 0, dy: 8 }, strip: { ax: "l", ay: "b", dx: 8, dy: 52 }, pit: { ax: "r", ay: "b", dx: 8, dy: 52 } }[id] || { ax: "l", ay: "t", dx: 8, dy: 8 }; }
+  function smallSpec(id) { return { cam: { ax: "l", ay: "t", dx: 8, dy: 8 }, driver: { ax: "c", ay: "b", dx: 0, dy: 8 }, strip: { ax: "r", ay: "t", dx: 8, dy: 52 }, pit: { ax: "r", ay: "b", dx: 8, dy: 52 } }[id] || { ax: "l", ay: "t", dx: 8, dy: 8 }; }
 
   // ---------- editing ----------
   let editReturn = null, editBefore = null;

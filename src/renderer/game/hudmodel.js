@@ -453,3 +453,6 @@ export function plainRunning(c) {
   const ph = c.pit?.phase || "none";
   return c.status === "run" && ph === "none" && !c.inc;
 }
+// the incident in a word for the card's badge (engine car.inc kinds – incidents.js); unknown kinds say "사고 처리 중"
+export const INC_KO = { moment: "실수", wide: "코스 이탈", spin: "스핀", crash: "사고", puncture: "펑크", limp: "손상 주행" };
+export const incKo = (k) => (k ? INC_KO[k] || "사고 처리 중" : "");

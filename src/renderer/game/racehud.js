@@ -133,6 +133,7 @@ function card(e) {
       <span class="gc-grp gc-goalg"><small class="gc-lbl">목표</small><select class="ui-select gc-goal" data-chg="hud:goal" data-num="${n}" ${hasGoal() ? "" : "disabled"} aria-label="운영 목표" title="목표를 고르면 목표 보조가 페이스·에너지를 정해요 (직접 누르면 목표 종료)">
         <option value="">${hasGoal() ? "없음" : "사용할 수 없음"}</option>${HM.GOALS.map((g) => `<option value="${g}">${HM.GOAL_KO[g]}</option>`).join("")}</select>
         <button class="ui-btn sm quiet gc-deleg" data-act="hud:delegate" data-num="${n}" data-f="deleg" ${hasDelegate() ? "" : "disabled"} title="직접 지시한 페이스·에너지·계획을 팀 AI에게 다시 맡겨요">AI에 맡기기</button></span>
+      <span class="gc-grp gc-plang"><small class="gc-lbl">피트 계획</small><span class="gc-own" data-f="ownPlan2">–</span></span>
       <span class="gc-pre2" data-f="pre2"></span>
     </div>
   </section>`;
@@ -239,7 +240,7 @@ function paintCard(e, snap, T, onCam, mine) {
   root.classList.toggle("out", out);
   setT(f(root, "pos"), c.pos ? `P${c.pos}` : "–");
   const st = f(root, "status"), ph = c.pit?.phase || "none";
-  setT(st, c.status === "pit" ? PIT_KO[ph] || "피트" : ph === "called" ? "박스 요청" : ph === "committed" ? "진입 확정" : STATUS_KO[c.status] || c.status || "");
+  setT(st, c.status === "pit" ? PIT_KO[ph] || "피트" : ph === "called" ? "박스 요청" : ph === "committed" ? "진입 확정" : c.status === "run" && c.inc ? HM.incKo(c.inc) : STATUS_KO[c.status] || c.status || "");
   setC(st, `ui-badge ${c.status === "pit" || ph === "called" || ph === "committed" ? "info" : c.status === "dnf" ? "bad" : c.inc ? "warn" : ""}`);
   // (plain running is the usual state – no badge saying "주행 중" on both cards all race long)
   { const plain = HM.plainRunning(c); if (st.hidden !== plain) st.hidden = plain; }
@@ -274,7 +275,8 @@ function paintCard(e, snap, T, onCam, mine) {
     const oc = HM.ownChip(c.own, k), el = f(root, k === "pace" ? "ownPace" : "ownEnergy"); setT(el, oc.text); setC(el, oc.cls); if (el.title !== oc.tip) el.title = oc.tip;
     modeWords.push(`<span class="gm-k"><small>${k === "pace" ? "페이스" : "에너지"}</small> <b>${esc(ko[cur] || "–")}</b>${oc.key ? ` <i class="${esc(oc.cls)}">${esc(oc.text)}</i>` : ""}${pend ? ` <em class="gm-pend">→ ${esc(ko[pend.args?.mode] || "")} 대기</em>` : ""}</span>`);
   }
-  const op = HM.ownChip(c.own, "plan"), ope = f(root, "ownPlan"); setT(ope, op.key ? op.text : "–"); setC(ope, op.cls); { const tt = `피트 계획: ${op.tip}`; if (ope.title !== tt) ope.title = tt; }
+  const op = HM.ownChip(c.own, "plan");
+  for (const ope of [f(root, "ownPlan"), f(root, "ownPlan2")]) { setT(ope, op.key ? op.text : "–"); setC(ope, op.cls); const tt = `피트 계획: ${op.tip}`; if (ope.title !== tt) ope.title = tt; }
   modeWords.push(`<span class="gm-k"><small>목표</small> <b>${c.goal && c.goal.state !== "done" ? esc(HM.GOAL_SHORT[c.goal.kind] || c.goal.kind) : "없음"}</b></span>`);
   setH(f(root, "modes"), modeWords.join(""));
   // goal (the select follows the engine unless the player is on it)

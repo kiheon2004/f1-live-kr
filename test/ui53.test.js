@@ -85,3 +85,9 @@ test("game card: a status badge only when the car isn't plainly running", async 
   assert.strictEqual(plainRunning({ status: "fin" }), false);
   assert.strictEqual(plainRunning(null), false);
 });
+
+test("game card: an incident says what it is (not '주행 중' in yellow)", async () => {
+  const { incKo } = await HM();
+  assert.strictEqual(incKo("spin"), "스핀"); assert.strictEqual(incKo("puncture"), "펑크"); assert.strictEqual(incKo("wide"), "코스 이탈");
+  assert.strictEqual(incKo("something-new"), "사고 처리 중"); assert.strictEqual(incKo(null), "");
+});

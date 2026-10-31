@@ -462,7 +462,9 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gc-ord { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .gc-ord:has(.refused), .gc-ord:has(.rejected) { color: var(--bad-ink); }
   /* folding by priority (narrow card or short window): captions go first (values stay, captions in the tooltips) */
-  @container gcard (max-width: 560px) {
+  .gc-plang { display: none; }
+  @container gcard (max-width: 470px) { .gc-plang { display: flex; } }
+  @container gcard (max-width: 640px) {
     .gc-lapt em { display: none; }
     .gc-u { display: none; }
     .gc-kv .lg { display: none; } .gc-kv .sh { display: inline; }
@@ -470,7 +472,9 @@ body.game-on { grid-template-rows: auto 1fr; }
   @container gcard (max-width: 470px) {
     .gc-h { flex-wrap: wrap; row-gap: var(--s-1); }
     .gc-h .gc-cam { order: 3; } .gc-br { display: block; order: 4; flex-basis: 100%; height: 0; } .gc-gaps { order: 5; } .gc-lapt { order: 6; }   /* (the same two rows on both cards) */
-    .gc-box > .gc-pre { display: none; }
+    .gc-box > .gc-pre, .gc-box > .gc-lbl, .gc-box > .gc-own { display: none; }   /* (the plan's owner is in the 조작 pop-up) */
+    .gr-card.ctl-open .gc-ctl { gap: var(--s-3) var(--s-4); padding: var(--s-3) var(--s-4) var(--s-4); }
+    .gc-seg > button { min-height: 26px; min-width: 40px; padding: 0 var(--s-3); }
     .gc-cmp { width: 92px; }
     .gc-box .gc-fold { padding: 0 var(--s-3); }
     .gc-modes { gap: var(--s-1) var(--s-4); }
@@ -600,4 +604,5 @@ body.game-on { grid-template-rows: auto 1fr; }
   #map3d .notes3d.game .note3d-line { max-width: min(420px, 60vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); pointer-events: auto; }
   /* a big window: the cards, the tower and the bar a size up (13 px type over a 1920 px race reads small) */
   @media (min-width: 1680px) and (min-height: 900px) { .gr-bottom, .gr-tower, .gr-top { zoom: 1.12; } }
+  .gr-tower-h .ui-seg.sm > button { min-height: 24px; }   /* (targets ≥ 24 px – v0.53 measured 20 px) */
 }

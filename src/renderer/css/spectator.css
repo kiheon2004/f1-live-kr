@@ -121,7 +121,7 @@
 #map3d .spec-driver .dc-tel i { display: inline-block; width: 6px; height: 18px; border-radius: 2px; background: linear-gradient(to top, var(--c) var(--v, 0%), var(--bg-3) var(--v, 0%)); }
 #map3d .spec-driver .dc-tel i.thr { --c: var(--ok); } #map3d .spec-driver .dc-tel i.brk { --c: var(--bad); }
 #map3d .spec-driver .dc-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-5); border-top: var(--bw) solid var(--line-soft); font-size: var(--fs-xs); color: var(--text-2); }
-#map3d .spec-driver .dc-cam { color: var(--warn); }
+#map3d .spec-driver .dc-cam { color: var(--text-1); }   /* (another car filmed is a state, not a warning: no yellow – v0.53 §12-3) */
 #map3d .spec-driver .dc-cam .ui-btn { margin-left: auto; }
 #map3d .spec-driver .dc-cmpdot { width: 8px; height: 8px; border-radius: 2px; box-shadow: 0 0 0 1px var(--info); }
 #map3d .spec-driver .dc-empty { margin: 0; padding: var(--s-4) var(--s-5); font-size: var(--fs-xs); }
@@ -131,7 +131,7 @@
 #map3d .spec-cam .ui-seg > button { min-height: 24px; }
 #map3d .spec-cam .cam-car { display: inline-flex; align-items: center; }
 #map3d .spec-cam .cam-who { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 46px; justify-content: center; font-weight: var(--fw-bold); color: var(--text-2); }
-#map3d .spec-cam .cam-who.diff { color: var(--warn); }
+#map3d .spec-cam .cam-who.diff { color: var(--text-1); box-shadow: inset 0 -1px 0 var(--text-2); }
 
 /* pit panel */
 #map3d .spec-pit .spec-in { min-width: 200px; max-width: 320px; border-left: 3px solid var(--info); }
@@ -210,3 +210,5 @@
 #map3d .spec-menu { left: 0; bottom: calc(100% + 6px); min-width: 240px; font-size: var(--fs-md); }
 #map3d .spec-menu > label.ui-check { min-height: var(--ctl-h); padding: 0 var(--s-4); color: var(--text-1); }
 #map3d[data-mode="spec"] > .geo3d-btn { display: none; }
+#map3d .spec-hud.small.xp .spec-strip { display: block; }
+#map3d .spec-hud.small.xp .spec-strip .st-clock, #map3d .spec-hud.small.xp .spec-strip [data-k="wx"] { display: none; }
