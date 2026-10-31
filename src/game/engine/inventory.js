@@ -60,16 +60,40 @@ export function releaseStale(car) {
   const keep = car.pit?.call?.setId ?? null;
   for (const s of car.sets) if (s.state === "reserved" && s.id !== keep) s.state = "free";
 }
-// the work is over: the reserved set (or the best free one of the compound) goes on, the old one comes back to the garage
-// with what it has run. make(set) → the tyre object for that set (the engine's newTyre with the set's wear / laps).
+// The one check every fitting path uses (v0.52 §3 – the red-flag change skipped it): the set to fit for compound `name`
+// – the named one (it must be THIS car's, of that compound, free or reserved by this car's call), else this car's set
+// reserved for that compound, else its best free one. { ok, set } or { ok: false, why }. Reads only.
+export function canFit(car, name, setId = null) {
+  if (!car.sets) return { ok: false, why: "no tyre sets" };
+  if (setId != null) {
+    const s = car.sets.find((x) => x.id === setId);
+    if (!s) return { ok: false, why: `set ${setId} not available` };   // (another car's id, or none: not in this car's list)
+    if (s.compound !== name) return { ok: false, why: `set ${setId} is ${s.compound}, not ${name}` };
+    if (s.state !== "free" && s.state !== "reserved") return { ok: false, why: `set ${setId} not available` };
+    return { ok: true, set: s };
+  }
+  const s = car.sets.find((x) => x.state === "reserved" && x.compound === name) || pickFree(car.sets, name);
+  return s ? { ok: true, set: s } : { ok: false, why: `no set of ${name} left` };
+}
+// the work is over (or the red-flag change is made): the set canFit names goes on, the old one comes back to the garage
+// with what it has run. ATOMIC: when no set can be fitted nothing changes (no set handed back, no tyre made) and
+// { ok: false, why } is returned – the caller keeps the car's tyre. make(set) → the tyre object for that set.
 export function fit(car, name, setId, make) {
-  if (!car.sets) return make({ compound: name, used: false, laps: 0, km: 0, wear: 0 });
-  const s = (setId != null && car.sets.find((x) => x.id === setId && (x.state === "reserved" || x.state === "free"))) || car.sets.find((x) => x.state === "reserved" && x.compound === name) || pickFree(car.sets, name);
-  const old = car.sets.find((x) => x.state === "fitted");
+  const c = canFit(car, name, setId); if (!c.ok) return c;
+  const s = c.set, old = car.sets.find((x) => x.state === "fitted");
+  const tyre = make(s);
   if (old) { old.state = "free"; old.used = true; old.laps = car.tyre.laps; old.km = +car.tyre.km.toFixed(2); old.wear = +car.tyre.wear.toFixed(4); }
-  if (!s) return make({ compound: name, used: false, laps: 0, km: 0, wear: 0 });   // (no set left – the rules allowed the order; a new set, est)
   s.state = "fitted";
-  return make(s);
+  return { ok: true, tyre, set: s };
+}
+// the invariant (tests, migration checks): a car with sets has exactly one fitted set, the tyre names it, compounds agree
+export function checkSets(car) {
+  if (!car.sets) return { ok: true, problems: [] };
+  const f = car.sets.filter((x) => x.state === "fitted"), p = [];
+  if (f.length !== 1) p.push(`${f.length} fitted sets`);
+  else { if (car.tyre?.setId !== f[0].id) p.push(`tyre set ${car.tyre?.setId} ≠ fitted ${f[0].id}`); if (car.tyre?.name !== f[0].compound) p.push(`tyre ${car.tyre?.name} ≠ set ${f[0].compound}`); }
+  for (const x of car.sets) if (!String(x.id).startsWith(car.num + "-")) p.push(`foreign set ${x.id}`);
+  return { ok: !p.length, problems: p };
 }
 // a save from before v0.50 has no sets: the assumed allocation, less one set per stint already run (used, with the
 // stint's last known wear), the current tyre fitted
@@ -78,6 +102,6 @@ export function migrateSets(car, names) {
   const stints = []; let prev = null;
   for (const l of car.laps || []) { const last = stints[stints.length - 1]; if (last && !prev?.pit && last.compound === l.compound) { last.laps++; last.wear = l.wear; } else stints.push({ compound: l.compound, laps: 1, wear: l.wear }); prev = l; }
   for (const st of stints.slice(0, -1)) { const s = pickFree(sets, st.compound); if (s) { s.used = true; s.laps = st.laps; s.wear = st.wear ?? 0.3; } }
-  const cur = pickFree(sets, car.tyre?.name); if (cur) cur.state = "fitted";
+  const cur = pickFree(sets, car.tyre?.name); if (cur) { cur.state = "fitted"; if (car.tyre) car.tyre.setId = cur.id; }
   return sets;
 }

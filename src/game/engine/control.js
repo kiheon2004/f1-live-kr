@@ -576,7 +576,9 @@ export function redTyreChange(race, T, car, compound, apply, P = CONTROL) {
   if (ctl.flag !== "red" || !R || R.phase === "run") return { ok: false, why: "not suspended" };
   if (car.where !== "pit" || (car.pit?.v ?? 1) > 0.2) return { ok: false, why: "not stopped in the pit lane" };
   if (race.state.t > R.resumeAt - P.redWheelsMs.v) return { ok: false, why: "after the 5-minute signal (wheels must be fitted)" };
-  R.changed[car.num] = compound; apply?.(car, compound);
+  // (the change is recorded only once it is made – apply returns false when the set can't be fitted: nothing changes)
+  if (apply && apply(car, compound) === false) return { ok: false, why: "tyre set not fitted" };
+  R.changed[car.num] = compound;
   return { ok: true };
 }
 

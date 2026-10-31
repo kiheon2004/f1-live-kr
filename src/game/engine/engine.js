@@ -163,8 +163,15 @@ function newTyre(race, name, airT, set = null) {
   const C = race.cache, code = C.alloc[name] || name, ty = createTyre(code, { T0: fitTemp(race.state.season, code, airT ?? 25), kwScale: race.state.tyreWear ?? 1, wear0: set?.wear || 0, laps0: set?.laps || 0, km0: set?.km || 0 });   // (tyreWear: a sensitivity knob, 1 = the model)
   ty.name = name; if (set?.id) ty.setId = set.id; return ty;
 }
-// fit a set at the end of the work (or a red-flag change): the reserved / best free one; the old set back to the garage
-const fitSet = (race, car, name, setId = null) => { car.tyre = INV.fit(car, name, setId, (s) => newTyre(race, name, race.cache.w.airT ?? 25, s)); race.cache.profiles[car.num].at = -1e9; };
+// fit a set at the end of the work (or a red-flag change): inventory.fit – atomic, never a set that isn't there. On a
+// refusal the car keeps its tyre (the orders were checked against the same rule – a stop's own reservation normally
+// guarantees the set; a refusal here is logged, never a made-up tyre). { ok, why }
+function fitSet(race, car, name, setId = null) {
+  const r = INV.fit(car, name, setId, (s) => newTyre(race, name, race.cache.w.airT ?? 25, s));
+  if (!r.ok) { log(race, { car: car.num, type: "tyreNotFitted", cause: r.why, effect: `kept ${car.tyre.name}` }); return r; }
+  car.tyre = r.tyre; race.cache.profiles[car.num].at = -1e9; INV.releaseStale(car);
+  return { ok: true };
+}
 // who controls a player's car, kind by kind ("ai" | "player" | "goal"), and the last applied order that set each
 const newOwn = (who) => ({ pace: who, energy: who, plan: who, by: {} });
 
@@ -590,10 +597,11 @@ function validateOrder(race, c) {
     c.team = tk;
   }
   if (c.type === "pit" && c.args.compound != null && !isCompound(race.scenario, c.args.compound)) return { ok: false, why: `compound ${c.args.compound} not offered at this event` };
-  // the sets (inventory.js): a free set of that compound (or the named one), or the one the standing call already holds
-  if (c.type === "pit" && c.args.compound != null && car?.sets && !(S.control?.flag === "red" && car.where === "pit")) {
-    const held = car.sets.find((x) => x.state === "reserved" && x.compound === c.args.compound && (c.args.setId == null || x.id === c.args.setId));
-    if (!held && !INV.pickFree(car.sets, c.args.compound, c.args.setId ?? null)) return { ok: false, why: c.args.setId != null ? `set ${c.args.setId} not available` : `no set of ${c.args.compound} left` };
+  // the sets (inventory.js canFit – the same rule for a stop and for the red-flag change: this car's set of that compound,
+  // free or held by its call; a named set must be this car's and of that compound)
+  if (c.type === "pit" && car?.sets) {
+    if (c.args.compound == null && c.args.setId != null) return { ok: false, why: "a set needs its compound" };
+    if (c.args.compound != null) { const f = INV.canFit(car, c.args.compound, c.args.setId ?? null); if (!f.ok) return f; }
   }
   if (c.type === "plan") {
     const st = c.args.stints;
@@ -621,7 +629,17 @@ function applyOrder0(race, c, t) {
     case "energy": car.mode.energy = c.args.mode; return { ok: true };
     case "pit": {
       // suspended (red flag) and stopped in the lane: the free tyre change (SR 57.4b / B5.14.4a), not a stop
-      if (S.control?.flag === "red" && car.where === "pit") { const r = CTL.redTyreChange(race, race.cache.T, car, c.args.compound, (cc, cmp) => { fitSet(race, cc, cmp, c.args.setId ?? null); cc.redSets = (cc.redSets || 0) + 1; }); log(race, { t, car: car.num, type: "redTyreChange", cause: c.by, effect: r.ok ? c.args.compound : `refused: ${r.why}` }); return r; }
+      if (S.control?.flag === "red" && car.where === "pit") {
+        // (the free change under a red flag is a free CHANGE, not free tyres: the set must be there – checked first, so a
+        // refusal changes nothing; v0.52 §3: the change skipped the check and fitted a tyre no set existed for)
+        if (c.args.compound == null) return { ok: false, why: "red-flag change needs a compound" };
+        const f = car.sets ? INV.canFit(car, c.args.compound, c.args.setId ?? null) : { ok: true };
+        if (!f.ok) { log(race, { t, car: car.num, type: "redTyreChange", cause: c.by, effect: `refused: ${f.why}` }); return f; }
+        let fr = { ok: true };
+        const r = CTL.redTyreChange(race, race.cache.T, car, c.args.compound, (cc, cmp) => { fr = car.sets ? fitSet(race, cc, cmp, f.set?.id ?? null) : (cc.tyre = newTyre(race, cmp, race.cache.w.airT ?? 25), { ok: true }); if (fr.ok) cc.redSets = (cc.redSets || 0) + 1; return fr.ok; });
+        const res = r.ok && !fr.ok ? fr : r;
+        log(race, { t, car: car.num, type: "redTyreChange", cause: c.by, effect: res.ok ? c.args.compound : `refused: ${res.why}` }); return res;
+      }
       // (the set first: a call the sets can't serve is refused whole; a call that isn't taken frees what it reserved)
       const rs = c.args.compound != null && (car.pit.phase === "none" || car.pit.phase === "called") ? INV.reserve(car, c.args.compound, c.args.setId ?? null) : { ok: true, set: null };
       if (!rs.ok) { log(race, { t, car: car.num, type: "pitCall", cause: c.by, effect: `refused: ${rs.why}` }); return rs; }
