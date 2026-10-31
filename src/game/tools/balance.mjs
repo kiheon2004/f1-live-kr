@@ -22,7 +22,7 @@ const repo = path.resolve(opt("repo") || path.join(path.dirname(fileURLToPath(im
 const scDir = opt("scenarios"), out = opt("out"), seeds = (opt("seeds", "1,2,3,4")).split(",").map(Number), maxMin = +opt("maxMin", 240);
 if (!scDir || !out || !cases.length) { console.error("usage: balance.mjs --scenarios <dir> --out <file> --case <id>[:<weatherMode>] … [--seeds 1,2,3,4]"); process.exit(2); }
 
-const E = await import(path.join(repo, "src/game/engine/engine.js"));
+const E = await import(path.join(repo, "src/game/engine/engine.js")), INV = await import(path.join(repo, "src/game/engine/inventory.js"));
 let commit = null; try { commit = execFileSync("git", ["-C", repo, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim(); const dirty = execFileSync("git", ["-C", repo, "status", "--porcelain", "src"], { encoding: "utf8" }).trim(); if (dirty) commit += "+dirty"; } catch { commit = null; }
 const cls = (c) => (c === "INTERMEDIATE" ? "I" : c === "WET" ? "W" : "D");
 const unsuited = (c, w, ageLaps) => (cls(c) === "D" ? w >= 0.5 : cls(c) === "I" ? w >= 2.0 || (w <= 0.03 && ageLaps > 2) : w <= 0.8);
@@ -54,10 +54,10 @@ for (const spec of cases) for (const seed of seeds) {
     for (let i = 0; i < flags.length; i++) if (flags[i].f === "sc" || flags[i].f === "vsc") periods.push({ f: flags[i].f, t0: flags[i].t, t1: flags[i + 1]?.t ?? S.t, lap0: flags[i].lap });
     const entries = S.log.filter((e) => e.type === "pitEntry");
     rec.cars = S.cars.map((c) => {
-      const st = []; let prev = null; for (const l of c.laps) { const last = st[st.length - 1]; if (last && !prev?.pit && last.c === l.compound) last.n++; else st.push({ c: l.compound, from: l.n, n: 1 }); prev = l; }
+      const st = INV.stintsOf(c.laps).map((x) => ({ c: x.compound, from: x.fromLap, n: x.laps }));
       const stops = stopsBy[c.num];
       const w = lapWater[c.num]; let bad = 0, run = 0, episodes = 0, age = 0, prevC = null;
-      c.laps.forEach((l, i) => { age = l.compound === prevC && !c.laps[i - 1]?.pit ? age + 1 : 1; prevC = l.compound; const u = unsuited(l.compound, w[i] ?? 0, age); if (u) { bad++; run++; if (run === 3) episodes++; } else run = 0; });
+      c.laps.forEach((l, i) => { const pl = c.laps[i - 1]; age = pl && (l.set != null && pl.set != null ? l.set === pl.set : l.compound === prevC && !pl.pit) ? age + 1 : 1; prevC = l.compound; const u = unsuited(l.compound, w[i] ?? 0, age); if (u) { bad++; run++; if (run === 3) episodes++; } else run = 0; });
       const aiPlans = S.commands.log.filter((o) => o.car === c.num && o.type === "plan" && o.ok && o.by.startsWith("ai:")).map((o) => o.args.stints.map((x) => x.compound[0] + x.toLap).join("-"));
       let flips = 0; for (let i = 2; i < aiPlans.length; i++) if (aiPlans[i] === aiPlans[i - 2] && aiPlans[i] !== aiPlans[i - 1]) flips++;
       const row = res.rows.find((x) => x.num === c.num);

@@ -95,12 +95,27 @@ export function checkSets(car) {
   for (const x of car.sets) if (!String(x.id).startsWith(car.num + "-")) p.push(`foreign set ${x.id}`);
   return { ok: !p.length, problems: p };
 }
+// the stints as run, from the lap records → [{ compound, fromLap, toLap, laps, wear (last lap's) }]. A lap record names
+// the set on it (v0.52): a new stint wherever the set changes – a stop, also on the same compound, or a red-flag change.
+// Older records have no set: a new stint where the compound changes, or after an in-lap that did not itself already show
+// the new compound (where the timing line lies in the pit lane past the box – Monaco – the in-lap's record carries the
+// set fitted in it, and its next lap is the same stint)
+export function stintsOf(laps) {
+  const out = []; let prev = null, prev2 = null;
+  for (const l of laps || []) {
+    const last = out[out.length - 1];
+    const same = last && (l.set != null && prev.set != null ? l.set === prev.set : l.compound === prev.compound && !(prev.pit && (!prev2 || prev2.compound === prev.compound)));
+    if (same) { last.toLap = l.n; last.laps++; last.wear = l.wear; } else out.push({ compound: l.compound, fromLap: l.n, toLap: l.n, laps: 1, wear: l.wear });
+    prev2 = prev; prev = l;
+  }
+  return out;
+}
+
 // a save from before v0.50 has no sets: the assumed allocation, less one set per stint already run (used, with the
 // stint's last known wear), the current tyre fitted
 export function migrateSets(car, names) {
   const sets = newSets(car.num, names, null);
-  const stints = []; let prev = null;
-  for (const l of car.laps || []) { const last = stints[stints.length - 1]; if (last && !prev?.pit && last.compound === l.compound) { last.laps++; last.wear = l.wear; } else stints.push({ compound: l.compound, laps: 1, wear: l.wear }); prev = l; }
+  const stints = stintsOf(car.laps);
   for (const st of stints.slice(0, -1)) { const s = pickFree(sets, st.compound); if (s) { s.used = true; s.laps = st.laps; s.wear = st.wear ?? 0.3; } }
   const cur = pickFree(sets, car.tyre?.name); if (cur) { cur.state = "fitted"; if (car.tyre) car.tyre.setId = cur.id; }
   return sets;

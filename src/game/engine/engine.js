@@ -331,8 +331,8 @@ function resultRows(race, R) {
     const pq = (c.acct.pitParts || []).reduce((a, p) => a + p.queue, 0);
     r.acct = { traffic: +c.acct.traffic.toFixed(2), pit: +c.acct.pit.toFixed(2), pitQueue: +pq.toFixed(2), penalty: r.penS || 0, approx: ["traffic", "pit", "pitQueue"], pitParts: c.acct.pitParts || [] };
     // stints as run (from the lap records: compound per completed lap)
-    // (a new stint after an in-lap – the lap record's pit flag – or when the compound changes, e.g. a red-flag change)
-    r.stints = []; let prev = null; for (const l of c.laps) { const last = r.stints.at(-1); if (last && !prev?.pit && last.compound === l.compound) last.laps++; else r.stints.push({ compound: l.compound, laps: 1 }); prev = l; }
+    // (a new stint wherever the set changes – a stop or a red-flag change; inventory.stintsOf)
+    r.stints = INV.stintsOf(c.laps).map((x) => ({ compound: x.compound, laps: x.laps }));
   }
   R.by = "rules.classify";
   return R;
@@ -541,7 +541,7 @@ function lineCrossing(race, car, s0, s1, crossed, tCross) {
   car.lap++;
   const lapT = (tCross - car.lapT0) / 1000; car.lapT0 = tCross;
   const inLap = car.pit.times?.entry != null || car.where === "pit";
-  car.laps.push({ n: car.lap, t: +lapT.toFixed(3), compound: car.tyre.name, wear: +car.tyre.wear.toFixed(4), fuel: +car.energy.fuel.toFixed(2), soc: +socFrac(car.energy, race.cache.ep).toFixed(3), pit: inLap, mode: car.mode.pace, emode: car.mode.energy, tr: +car.acct.traffic.toFixed(2), w: +avg(race.cache.surface.hLine).toFixed(3), rain: +(race.cache.w.rain || 0).toFixed(2), Ts: +car.tyre.Ts.toFixed(1), Tc: +car.tyre.Tc.toFixed(1) });
+  car.laps.push({ n: car.lap, t: +lapT.toFixed(3), compound: car.tyre.name, wear: +car.tyre.wear.toFixed(4), fuel: +car.energy.fuel.toFixed(2), soc: +socFrac(car.energy, race.cache.ep).toFixed(3), pit: inLap, set: car.tyre.setId ?? null, mode: car.mode.pace, emode: car.mode.energy, tr: +car.acct.traffic.toFixed(2), w: +avg(race.cache.surface.hLine).toFixed(3), rain: +(race.cache.w.rain || 0).toFixed(2), Ts: +car.tyre.Ts.toFixed(1), Tc: +car.tyre.Tc.toFixed(1) });
   tyreLap(car.tyre); energyLap(car.energy);
   if (car.lap > S.leaderLap) S.leaderLap = car.lap;
   // (the chequered flag and each car's finish are race control's: control.js onLine)
@@ -771,8 +771,7 @@ export function analysis(race, nums = null) {
     if (!want.has(c.num)) continue;
     const plans = [{ t: 0, lap: 0, by: c.plan0?.by || "pre-race", stints: c.plan0?.stints || [] }];
     for (const o of S.commands.log) if (o.car === c.num && o.type === "plan" && o.ok && o.stage !== "submit") plans.push({ t: o.tEff, lap: lapAt(c, o.tEff), by: o.by, stints: o.args.stints });
-    const stints = []; let prev = null;
-    for (const l of c.laps) { const last = stints[stints.length - 1]; if (last && !prev?.pit && last.compound === l.compound) { last.toLap = l.n; last.laps++; } else stints.push({ compound: l.compound, fromLap: l.n, toLap: l.n, laps: 1 }); prev = l; }
+    const stints = INV.stintsOf(c.laps).map((x) => ({ compound: x.compound, fromLap: x.fromLap, toLap: x.toLap, laps: x.laps }));
     const orders = S.commands.log.filter((o) => o.car === c.num && (o.by === "player" || o.by.startsWith("goal:"))).map((o) => ({ t: o.tAt, tEff: o.tEff, type: o.type, args: o.args, by: o.by, ok: o.ok, why: o.why, stage: o.stage }));
     const ai = (S.ai?.teams?.[c.teamKey]?.decisions || []).filter((d) => d.num === c.num).map((d) => ({ t: d.t, lap: d.lap, why: d.why, plan: d.plan, gain: d.gain ?? null }));
     const traffic = []; let tr0 = 0; for (const l of c.laps) { if (l.tr != null) { traffic.push({ lap: l.n, loss: +(l.tr - tr0).toFixed(2) }); tr0 = l.tr; } }

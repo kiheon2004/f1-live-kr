@@ -7,7 +7,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs"), path = require("node:path");
 const SC = JSON.parse(fs.readFileSync(path.join(__dirname, "../fixtures/game/2025-08-03_Hungarian_Grand_Prix_2025-08-03_Race.scenario.json"), "utf8"));
-const M = () => Promise.all([import("../../src/game/engine/engine.js"), import("../../src/game/engine/ai.js"), import("../../src/game/engine/strategy.js")]);
+const M = async () => { INV ??= await import("../../src/game/engine/inventory.js"); return Promise.all([import("../../src/game/engine/engine.js"), import("../../src/game/engine/ai.js"), import("../../src/game/engine/strategy.js")]); };
 
 // laps:rain sequence → the race (stops after the sequence or at the flag)
 async function rainRace(seq, { seed = 4, prep = null } = {}) {
@@ -21,7 +21,7 @@ async function rainRace(seq, { seed = 4, prep = null } = {}) {
   return r;
 }
 // a car's stints as run: [{ c: compound, from, n }] (a stop starts a new stint, also on the same compound)
-const stints = (c) => { const st = []; let prev = null; for (const l of c.laps) { const last = st[st.length - 1]; if (last && !prev?.pit && last.c === l.compound) last.n++; else st.push({ c: l.compound, from: l.n, n: 1 }); prev = l; } return st; };
+let INV; const stints = (c) => INV.stintsOf(c.laps).map((x) => ({ c: x.compound, from: x.fromLap, n: x.laps }));
 const cls = (c) => (c === "INTERMEDIATE" ? "I" : c === "WET" ? "W" : "D");
 
 test("heavy rain: dry → intermediate → wet → intermediate → dry, each change with the water then (not straight back on noise)", async () => {

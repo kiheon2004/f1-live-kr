@@ -99,3 +99,15 @@ test("normal stops keep the invariant for every car over a race (all paths: plan
   assert.ok(r.state.finished);
   assert.ok(!r.state.log.some((e) => e.type === "tyreNotFitted"), "no stop ended without its set");
 });
+
+test("stintsOf: a new stint where the set changes (same compound too); old records without sets: an in-lap that already shows the new compound (Monaco's line in the pit lane) is not a stint of one lap", async () => {
+  const [, , INV] = await M();
+  const L = (n, compound, pit = false, set) => ({ n, compound, pit, wear: n / 100, ...(set ? { set } : {}) });
+  const s = (laps) => INV.stintsOf(laps).map((x) => x.compound[0] + x.laps).join("-");
+  assert.strictEqual(s([L(1, "SOFT", false, "a"), L(2, "SOFT", true, "a"), L(3, "SOFT", false, "b"), L(4, "SOFT", false, "b")]), "S2-S2");
+  assert.strictEqual(s([L(1, "SOFT", false, "a"), L(2, "MEDIUM", true, "b"), L(3, "MEDIUM", false, "b")]), "S1-M2", "set fitted in the in-lap");
+  // legacy: the in-lap shows the old compound → split after it; shows the new one → no 1-lap stint
+  assert.strictEqual(s([L(1, "SOFT"), L(2, "SOFT", true), L(3, "MEDIUM"), L(4, "MEDIUM")]), "S2-M2");
+  assert.strictEqual(s([L(1, "SOFT"), L(2, "MEDIUM", true), L(3, "MEDIUM"), L(4, "MEDIUM")]), "S1-M3");
+  assert.strictEqual(s([L(1, "SOFT"), L(2, "SOFT", true), L(3, "SOFT")]), "S2-S1", "same-compound stop seen at the in-lap");
+});
