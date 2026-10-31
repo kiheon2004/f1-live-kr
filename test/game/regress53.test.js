@@ -111,7 +111,8 @@ let pair = null;
 test("VSC (forced, as incidents.js would): no traffic counted under it; pit = Σ parts, each part's split adds up", async () => { pair = await vscPair(); });
 // (found here: the stop's loss is measured against the car's FREE lap over the same stretch – under a VSC the car that
 // stays out is slower too, so the stop really costs less; the AI prices it at AI.vscLossK × the green loss, the
-// account shows the green-reference number. Seed 3: 19.49 s under the VSC vs 19.17 s under green.)
+// account shows the green-reference number. Seed 3, measured against the same race without the stop (regress/repro/
+// vsccost.mjs): green real 22.6 s / account 19.2 s; VSC real 12.6 s / account 19.5 s.)
 test("VSC: a stop under the VSC is accounted cheaper than the same stop under green", { todo: "the account's reference is the free lap, not the neutralised one (engine.js pitExit loss) – reported to the lead" }, async () => {
   const { pv, pg } = pair || await vscPair();
   assert.ok(pv.loss < pg.loss - 3, `stop under VSC ${pv.loss} s vs green ${pg.loss} s`);
