@@ -1282,13 +1282,15 @@ function shadowTex(prof = null) {
     const k = 50, W = (c.width = 120), H = (c.height = 290), px = (mx) => W / 2 + mx * k, pz = (mz) => H / 2 - mz * k;
     const box = (x0, z0, x1, z1, a, r) => { x.fillStyle = `rgba(0,0,0,${a})`; x.beginPath(); x.roundRect(px(x0), pz(z1), (x1 - x0) * k, (z1 - z0) * k, r * k); x.fill(); };
     x.filter = "blur(7px)";
-    box(-0.8, prof.RZ + 0.3, 0.8, prof.FZ - 0.6, 0.42, 0.25);       // the floor's plate
+    box(-0.95, prof.RZ + 0.3, 0.95, prof.FZ - 0.6, 0.5, 0.25);       // the floor's plate (to its edge under the sidepods)
     box(-0.3, prof.FZ - 0.8, 0.3, prof.FZ + 1.0, 0.3, 0.15);         // the nose and the front wing's middle
     box(-0.45, prof.RZ - 0.75, 0.45, prof.RZ + 0.4, 0.34, 0.15);     // the gearbox and the diffuser
-    x.filter = "blur(3px)";
+    // (each tyre: the shade round its foot – the road a hand's breadth round the contact patch sees little sky –, then the
+    // patch itself darkest)
     for (const [z, tw] of [[prof.FZ, prof.FW], [prof.RZ, prof.RW]]) for (const sd of [-1, 1]) {
       const cx = sd * (prof.W / 2 - tw / 2);
-      box(cx - tw / 2 - 0.02, z - 0.16, cx + tw / 2 + 0.02, z + 0.16, 0.5, 0.06);   // the tyre's contact patch and the shade either side of it
+      x.filter = "blur(5px)"; box(cx - tw / 2 - 0.1, z - 0.32, cx + tw / 2 + 0.1, z + 0.32, 0.45, 0.12);
+      x.filter = "blur(2px)"; box(cx - tw / 2, z - 0.12, cx + tw / 2, z + 0.12, 0.7, 0.04);
     }
     x.filter = "none";
   }
@@ -5406,6 +5408,19 @@ window.Map3D = {
       out.push([+((ms - t0) / 1000).toFixed(1), +(w * 180 / Math.PI).toFixed(1), Math.round(v * 3.6), Math.round(((q.s % sm.frame.L) + sm.frame.L) % sm.frame.L)]);
     }
     return JSON.stringify(out);
+  },
+  // (v0.52) the focused car's contact shadow: its texture (per era), its plane's height and the road's under the car's
+  // middle and its four tyres (a ray down through the world's meshes) – is it on the road or under it
+  contactShadow() {
+    const c = cars.get(camNum()); if (!c) return "no car"; c.model.updateWorldMatrix(true, true);
+    const sh = c.model.getObjectByName("contactShadow"), p = new THREE.Vector3(), ray = new THREE.Raycaster(), hits = [];
+    const u = c.model.userData.profile;
+    for (const [x, z] of [[0, 0], [u.W / 2 - u.FW / 2, u.FZ], [-(u.W / 2 - u.FW / 2), u.FZ], [u.W / 2 - u.RW / 2, u.RZ], [-(u.W / 2 - u.RW / 2), u.RZ]]) {
+      p.set(x, 0.03, z).applyMatrix4(c.model.matrixWorld); ray.set(new THREE.Vector3(p.x, p.y + 5, p.z), new THREE.Vector3(0, -1, 0));
+      let h = null; world.group.traverseVisible((o) => { if (!o.isMesh || o.isInstancedMesh) return; try { for (const q of ray.intersectObject(o, false)) if (!h || q.distance < h.distance) h = q; } catch {} });
+      hits.push(h ? +(p.y - h.point.y).toFixed(3) : null);
+    }
+    return JSON.stringify({ tex: sh?.material.map?.image ? [sh.material.map.image.width, sh.material.map.image.height] : null, planeOverRoad: hits });
   },
   // (v0.52) the eye camera's turn with the driver's head into bends: on / off (kept in this computer's settings); no
   // argument: the state and the head's turn now (deg)
