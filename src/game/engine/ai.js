@@ -257,7 +257,9 @@ function decide(race, team, car, why) {
     const need = pitLoss(M, est, view.flag) + AI.switchDelta * (car.lap - (cs.switchLap ?? -9) < 4 ? 3 : 1);
     let best = null, bg = need;
     const gains = crossoverGains(M, est, view, car.num, { name: car.tyre.name, age: car.tyre.laps, fuel: car.energy.fuel }, { K, corr, key: `${car.num}:${car.pit.stops}:w` });
-    for (const c in gains) if (gains[c] > bg && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) { bg = gains[c]; best = c; }
+    // (the crossover rule is for a change of FAMILY – slicks ↔ wet-weather tyres; a dry-for-dry change is the planner's,
+    // with its minimum stint: v0.51, after a shower the rule boxed soft → medium three laps after the slicks went on)
+    for (const c in gains) if (gains[c] > bg && WETS.includes(c) !== wetTyre && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) { bg = gains[c]; best = c; }
     // a stop the plan makes in the next two laps anyway: no extra stop to pay for – only the right tyre for it
     const ns = nextStopOf(car), imminent = ns && ns.toLap - car.lap <= 2;
     if (imminent && !best) {
@@ -290,6 +292,10 @@ function decide(race, team, car, why) {
     // a set of the same family fitted only a few laps ago is not changed again before AI.minStint laps (a family switch is
     // the crossover rule's, above) – v0.51
     if (!wetTyre && car.tyre.laps < AI.minStint) cands = cands.filter((c) => !(c.stints.length > 1 && c.stints[0].laps < AI.minStint - car.tyre.laps));
+    // rain likely within the next half hour of the game's forecast: no stop for fresh slicks in the next laps – the stop
+    // for wet-weather tyres is coming (v0.51: dry stops three laps before switching to intermediates)
+    const pSoon = Math.max(0, ...(view.forecast?.blocks || []).slice(0, 2).map((b) => b.pRain || 0));
+    if (!wetTyre && pSoon >= AI.rainHold) cands = cands.filter((c) => !(c.stints.length > 1 && c.stints[0].laps <= 3 && !WETS.includes(c.stints[1].compound)));
     // the present plan as a candidate (continuing it costs nothing to decide)
     const cur = planAsCandidate(car, st, cs.modes); if (cur) cands.push(cur);
     // weather: box now for a wet tyre / back to slicks (the reactive rule decides later laps in the scenarios)
