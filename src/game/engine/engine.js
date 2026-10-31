@@ -208,7 +208,7 @@ export function step(race) {
   // 1. orders
   for (const c of CMD.due(S.commands, t)) { const res = applyOrder(race, c, t); CMD.record(S.commands, c, t, res); noteOwner(race, c, res, t); }
   // 2. weather (once a second, on the second)
-  if (t % 1000 === 0) { truthAt(C.truth, t, C.w); surfaceStep(C.surface, C.w, 1); }
+  if (t % 1000 === 0) { truthAt(C.truth, t, C.w); surfaceStep(C.surface, C.w, 1); rainEvents(race, t); }
   else if (C.w.rain == null) truthAt(C.truth, t, C.w);
   // 3. traffic decisions from the field as it is now (step start)
   trafficPre(race, t);
@@ -541,7 +541,7 @@ function lineCrossing(race, car, s0, s1, crossed, tCross) {
   car.lap++;
   const lapT = (tCross - car.lapT0) / 1000; car.lapT0 = tCross;
   const inLap = car.pit.times?.entry != null || car.where === "pit";
-  car.laps.push({ n: car.lap, t: +lapT.toFixed(3), compound: car.tyre.name, wear: +car.tyre.wear.toFixed(4), fuel: +car.energy.fuel.toFixed(2), soc: +socFrac(car.energy, race.cache.ep).toFixed(3), pit: inLap, mode: car.mode.pace, emode: car.mode.energy, tr: +car.acct.traffic.toFixed(2), Ts: +car.tyre.Ts.toFixed(1), Tc: +car.tyre.Tc.toFixed(1) });
+  car.laps.push({ n: car.lap, t: +lapT.toFixed(3), compound: car.tyre.name, wear: +car.tyre.wear.toFixed(4), fuel: +car.energy.fuel.toFixed(2), soc: +socFrac(car.energy, race.cache.ep).toFixed(3), pit: inLap, mode: car.mode.pace, emode: car.mode.energy, tr: +car.acct.traffic.toFixed(2), w: +avg(race.cache.surface.hLine).toFixed(3), rain: +(race.cache.w.rain || 0).toFixed(2), Ts: +car.tyre.Ts.toFixed(1), Tc: +car.tyre.Tc.toFixed(1) });
   tyreLap(car.tyre); energyLap(car.energy);
   if (car.lap > S.leaderLap) S.leaderLap = car.lap;
   // (the chequered flag and each car's finish are race control's: control.js onLine)
@@ -678,6 +678,17 @@ function applyOrder0(race, c, t) {
 
 // ---------- reading ----------
 
+// rain starting / stopping as events (the screens' alerts and the results' weather bands): on at ≥ RAIN_ON mm/h, off once
+// below RAIN_OFF for RAIN_OFF_MS (no flicker on a drizzle at the edge); the state is saved, so a restored race logs alike
+const RAIN_ON = 0.2, RAIN_OFF = 0.05, RAIN_OFF_MS = 120000;
+function rainEvents(race, t) {
+  const S = race.state, r = race.cache.w.rain || 0;
+  if (!S.wx) { S.wx = { raining: r >= RAIN_ON, dryFrom: null }; return; }   // (first second, or a save from before v0.52: as it is, no event)
+  if (!S.wx.raining) { if (r >= RAIN_ON) { S.wx.raining = true; S.wx.dryFrom = null; log(race, { t, type: "rainStart", effect: `${r.toFixed(1)} mm/h` }); } return; }
+  if (r >= RAIN_OFF) { S.wx.dryFrom = null; return; }
+  S.wx.dryFrom ??= t;
+  if (t - S.wx.dryFrom >= RAIN_OFF_MS) { S.wx.raining = false; S.wx.dryFrom = null; log(race, { t, type: "rainEnd" }); }
+}
 function log(race, e) { race.state.log.push({ t: e.t ?? race.state.t, lap: race.state.leaderLap, ...e }); }
 export const events = (race, sinceT = -1) => race.state.log.filter((e) => e.t > sinceT);
 export const results = (race) => race.state.results || classify(race);
@@ -766,7 +777,7 @@ export function analysis(race, nums = null) {
     const ai = (S.ai?.teams?.[c.teamKey]?.decisions || []).filter((d) => d.num === c.num).map((d) => ({ t: d.t, lap: d.lap, why: d.why, plan: d.plan, gain: d.gain ?? null }));
     const traffic = []; let tr0 = 0; for (const l of c.laps) { if (l.tr != null) { traffic.push({ lap: l.n, loss: +(l.tr - tr0).toFixed(2) }); tr0 = l.tr; } }
     const events = S.log.filter((e) => e.car === c.num || (e.cars || []).includes(c.num)).filter((e) => !["defend", "attackAborted", "attack", "blueFlag", "yield"].includes(e.type)).map((e) => ({ t: e.t, lap: e.lap, type: e.type, cause: typeof e.cause === "string" ? e.cause : null, effect: typeof e.effect === "string" ? e.effect : e.effect?.kind || null }));
-    out.cars[c.num] = { num: c.num, tla: c.tla, plans, stints, orders, ai, pitParts: c.acct.pitParts || [], traffic, trafficTotal: +c.acct.traffic.toFixed(2), pitTotal: +c.acct.pit.toFixed(2), events, laps: c.laps.map((l) => ({ n: l.n, t: l.t, compound: l.compound, pit: l.pit, mode: l.mode, emode: l.emode ?? null })) };
+    out.cars[c.num] = { num: c.num, tla: c.tla, plans, stints, orders, ai, pitParts: c.acct.pitParts || [], traffic, trafficTotal: +c.acct.traffic.toFixed(2), pitTotal: +c.acct.pit.toFixed(2), events, laps: c.laps.map((l) => ({ n: l.n, t: l.t, compound: l.compound, pit: l.pit, mode: l.mode, emode: l.emode ?? null, water: l.w ?? null, rain: l.rain ?? null })) };
   }
   return out;
 }
