@@ -398,7 +398,9 @@ function pitFrame(src, t, lag, isRace) {
     // (v0.53: this visit's own stops – its stand at its box, a double stack's queue place – and the ways in and out at
     // its box; the last box stop from this visit only, never a previous visit's)
     const tol = Math.min(PIT.atBox, tolOf.get(team) ?? PIT.atBox), ways = tm?.box != null ? waysOf(G, m, tm.box) : null;
-    const visit = trk && ways ? pitVisitOf(src, S, num, trk, t, G, tm.box, tol, ways) : null;
+    // (the record's stand counts as at its box within half the way to the next team's box – nearer its own than any other
+    // – up to 15 m; the state's own tolerance stays the tighter one)
+    const visit = trk && ways ? pitVisitOf(src, S, num, trk, t, G, tm.box, Math.min(15, tolOf.get(team) ?? PIT.atBox), ways) : null;
     let lastBox = null;
     if (visit?.box && !visit.box.open && t >= visit.box.t1) lastBox = { endU: visit.box.u, ago: (t - visit.box.t1) / 1000, t0: visit.box.t0, t1: visit.box.t1 };
     let pitStart = null;

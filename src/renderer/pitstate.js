@@ -120,7 +120,9 @@ function visitState(c, d, tol, standing, ev, P) {
   if (standing) {
     if (left && Math.abs(d) > tol) { const o = out("queued", ["standing on its way out"]); if (o) return o; return { state: "queued", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev }; }
     if (c.teammateInBox && d < -2 && d > -P.near - 10) { ev.push("teammate in the box"); return { state: "waiting (double stack)", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev }; }
-    if (Math.abs(d) <= tol) {
+    // (at its box: within the box's tolerance, or where this visit's record has it stand at its box – which may be a
+    // little past the tolerance: Hungary 2025, Bearman 11 m past Haas' box, nearer it than any other team's)
+    if (Math.abs(d) <= tol || (box && Math.abs(c.u - box.u) < 3 && (!first || first === box || t >= box.t0 - 500))) {
       if (!c.race && c.stillFor >= P.garage) { ev.push("standing long outside a race"); return { state: "garage", lane: "garage", w: ss(P.garage, P.garage + P.garageIn, c.stillFor), evidence: ev }; }
       if (c.penalty === "stop-go") { ev.push("stop-and-go given by race control"); return { state: "stop-go", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev }; }
       return { state: "in box", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev };
