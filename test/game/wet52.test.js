@@ -89,3 +89,20 @@ test("dry race unchanged by the wet rules where nothing is wet (Hungary dry, 25 
   const a = E.createRace({ scenario: SC, seed: 2, ai: true }); while (a.state.t < 1500000) E.step(a);
   assert.ok(a.state.cars.every((c) => c.laps.every((l) => !/INTER|WET/.test(l.compound))));
 });
+
+test("rain likely soon and the PRESENT plan has a slick stop within 3 laps: the stop is moved later (priced, same rule as new plans); with no rain the plan's stop is made", async () => {
+  const [E] = await M();
+  const out = {};
+  for (const rain of [0, 6]) {
+    const r = E.createRace({ scenario: SC, seed: 2, ai: true }), c = r.state.cars.find((x) => x.num === "4");
+    while (!(c.plan && c.lap >= c.plan.stints[0].toLap - 3)) E.step(r);
+    const T = r.cache.truth, m0 = Math.floor(r.state.t / 60000);
+    for (let j = m0 + 14; j < Math.min(T.rain.length, m0 + 60); j++) T.rain[j] = rain;   // (rain in ~15 min: the forecast's second block)
+    const lap0 = c.lap, stop0 = c.plan.stints[0].toLap;
+    while (c.lap < lap0 + 3) E.step(r);
+    out[rain] = { stops: c.pit.stops, stop0, lap0, firstStop: c.plan.stints[0].toLap, p: Math.max(...E.forecast(r).blocks.slice(0, 2).map((b) => b.pRain)) };
+    while (c.lap < lap0 + 5) E.step(r); out[rain].stops5 = c.pit.stops;
+  }
+  assert.ok(out[0].stops5 === 1 && out[0].firstStop - out[0].stop0 <= 2, `dry: the planned stop made (give or take a lap) ${JSON.stringify(out[0])}`);
+  assert.ok(out[6].p >= 0.5 && out[6].stops === 0 && out[6].firstStop > out[6].stop0, `rain: the stop moved later ${JSON.stringify(out[6])}`);
+});
