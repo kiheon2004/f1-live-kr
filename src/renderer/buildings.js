@@ -241,6 +241,22 @@ function material(night) {
       // walls take the building's colour; glass stays glass, a little different window to window
       vec3 wallC = fx.rgb * vTint;
       vec3 glassC = fx.rgb * (0.78 + 0.4 * wv) * mix(vec3(1.0), vTint, 0.15);
+      // v0.52 (request §11, repeating facades): the tile repeats every 2 bays × 2 storeys, so a long or tall facade read as
+      // one stamp copied – now, in the shader (no texture, no draw call): behind some windows a blind or curtain drawn
+      // part way down (pale, a different share window to window), each storey and each bay a few per cent lighter or
+      // darker, broad patches of weathering across the wall, and the bottom 3 m darker with splash and grime
+      {
+        vec2 wc = fract(vFUv * 2.0);
+        float hb = bHash(winCell + 3.7), drop = 0.25 + 0.7 * bHash(winCell + 9.1);
+        vec3 blind = mix(vec3(0.82, 0.8, 0.74), vec3(0.62, 0.6, 0.56), bHash(winCell + 1.3));
+        glassC = mix(glassC, blind * (0.55 + 0.25 * wv), step(hb, 0.3) * step(1.0 - drop, wc.y) * 0.85);
+        float row = bHash(vec2(floor(vFUv.y * 2.0), vSeed * 91.0)), col = bHash(vec2(floor(vFUv.x * 2.0), vSeed * 53.0));
+        vec2 q = vFUv * 0.21 + vSeed * 7.0; vec2 qi = floor(q), qf = fract(q); qf = qf * qf * (3.0 - 2.0 * qf);
+        float patchN = mix(mix(bHash(qi), bHash(qi + vec2(1.0, 0.0)), qf.x), mix(bHash(qi + vec2(0.0, 1.0)), bHash(qi + 1.0), qf.x), qf.y);
+        float grime = mix(0.84, 1.0, smoothstep(0.0, 3.0, vY - vBT.x));
+        wallC *= (0.96 + 0.06 * row) * (0.97 + 0.05 * col) * (0.92 + 0.12 * patchN) * grime;
+        glassC *= mix(0.9, 1.0, grime);
+      }
       diffuseColor.rgb *= mix(wallC, glassC, glossMask) * vShade;`)
       .replace("#include <roughnessmap_fragment>", "float roughnessFactor = mix(roughness, 0.16, glossMask);")
       .replace("#include <metalnessmap_fragment>", "float metalnessFactor = mix(metalness, 0.3, glossMask);")
@@ -250,7 +266,7 @@ function material(night) {
         totalEmissiveRadiance *= nightWindows(vFUv, vLayer, vSeed, glassMask * wallFace) + nightFacade(vY, vBT, vSeed, diffuseColor.rgb, glassMask, wallFace);
       }`);
   };
-  mat.customProgramCacheKey = () => "facadeArray2";
+  mat.customProgramCacheKey = () => "facadeArray3";
   return mat;
 }
 
