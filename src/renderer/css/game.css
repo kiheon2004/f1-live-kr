@@ -98,7 +98,6 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gm-more button small { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .gm-more button:hover { background: var(--bg-3); }
   .gm-more button[aria-pressed="true"] { background: var(--bg-3); box-shadow: inset 2px 0 0 var(--text-1); }
-  .gm-exit.ui-btn { align-self: start; background: var(--hud-bg); border-color: var(--line); color: var(--text-1); }
   .gm-note { color: var(--warn); font-size: var(--fs-sm); margin: 0; }
   .gm-right { grid-column: 3; display: flex; flex-direction: column; gap: var(--s-4); align-self: start; max-height: 100%; min-height: 0; }
   .gm-src { display: grid; gap: var(--s-1); padding: var(--s-4) var(--s-5); border-radius: var(--r-2); background: var(--hud-bg); border: var(--bw) solid var(--line); }

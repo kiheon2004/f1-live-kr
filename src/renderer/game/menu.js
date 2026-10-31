@@ -150,7 +150,6 @@ export function paintMenu() {
       ${item("history", "경기 기록", "")}
       ${item("settings", "설정", "")}
     </nav>
-    <button class="ui-btn ghost sm gm-exit" data-act="game:exit">← 라이브 타이밍으로</button>
     ${G.engine ? "" : `<p class="gm-note">${esc(G.engineErr === "checking" ? "게임 엔진을 여는 중…" : "게임 엔진을 열지 못했어요")}</p>`}
   </div>
   <div class="gm-right" id="gmRight">

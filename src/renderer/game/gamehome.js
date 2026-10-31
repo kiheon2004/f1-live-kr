@@ -292,7 +292,8 @@ function finishRace() {
 
 // ---------- events: each screen's module gets its own actions (data-act="<module>:<what>") ----------
 $("homeGameBtn")?.addEventListener("click", open);
-$("gameExit").addEventListener("click", () => close());
+// (the game bar's 라이브 타이밍으로 is the one way out on every step – data-act="game:exit", handled below; v0.53 removed the
+// garage's second copy of it)
 const MODS = { menu: Menu, save: SaveUI, pre: Pre, hud: Hud, res: Res, alerts: AlertsUI };
 $("game").addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;
