@@ -196,3 +196,4 @@
 @media (prefers-reduced-motion: reduce) { #map3d .spec-tower .tw-row { transition: none; } }
 /* the cockpit cameras: of the provenance lines only the camera's own note (the view itself stays clear) */
 #map3d .spec-hud.cockpit ~ .notes3d .note3d-line:not(.cam) { display: none; }
+#map3d .tw-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

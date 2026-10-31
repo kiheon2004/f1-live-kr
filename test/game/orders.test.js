@@ -119,6 +119,9 @@ test("game store: concurrent saves of one slot end with the last one, no stray t
     await assert.rejects(st.saveGame("../evil", {}), /bad game slot/);
     const bad = path.join(dir, "bad.json"); fs.writeFileSync(bad, JSON.stringify({ hello: 1 }));
     await assert.rejects(st.importScenario(bad), /시나리오 파일이 아니에요/);
+    // (v0.51) the right format but damaged content: refused at import with the reason
+    const broken = path.join(dir, "broken.json"); fs.writeFileSync(broken, JSON.stringify({ ...SC, track: { ...SC.track, n: 0, L: -1 } }));
+    await assert.rejects(st.importScenario(broken), /시나리오 내용이 올바르지 않아요/);
     const good = path.join(dir, "good.json"); fs.writeFileSync(good, JSON.stringify(SC));
     const r = await st.importScenario(good); assert.strictEqual(r.id, SC.meta.id);
     assert.ok((await st.listScenarios()).some((s) => s.id === SC.meta.id));

@@ -86,8 +86,8 @@ function card(e) {
     <header class="gc-h">
       <button class="gc-sel" data-act="hud:sel" data-num="${n}" title="이 차를 선택 (패널의 상세가 이 차를 보여줘요)"><b class="gc-pos num" data-f="pos">–</b><span class="gc-name"><b>${esc(e.tla)}</b><small>#${n}</small></span></button>
       <span class="ui-badge" data-f="status"></span>
-      <span class="gc-gaps num" title="앞차·뒤차와의 시간 차 (계측선 통과 기준, 자료 없으면 –)"><small>앞</small><b data-f="ahead">–</b><small>뒤</small><b data-f="behind">–</b></span>
-      <span class="gc-lapt num" title="최근 랩 · 이 차의 최고 랩 대비"><b data-f="last">–</b><em data-f="delta"></em></span>
+      <span class="gc-gaps num" title="앞차·뒤차와의 시간 차 (계측선 통과 기준, 자료 없으면 –)"><small>앞차</small><b data-f="ahead">–</b><small>뒤차</small><b data-f="behind">–</b></span>
+      <span class="gc-lapt num" title="최근 랩 · 이 차의 최고 랩 대비"><small>최근</small><b data-f="last">–</b><em data-f="delta"></em></span>
       <button class="ui-btn sm quiet gc-cam" data-act="hud:cam" data-num="${n}" data-f="cam" title="3D 카메라가 이 차를 따라가요">카메라</button>
     </header>
     <div class="gc-stats">
@@ -214,7 +214,9 @@ function paintCard(e, snap, T, onCam, mine) {
   setT(f(root, "cam"), onCam === String(e.num) ? "카메라 ●" : "카메라");
   // gaps (timing line; "–" when there is no data – never 0), last lap and delta
   const ahead = c.pos === 1 ? "선두" : HM.fmtGap(c.gap?.ahead, c.gap?.aheadLaps), bh = HM.gapBehind(snap.cars, e.num);
-  setT(f(root, "ahead"), ahead); setT(f(root, "behind"), bh.car ? HM.fmtGap(bh.g, bh.laps).replace("+", "") : "–");
+  // (both as a plain time to that car – "앞차 1.2 · 뒤차 0.4"; laps as "+1랩"; no data "–")
+  const plain = (x) => (/^\+\d+(\.\d+)?$/.test(x) ? x.slice(1) : x);
+  setT(f(root, "ahead"), plain(ahead)); setT(f(root, "behind"), bh.car ? plain(HM.fmtGap(bh.g, bh.laps)) : "–");
   setT(f(root, "last"), HM.fmtLapT(c.last?.t));
   const d = HM.lapDelta(c.last, c.best), de = f(root, "delta"); setT(de, d); setC(de, d.startsWith("+") ? "t-lose" : d ? "t-gain" : "");
   // tyre

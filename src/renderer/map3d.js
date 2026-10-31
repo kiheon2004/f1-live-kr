@@ -2814,6 +2814,11 @@ function keepClearZones() {
     const r = screenRect([0, 1, 2, 3, 4, 5, 6, 7].map((j) => new THREE.Vector3(j & 1 ? b.max.x : b.min.x, j & 2 ? b.max.y : b.min.y, j & 4 ? b.max.z : b.min.z).applyMatrix4(M)), 0.12);
     if (r) out.push({ ...r, what: "wheel" });
   }
+  // (onboard – the T-cam above the airbox looks down on the helmet: its box too, so the driver card doesn't sit on it; v0.51)
+  if (camMode === "onboard" && u.helmet?.visible) {
+    const hb = new THREE.Box3().setFromObject(u.helmet);
+    if (!hb.isEmpty()) { const r = screenRect([0, 1, 2, 3, 4, 5, 6, 7].map((j) => new THREE.Vector3(j & 1 ? hb.max.x : hb.min.x, j & 2 ? hb.max.y : hb.min.y, j & 4 ? hb.max.z : hb.min.z)), 0.1); if (r) { const cx = r.x + r.w / 2, hw = Math.min(r.w / 2, hostW * 0.2); out.push({ x: Math.round(cx - hw), y: Math.max(r.y, Math.round(hostH * 0.55)), w: Math.round(2 * hw), h: hostH - Math.max(r.y, Math.round(hostH * 0.55)), what: "helmet" }); } }   // (the group's box is wider than the shell seen: its centre ± 20 % of the view, from 55 % down)
+  }
   if (u.specMirrors === undefined) u.specMirrors = mirrorBoxes(c.model);
   for (const m of u.specMirrors) { const r = screenRect(m.pts.map((p) => p.clone().applyMatrix4(m.mesh.matrixWorld)), 0.25); if (r) out.push({ ...r, what: "mirror" }); }
   // (the view's centre: the road ahead and, onboard, the halo's opening – 30–70 % across, 12–58 % down)

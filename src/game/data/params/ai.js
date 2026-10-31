@@ -39,6 +39,8 @@ export const AI_TABLE = {
   revertLaps: est(8, "laps", "a plan the team dropped this recently needs revertK × the hysteresis to come back", "teams don't swing between two plans lap after lap on model noise (v0.50 audit)", [2, 20]),
   revertK: est(3, "×", "hysteresis multiplier for going back to a recently dropped plan", "see revertLaps", [1, 6]),
   tweakK: est(2, "×", "hysteresis multiplier for moving the next stop by a lap or two on the same tyres", "a one-lap shift is within the model's noise", [1, 5]),
+  rainHold: est(0.5, "1", "rain chance in the next two forecast blocks (30 min) above which the AI doesn't box for fresh slicks in the next 3 laps", "the stop for wet-weather tyres is coming (v0.51 audit)", [0.3, 0.9]),
+  wetLearn: est(0.05, "mm", "average water on the line above which laps are left out of the degradation / falloff learning", "a damp track slows laps for reasons that aren't the tyres' wear (v0.51)", [0.01, 0.3]),
   familyMinLaps: est(3, "laps", "after a switch between slicks and wet-weather tyres, the laps before the AI switches back (unless the track is properly wet: wetNow)", "a shower around the model's crossover depth flipped the AI's choice every lap (v0.50 audit: up to 12 stops)", [1, 8]),
   wetNow: est(0.5, "mm", "water on the line above which a switch to wet-weather tyres needs no trend (and ignores familyMinLaps)", "well past the slick/inter crossover (≈ 0.12 mm in this model)", [0.2, 2]),
   scMinAge: est(8, "laps", "under SC/VSC a team boxes for a fresh set of the same family only when the tyres have run at least this long (and once per neutralisation)", "a cheap stop is still a stop: teams don't change a set fitted a few laps earlier; v0.50 – the AI re-pitted every 2–3 laps under a long SC", [3, 15]),

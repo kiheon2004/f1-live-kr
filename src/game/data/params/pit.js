@@ -18,6 +18,6 @@ export const PIT = {
   errStack: { v: 2.0, unit: "×", est: true, range: [1, 3], why: "factor on errBase for the second car of a double stack" },
   errWet: { v: 1.5, unit: "×", est: true, range: [1, 2.5], why: "factor on errBase in rain" },
   errDelay: { v: [2.5, 8], unit: "s", est: true, range: [1, 20], why: "added time of a slow wheel: uniform between the two (seeded)" },
-  unsafeRelease: { v: 0.15, unit: "1/release", est: true, range: [0, 0.4], why: "chance the crew releases a car although a car is within releaseGap in the fast lane (a misjudgement – only when such a car is there)" },
+  unsafeRelease: { v: 0.06, unit: "1/release", est: true, range: [0, 0.4], why: "chance the crew releases a car although a car is within releaseGap in the fast lane (a misjudgement – only when such a car is there). v0.51: 0.15 → 0.06 – unsafe-release penalties are of the order of ten a season over ≈ 800 stops, of which perhaps one in seven has a car coming down the fast lane (both rough, est); at 0.15 a wet race's mass stop handed out 5–10 penalties (audit, Australia 2025)" },
 };
 export const PIT_PARAMS_VERSION = 1;
