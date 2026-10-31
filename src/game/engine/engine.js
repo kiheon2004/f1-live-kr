@@ -228,7 +228,7 @@ export function step(race) {
   for (const c of S.cars) if (!(c.status === "run" && c.where === "lap")) s0.delete(c.num);
   trafficPost(race, t, s0);
   // 5. race control: this move's crossings, the SC, flags, start / finish; then the stewards and the incidents
-  const flag0 = S.control.flag, phase0 = S.control.phase, water = avg(C.surface.hLine);
+  const flag0 = S.flagLogged ?? S.control.flag, phase0 = S.control.phase, water = avg(C.surface.hLine);
   CTL.controlStep(race, T, { wet: water > 0.15 || (C.w.rain || 0) > 0.5, lowGrip: water > 1.0 });
   RULES.stewardsStep(race, T);
   for (const car of S.cars) incidentsFor(race, car);
@@ -302,7 +302,10 @@ function incidentsFor(race, car) {
 function controlEvents(race, flag0, phase0) {
   const S = race.state, ctl = S.control;
   S.phase = ctl.phase;
+  // (against the flag last logged, not the step's start: a flag race control set between steps – a dev trigger, a test –
+  // is logged too)
   if (ctl.flag !== flag0) log(race, { type: ctl.flag === "green" ? "green" : ctl.flag, cause: ctl.msgs.at(-1)?.text || "race control", effect: `${flag0} → ${ctl.flag}` });
+  S.flagLogged = ctl.flag;
   if (ctl.phase !== phase0) {
     if (ctl.phase === "racing" && phase0 === "grid") { for (const c of S.cars) if (!c.armed) c.lapT0 = ctl.t0 ?? S.t; log(race, { type: "lightsOut", cause: "start", effect: "lights out" }); }
     if (ctl.phase === "chequered") { S.chequeredAt = ctl.fin.flagT; log(race, { t: ctl.fin.flagT, type: "chequered", cause: ctl.fin.reason || "distance", effect: "chequered flag" }); }
@@ -418,7 +421,9 @@ function moveLap(race, car, t, cap = null) {
   noteLine(race, car, d0, t);
   // the traffic time account: a free "ghost" of this car (same envelope, power, mass, non-traffic caps; no traffic) runs
   // beside it while traffic influences it – the loss is the time difference at the same distance (traffic.js)
-  trafficAccount(race, car, ghostModels(E));
+  // (not under SC / VSC / a red flag: race control sets the pace then – the free ghost knows no SC, so following the train
+  // would count as traffic; the episode ends and the account keeps what it had)
+  if (S.control.flag === "green" || S.control.flag === "yellow") trafficAccount(race, car, ghostModels(E)); else car.traffic.gh = null;
   // plan: call the stop when the plan says (the team's plan – ai.js decides plans; executing them is the engine's)
   planCall(race, car, t);
 }
@@ -459,6 +464,10 @@ function movePit(race, car, t, ctx = {}) {
     penaltyS: ctx.penaltyS || 0, noBox: !!ctx.noBox, holdU: ctx.holdU ?? null, noWork: !!ctx.noWork,
     stack: S.cars.some((o) => o !== car && o.teamKey === car.teamKey && o.pit.times?.release && t - o.pit.times.release < 30000),
     onWorkDone: (cc, cmp) => fitSet(race, cc, cmp, cc.pit.call?.setId ?? null) }, undefined);
+  // (a visit through a suspension: the time the race stood still – red flag – and the resumption behind the SC until the
+  // car is out are the procedure's, not the stop's: kept apart as susp, every car in the lane pays it alike)
+  { const tm = car.pit.times, ctl = S.control;
+    if (tm && tm.entry != null) { if (ctl.flag === "red") { tm.red = true; tm.susp = (tm.susp || 0) + DT_MS; } else if (tm.red && ctl.flag === "sc" && ctl.red?.phase === "run") tm.susp = (tm.susp || 0) + DT_MS; } }
   if (car.pit.phase === "laneOut" || car.pit.phase === "exit" || car.pit.phase === "none") INV.releaseStale(car);   // (a stop without a tyre change keeps no set reserved)
   // the merge: the car waits at the end of the exit road while joining would force a car on the lap to brake or move
   if (ev === "exit" && !mergeClear(race, car)) {
@@ -484,10 +493,12 @@ function movePit(race, car, t, ctx = {}) {
     // the stop's loss: time from the branch to the merge minus the time the car would have taken on the lap over the same
     // stretch at its free reference pace (forward pass of its envelope at entry) – the parts: queue, stationary (penalty +
     // work), the rest (braking to the limiter, the lane, the launch). Approximate: the reference is a free lap's pace.
-    const queue = tm.queue != null ? (tm.queueEnd - tm.queue) / 1000 : 0, still = (tm.release - tm.stop) / 1000, ref = car.pit.refS ?? 0;
-    const loss = lane - ref;
-    car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2) });
-    log(race, { t, car: car.num, type: "pitExit", cause: "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s − free ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
+    const queue = tm.queue != null ? (tm.queueEnd - tm.queue) / 1000 : 0, susp = (tm.susp || 0) / 1000, ref = car.pit.refS ?? 0;
+    // (stationary: the box stop – under a red flag the car stops in the lane without one, and that wait is the suspension)
+    const still = tm.release != null && tm.stop != null ? (tm.release - tm.stop) / 1000 : 0;
+    const loss = tm.red ? Math.max(0, lane - susp - ref) : lane - ref;   // (into the lane BY the red flag: driven at the red's pace, never a gain)
+    car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2), ...(tm.red ? { red: true, susp: +susp.toFixed(1) } : {}) });
+    log(race, { t, car: car.num, type: "pitExit", cause: tm.red ? "red flag" : "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s${susp ? ` − suspension ${susp.toFixed(1)} s` : ""} − free ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
     car.pit.times = {};
     }
   }

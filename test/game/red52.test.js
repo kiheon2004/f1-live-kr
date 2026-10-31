@@ -111,3 +111,14 @@ test("stintsOf: a new stint where the set changes (same compound too); old recor
   assert.strictEqual(s([L(1, "SOFT"), L(2, "MEDIUM", true), L(3, "MEDIUM"), L(4, "MEDIUM")]), "S1-M3");
   assert.strictEqual(s([L(1, "SOFT"), L(2, "SOFT", true), L(3, "SOFT")]), "S2-S1", "same-compound stop seen at the in-lap");
 });
+
+test("red flag: the time in the lane through the suspension is not a pit loss (kept apart as susp); no traffic is counted under the SC / red; the red flag is logged even when set between steps", async () => {
+  const { E, r, car } = await suspended();
+  const tr0 = Object.fromEntries(r.state.cars.map((c) => [c.num, c.acct.traffic]));
+  let g = 0; while (r.state.control.flag !== "green" && g++ < 200000) E.step(r);
+  for (const c of r.state.cars) assert.ok(Math.abs(c.acct.traffic - tr0[c.num]) < 1, `car ${c.num}: traffic ${tr0[c.num].toFixed(1)} → ${c.acct.traffic.toFixed(1)} under red / SC`);
+  let h = 0; while (car.where === "pit" && h++ < 20000) E.step(r);
+  const part = car.acct.pitParts.find((p) => p.red);
+  assert.ok(part && part.susp > 100 && part.loss < 60, JSON.stringify(part));
+  assert.ok(r.state.log.some((e) => e.type === "red"), "red flag logged");
+});

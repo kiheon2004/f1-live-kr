@@ -133,3 +133,15 @@ test("race story from the engine: the player's orders and the team AI's decision
   const S0 = H.raceStory({ ...A.cars[num], laps: A.cars[num].laps.map(({ rain, water, ...l }) => l) }, { flags: A.flags, total: A.totalLaps, weather: [] });
   assert.strictEqual(S0.hasRain, false, "no series and no lap records (a result from before v0.52): rain unknown, not 'dry'");
 });
+
+test("alerts: a car of mine on a tyre that doesn't suit the water, or nearly worn out, is reported (the AI never changes a player plan)", async () => {
+  const A = await import("../../src/renderer/game/alerts.js");
+  const set = A.defaultAlertSettings(), mk = (compound, life, age, water) => ({ totalLaps: 52, weather: { water }, cars: [{ num: "16", status: "run", lap: 30, tyre: { compound, life, age }, plan: null }] });
+  const one = (snap, t) => A.checkAlerts(A.newAlertState(), { snap, mine: ["16"], settings: set, t }).filter((x) => x.rule === "tyre").map((x) => x.text);
+  assert.match(one(mk("WET", 0.6, 8, 0.0), 1)[0] || "", /마른 노면에 우천 타이어/);
+  assert.match(one(mk("MEDIUM", 0.6, 8, 0.9), 1)[0] || "", /젖은 노면/);
+  assert.match(one(mk("MEDIUM", 0.1, 30, 0.0), 1)[0] || "", /수명 10%/);
+  assert.deepStrictEqual(one(mk("MEDIUM", 0.6, 8, 0.0), 1), []);
+  assert.deepStrictEqual(one(mk("INTERMEDIATE", 0.9, 1, 0.0), 1), [], "a fresh inter on a drying track: not yet");
+  assert.strictEqual(set.tyre, "slow");
+});

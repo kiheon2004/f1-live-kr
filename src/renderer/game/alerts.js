@@ -11,6 +11,8 @@
 //   flag      SC / VSC / red flag deployed
 //   damage    a car of mine: an incident (contact, mechanical, error with consequence), retired
 //   fuel      a car of mine: fuel left below what its own burn so far needs to the finish (+ 1 lap margin)
+//   tyre      a car of mine: tyre life under 15 %, or a tyre that doesn't suit the track's water (slick on ≥ 0.5 mm,
+//             intermediate / wet on ≤ 0.03 mm – a player's plan is never changed by the AI, v0.52: the player is told)
 //   battery   a car of mine: battery store empty
 //   finish    the chequered flag
 export const ACTIONS = ["off", "note", "slow", "pause"];
@@ -20,6 +22,7 @@ export const RULES = {
   flag: { level: 3, cooldownMs: 30000, def: "slow" },
   damage: { level: 3, cooldownMs: 30000, def: "pause" },
   fuel: { level: 2, cooldownMs: 300000, def: "note" },
+  tyre: { level: 2, cooldownMs: 180000, def: "slow" },
   battery: { level: 1, cooldownMs: 120000, def: "note" },
   finish: { level: 1, cooldownMs: 1e9, def: "slow" },
 };
@@ -54,6 +57,14 @@ export function checkAlerts(st, { events = [], snap = null, forecast = null, min
     // a lap from the planned stop
     const ns = (c.plan?.stints || []).find((x, k, a) => x.toLap > (c.lap || 0) && k < a.length - 1);
     if (ns && ns.toLap - c.lap === 1 && c.pit?.phase === "none" && st.lap[n] !== c.lap) fire("myPit", n, `계획한 피트까지 1랩 (${ns.toLap}랩)`, "myPit:win:" + n + ":" + ns.toLap);
+    // tyre: nearly worn out, or wrong for the water now (the render-time picture's track water)
+    const ty = c.tyre, w = snap.weather?.water;
+    if (ty && Number.isFinite(ty.life) && ty.life < 0.15) fire("tyre", n, `타이어 수명 ${Math.round(ty.life * 100)}% 남음`, "tyre:life:" + n);
+    else if (ty && Number.isFinite(w)) {
+      const wetT = ty.compound === "INTERMEDIATE" || ty.compound === "WET";
+      if (!wetT && w >= 0.5) fire("tyre", n, `젖은 노면(물 ${w.toFixed(1)} mm)에 슬릭`, "tyre:fit:" + n);
+      else if (wetT && w <= 0.03 && (ty.age ?? 0) >= 2) fire("tyre", n, "마른 노면에 우천 타이어", "tyre:fit:" + n);
+    }
     // fuel: this car's own burn per lap so far
     const b = st.burn[n] || (st.burn[n] = []);
     if (st.lap[n] !== c.lap && Number.isFinite(c.fuel)) { b.push({ lap: c.lap, fuel: c.fuel }); if (b.length > 6) b.shift(); }

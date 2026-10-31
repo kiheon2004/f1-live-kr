@@ -70,7 +70,7 @@ function carCol(r, e, total) {
 function axis(S, planned, total) {
   if (!total) return "";
   const P = (lap) => HM.lapPct(lap, total), mid = (lap) => HM.lapPct(lap - 0.5, total), FL = { sc: "SC", vsc: "VSC", red: "적색기" };
-  const pits = S.pits.map((p) => `<b class="gx-pit${p.queue > 0.05 ? " q" : ""}" style="left:${P(p.lap)}" title="${p.lap}랩 피트 ${esc(CMP_KO[p.from] || "")}→${esc(CMP_KO[p.to] || "")} · 손실 ${HM.fmtS(p.loss)}${p.queue > 0.05 ? ` (동료 대기 ${HM.fmtS(p.queue)})` : ""} · 정지 ${HM.fmtS(p.stationary)}"><span class="num">${p.loss.toFixed(0)}초</span></b>`).join("");
+  const pits = S.pits.map((p) => `<b class="gx-pit${p.queue > 0.05 ? " q" : ""}" style="left:${P(p.lap)}" title="${p.lap}랩 ${p.red ? `적색기 피트레인 (중단 ${HM.fmtS(p.susp)}은 손실에서 뺌)` : "피트"} ${esc(CMP_KO[p.from] || "")}→${esc(CMP_KO[p.to] || "")} · 손실 ${HM.fmtS(p.loss)}${p.queue > 0.05 ? ` (동료 대기 ${HM.fmtS(p.queue)})` : ""} · 정지 ${HM.fmtS(p.stationary)}"><span class="num">${p.red ? "적색기" : `${p.loss.toFixed(0)}초`}</span></b>`).join("");
   const dec = [...S.changes, ...S.aiOther].map((d) => `<b class="gx-dm ${d.cls}" style="left:${mid(d.lap)}" title="${d.lap}랩 · ${esc(d.who)} · ${esc(d.text)}${d.why ? ` (${esc(d.why)})` : ""}"></b>`).join("")
     + S.orders.map((x) => `<b class="gx-dm ${x.cls}${x.ok ? "" : " no"}" style="left:${mid(x.lap)}" title="${x.lap}랩 · ${esc(x.who)} · ${esc(ordText(x))}${x.ok ? "" : ` – 거절: ${esc(whyKo(x.why))}`}"></b>`).join("");
   const mx = Math.max(1, ...S.traffic.map((t) => t.loss)), topSet = new Set(S.top.map((t) => t.lap)), labelled = new Set();

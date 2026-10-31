@@ -11,13 +11,14 @@ import { esc } from "./ui.js";
 import * as HM from "./hudmodel.js";
 import { setAlertsSettings } from "./menu.js";
 
-export const RULE_KO = { myPit: "내 차 피트", rain: "비 예보 변화", flag: "SC·VSC·적색기", damage: "내 차 손상·사고", fuel: "연료 완주 위험", battery: "배터리 소진", finish: "체커기" };
+export const RULE_KO = { myPit: "내 차 피트", rain: "비 예보 변화", flag: "SC·VSC·적색기", damage: "내 차 손상·사고", fuel: "연료 완주 위험", tyre: "내 차 타이어 위험", battery: "배터리 소진", finish: "체커기" };
 export const RULE_HELP = {
   myPit: "계획한 피트 1랩 전, 피트 진입 확정·진입 때",
   rain: "게임 예보의 1시간 내 비 확률이 25%p 이상 바뀌거나 비가 시작될 때",
   flag: "세이프티카·VSC·적색기가 나올 때",
   damage: "내 차의 접촉·고장·큰 실수·리타이어",
   fuel: "이 차가 지금까지 쓴 연료로 추정한 완주 여유가 모자랄 때 (게임 추정)",
+  tyre: "내 차 타이어가 거의 닳았거나(남은 수명 15% 미만) 노면에 맞지 않을 때 (젖은 노면에 슬릭, 마른 노면에 우천 타이어)",
   battery: "내 차의 배터리가 바닥났을 때",
   finish: "선두가 체커기를 받을 때",
 };
