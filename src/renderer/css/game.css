@@ -484,4 +484,19 @@ body.game-on { grid-template-rows: auto 1fr; }
   .pp-issue { color: var(--bad-ink); font-weight: var(--fw-med); }
   .pp-rel { color: var(--info); }
   @media (max-width: 1440px) { .gr-clock small, .gr-lap small { display: none; } .gr-top { gap: var(--s-4); } .gr-dock { width: 300px; } }
+  /* narrow game windows (1280 at 125 %: 1024 × 550 CSS px – v0.51): control groups keep their size and wrap instead of
+     overlapping; the top bar drops what the docked panels also show (weather, the achieved-speed note) */
+  .gc-ctl { flex-wrap: wrap; row-gap: var(--s-2); }
+  .gc-grp { flex: none; }
+  @media (max-width: 1180px) {
+    .gr-top { gap: var(--s-3); padding: var(--s-2) var(--s-4); }
+    .gr-wx, .gr-auto { display: none; }
+    .gr-ev { max-width: 150px; }
+    .gr-speeds > button { min-width: 28px; padding: 0 var(--s-2); }
+    .gr-docktabs > button { padding: 0 var(--s-3); font-size: var(--fs-xs); }
+    .gr-dock { width: 260px; }
+    .gc-ctl { gap: var(--s-3); }
+    .gc-goal { width: 92px; }
+  }
+  @media (max-height: 640px) { .gr-view .note3d, .gr-view #notes3d .note3d-line:not(.cam) { display: none; } }   /* (the source notes give way to the camera tools in a short view) */
 }
