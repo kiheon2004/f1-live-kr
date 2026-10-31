@@ -93,6 +93,7 @@ export function createSpecHud(host, api) {
 
   // ---------- tower rows: built per driver set, then only text / order changed ----------
   let towerKey = "", rows = new Map();
+  const tw = { order: [], start: 0, room: 0, lastIdx: 0 };   // (the tower as shown: order, first row on screen, rows on screen)
   function buildTower(drivers, nums) {
     const ol = W.tower.inner.querySelector(".tw-rows"); ol.textContent = ""; rows = new Map();
     for (const n of nums) {
@@ -100,7 +101,7 @@ export function createSpecHud(host, api) {
       li.dataset.num = n; li.tabIndex = rows.size ? -1 : 0; li.setAttribute("role", "button");   // (roving focus: one row in the tab order, ↑↓ move, Enter selects)
       li.innerHTML = `<span class="tw-pos num"></span><i class="tw-bar" style="background:${hex(d.TeamColour)}"></i><b class="tw-tla">${esc(d.Tla || n)}</b><span class="tw-mk"></span><span class="tw-gap num"></span><span class="tw-int num"></span><span class="tw-tyre"></span><span class="tw-pits num"></span>`;
       const [pos, , , mk, gap, int, tyre, pits] = li.children;
-      rows.set(n, { li, pos, mk, gap, int, tyre, pits, y: -1, ty: "", mkv: "" });
+      rows.set(n, { li, pos, mk, gap, int, tyre, pits, y: -1, ty: "", mkv: "", tla: d.Tla || n, lbl: "" });
       ol.appendChild(li);
     }
     cost.built++;
@@ -122,6 +123,7 @@ export function createSpecHud(host, api) {
     let start = 0;
     if (order.length > room) { const i = Math.max(0, order.indexOf(cockpit ? cam : sel)); start = Math.max(0, Math.min(order.length - room, i - Math.floor(room / 2))); }
     const ol = W.tower.inner.querySelector(".tw-rows"), shown = Math.min(order.length, room);
+    tw.order = order; tw.start = start; tw.room = room;
     if (ol.__h !== shown) { ol.__h = shown; ol.style.height = shown * ROW_H + "px"; }
     order.forEach((n, i) => {
       const r = rows.get(n); if (!r) return;
@@ -132,6 +134,9 @@ export function createSpecHud(host, api) {
       const out = l.Retired || l.Stopped, pit = l.InPit || l.PitOut;
       setText(r.pos, l.Position || "");
       setCls(r.li, "sel", n === sel); setCls(r.li, "cmp", n === cmp && n !== sel); setCls(r.li, "out", !!out);
+      // (what a screen reader says for the row: position, driver, selected / compared / filmed)
+      const lbl = `${l.Position || ""}위 ${r.tla}${n === sel ? " · 선택됨" : ""}${n === cmp && n !== sel ? " · 비교" : ""}${n === cam ? " · 카메라" : ""}`;
+      if (r.lbl !== lbl) { r.lbl = lbl; r.li.setAttribute("aria-label", lbl); r.li.setAttribute("aria-pressed", String(n === sel)); }
       const mk = (n === cam ? "cam" : "") + (pit ? " pit" : "") + (out ? " out" : "");
       if (r.mkv !== mk) { r.mkv = mk; r.mk.innerHTML = (n === cam ? CAM_SVG : "") + (out ? '<span class="ui-badge">OUT</span>' : pit ? '<span class="ui-badge info">PIT</span>' : ""); }
       const leader = l.Position === "1";
@@ -148,6 +153,19 @@ export function createSpecHud(host, api) {
         setText(r.pits, l.NumberOfPitStops != null ? `${l.NumberOfPitStops}회` : "");
       } else if (r.ty) { r.ty = ""; r.tyre.innerHTML = ""; setText(r.pits, ""); }
     });
+    rovingTab();
+  }
+  // the rows on screen, top to bottom – the order the keys move in (not the DOM order: rows are placed by transform)
+  const towerVisible = () => (tw.order || []).slice(tw.start || 0, (tw.start || 0) + (tw.room || 0)).map((n) => rows.get(n)?.li).filter((li) => li && !li.classList.contains("off") && !li.hidden);
+  // exactly one visible row in the tab order: the focused one if still on screen, else the selected driver's, else the
+  // first; a focused row that left the screen hands the focus to the nearest row still there
+  function rovingTab() {
+    const vis = towerVisible(); if (!vis.length) return;
+    const act = document.activeElement, focusedRow = act?.classList?.contains("tw-row") && W.tower.inner.contains(act) ? act : null;
+    let keep = focusedRow && vis.includes(focusedRow) ? focusedRow : null;
+    if (focusedRow && !keep) { const i = Math.min(vis.length - 1, Math.max(0, (tw.lastIdx ?? 0))); keep = vis[i]; keep.focus({ preventScroll: true }); }
+    keep ||= vis.find((li) => li.classList.contains("sel")) || vis[0];
+    for (const r of rows.values()) { const t = r.li === keep ? 0 : -1; if (r.li.tabIndex !== t) r.li.tabIndex = t; }
   }
 
   // ---------- session strip ----------
@@ -382,12 +400,15 @@ export function createSpecHud(host, api) {
   // keyboard (v0.51): ↑ / ↓ move between rows, Enter or Space selects, Shift+Enter compares, Home / End the ends
   W.tower.inner.addEventListener("keydown", (e) => {
     const li = e.target.closest?.("[data-num]"); if (!li || editing) return;
-    const all = [...W.tower.inner.querySelectorAll(".tw-row:not([hidden])")], i = all.indexOf(li);
+    // (the rows ON SCREEN in their screen order – v0.52 §8: the DOM order and the hidden ".off" rows were used; Home / End
+    // are the ends of the rows shown – selecting a driver re-centres the short view on it)
+    const all = towerVisible(), i = all.indexOf(li); tw.lastIdx = Math.max(0, i);
     let to = null;
     if (e.key === "ArrowDown") to = all[Math.min(all.length - 1, i + 1)]; else if (e.key === "ArrowUp") to = all[Math.max(0, i - 1)];
     else if (e.key === "Home") to = all[0]; else if (e.key === "End") to = all[all.length - 1];
-    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); const A = api.app(); if (e.shiftKey && A.setCompare) A.setCompare(li.dataset.num === A.compare ? null : li.dataset.num); else A.setFocus(li.dataset.num); last.driver = last.tower = 0; return; }
-    if (to) { e.preventDefault(); for (const r of all) r.tabIndex = -1; to.tabIndex = 0; to.focus(); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); if (e.repeat) return; const A = api.app(); if (e.shiftKey && A.setCompare) A.setCompare(li.dataset.num === A.compare ? null : li.dataset.num); else A.setFocus(li.dataset.num); last.driver = last.tower = 0; return; }
+    if (to && to !== li) { e.preventDefault(); for (const r of rows.values()) r.li.tabIndex = -1; to.tabIndex = 0; to.focus(); tw.lastIdx = all.indexOf(to); }
+    else if (to) e.preventDefault();
   });
   W.tower.outer.title = "클릭: 드라이버 선택 · Shift+클릭: 비교 드라이버 · 키보드: ↑↓ 이동, Enter 선택, Shift+Enter 비교";
   new ResizeObserver(() => { layoutDue = true; }).observe(host);
