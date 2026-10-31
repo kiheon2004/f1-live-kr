@@ -19,6 +19,7 @@ import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
 import { LANES, laneCells, crossSection, laneSectionAt } from "./pitlane.js";
+import { createPitTrace } from "./pitcheck.js";
 import { pitState, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, garagePath, PIT } from "./pitstate.js";
 import { crewMeshes, crewAt, crewLayout, stopChoreo, changeWalk, kitAt, CHANGE, stopSeed, walkPose, walkPhase, flagPose, flagHold, peopleLod } from "./crew.js";
 import { orderedBoxes } from "./pitorder.js";
@@ -3922,6 +3923,7 @@ const gameKit = {
 };
 function gameCars(dt) {
   const fr = updateGameCars(gameKit, game, dt);
+  if (fr && gamePitTrace) gameTraceFrame(fr, dt);
   if (fr) { const t0 = performance.now(); gamePitCam.direct(game, fr, t0); gamePitCost.direct += performance.now() - t0; gamePitCost.frames++; gamePitFr = fr; }
   // the safety car where the engine has it (snapshot.sc: on the engine's lap, mapped like the cars)
   const sc = fr?.snap?.sc, SP = supportCtx(game, 0);
@@ -3934,6 +3936,20 @@ function gameCars(dt) {
   gameNote(fr);
 }
 gamePitCam = createPitCam(gameKit);
+// development (v0.53 §8): the game's pit cars as drawn, every frame while on (Map3D.game.pitTrace) – pitcheck.js
+let gamePitTrace = null;
+function gameTraceFrame(fr, dt) {
+  const G = pitTeams.G; if (!G) return;
+  if (!gamePitTrace.trace) { const m = pitModelFor(G); gamePitTrace.trace = createPitTrace({ project: G.project, inner: (u) => m.at(Math.max(G.gStart, Math.min(G.gEnd, u))).inner ?? 0, boxes: (pitTeams.teams || []).filter((q) => q.box != null).map((q) => q.box) }); }
+  const list = [];
+  for (const [num, c] of cars) {
+    const g = c.game; if (!c.has || !c.obj.visible || !g || g.where !== "pit") continue;
+    const P = c.obj.position, pr = G.project(P.x, P.z); if (pr.u < G.gStart - PIT.ends || pr.u > G.gEnd + PIT.ends || !(pr.off > -3 && pr.off < 40)) continue;
+    const d = game.driverOf(num), tm = (pitTeams.teams || []).find((q) => q.team === d?.TeamName);
+    list.push({ num, x: P.x, z: P.z, yaw: c.model.rotation.y, speed: Math.abs(g.v || 0), state: g.pit?.phase || "?", team: d?.TeamName || null, boxU: tm?.box ?? null });
+  }
+  gamePitTrace.frames++; gamePitTrace.trace.frame(fr.t / 1000, dt * (game.ctx.rate || 1), list);
+}
 // the pit view's camera (camMode "pit"): game/pitcam.js's pose for this frame, or the camera left where it is
 let gamePitFr = null, pitCamDirecting = false;
 const gamePitCost = { direct: 0, pose: 0, frames: 0 };
@@ -4050,6 +4066,12 @@ window.Map3D = {
       cars: [...cars.values()].filter((c) => c.obj.visible).map((c) => ({ num: c.num, x: +c.pos.x.toFixed(2), y: +c.pos.y.toFixed(2), z: +c.pos.z.toFixed(2), yaw: +c.yaw.toFixed(3), s: c.worldS != null ? +c.worldS.toFixed(1) : null, where: c.game?.where, phase: c.game?.pit?.phase, lifted: !!c.lifted, cmp: c.game?.tyre?.compound })),
       crews: world?.crews ? true : false, boxes: gameKit.boxDiag || null, cam: camMode, focus: app().focus || null, t: app().t }),
     setCam: (m) => setCam(m),
+    // development (v0.53 §8): record the pit cars as drawn from now (on) / stop and report (off) – pitcheck.js
+    pitTrace(on = true) {
+      if (on) { gamePitTrace = { trace: null, frames: 0, t0: performance.now() }; return "recording"; }
+      const T = gamePitTrace; gamePitTrace = null; if (!T?.trace) return JSON.stringify({ frames: T?.frames || 0, none: true });
+      return JSON.stringify({ frames: T.frames, wallS: Math.round((performance.now() - T.t0) / 1000), facility: pitTeams.G?.facility, ...T.trace.report() });
+    },
     // the pit view (game/pitcam.js): auto-direction and auto-slow on / off, the team's cars the director follows (the
     // selected car always first), its state and costs (ms: the director and the camera's placing, over `frames`)
     pitcam: {
@@ -4515,6 +4537,51 @@ window.Map3D = {
     const src = app().src, out = [];
     for (let t = t0; t <= t1; t += step) { const f = pitFrame(src, t, 0, true); if (!f) continue; for (const r of f.values()) if ((!states || states.includes(r.state.state)) && (!nums || nums.includes(r.num))) out.push([t, r.num, r.state.state, r.u == null ? null : Math.round(r.u), ...(nums ? [+r.off.toFixed(1), +r.input.speed.toFixed(1), +r.input.stillFor.toFixed(1), r.input.boxU == null ? null : Math.round(r.input.boxU)] : [])]); }
     return JSON.stringify(out);
+  },
+  // development (v0.53 §8): the pit lane as DRAWN through every pit visit in [t0, t1] (stream ms) – driven through
+  // updateCars like poseScan (every car's final pose), at `fps`, only around the visits (the InPit flag's, ± 3 s; o.nums:
+  // only those cars) – pitcheck.js: the lateral and heading steps per frame, sliding, slip, curvature, metres in the
+  // working lane before / after each stop. o.ray (s, default 1; 0: off): every so often a ray straight down from 2.5 m
+  // over each pit car onto what is drawn under it (the lane's tarmac, a garage's floor, the ground) – the car's drawn
+  // height against it, per state
+  pitPathScan(t0, t1, o = {}) {
+    const src = app().src, G = pitTeams.G; if (!world || !src) return "no world"; if (!G) return "no garages";
+    if (!smoothFor(src)) return "pending";
+    const fps = o.fps ?? 30, dt = 1 / fps, real = window.F1KR, st0 = src.startTime?.() || 0, nums = o.nums ? o.nums.map(String) : null, m = pitModelFor(G);
+    const S = startState(src, t1), wins = [];
+    for (const [k, ch] of S.hist.flags) { if (!k.endsWith(":InPit")) continue; const num = k.split(":")[0]; if (nums && !nums.includes(num)) continue; for (const [a, b] of pitVisits(ch, t1)) if ((b ?? t1) >= t0 && a <= t1) wins.push([Math.max(t0, a - 3000), Math.min(t1, (b ?? t1) + 3000)]); }
+    wins.sort((a, b) => a[0] - b[0]); const W = []; for (const w of wins) { const l = W[W.length - 1]; if (l && w[0] <= l[1] + 1000) l[1] = Math.max(l[1], w[1]); else W.push([...w]); }
+    const trace = createPitTrace({ project: G.project, inner: (u) => m.at(Math.max(G.gStart, Math.min(G.gEnd, u))).inner ?? 0, boxes: (pitTeams.teams || []).filter((q) => q.box != null).map((q) => q.box) });
+    const rayEvery = o.ray ?? 1, rc = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0), heights = {}, hWorst = [];
+    let fakeT = t0, frames = 0, lastRay = -Infinity; const tA = performance.now();
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try {
+      for (const [a, b] of W) {
+        for (fakeT = a - 2000; fakeT < a; fakeT += 100) updateCars(0.1);   // (in from before the window: a seek, then settled)
+        for (fakeT = a; fakeT <= b; fakeT += dt * 1000) {
+          updateCars(dt); frames++;
+          const list = [], ray = rayEvery > 0 && fakeT - lastRay >= rayEvery * 1000; if (ray) lastRay = fakeT;
+          for (const [num, c] of cars) {
+            if (nums && !nums.includes(num)) continue;
+            const r = c.pit; if (!c.has || !c.obj.visible || !r || r.u == null || r.u < G.gStart - PIT.ends || r.u > G.gEnd + PIT.ends) continue;
+            const P = c.obj.position;
+            list.push({ num, x: P.x, z: P.z, yaw: c.model.rotation.y, speed: r.input.speed, state: r.state.state, team: r.team, boxU: r.input.boxU });
+            if (ray && world.real) {
+              rc.set(new THREE.Vector3(P.x, P.y + 2.5, P.z), down); rc.far = 6; rc.camera = camera;
+              const h = rc.intersectObject(world.real.group, true).find((x) => x.object.visible !== false && !x.object.isSprite && !x.object.isPoints && !x.object.isLine);
+              const k = r.state.state, H = heights[k] || (heights[k] = { n: 0, none: 0, max: 0, min: 0 });
+              H.n++; if (!h) { H.none++; continue; }
+              const gap = P.y - h.point.y; H.max = Math.max(H.max, gap); H.min = Math.min(H.min, gap);
+              if (Math.abs(gap) > 0.08) { hWorst.push({ num, t: +((fakeT - st0) / 1000).toFixed(1), state: k, gap: +gap.toFixed(2), on: (() => { let x = h.object; while (x && !x.name) x = x.parent; return x?.name || h.object.type; })(), u: +r.u.toFixed(1) }); if (hWorst.length > 60) hWorst.splice(30, 1); }
+            }
+          }
+          trace.frame((fakeT - st0) / 1000, dt, list);
+        }
+      }
+    } finally { window.F1KR = real; }
+    const rep = trace.report();
+    for (const H of Object.values(heights)) { H.max = +H.max.toFixed(3); H.min = +H.min.toFixed(3); }
+    return JSON.stringify({ frames, windows: W.length, ms: Math.round(performance.now() - tA), facility: G.facility, run: [Math.round(G.gStart), Math.round(G.gEnd)], ...rep, heights, heightWorst: hWorst.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap)).slice(0, 12) });
   },
   // development: the grandstands as built – each with the nearest corner (F1's corner numbers for this circuit and
   // season), which side of the track it is on (L/R in the race's direction), how far along from that corner (m), its
