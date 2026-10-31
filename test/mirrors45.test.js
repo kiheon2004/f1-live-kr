@@ -91,8 +91,10 @@ test("mirror glass under MIN_PX: every glass small – not a frozen picture but 
 });
 
 test("mirror glass under MIN_PX: one glass small, the other large – the small one's half is this view's, not another view's or blank", () => {
-  // looking off to the right: the left glass (0) mid-screen, small; the right one (1) at the edge, stretched – ~75 vs ~234 px²
-  const { scene, car, camera } = rig([1, 0.7, 3]), r = mockRenderer(), P = M.createMirrorPass(), glass = car.userData.mirrors;
+  // looking off to the right: the left glass (0) mid-screen, small; the right one (1) near the edge, stretched – ~83 vs ~164 px²
+  // (v0.52: turned a little less – [0.6, 0.7, 3], was [1, 0.7, 3]: there the right glass was three quarters out of the
+  // picture, which now counts as a small one – mirrors.js inPicture; that case is checked below)
+  const { scene, car, camera } = rig([0.6, 0.7, 3]), r = mockRenderer(), P = M.createMirrorPass(), glass = car.userData.mirrors;
   r.size = [192, 108];
   P.update(r, scene, camera, car, "full", "onboard:16");
   P.update(r, scene, camera, car, "full", "eye:16");   // (a new view: both halves still another view's picture)
@@ -101,4 +103,18 @@ test("mirror glass under MIN_PX: one glass small, the other large – the small 
   assert.deepEqual(P.state.drawn, [true, true], "every glass in view has its half drawn for this view");
   // after that the small one is kept (no pass a frame for a ~75 px² sliver), the large one drawn every frame
   const c0 = r.calls; P.update(r, scene, camera, car, "full", "eye:16"); assert.equal(r.calls - c0, 1);
+});
+
+test("v0.52: a glass mostly out of the picture counts as a small one – no live pass for a mirror's edge (the eye camera's head turned into a bend)", () => {
+  const sq = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => ({ x, y }));
+  assert.equal(M.inPicture(sq(-0.5, -0.5, 0.5, 0.5)), 1);
+  assert.ok(Math.abs(M.inPicture(sq(0.5, 0, 1.5, 0.5)) - 0.5) < 1e-9);
+  assert.equal(M.inPicture(sq(1.2, 0, 1.5, 0.5)), 0);
+  assert.equal(M.inPicture(sq(0, 0, 0, 0)), 1, "no area: not judged out");
+  // the rig turned so the right glass is ~74 % out of the picture and the left one under MIN_PX: no pass, the plain glass
+  const { scene, car, camera } = rig([1, 0.7, 3]), r = mockRenderer(), P = M.createMirrorPass(), glass = car.userData.mirrors;
+  r.size = [192, 108];
+  P.update(r, scene, camera, car, "full", "eye:16");
+  assert.equal(r.calls, 0);
+  assert.ok(glass.material === glass.userData.glass);
 });
