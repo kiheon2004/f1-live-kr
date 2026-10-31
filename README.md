@@ -252,6 +252,15 @@ src/
 | [Pretendard](https://github.com/orioncactus/pretendard) (앱에 포함) | SIL Open Font License 1.1 – `src/renderer/fonts/PRETENDARD-LICENSE.txt` |
 | [Lucide](https://lucide.dev) 아이콘 일부 (앱에 포함) | ISC – `src/renderer/ICONS-LICENSE.txt` |
 
+## 라이선스
+
+이 프로젝트의 코드와 자체 제작 콘텐츠는 [PolyForm Noncommercial License 1.0.0](LICENSE.md)을 따릅니다.
+
+- 개인 사용, 학습·연구, 취미 프로젝트 같은 **비상업적 목적**으로는 사용·수정·재배포할 수 있습니다.
+- **상업적 이용은 허용되지 않습니다.** 필요하면 저작권자에게 따로 문의해 주세요.
+- 재배포할 때는 라이선스 조건(또는 그 URL)과 `Required Notice:` 줄을 함께 전달해야 합니다.
+- three.js, Pretendard, Lucide, f1-circuits, OpenStreetMap 데이터 등 포함된 제3자 구성요소는 각자의 라이선스를 따릅니다 – [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## 고지
 
 - 이 앱은 **개인적·비상업적 용도**의 비공식 프로그램이며 Formula 1 회사들과 관련이 없습니다.
