@@ -128,5 +128,8 @@ test("race story from the engine: the player's orders and the team AI's decision
   for (const o of S.orders) assert.ok(o.lap >= 1 && o.lap <= lapNow + 1, `order on lap ${o.lap} (car on ${lapNow})`);
   assert.ok(S.orders.some((o) => o.type === "pitCancel" && !o.ok), "the refused order is kept, marked refused");
   for (const c of [...S.changes, ...S.aiOther]) assert.ok(c.lap >= 0 && c.lap <= lapNow + 1);
-  assert.strictEqual(S.hasRain, false, "no weather series given: rain unknown, not 'dry'");
+  // no screen samples, but the engine's lap records carry the rain: known, and dry so far (the shower comes at ~20 min)
+  assert.strictEqual(S.hasRain, true, "rain known from the lap records"); assert.deepStrictEqual(S.rainy, []);
+  const S0 = H.raceStory({ ...A.cars[num], laps: A.cars[num].laps.map(({ rain, water, ...l }) => l) }, { flags: A.flags, total: A.totalLaps, weather: [] });
+  assert.strictEqual(S0.hasRain, false, "no series and no lap records (a result from before v0.52): rain unknown, not 'dry'");
 });

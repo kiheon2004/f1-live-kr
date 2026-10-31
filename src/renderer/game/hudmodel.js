@@ -407,7 +407,11 @@ export function raceStory(A, o = {}) {
   }
   if (open) open.to = total;
   // weather and the tyres on the same laps (facts only)
-  const wx = weatherByLap(laps, o.weather || [], t0);
+  // (the engine's own lap records – water / rain at each lap's end, v0.52 – also where the screen sampled nothing)
+  const wx = weatherByLap(laps, o.weather || [], t0).map((x, i) => {
+    const l = laps[i], mx = (a, b) => (fin(b) ? Math.max(a ?? 0, b) : a);
+    return { lap: x.lap, rain: mx(x.rain, l?.rain), water: mx(x.water, l?.water) };
+  });
   const rainy = runs(wx, (x) => (x.rain ?? 0) > 0.05), wet = runs(wx, (x) => (x.water ?? 0) > WET_MM);
   const onWet = runs(laps.map((l) => ({ lap: l.n, c: l.compound })), (x) => x.c === "INTERMEDIATE" || x.c === "WET");
   return { total, actual, planned, pits, changes, aiOther, orders, traffic, top, trafficTotal: A.trafficTotal ?? null, pitTotal: A.pitTotal ?? null,
