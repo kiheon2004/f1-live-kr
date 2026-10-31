@@ -7,7 +7,7 @@
 **F1 세션을 한국어로 보는 데스크톱 앱**<br>
 다시보기·실시간 타이밍 · 실제 지도 3D 서킷 · 싱글플레이 전략 게임
 
-![version](https://img.shields.io/badge/version-0.50.0-e10600?style=flat-square)
+![version](https://img.shields.io/badge/version-0.51.0-e10600?style=flat-square)
 ![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)
 ![electron](https://img.shields.io/badge/Electron-44-47848F?style=flat-square&logo=electron&logoColor=white)
 ![three.js](https://img.shields.io/badge/three.js-r186-000000?style=flat-square&logo=threedotjs&logoColor=white)
