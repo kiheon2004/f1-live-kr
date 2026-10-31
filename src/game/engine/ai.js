@@ -17,7 +17,8 @@
 import { commandAs } from "./engine.js";   // (a cycle engine ↔ ai: only called at run time, both loaded by then)
 import { kindOf } from "./commands.js";
 import { stockMap, stockOf } from "./inventory.js";
-import { teamModel, publicView, planCandidates, evaluate, scenarios, crossoverGains, freshCosts, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, lastClean, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
+import { teamModel, publicView, planCandidates, evaluate, scenarios, switchGains, tyreClass, fitsStock, freshCosts, prepTraffic, trafficHold, toPlan, lapTime, degPart, wearAt, lastClean, pitLoss, ltOfMu, DRY, WETS } from "./strategy.js";
+import { COMPOUNDS } from "../data/params/tyres.js";
 import { streamFor } from "./rng.js";
 import { AI, TEAM_TENDENCY } from "../data/params/ai.js";
 import { PIT } from "../data/params/pit.js";
@@ -129,6 +130,17 @@ export function aiStep(race) {
   }
 }
 
+// The plan rules every candidate passes (pure, tested: test/game/wet52.test.js) – ctx: { tyreLaps, wetTyre, wornOut,
+// scPeriod (null on green), scStop (the neutralisation this car already stopped in), stock (sets in hand by compound) }
+export function planAdmissible(ctx, c) {
+  const stops = c.stints.length > 1;
+  if (ctx.scPeriod && stops && c.stints[0].laps === 1 && (ctx.tyreLaps < AI.scMinAge || ctx.scStop === ctx.scPeriod)) return false;
+  if (!ctx.wetTyre && stops && ctx.tyreLaps + c.stints[0].laps < AI.minStint && !ctx.wornOut) return false;
+  if (ctx.stock && stops && !fitsStock(ctx.stock, c.stints.slice(1).map((x) => x.compound))) return false;
+  return true;
+}
+// the price of a stop for fresh slicks within 3 laps when rain is likely in the next half hour: chance × a stop's loss
+export const rainStopRisk = ({ wetTyre, pSoon }, c, loss) => (!wetTyre && pSoon >= AI.rainHold && c.stints.length > 1 && c.stints[0].laps <= 3 && tyreClass(c.stints[1].compound) === "dry" ? pSoon * loss : 0);
 // mean water film on the line (mm) – from the saved surface state (deterministic across save / load)
 export function wetLine(race) { const hl = race.cache.surface?.hLine; if (!hl?.length) return 0; let w = 0; for (const x of hl) w += x; return w / hl.length; }
 const forecastOf = (race) => (race.cache.forecastFn ? race.cache.forecastFn(race) : publicView(race, null).forecast);
@@ -248,12 +260,25 @@ function decide(race, team, car, why) {
   // it has stopped raining and the water is not rising; and not straight back within AI.familyMinLaps (v0.50 §5-5)
   if (why === "lap" || why.startsWith("lap")) { (cs.wh ||= []).push(+view.water.toFixed(3)); if (cs.wh.length > 3) cs.wh.shift(); }
   const rising = (cs.wh?.length >= 2) && cs.wh[cs.wh.length - 1] > cs.wh[cs.wh.length - 2] + 0.005;
-  const famOk = (to) => {
-    const toWet = WETS.includes(to); if (toWet === wetTyre) return true;
-    const recent = car.lap - (cs.switchLap ?? -99) < AI.familyMinLaps;
-    if (toWet) return view.water >= AI.wetNow || (!recent && (view.rain > 0.1 || rising));
-    return !recent && view.rain <= 0.1 && !rising;
+  // three classes (v0.52 §5: inter ↔ wet were never candidates): the evidence a change of class needs –
+  //   → inter (from dry)   raining, the water rising, or a properly wet track (AI.wetNow)
+  //   → wet                deep water (AI.wetDeep), or the water rising on an already wet track, or heavy rain (AI.heavyRain)
+  //   wet → inter          the water not rising and below wetDeep
+  //   → dry                rain stopped and the water not rising
+  // and not straight back within AI.familyMinLaps of the last change of class – unless the present tyre is badly out of
+  // place (severe: the next lap alone would cost more than AI.severeLap s, or the set is past its wear cliff)
+  const curClass = tyreClass(car.tyre.name), recentSwitch = car.lap - (cs.switchLap ?? -99) < AI.familyMinLaps;
+  const classOk = (to, severe = false) => {
+    const k = tyreClass(to); if (k === curClass) return true;
+    if (recentSwitch && !severe) return false;
+    if (k === "inter" && curClass === "dry") return view.water >= AI.wetNow || view.rain > 0.1 || rising;
+    if (k === "wet") return view.water >= AI.wetDeep || (rising && view.water >= AI.wetNow) || view.rain > AI.heavyRain;
+    if (k === "inter" && curClass === "wet") return !rising && view.water < AI.wetDeep;
+    return view.rain <= 0.1 && !rising;   // (→ dry)
   };
+  const cliff = (COMPOUNDS[car.tyre.compound]?.wc ?? 0.7) - 0.05, wornOut = car.tyre.wear > cliff;
+  // the set the team would fit for c: its age (0 new), null when there is none (the fitted set itself is not a candidate)
+  const setAge = (c) => { if (!car.sets) return 0; let b = null; for (const x of car.sets) if (x.compound === c && (x.state === "free" || x.state === "reserved") && (!b || (b.used && !x.used) || (b.used === x.used && x.wear < b.wear))) b = x; return b ? (b.used ? b.laps : 0) : null; };
   // the tyre-family check every lap: box for the other family when a fresh set of it is expected to be clearly faster
   // over the next laps – the water expected there from the forecast scenarios (rain coming → it rises, a dry forecast →
   // it falls), the model corrected by what the field is doing on each compound right now (public lap times: the
@@ -262,17 +287,22 @@ function decide(race, team, car, why) {
     const corr = conditionCorr(race, team, M, est, view), K = Math.min(10, S.totalLaps - car.lap - 1);
     // (just switched: switching back needs a further margin – one lap's reading is noisy)
     const need = pitLoss(M, est, view.flag) + AI.switchDelta * (car.lap - (cs.switchLap ?? -9) < 4 ? 3 : 1);
-    let best = null, bg = need;
-    const gains = crossoverGains(M, est, view, car.num, { name: car.tyre.name, age: car.tyre.laps, fuel: car.energy.fuel }, { K, corr, key: `${car.num}:${car.pit.stops}:w` });
-    // (the crossover rule is for a change of FAMILY – slicks ↔ wet-weather tyres; a dry-for-dry change is the planner's,
-    // with its minimum stint: v0.51, after a shower the rule boxed soft → medium three laps after the slicks went on)
-    for (const c in gains) if (gains[c] > bg && WETS.includes(c) !== wetTyre && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) { bg = gains[c]; best = c; }
+    // every compound of every class and the same compound on another set (switchGains); dry-for-dry stays the planner's
+    let best = null, bg = 0, bx = null;
+    const sw = switchGains(M, est, view, car.num, { name: car.tyre.name, age: car.tyre.laps, fuel: car.energy.fuel }, { K, corr, key: `${car.num}:${car.pit.stops}:w`, setAge });
+    for (const c in sw) {
+      const k = tyreClass(c), x = sw[c], severe = x.firstLap > AI.severeLap || wornOut;
+      if (k === "dry" && curClass === "dry") continue;
+      if (c === car.tyre.name && car.tyre.laps < AI.minStint && !severe) continue;   // (a fresh set isn't changed for another of the same)
+      if (!classOk(c, severe)) continue;
+      const over = x.gain - need; if (over > bg) { bg = over; best = c; bx = x; }
+    }
     // a stop the plan makes in the next two laps anyway: no extra stop to pay for – only the right tyre for it
     const ns = nextStopOf(car), imminent = ns && ns.toLap - car.lap <= 2;
     if (imminent && !best) {
       const fc = freshCosts(M, est, view, car.num, { K, corr, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
-      let pick = ns.compound; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
-      if (pick !== ns.compound && WETS.includes(pick) !== WETS.includes(ns.compound)) {
+      let pick = ns.compound; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && classOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
+      if (pick !== ns.compound && tyreClass(pick) !== tyreClass(ns.compound)) {
         const stints = [{ compound: car.tyre.name, toLap: ns.toLap }, { compound: pick, toLap: S.totalLaps }];
         order(race, team, car, "plan", { stints }); cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = ns.toLap; cs.lockLap = ns.toLap + 1;
         TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why: why + ",plannedStopTyre", plan: `${ns.compound}→${pick}@${ns.toLap}`, water: +view.water.toFixed(3), corr });
@@ -280,9 +310,10 @@ function decide(race, team, car, why) {
       }
     }
     if (best) {
+      const refresh = best === car.tyre.name;
       order(race, team, car, "plan", { stints: [{ compound: car.tyre.name, toLap: car.lap + 1 }, { compound: best, toLap: S.totalLaps }] });
-      cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; cs.switchLap = car.lap + 1; cs.lockLap = car.lap + 2;
-      TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why: why + ",crossover", plan: `→${best}`, gain: +bg.toFixed(1), water: +view.water.toFixed(3), corr });
+      cs.modes = [{ toLap: S.totalLaps, mode: "balanced" }]; cs.nextFull = car.lap + 2; if (tyreClass(best) !== curClass) cs.switchLap = car.lap + 1; cs.lockLap = car.lap + 2;
+      TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why: why + (refresh ? ",refresh" : ",crossover"), plan: `→${best}`, gain: +(bx.gain).toFixed(1), water: +view.water.toFixed(3), corr });
       return;
     }
   }
@@ -296,20 +327,31 @@ function decide(race, team, car, why) {
     const corrNow = view.water > 0.02 || view.rain > 0.1 || wetTyre ? conditionCorr(race, team, M, est, view) : null;
     // dry plans only while on slicks (a wet tyre's plan: stay on it – the crossover check brings the slicks)
     let cands = wetTyre ? [] : planCandidates(M, est, st, { flag, top: 4 });
-    // a set of the same family fitted only a few laps ago is not changed again before AI.minStint laps (a family switch is
-    // the crossover rule's, above) – v0.51
-    if (!wetTyre && car.tyre.laps < AI.minStint) cands = cands.filter((c) => !(c.stints.length > 1 && c.stints[0].laps < AI.minStint - car.tyre.laps));
-    // rain likely within the next half hour of the game's forecast: no stop for fresh slicks in the next laps – the stop
-    // for wet-weather tyres is coming (v0.51: dry stops three laps before switching to intermediates)
-    const pSoon = Math.max(0, ...(view.forecast?.blocks || []).slice(0, 2).map((b) => b.pRain || 0));
-    if (!wetTyre && pSoon >= AI.rainHold) cands = cands.filter((c) => !(c.stints.length > 1 && c.stints[0].laps <= 3 && !WETS.includes(c.stints[1].compound)));
     // the present plan as a candidate (continuing it costs nothing to decide)
     const cur = planAsCandidate(car, st, cs.modes); if (cur) cands.push(cur);
     // weather: box now for a wet tyre / back to slicks (the reactive rule decides later laps in the scenarios)
     const scns = scenarios(M, est, view, `${car.num}:${car.pit.stops}`);   // (the same draws for the whole stint: plans compared on common scenarios don't flip on sampling noise)
-    // (under SC / VSC: "box now" only on tyres that have done AI.scMinAge laps, once per neutralisation – v0.50 §5-5)
+    // ONE admissibility rule for every candidate – the new ones, the present plan and the double-stack shifts below
+    // (v0.52 §6: the present plan and the shifts were added after the filters and slipped past them):
+    //   SC / VSC   "box now" only on tyres with AI.scMinAge laps, once per neutralisation
+    //   fresh set  no stop before the set has done AI.minStint laps – unless it is past its wear cliff
+    //   sets       the stints still to run must be in hand (free + reserved)
     const scPeriod = flag !== "green" ? `${flag}:${S.control?.sc?.t0 ?? S.control?.vsc?.t0 ?? ""}` : null;
-    if (scPeriod && (car.tyre.laps < AI.scMinAge || cs.scStop === scPeriod)) cands = cands.filter((c) => !(c.stints[0].laps === 1 && c.stints.length > 1));
+    const rctx = { tyreLaps: car.tyre.laps, wetTyre, wornOut, scPeriod, scStop: cs.scStop, stock: st.stock };
+    const admissible = (c) => planAdmissible(rctx, c);
+    // (the present plan itself breaking a rule – a stop on a set fitted 2 laps ago: its first stop moved to the first lap
+    // the rules allow, so a plan in force is never one the same rules would refuse)
+    if (cur && !admissible(cur) && cur.stints.length > 1) {
+      const minFirst = Math.max(car.tyre.laps < AI.minStint && !wetTyre && !wornOut ? AI.minStint - car.tyre.laps : 1, scPeriod ? 2 : 1);
+      const x = cur.stints.map((y) => ({ ...y })), d = minFirst - x[0].laps;
+      if (d > 0 && x[1].laps - d >= 1) { x[0].laps += d; x[1].laps -= d; cands.push({ ...cur, stints: x, tag: "fix" }); }   // (not "current": choosing it orders the moved plan)
+    }
+    cands = cands.filter(admissible);
+    // rain likely in the next half hour of the game's forecast: a stop for fresh slicks in the next 3 laps carries the risk
+    // of a second stop when the rain comes – priced (chance × a stop's loss), not forbidden (v0.52 §6: the v0.51 ban kept
+    // worn tyres on and pushed planned stops back when the rain came late or never)
+    const pSoon = Math.max(0, ...(view.forecast?.blocks || []).slice(0, 2).map((b) => b.pRain || 0));
+    const lossG = pitLoss(M, est, "green"), rainRisk = (c) => rainStopRisk({ wetTyre, pSoon }, c, lossG);
     let ev = evaluate(M, est, st, cands, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap, corr: corrNow });
     if (!ev.length) return;
     // traffic over the next laps for each candidate's next stop, and the teammate's box (a queue when both come in together)
@@ -330,7 +372,8 @@ function decide(race, team, car, why) {
       c.hold = h * kHold; c.hold1 = h1 * kHold;
       // the second car into the box waits for the first one's stop (the team pays it whichever car it is)
       c.queue = stops.length && stops[0].lap === mateStop && gapMate < PIT.workBase.v + AI.queueMargin ? PIT.workBase.v + AI.queueMargin - gapMate : 0;
-      c.score = c.mean + TS.tend.risk * c.sdRel + c.hold + c.queue;
+      c.rain = rainRisk(c);
+      c.score = c.mean + TS.tend.risk * c.sdRel + c.hold + c.queue + c.rain;
       return c;
     };
     ev.forEach(score);
@@ -338,7 +381,7 @@ function decide(race, team, car, why) {
     ev.sort((a, b) => a.score - b.score);
     if (ev[0].queue > 0 && ev[0].stints.length > 1) {
       const sh = [-1, 1].map((d) => { const x = ev[0].stints.map((y) => ({ ...y })); x[0].laps += d; x[1].laps -= d; return { stints: x, stops: ev[0].stops, tag: "shift" }; }).filter((c) => c.stints[0].laps >= 1 && c.stints[1].laps >= 1);
-      ev.push(...evaluate(M, est, st, sh, scns, { fuel: car.energy.fuel, burn: M.fuelPerLap, corr: corrNow }).map(score));
+      ev.push(...evaluate(M, est, st, sh.filter(admissible), scns, { fuel: car.energy.fuel, burn: M.fuelPerLap, corr: corrNow }).map(score));
     }
     ev.sort((a, b) => a.score - b.score);
     const best = ev[0], now = cur ? ev.find((c) => c.tag === "current") : null;
@@ -358,14 +401,16 @@ function decide(race, team, car, why) {
     if (change && corrNow && best.stints.length > 1) {
       // wet or drying: the tyre for the plan's next stop chosen for the water expected then (the dry DP doesn't know it)
       const fc = freshCosts(M, est, view, car.num, { K: Math.min(10, S.totalLaps - car.lap - 1), corr: corrNow, key: `${car.num}:${car.pit.stops}:w`, fuel: car.energy.fuel });
-      const want = best.stints[1].compound; let pick = want; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && famOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
-      if (WETS.includes(pick) !== WETS.includes(want)) best.stints[1].compound = pick;
+      const want = best.stints[1].compound; let pick = want; for (const c in fc) if (fc[c] < (fc[pick] ?? Infinity) - AI.switchDelta && classOk(c) && (!car.sets || stockOf(car, c, ["free", "reserved"]) > 0)) pick = c;
+      if (tyreClass(pick) !== tyreClass(want)) best.stints[1].compound = pick;
     }
     if (change) {
       const plan = toPlan(st, best);
       order(race, team, car, "plan", { stints: plan });
       cs.modes = best.stints.map((s, i) => ({ toLap: plan[i].toLap, mode: s.mode }));
-      if (car.pit.phase === "called" && best.stints[0].laps > 1) order(race, team, car, "pitCancel", {});
+      // (a standing call is cancelled only when it is the team AI's own and still before the commit point – never a
+      // player's call: handsPlan keeps the AI off a car whose plan the player controls)
+      if (car.pit.phase === "called" && best.stints[0].laps > 1 && String(car.pit.call?.by || "").startsWith("ai:")) order(race, team, car, "pitCancel", {});
       // under SC/VSC, box now is called directly (the plan's call would wait for this lap's line)
       if (best.stints[0].laps === 1 && car.pit.phase === "none" && flag !== "green") { order(race, team, car, "pit", { compound: best.stints[1].compound }); cs.scStop = scPeriod; }
       TS.decisions.push({ t: S.t, lap: car.lap, num: car.num, why, plan: plan.map((x) => `${x.compound[0]}${x.toLap}`).join("-"), gain: now ? +(now.score - best.score).toFixed(1) : null, hold: +best.hold.toFixed(1),

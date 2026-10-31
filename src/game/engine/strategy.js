@@ -279,7 +279,7 @@ export function planCandidates(M, est, st, { flag = "green", maxStops = 4, compo
 }
 
 // stints → the engine's plan order: [{ compound, toLap }] (toLap = in-lap of each stop; last = total)
-const fitsStock = (stock, list) => { const need = {}; for (const c of list) need[c] = (need[c] || 0) + 1; for (const c in need) if (need[c] > (stock[c] || 0)) return false; return true; };
+export const fitsStock = (stock, list) => { const need = {}; for (const c of list) need[c] = (need[c] || 0) + 1; for (const c in need) if (need[c] > (stock[c] || 0)) return false; return true; };
 export function toPlan(st, cand) {
   let lap = st.lap; const stints = [];
   for (const s of cand.stints) { lap += s.laps; stints.push({ compound: s.compound, toLap: lap }); }
@@ -382,6 +382,23 @@ export function crossoverGains(M, est, view, num, cur, { K = 10, corr = {}, key 
 
 // the cost (s) of each fresh set over the next K laps on the expected water (same water path and correction as above):
 // which tyre a stop that is going to happen anyway should fit
+// v0.52 §5: the gain (s over the next K laps) of boxing now for each compound against keeping the present set – every
+// class (dry / intermediate / wet) and the SAME compound on another set (a worn intermediate for a fresh one). setAge(c):
+// the age (laps) of the set the team would fit for c (0 for a new one, null when there is none – that compound is left
+// out). The water each lap ahead from the forecast scenarios, the field's live correction per compound. Pure.
+export const tyreClass = (c) => (c === "INTERMEDIATE" ? "inter" : c === "WET" ? "wet" : "dry");
+export function switchGains(M, est, view, num, cur, { K = 10, corr = {}, key = "x", setAge = () => 0 } = {}) {
+  const scW = scenarios(M, est, view, key, 8), hAt = (k) => scW.reduce((a, x) => a + x.water[Math.min(view.total, view.lap + k)], 0) / scW.length;
+  const lt = (c, age, k) => lapTime(M, est, num, c, "balanced", age, hAt(k), cur.fuel ?? M.fuelRef) + (corr[c] ?? 0) * (k <= 1 ? 1 : 0.5);
+  const out = {};
+  for (const c of [...M.av.dry, ...M.av.wet]) {
+    if (!M.vs[c]) continue;
+    const a0 = setAge(c); if (a0 == null) continue;
+    let g = 0, first = 0; for (let k = 1; k <= K; k++) { const d = lt(cur.name, cur.age + k, k) - lt(c, a0 + k - 1, k); g += d; if (k === 1) first = d; }
+    out[c] = { gain: g, firstLap: first };
+  }
+  return out;
+}
 export function freshCosts(M, est, view, num, { K = 10, corr = {}, key = "x", fuel = M.fuelRef } = {}) {
   const scW = scenarios(M, est, view, key, 8), hAt = (k) => scW.reduce((a, x) => a + x.water[Math.min(view.total, view.lap + k)], 0) / scW.length, out = {};
   for (const c of [...M.av.dry, ...M.av.wet]) if (M.vs[c]) { let g = 0; for (let k = 1; k <= K; k++) g += lapTime(M, est, num, c, "balanced", k - 1, hAt(k), fuel) + (corr[c] ?? 0) * (k <= 1 ? 1 : 0.5); out[c] = g; }
