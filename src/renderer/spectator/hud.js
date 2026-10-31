@@ -97,7 +97,7 @@ export function createSpecHud(host, api) {
     const ol = W.tower.inner.querySelector(".tw-rows"); ol.textContent = ""; rows = new Map();
     for (const n of nums) {
       const d = drivers[n] || {}, li = h("li", "tw-row");
-      li.dataset.num = n; li.tabIndex = -1;
+      li.dataset.num = n; li.tabIndex = rows.size ? -1 : 0; li.setAttribute("role", "button");   // (roving focus: one row in the tab order, ↑↓ move, Enter selects)
       li.innerHTML = `<span class="tw-pos num"></span><i class="tw-bar" style="background:${hex(d.TeamColour)}"></i><b class="tw-tla">${esc(d.Tla || n)}</b><span class="tw-mk"></span><span class="tw-gap num"></span><span class="tw-int num"></span><span class="tw-tyre"></span><span class="tw-pits num"></span>`;
       const [pos, , , mk, gap, int, tyre, pits] = li.children;
       rows.set(n, { li, pos, mk, gap, int, tyre, pits, y: -1, ty: "", mkv: "" });
@@ -379,7 +379,17 @@ export function createSpecHud(host, api) {
     const A = api.app(); if (e.shiftKey && A.setCompare) A.setCompare(li.dataset.num === A.compare ? null : li.dataset.num); else A.setFocus(li.dataset.num);
     last.driver = last.tower = 0;
   });
-  W.tower.outer.title = "클릭: 드라이버 선택 · Shift+클릭: 비교 드라이버";
+  // keyboard (v0.51): ↑ / ↓ move between rows, Enter or Space selects, Shift+Enter compares, Home / End the ends
+  W.tower.inner.addEventListener("keydown", (e) => {
+    const li = e.target.closest?.("[data-num]"); if (!li || editing) return;
+    const all = [...W.tower.inner.querySelectorAll(".tw-row:not([hidden])")], i = all.indexOf(li);
+    let to = null;
+    if (e.key === "ArrowDown") to = all[Math.min(all.length - 1, i + 1)]; else if (e.key === "ArrowUp") to = all[Math.max(0, i - 1)];
+    else if (e.key === "Home") to = all[0]; else if (e.key === "End") to = all[all.length - 1];
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); const A = api.app(); if (e.shiftKey && A.setCompare) A.setCompare(li.dataset.num === A.compare ? null : li.dataset.num); else A.setFocus(li.dataset.num); last.driver = last.tower = 0; return; }
+    if (to) { e.preventDefault(); for (const r of all) r.tabIndex = -1; to.tabIndex = 0; to.focus(); }
+  });
+  W.tower.outer.title = "클릭: 드라이버 선택 · Shift+클릭: 비교 드라이버 · 키보드: ↑↓ 이동, Enter 선택, Shift+Enter 비교";
   new ResizeObserver(() => { layoutDue = true; }).observe(host);
   const ro = new ResizeObserver(() => { layoutDue = true; });
   for (const id of WIDGET_IDS) ro.observe(W[id].inner);
