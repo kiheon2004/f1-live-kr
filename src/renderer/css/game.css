@@ -267,6 +267,48 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gx-list small { color: var(--text-3); display: inline-block; min-width: 44px; }
   .gx-list li.no { color: var(--text-3); }
   .gx-dec { max-height: 220px; overflow: auto; }
+  /* v0.52 §10-2: one lap axis per driver – plan / actual + stops / decisions / traffic / rain, flag bands behind */
+  .gx-axis { position: relative; margin: var(--s-4) 0 var(--s-2); display: grid; gap: var(--s-2); }
+  .gx-ov { position: absolute; left: calc(34px + var(--s-4)); right: 0; top: 0; bottom: 18px; pointer-events: none; }
+  .gx-band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--sc) 14%, transparent); border-inline: 1px dashed color-mix(in srgb, var(--sc) 60%, transparent); pointer-events: auto; }
+  .gx-band.red { background: color-mix(in srgb, var(--bad) 14%, transparent); border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
+  .gx-band span { position: absolute; top: -2px; left: 2px; font-size: var(--fs-2xs); color: var(--text-2); }
+  .gx-lane { position: relative; height: 18px; border-radius: var(--r-1); background: var(--bg-2); }
+  .gx-lane > small { position: absolute; left: var(--s-3); top: 1px; font-size: var(--fs-2xs); }
+  .gx-act { overflow: visible; }
+  .gx-pit { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text-1); border-radius: 1px; z-index: 1; }
+  .gx-pit.q { background: var(--bad); }
+  .gx-pit span { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); font-size: var(--fs-2xs); color: var(--text-1); white-space: nowrap; line-height: 1.1; }
+  .gx-row:has(.gx-act) { margin-top: 10px; }
+  .gx-dm { position: absolute; top: 4px; width: 10px; height: 10px; margin-left: -5px; background: var(--bg-0); border: 2px solid var(--text-2); transform: rotate(45deg); border-radius: 1px; }
+  .gx-dm.me { background: var(--text-1); border-color: var(--text-1); transform: none; border-radius: 50%; }
+  .gx-dm.goal { background: var(--info); border-color: var(--info); transform: none; }
+  .gx-dm.no { background: transparent; border-color: var(--bad); border-style: dashed; }
+  .gx-traf { height: 30px; background: transparent; border-bottom: 1px solid var(--line); border-radius: 0; }
+  .gx-traf i { position: absolute; bottom: 0; background: color-mix(in srgb, var(--text-2) 55%, transparent); border-radius: 2px 2px 0 0; box-shadow: inset -1px 0 0 var(--bg-1); }
+  .gx-traf i.top { background: var(--warn); }
+  .gx-traf i span { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); font-size: var(--fs-2xs); color: var(--text-2); line-height: 1.1; }
+  .gx-wxl i { position: absolute; top: 3px; bottom: 3px; background: var(--info); border-radius: 1px; box-shadow: inset -1px 0 0 var(--bg-2); }
+  .gx-wxl i.wet { background: color-mix(in srgb, var(--info) 40%, transparent); }
+  .gx-ticks > div { position: relative; height: 14px; }
+  .gx-ticks > div span { position: absolute; transform: translateX(-50%); font-size: var(--fs-2xs); color: var(--text-3); }
+  .gx-leg { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5); font-size: var(--fs-xs); color: var(--text-2); margin-top: var(--s-2); }
+  .gx-leg span { display: inline-flex; align-items: center; gap: var(--s-2); }
+  .gx-leg .gx-pit, .gx-leg .gx-dm { position: relative; top: auto; bottom: auto; margin: 0 2px; }
+  .gx-leg .gx-pit { display: inline-block; height: 12px; }
+  .gx-leg .gx-dm { display: inline-block; }
+  .gx-leg i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; }
+  .gx-lt { background: var(--warn); } .gx-lr { background: var(--info); } .gx-lw { background: color-mix(in srgb, var(--info) 40%, transparent); }
+  .gx-lb { background: color-mix(in srgb, var(--sc) 30%, transparent); border: 1px dashed var(--sc); }
+  .gx-wx { font-size: var(--fs-sm); margin: var(--s-3) 0 0; }
+  .gx-src { font-style: normal; font-size: var(--fs-2xs); padding: 0 var(--s-2); border-radius: var(--r-1); background: var(--bg-3); color: var(--text-2); white-space: nowrap; }
+  .gx-src.m { background: var(--ok-soft); color: var(--ok); } .gx-src.e { background: var(--warn-soft); color: var(--warn); }
+  .gx-who { font-size: var(--fs-xs); font-weight: var(--fw-med); white-space: nowrap; }
+  .gx-who.ai { color: var(--text-2); } .gx-who.me { color: var(--text-1); } .gx-who.goal { color: var(--info); }
+  .gx-storyw { max-height: 320px; overflow: auto; }
+  .gx-story td.txt { white-space: normal; min-width: 160px; }
+  .gx-story tr.k-pit td { background: color-mix(in srgb, var(--bg-2) 60%, transparent); }
+  .gx-story tr.no td { color: var(--text-3); }
   .gx-cols { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: var(--s-5); align-items: start; }
   @media (max-width: 1200px) { .gx-cols { grid-template-columns: minmax(0, 1fr); } }
   .gx-ev { max-height: 300px; overflow: auto; font-size: var(--fs-sm); color: var(--text-2); }
@@ -339,54 +381,96 @@ body.game-on { grid-template-rows: auto 1fr; }
 
   /* the two driver panels: the same layout, fixed rows (nothing moves at speed) */
   .gr-bottom { grid-column: 1 / 3; grid-row: 3; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-4); padding: var(--s-4); background: var(--bg-0); border-top: var(--bw) solid var(--line); }
-  .gr-card { min-width: 0; display: grid; gap: var(--s-3); padding: var(--s-3) var(--s-5) var(--s-4); border-radius: var(--r-2); background: var(--bg-1); border: var(--bw) solid var(--line); box-shadow: inset 0 2px 0 var(--tc); }
+  .gr-bottom { position: relative; z-index: 2; }
+  .gr-bottom:has(.ctl-open) { z-index: var(--z-menu); }   /* (the folded controls' pop-up sits over the view and its tools) */
+  .gc-kv .sh { display: none; }
+  .gr-card { position: relative; container: gcard / inline-size; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); padding: var(--s-3) var(--s-5) var(--s-3); border-radius: var(--r-2); background: var(--bg-1); border: var(--bw) solid var(--line); box-shadow: inset 0 2px 0 var(--tc); }
   .gr-card.sel { border-color: var(--text-3); }
   .gr-card.out { opacity: 0.72; }
+  /* state row */
   .gc-h { display: flex; align-items: center; gap: var(--s-4); min-height: 28px; min-width: 0; }
-  .gc-cam { flex: none; }
-  .gc-sel { display: flex; align-items: center; gap: var(--s-4); background: none; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; }
+  .gc-sel { display: flex; align-items: center; gap: var(--s-4); background: none; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; min-height: 28px; }
   .gc-pos { font-size: var(--fs-xl); font-weight: var(--fw-bold); min-width: 40px; }
   .gc-name { display: flex; align-items: baseline; gap: var(--s-2); } .gc-name b { font-size: var(--fs-lg); } .gc-name small { color: var(--text-3); }
   .gr-card.sel .gc-name b { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--tc); }
   .gc-h .ui-badge { width: 78px; flex: none; justify-content: center; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 18px; text-align: center; }
-  .gc-gaps, .gc-lapt { display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-sm); }
-  .gc-gaps small, .gc-lapt small, .gc-kv > small { color: var(--text-3); font-size: var(--fs-2xs); white-space: nowrap; }
-  .gc-gaps b { min-width: 42px; text-align: right; font-weight: var(--fw-med); }
+  .gc-gaps, .gc-lapt { display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-sm); white-space: nowrap; }
+  .gc-gaps small, .gc-lapt small, .gc-kv > small, .gc-u { color: var(--text-3); font-size: var(--fs-2xs); white-space: nowrap; }
+  .gc-gaps b { min-width: 44px; text-align: right; font-weight: var(--fw-med); }
   .gc-lapt b { min-width: 62px; font-weight: var(--fw-med); }
   .gc-lapt em { font-style: normal; min-width: 46px; font-size: var(--fs-xs); }
-  .gc-cam { margin-left: auto; }
+  .gc-cam { margin-left: auto; flex: none; min-height: 24px; }
   .gr-card.cam .gc-cam { color: var(--text-1); box-shadow: inset 0 0 0 1px var(--text-3); }
-  .gc-stats { display: flex; align-items: center; gap: var(--s-4); min-height: 24px; font-size: var(--fs-sm); flex-wrap: nowrap; overflow: hidden; }
+  /* stats row */
+  .gc-stats { display: flex; align-items: center; gap: var(--s-2) var(--s-5); min-height: 24px; font-size: var(--fs-sm); flex-wrap: wrap; min-width: 0; }
   .gc-tyre { display: flex; align-items: center; gap: var(--s-3); }
   .gc-tyre .g-cmp { width: 22px; height: 22px; font-size: 11px; }
-  .gc-tyre > small { color: var(--text-2); min-width: 30px; }
+  .gc-tyre > small.num { color: var(--text-2); min-width: 30px; }
   .gc-tyre b { min-width: 34px; text-align: right; font-weight: var(--fw-med); }
   .gc-tyre .ui-badge { min-width: 40px; justify-content: center; }
   .gc-kv { display: flex; align-items: center; gap: var(--s-3); }
-  .gc-kv > small { color: var(--text-3); font-size: var(--fs-2xs); }
-  .gc-kv > b { min-width: 38px; font-weight: var(--fw-med); }
+  .gc-kv > b { min-width: 38px; font-weight: var(--fw-med); white-space: nowrap; }
   .gc-kv .ui-meter > i { width: 36px; }
   .gc-tyre .ui-meter > i { width: 32px; }
-  .gc-kv > b { white-space: nowrap; }
-  .gc-ctl, .gc-box { display: flex; align-items: center; gap: var(--s-5); min-width: 0; min-height: 26px; }
-  .gc-grp { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
-  .gc-grp > small, .gc-box > small { color: var(--text-3); font-size: var(--fs-2xs); white-space: nowrap; }
-  .gc-grp > small em, .gc-box > small em { font-style: normal; color: var(--text-2); margin-left: var(--s-2); }
-  .gc-grp .ui-seg > button { min-height: 22px; padding: 0 var(--s-3); }
+  /* controls: label · who decides · the modes (in force pressed, pending dashed + dot, the rest selectable) */
+  .gc-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-6); min-width: 0; padding: var(--s-2) 0; border-block: var(--bw) solid var(--line-soft); }
+  .gc-grp { display: flex; align-items: center; gap: var(--s-3); min-width: 0; flex: none; }
+  .gc-lbl { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+  .gc-own { flex: none; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 20px; padding: 0 var(--s-2); border-radius: var(--r-1); font-size: var(--fs-2xs); font-weight: var(--fw-bold); white-space: nowrap; border: 1px solid var(--line); color: var(--text-2); background: transparent; cursor: help; }
+  .gc-own.own-ai { color: var(--text-2); border-color: var(--line); }
+  .gc-own.own-player { color: var(--text-inv); background: var(--text-1); border-color: var(--text-1); }
+  .gc-own.own-goal { color: var(--info); border-color: var(--info); background: var(--info-soft); }
+  .gc-seg > button { min-height: 24px; min-width: 40px; padding: 0 var(--s-3); font-size: var(--fs-sm); position: relative; }
+  .gc-seg > button[aria-pressed="true"] { background: var(--text-1); color: var(--text-inv); box-shadow: none; font-weight: var(--fw-bold); }
+  .gc-seg > button.pending { box-shadow: inset 0 0 0 1px var(--warn); color: var(--warn); outline: 1px dashed var(--warn); outline-offset: -3px; }
+  .gc-seg > button.pending::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); }
+  .gc-foot .gc-goalg { flex: none; }
   .gc-goal { min-height: 24px; width: 104px; font-size: var(--fs-sm); padding: 0 var(--s-2); }
-  .gc-box { gap: var(--s-3); }
-  .gc-cmp { min-height: 24px; width: 100px; font-size: var(--fs-sm); padding: 0 var(--s-2); flex: none; }
-  .gc-boxbtn { min-width: 52px; min-height: 24px; padding: 0 var(--s-4); background: var(--text-1); border-color: var(--text-1); color: var(--text-inv); font-weight: var(--fw-bold); flex: none; }
+  .gc-modes { display: none; font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  /* box row: always visible – both cars can always box */
+  .gc-box { display: flex; align-items: center; gap: var(--s-3); min-width: 0; min-height: 28px; }
+  .gc-cmp { min-height: 26px; width: 100px; font-size: var(--fs-sm); padding: 0 var(--s-2); flex: none; }
+  .gc-boxbtn { min-width: 56px; min-height: 28px; padding: 0 var(--s-4); background: var(--text-1); border-color: var(--text-1); color: var(--text-inv); font-weight: var(--fw-bold); flex: none; }
   .gc-boxbtn:hover:not(:disabled) { background: #fff; }
   .gc-boxbtn:disabled { background: var(--bg-3); border-color: var(--line); color: var(--text-3); }
-  .gc-box .ui-btn.sm { flex: none; }
+  .gc-box .ui-btn.sm { flex: none; min-height: 26px; }
   .gc-pre { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--text-2); }
   .gc-pre b { color: var(--text-1); font-weight: var(--fw-med); }
   .gc-pre .g-cmp { width: 15px; height: 15px; font-size: 9px; border-width: 1.5px; vertical-align: -3px; }
-  .gc-foot { display: flex; align-items: center; gap: var(--s-4); min-height: 20px; font-size: var(--fs-xs); color: var(--text-2); border-top: var(--bw) solid var(--line-soft); padding-top: var(--s-2); }
+  .gc-fold { display: none; }
+  .gc-br { display: none; }
+  .gc-pre2 { display: none; flex-basis: 100%; font-size: var(--fs-xs); color: var(--text-2); }   /* (the box line, inside the folded pop-up) */
+  .gc-foot { display: flex; align-items: center; gap: var(--s-4); min-height: 24px; font-size: var(--fs-xs); color: var(--text-2); }
   .gc-goalst { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 55%; }
   .gc-ord { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .gc-deleg { margin-left: auto; min-height: 20px; font-size: var(--fs-xs); flex: none; }
+  .gc-deleg { margin-left: auto; min-height: 24px; font-size: var(--fs-xs); flex: none; }
+  /* folding by priority (narrow card or short window): 1) captions go (values stay, captions in tooltips) 2) the controls
+     fold into a pop-up behind 조작 – the modes line keeps saying what is in force; box, the state and the stats stay */
+  @container gcard (max-width: 560px) {
+    .gc-lapt em { display: none; }
+    .gc-u { display: none; }
+    .gc-kv .lg { display: none; } .gc-kv .sh { display: inline; }
+    .gc-ctl { gap: var(--s-2) var(--s-4); }
+  }
+  @container gcard (max-width: 470px) {
+    .gc-ctl { display: none; }
+    .gc-modes, .gc-fold { display: block; }
+    .gc-lapt em { display: none; }
+    .gc-h { flex-wrap: wrap; row-gap: var(--s-1); }
+    .gc-h .gc-cam { order: 3; } .gc-br { display: block; order: 4; flex-basis: 100%; height: 0; } .gc-gaps { order: 5; } .gc-lapt { order: 6; }   /* (the same two rows on both cards) */
+    .gc-box > .gc-lbl, .gc-box > .gc-pre, .gc-goalg > .gc-lbl { display: none; }
+    .gc-goal { width: 92px; }
+    .gc-pre2 { display: block; }
+    .gc-cmp { width: 84px; }
+    .gc-box .gc-fold { padding: 0 var(--s-3); }
+  }
+  @media (max-height: 600px) {
+    .gr-card .gc-ctl { display: none; }
+    .gr-card .gc-modes, .gr-card .gc-fold { display: block; }
+    .gr-card .gc-pre2 { display: block; }
+    .gr-card { gap: var(--s-2); padding-block: var(--s-2); }
+  }
+  .gr-card.ctl-open .gc-ctl { display: flex; position: absolute; left: -1px; right: -1px; bottom: calc(100% + var(--s-2)); z-index: var(--z-menu); background: var(--bg-1); border: var(--bw) solid var(--line); border-radius: var(--r-2); padding: var(--s-4) var(--s-5); box-shadow: 0 -6px 18px rgb(0 0 0 / 0.45), inset 0 2px 0 var(--tc); }
   .gr-ord b { font-weight: var(--fw-med); }
   .gr-ord.queued b, .gr-ord.sending b { color: var(--warn); } .gr-ord.applied b { color: var(--ok); } .gr-ord.refused b, .gr-ord.rejected b { color: var(--bad-ink); }
   b.gr-ord.queued { color: var(--warn); } b.gr-ord.applied { color: var(--ok); } b.gr-ord.refused, b.gr-ord.rejected { color: var(--bad-ink); }
@@ -483,11 +567,10 @@ body.game-on { grid-template-rows: auto 1fr; }
   .pp-steps li.done { color: var(--text-1); }
   .pp-issue { color: var(--bad-ink); font-weight: var(--fw-med); }
   .pp-rel { color: var(--info); }
+  @media (max-width: 1100px) { .gr-tower:not(.slim) { max-width: 228px; } }   /* (narrow windows: the tower gives the panels room – v0.52) */
   @media (max-width: 1440px) { .gr-clock small, .gr-lap small { display: none; } .gr-top { gap: var(--s-4); } .gr-dock { width: 300px; } }
   /* narrow game windows (1280 at 125 %: 1024 × 550 CSS px – v0.51): control groups keep their size and wrap instead of
      overlapping; the top bar drops what the docked panels also show (weather, the achieved-speed note) */
-  .gc-ctl { flex-wrap: wrap; row-gap: var(--s-2); }
-  .gc-grp { flex: none; }
   @media (max-width: 1180px) {
     .gr-top { gap: var(--s-3); padding: var(--s-2) var(--s-4); }
     .gr-wx, .gr-auto { display: none; }
@@ -495,7 +578,6 @@ body.game-on { grid-template-rows: auto 1fr; }
     .gr-speeds > button { min-width: 28px; padding: 0 var(--s-2); }
     .gr-docktabs > button { padding: 0 var(--s-3); font-size: var(--fs-xs); }
     .gr-dock { width: 260px; }
-    .gc-ctl { gap: var(--s-3); }
     .gc-goal { width: 92px; }
   }
   @media (max-width: 1400px) { .gc-h { overflow: hidden; } .gc-name small, .gc-lapt small { display: none; } .gc-h .gc-cam { padding: 0 var(--s-3); flex: none; } }

@@ -72,44 +72,59 @@ export function build() {
     </aside>
     <footer class="gr-bottom">${mine.map((e) => card(e)).join("")}</footer></div>`;
   H.built = true; H.ordersDirty = true;
-  wireResize();
+  wireResize(); wireFold();
   Dock.build($("grDock"));
 }
 export function teardown() { H.built = false; Dock.teardown(); }
 export const markOrders = () => { H.ordersDirty = true; Dock.markDirty(); };
 
-// one driver panel – the same layout for both cars; every control row is here from the start
+// one driver panel – the same layout for both cars; every control row is here from the start (v0.52 §10-1):
+//   state row     position · name · status · gaps (s) · last lap · camera            – always visible
+//   stats row     tyre (left %, temperature) · battery % · fuel margin (laps) · next stop
+//   controls      페이스 / 에너지: who decides (AI / 직접 / 목표 chip) + the modes – IN FORCE pressed, SENT-not-yet
+//                 dashed with a dot, the rest selectable; 목표 select                 – folds into a pop-up (see below)
+//   modes line    the same three states in words – shown only while the controls are folded
+//   box row       who owns the plan · tyre + sets · 박스 · 취소 · what the call will do – ALWAYS visible (both cars can
+//                 always box), long text cut with the full text in its tooltip
+//   foot          goal state · the last order and its state (short refusal) · AI에 맡기기
+// Narrow or short windows (the card under ~470 px wide, or the window under 600 px high – 1280×720 at 125 / 150 %): the
+// controls fold behind the 조작 button into a pop-up over the view (nothing deleted, the modes line says what is in force);
+// Escape or the button closes it.
 function card(e) {
   const n = esc(e.num), EK = HM.energyKo(season()), cmp = compoundsFor(G.sc);
-  const seg = (k, list, ko) => `<div class="ui-seg sm" data-k="${k}" role="group" aria-label="${k === "pace" ? "페이스" : "에너지"}">${list.map((p) => `<button data-act="hud:${k}" data-num="${n}" data-v="${p}">${ko[p]}</button>`).join("")}</div>`;
+  const LEG = "채워진 버튼: 지금 적용 중 · 점선과 점: 보냈지만 아직 적용 전 · 나머지: 누르면 바로 지시";
+  const seg = (k, list, ko) => `<div class="ui-seg gc-seg" data-k="${k}" role="group" aria-label="${k === "pace" ? "페이스" : "에너지"}" title="${LEG}">${list.map((p) => `<button data-act="hud:${k}" data-num="${n}" data-v="${p}">${ko[p]}</button>`).join("")}</div>`;
   return `<section class="gr-card" data-car="${n}" style="--tc:${esc(e.colour || "#888")}">
     <header class="gc-h">
       <button class="gc-sel" data-act="hud:sel" data-num="${n}" title="이 차를 선택 (패널의 상세가 이 차를 보여줘요)"><b class="gc-pos num" data-f="pos">–</b><span class="gc-name"><b>${esc(e.tla)}</b><small>#${n}</small></span></button>
-      <span class="ui-badge" data-f="status"></span>
-      <span class="gc-gaps num" title="앞차·뒤차와의 시간 차 (계측선 통과 기준, 자료 없으면 –)"><small>앞차</small><b data-f="ahead">–</b><small>뒤차</small><b data-f="behind">–</b></span>
-      <span class="gc-lapt num" title="최근 랩 · 이 차의 최고 랩 대비"><small>최근</small><b data-f="last">–</b><em data-f="delta"></em></span>
+      <span class="ui-badge" data-f="status"></span><i class="gc-br" aria-hidden="true"></i>
+      <span class="gc-gaps num" title="앞차·뒤차와의 시간 차 (초, 계측선 통과 기준 · 자료 없으면 –)"><small>앞</small><b data-f="ahead">–</b><small>뒤</small><b data-f="behind">–</b></span>
+      <span class="gc-lapt num" title="최근 랩 · 이 차의 최고 랩 대비 (초)"><small>최근</small><b data-f="last">–</b><em data-f="delta"></em></span>
       <button class="ui-btn sm quiet gc-cam" data-act="hud:cam" data-num="${n}" data-f="cam" title="3D 카메라가 이 차를 따라가요">카메라</button>
     </header>
     <div class="gc-stats">
-      <span class="gc-tyre" title="타이어: 컴파운드 · 사용 랩 · 남은 수명(막대가 줄어들수록 마모) · 온도 상태"><span data-f="cmp"></span><small class="num" data-f="age"></small>
-        <span class="ui-meter" data-f="lifeM"><i><em data-f="lifebar"></em></i></span><b class="num" data-f="life">–</b><span class="ui-badge" data-f="temp"></span></span>
-      <span class="gc-kv" title="연료: 이 차가 지금까지 쓴 양으로 추정한 완주 여유 (게임 추정)"><small>연료 여유</small><b class="num" data-f="fuel">–</b></span>
-      <span class="gc-kv" title="배터리 충전 상태"><small>배터리</small><span class="ui-meter" data-f="socM"><i><em data-f="socbar"></em></i></span><b class="num" data-f="soc">–</b></span>
-      <span class="gc-kv" title="계획의 다음 피트 (랩 · 타이어)"><small>다음</small><b data-f="next">–</b></span>
+      <span class="gc-tyre" title="타이어: 컴파운드 · 이번 스틴트 랩 · 남은 수명 (새 타이어 100%, 줄어들수록 마모) · 온도 상태"><span data-f="cmp"></span><small class="num" data-f="age"></small>
+        <span class="ui-meter" data-f="lifeM"><i><em data-f="lifebar"></em></i></span><small class="gc-u">남은</small><b class="num" data-f="life">–</b><span class="ui-badge" data-f="temp"></span></span>
+      <span class="gc-kv" title="배터리: 남은 충전량 (%)"><small>배터리</small><span class="ui-meter" data-f="socM"><i><em data-f="socbar"></em></i></span><b class="num" data-f="soc">–</b></span>
+      <span class="gc-kv gc-fuel" title="연료: 이 차가 지금까지 쓴 양으로 추정한 완주 여유 (랩, 게임 추정)"><small><span class="lg">연료 여유</span><span class="sh">연료</span></small><b class="num" data-f="fuel">–</b></span>
+      <span class="gc-kv gc-next" title="계획의 다음 피트 (랩 · 타이어)"><small><span class="lg">다음 피트</span><span class="sh">다음</span></small><b data-f="next">–</b></span>
     </div>
-    <div class="gc-ctl">
-      <span class="gc-grp"><small>페이스<em data-f="ownPace"></em></small>${seg("pace", PACE.slice().sort((a, b) => PACE_ORDER.indexOf(a) - PACE_ORDER.indexOf(b)), PACE_KO)}</span>
-      <span class="gc-grp" title="${esc(HM.energyHelp(season()))}"><small>에너지<em data-f="ownEnergy"></em></small>${seg("energy", ENERGY, EK)}</span>
-      <span class="gc-grp"><select class="ui-select gc-goal" data-chg="hud:goal" data-num="${n}" ${hasGoal() ? "" : "disabled"} aria-label="운영 목표">
-        <option value="">${hasGoal() ? "목표 없음" : "목표: 엔진 연결 전"}</option>${HM.GOALS.map((g) => `<option value="${g}">${HM.GOAL_KO[g]}</option>`).join("")}</select></span>
+    <div class="gc-ctl" id="gcCtl${n}" role="group" aria-label="${esc(e.tla)} 조작">
+      <span class="gc-grp" data-k="pace"><small class="gc-lbl">페이스</small><span class="gc-own" data-f="ownPace">–</span>${seg("pace", PACE.slice().sort((a, b) => PACE_ORDER.indexOf(a) - PACE_ORDER.indexOf(b)), PACE_KO)}</span>
+      <span class="gc-grp" data-k="energy" title="${esc(HM.energyHelp(season()))}"><small class="gc-lbl">에너지</small><span class="gc-own" data-f="ownEnergy">–</span>${seg("energy", ENERGY, EK)}</span>
+      <span class="gc-pre2" data-f="pre2"></span>
     </div>
+    <div class="gc-modes" data-f="modes" aria-live="off"></div>
     <div class="gc-box">
-      <small>피트<em data-f="ownPlan"></em></small>
+      <small class="gc-lbl">피트 계획</small><span class="gc-own" data-f="ownPlan" title="계획(피트 시점·타이어)을 누가 정하는지">–</span>
       <select class="ui-select gc-cmp" data-chg="hud:cmp" data-num="${n}" aria-label="장착할 타이어">${cmp.list.map((c) => `<option value="${c}">${esc(CMP_KO[c] || c)}</option>`).join("")}</select>
-      <button class="ui-btn gc-boxbtn" data-act="hud:box" data-num="${n}">박스</button><button class="ui-btn sm" data-act="hud:cancel" data-num="${n}">취소</button>
+      <button class="ui-btn gc-boxbtn" data-act="hud:box" data-num="${n}">박스</button><button class="ui-btn sm gc-cancel" data-act="hud:cancel" data-num="${n}">취소</button>
       <span class="gc-pre" data-f="pre"></span>
+      <button class="ui-btn sm gc-fold" data-act="hud:fold" data-num="${n}" aria-expanded="false" aria-controls="gcCtl${n}" title="페이스·에너지 조작 열기 (Esc로 닫기)">조작 ▴</button>
     </div>
     <div class="gc-foot">
+      <span class="gc-grp gc-goalg"><small class="gc-lbl">목표</small><select class="ui-select gc-goal" data-chg="hud:goal" data-num="${n}" ${hasGoal() ? "" : "disabled"} aria-label="운영 목표" title="목표를 고르면 목표 보조가 페이스·에너지를 정해요 (직접 누르면 목표 종료)">
+        <option value="">${hasGoal() ? "없음" : "엔진 연결 전"}</option>${HM.GOALS.map((g) => `<option value="${g}">${HM.GOAL_KO[g]}</option>`).join("")}</select></span>
       <span class="gc-goalst" data-f="goal"></span>
       <span class="gc-ord" data-f="ord"></span>
       <button class="ui-btn sm quiet gc-deleg" data-act="hud:delegate" data-num="${n}" data-f="deleg" ${hasDelegate() ? "" : "disabled"} title="직접 지시한 페이스·에너지·계획을 팀 AI에게 다시 맡겨요">AI에 맡기기</button>
@@ -138,6 +153,9 @@ export function paint() {
   const w = snap.weather || {};
   setH($("grWx"), `${w.airT != null ? `<span>기온 <b class="num">${Math.round(w.airT)}°</b></span>` : ""}${w.trackT != null ? `<span>노면 <b class="num">${Math.round(w.trackT)}°</b></span>` : ""}<span>${w.rain > 0.05 ? `<b class="rain">비</b>` : "건조"}${w.water > 0.05 ? ` · 물 ${w.water.toFixed(1)}mm` : w.water > 0.005 ? " · 젖음" : ""}</span>`);
   setT($("grClock"), fmtT(T));
+  // (the weather the screen showed, every 10 s of race time – only for the result's lap axis; never read by the race)
+  if (!G.wxLog || G.wxLog.run !== R) G.wxLog = { run: R, s: [] };
+  { const L = G.wxLog.s; if (!L.length || T - L[L.length - 1].t >= 10000) { L.push({ t: T, rain: w.rain ?? 0, water: Number.isFinite(w.water) ? +w.water.toFixed(3) : null }); if (L.length > 3000) L.shift(); } }
   // (the achieved speed: two text nodes updated in place – no markup rebuilt 5× a second)
   setT($("grAchL"), R.paused ? "" : "실제"); setT($("grAchV"), R.paused ? "일시정지" : `${R.achieved.toFixed(1)}×`); setC($("grAchV"), R.behind && !R.paused ? "bad" : "");
   setH($("grAuto"), R.slowNote ? `<span class="ui-badge warn" title="${esc(R.slowNote.why || "")}">${R.slowNote.action === "pause" ? "자동 정지" : "자동 감속"} · ${esc(String(R.slowNote.why || "").slice(0, 26))}</span>` : R.behind ? `<span class="ui-badge sc" title="계산이 따라가지 못해 실제로 낼 수 있는 배속으로 진행 중">계산 한계</span>` : "");
@@ -213,10 +231,9 @@ function paintCard(e, snap, T, onCam, mine) {
   setC(st, `ui-badge ${c.status === "pit" || ph === "called" || ph === "committed" ? "info" : c.status === "dnf" ? "bad" : c.inc ? "warn" : ""}`);
   setT(f(root, "cam"), onCam === String(e.num) ? "카메라 ●" : "카메라");
   // gaps (timing line; "–" when there is no data – never 0), last lap and delta
-  const ahead = c.pos === 1 ? "선두" : HM.fmtGap(c.gap?.ahead, c.gap?.aheadLaps), bh = HM.gapBehind(snap.cars, e.num);
-  // (both as a plain time to that car – "앞차 1.2 · 뒤차 0.4"; laps as "+1랩"; no data "–")
-  const plain = (x) => (/^\+\d+(\.\d+)?$/.test(x) ? x.slice(1) : x);
-  setT(f(root, "ahead"), plain(ahead)); setT(f(root, "behind"), bh.car ? plain(HM.fmtGap(bh.g, bh.laps)) : "–");
+  // (seconds to that car – "앞 1.2초 · 뒤 0.4초"; laps "+1랩"; the leader has no car ahead: "없음"; no data "–")
+  const bh = HM.gapBehind(snap.cars, e.num);
+  setT(f(root, "ahead"), c.pos === 1 ? "없음" : HM.gapText(c.gap?.ahead, c.gap?.aheadLaps)); setT(f(root, "behind"), bh.car ? HM.gapText(bh.g, bh.laps) : "없음");
   setT(f(root, "last"), HM.fmtLapT(c.last?.t));
   const d = HM.lapDelta(c.last, c.best), de = f(root, "delta"); setT(de, d); setC(de, d.startsWith("+") ? "t-lose" : d ? "t-gain" : "");
   // tyre
@@ -224,7 +241,7 @@ function paintCard(e, snap, T, onCam, mine) {
   setH(f(root, "cmp"), cmpChip(ty.compound).replace('class="g-cmp', `class="g-cmp${ty.used || set?.used ? " used" : ""}`));
   setT(f(root, "age"), ty.age != null ? `${ty.age}랩` : "");
   const L = HM.tyreLife(ty); setT(f(root, "life"), L.pct); setW(f(root, "lifebar"), L.life); setC(f(root, "lifeM"), `ui-meter ${L.cls}`);
-  const tt = HM.tyreTemp(ty), te = f(root, "temp"); setT(te, tt.key ? tt.label : "–"); setC(te, `ui-badge ${tt.cls}`); te.title = tt.key ? `${tt.label} – 작동 온도 ${Math.round(ty.win.lo)}–${Math.round(ty.win.hi)}°C, 지금 ${Math.round(ty.Tw)}°C` : tt.label;
+  const tt = HM.tyreTemp(ty), te = f(root, "temp"); setT(te, tt.key ? tt.label : "–"); setC(te, `ui-badge ${tt.cls}`); { const tip = tt.key ? `${tt.label} – 작동 온도 ${Math.round(ty.win.lo)}–${Math.round(ty.win.hi)}°C, 지금 ${Math.round(ty.Tw)}°C` : tt.label; if (te.title !== tip) te.title = tip; }
   // fuel margin (estimate from this car's own burn) and battery
   const fm = fuelOf(c, snap), fe = f(root, "fuel");
   setT(fe, fm ? `${fm.marginLaps >= 0 ? "+" : "−"}${Math.abs(fm.marginLaps).toFixed(fm.marginLaps > -1 && fm.marginLaps < 1 ? 1 : 0)}랩` : Number.isFinite(c.fuel) ? "계산 중" : "–");
@@ -234,26 +251,31 @@ function paintCard(e, snap, T, onCam, mine) {
   // the next planned stop
   const ns = (c.plan?.stints || []).find((x, k, a) => x.toLap > (c.lap || 0) && k < a.length - 1), nx = ns ? (c.plan.stints[c.plan.stints.indexOf(ns) + 1]?.compound) : null;
   setH(f(root, "next"), c.plan ? (ns ? `${ns.toLap}랩 ${cmpChip(nx)}` : "없음") : "–");
-  // modes in force (the render-time picture), an order still waiting shown as waiting
-  for (const [k, cur] of [["pace", c.mode?.pace], ["energy", c.mode?.energy ?? c.energy?.mode]]) {
-    const pend = pendingShown(e.num, k, T);
-    root.querySelectorAll(`.ui-seg[data-k="${k}"] button`).forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.v === cur)); b.classList.toggle("pending", !!pend && pend.args?.mode === b.dataset.v); b.disabled = out; });
-    const own = HM.ownText(c.own, k); setT(f(root, k === "pace" ? "ownPace" : "ownEnergy"), own ? `· ${own}` : "");
+  // modes in force (the render-time picture); an order still waiting is marked pending on its button, never pressed;
+  // who decides each kind as a chip (AI / 직접 / 목표) with its meaning in the tooltip
+  const EK = HM.energyKo(season()), modeWords = [];
+  for (const [k, cur, ko] of [["pace", c.mode?.pace, PACE_KO], ["energy", c.mode?.energy ?? c.energy?.mode, EK]]) {
+    const pend = pendingShown(e.num, k, T), btns = HM.modeButtons([...root.querySelectorAll(`.ui-seg[data-k="${k}"] button`)].map((b) => b.dataset.v), cur, pend?.args?.mode, out);
+    root.querySelectorAll(`.ui-seg[data-k="${k}"] button`).forEach((b, i) => { const m = btns[i]; if (b.getAttribute("aria-pressed") !== String(m.inForce)) b.setAttribute("aria-pressed", String(m.inForce)); b.classList.toggle("pending", m.pending); if (b.disabled !== m.disabled) b.disabled = m.disabled; });
+    const oc = HM.ownChip(c.own, k), el = f(root, k === "pace" ? "ownPace" : "ownEnergy"); setT(el, oc.text); setC(el, oc.cls); if (el.title !== oc.tip) el.title = oc.tip;
+    modeWords.push(`${k === "pace" ? "페이스" : "에너지"} ${HM.modeLine(ko[cur], oc.key ? oc.text : null, pend ? ko[pend.args?.mode] : null)}`);
   }
-  setT(f(root, "ownPlan"), HM.ownText(c.own, "plan") ? `· 계획 ${HM.ownText(c.own, "plan")}` : "");
+  const op = HM.ownChip(c.own, "plan"), ope = f(root, "ownPlan"); setT(ope, op.key ? op.text : "–"); setC(ope, op.cls); { const tt = `피트 계획: ${op.tip}`; if (ope.title !== tt) ope.title = tt; }
+  if (c.goal && c.goal.state !== "done") modeWords.push(`목표 ${HM.GOAL_SHORT[c.goal.kind] || c.goal.kind}`);
+  setT(f(root, "modes"), modeWords.join(" · "));
   // goal (the select follows the engine unless the player is on it)
   const gs = root.querySelector(".gc-goal"); if (gs && document.activeElement !== gs) { const v = c.goal && c.goal.state !== "done" ? c.goal.kind : ""; if (gs.value !== (v || "")) gs.value = v || ""; gs.disabled = !hasGoal() || out; }
   const tlaOf = (n) => G.sc.entries.find((x) => String(x.num) === String(n))?.tla || (n ? "#" + n : "");
   const ge = f(root, "goal");
-  if (c.goal) { setT(ge, `목표 ${HM.GOAL_SHORT[c.goal.kind] || c.goal.kind} · ${HM.GOAL_STATE_KO[c.goal.state] || c.goal.state}${HM.goalWhy(c.goal.why, tlaOf) ? " – " + HM.goalWhy(c.goal.why, tlaOf) : ""}`); setC(ge, `gc-goalst ${c.goal.state === "blocked" ? "t-lose" : c.goal.state === "waiting" ? "muted" : ""}`); }
+  if (c.goal) { { const gt = `${HM.GOAL_STATE_KO[c.goal.state] || c.goal.state}${HM.goalWhy(c.goal.why, tlaOf) ? " – " + HM.goalWhy(c.goal.why, tlaOf) : ""}`; setT(ge, gt); if (ge.title !== gt) ge.title = `목표 ${HM.GOAL_KO[c.goal.kind] || c.goal.kind}: ${gt}`; } setC(ge, `gc-goalst ${c.goal.state === "blocked" ? "t-lose" : c.goal.state === "waiting" ? "muted" : ""}`); }
   else setT(ge, "");
   // box: the tyre (the player's choice, else the plan's next), the set and stock, cancel window, the team-mate's risk
   const cmpSel = root.querySelector(".gc-cmp"); let choice = H.pitCmp[e.num] || (ph === "called" ? c.pit?.compound : null) || nx || (ty.compound === "HARD" ? "MEDIUM" : "HARD");
   if (cmpSel && document.activeElement !== cmpSel && cmpSel.value !== choice) cmpSel.value = choice;
   if (cmpSel && Array.isArray(c.sets)) { const S = HM.setStock(c.sets).by; for (const o of cmpSel.options) { const t = `${CMP_KO[o.value] || o.value} · ${S[o.value]?.free ?? 0}세트`; if (o.textContent !== t) o.textContent = t; } }
   const pv = HM.boxPreview(c, mate, choice), lane = IN_LANE.has(ph);
-  const boxB = root.querySelector(".gc-boxbtn"); boxB.disabled = out || lane || ph === "committed" || (!pv.ok && ph !== "called");
-  setT(boxB, ph === "called" ? "변경" : "박스"); boxB.title = ph === "called" ? "요청한 피트의 타이어를 바꿔요" : "다음 피트 입구에서 들어와요";
+  const boxB = root.querySelector(".gc-boxbtn"), blocked = HM.boxBlocked(c, pv); boxB.disabled = !!blocked;
+  setT(boxB, ph === "called" ? "변경" : "박스"); { const tt = blocked ? `지금은 박스 불가: ${blocked}` : ph === "called" ? "요청한 피트의 타이어를 바꿔요" : "다음 피트 입구에서 들어와요 (긴급 박스)"; if (boxB.title !== tt) boxB.title = tt; }
   root.querySelector('[data-act="hud:cancel"]').disabled = ph !== "called";
   if (cmpSel) cmpSel.disabled = out || lane || ph === "committed";
   let pre;
@@ -261,7 +283,7 @@ function paintCard(e, snap, T, onCam, mine) {
   else if (ph === "called" || ph === "committed") pre = `<b>${ph === "called" ? "박스 요청됨" : "피트 진입 확정"}</b> · ${cmpChip(c.pit?.compound)} ${esc(CMP_KO[c.pit?.compound] || "")} · ${esc(pv.cancel)}${pv.mate.text ? ` · <span class="${pv.mate.risk === "high" ? "t-lose" : ""}">${esc(pv.mate.text)}</span>` : ""}`;
   else if (out) pre = "";
   else pre = !pv.ok ? `<span class="t-lose">${esc(pv.why)}</span>` : `박스 → ${cmpChip(choice)} ${Array.isArray(c.sets) ? `${esc(HM.setLabel(pv.set))} · 남은 ${pv.left}` : `<span class="muted">${esc(NO_INVENTORY)}</span>`} · ${esc(pv.cancel)}${pv.mate.text ? ` · <span class="${pv.mate.risk === "high" ? "t-lose" : ""}">${esc(pv.mate.text)}</span>` : ""}`;
-  setH(f(root, "pre"), pre);
+  const pe = f(root, "pre"); setH(pe, pre); setH(f(root, "pre2"), pre); { const tt = pe.textContent; if (pe.title !== tt) pe.title = tt; }   // (cut on a narrow card – the whole line in the tooltip)
   // the last order of this car and what became of it (its state at the render time)
   const o = G.book.last(e.num);
   setH(f(root, "ord"), o ? orderLine(o, T) : "");
@@ -274,8 +296,9 @@ function pendingShown(num, type, T) {
 }
 const ST_SHORT = { sending: "보내는 중", queued: "대기", applied: "적용", refused: "거절", rejected: "접수 거절", unknown: "확인 불가" };
 function orderLine(o, T) {
-  const s = G.book.stateAt ? G.book.stateAt(o, T) : o.state, why = (s === "refused" || s === "rejected") && o.why ? ` – ${esc(whyKo(o.why))}` : "";
-  return `<span class="gr-ord ${s}" title="${esc(ST_KO[s] || s)}">${esc(o.text || o.type)} <b>${esc(ST_SHORT[s] || s)}</b>${why}</span>`;
+  // (a refusal: its reason short on the panel, the whole reason in the tooltip)
+  const s = G.book.stateAt ? G.book.stateAt(o, T) : o.state, full = (s === "refused" || s === "rejected") && o.why ? whyKo(o.why) : "";
+  return `<span class="gr-ord ${s}" title="${esc(`${o.text || o.type} – ${ST_KO[s] || s}${full ? ": " + full : ""}`)}">${esc(o.text || o.type)} <b>${esc(ST_SHORT[s] || s)}</b>${full ? ` – ${esc(HM.clip(full, 24))}` : ""}</span>`;
 }
 // fuel samples per car: one at each completed lap (render-time picture)
 function fuelOf(c, snap) {
@@ -304,6 +327,21 @@ function pitPanel(el, car, T, snap) {
   setH(el, `<div class="pp-h"><b>${esc(e?.tla || car.num)}</b> <span>${esc(PIT_KO[car.pit?.phase] || "")}</span></div>`);
 }
 
+// ---------- the folded controls (narrow / short windows): a pop-up over the view, Escape or the button closes it ----------
+function foldCtl(num, open = null) {
+  const root = document.querySelector(`.gr-card[data-car="${CSS.escape(String(num))}"]`); if (!root) return;
+  const on = open == null ? !root.classList.contains("ctl-open") : open, btn = root.querySelector(".gc-fold");
+  document.querySelectorAll(".gr-card.ctl-open").forEach((x) => { if (x !== root) { x.classList.remove("ctl-open"); x.querySelector(".gc-fold")?.setAttribute("aria-expanded", "false"); } });
+  root.classList.toggle("ctl-open", on); btn?.setAttribute("aria-expanded", String(on)); if (btn) btn.textContent = on ? "조작 ▾" : "조작 ▴";
+  if (on) (root.querySelector('.gc-ctl button[aria-pressed="true"]') || root.querySelector(".gc-ctl button, .gc-ctl select"))?.focus();
+  else if (root.contains(document.activeElement)) btn?.focus();
+}
+function wireFold() {
+  document.querySelectorAll(".gr-card").forEach((root) => root.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && root.classList.contains("ctl-open")) { ev.stopPropagation(); ev.preventDefault(); foldCtl(root.dataset.car, false); }
+  }));
+}
+
 // ---------- the tower's width ----------
 function wireResize() {
   const h = $("grResize"), tw = $("grTower"); if (!h || !tw) return;
@@ -326,6 +364,7 @@ export function onClick(act, b) {
   if (act === "towerMode") { H.towerMode = v === "ahead" ? "ahead" : "leader"; try { localStorage.setItem(TOWER_MODE_KEY, H.towerMode); } catch { /* per-viewer only */ } document.querySelectorAll('[data-act="hud:towerMode"]').forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === H.towerMode))); H.ordersDirty = true; paint(); return; }
   if (act === "dock") { Dock.toggle(v); $("grRoot")?.classList.toggle("dock-on", !!Dock.open()); document.querySelectorAll('[data-act="hud:dock"]').forEach((x) => x.setAttribute("aria-selected", String(x.dataset.v === Dock.open()))); requestAnimationFrame(() => dispatchEvent(new Event("resize"))); H.ordersDirty = true; paint(); return; }
   if (act === "save") { SaveUI.savePrompt(); return; }
+  if (act === "fold") { foldCtl(num); return; }
   const EK = HM.energyKo(season());
   if (act === "pace") { sendOrder("pace", num, { mode: v }, `${tla} 페이스 ${PACE_KO[v]}`); return; }
   if (act === "energy") { sendOrder("energy", num, { mode: v }, `${tla} 에너지 ${EK[v]}`); return; }

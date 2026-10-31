@@ -164,7 +164,7 @@ function carPanel(snap) {
   const fh = burnOf(num);
   return `<section class="gd-sec"><h4>타이어 <small>${cmpChip(ty.compound)} ${esc(CMP_KO[ty.compound] || "")} · ${esc(HM.setLabel(set || (ty.used ? { used: true, laps: 0 } : null)) || "")}${ty.age != null ? ` · 이번 스틴트 ${ty.age}랩` : ""}</small></h4>
       <div class="gd-kvs"><span><small>남은 수명</small><span class="ui-meter ${L.cls}"><i><em style="width:${Math.round((L.life ?? 0) * 100)}%"></em></i></span><b class="num">${L.pct}</b></span>
-        <span><small>랩당 마모</small><b class="num">${wearPerLap != null ? `${Math.abs(wearPerLap * 100).toFixed(1)}%` : "–"}</b></span>
+        <span title="남은 수명이 한 랩에 줄어드는 양 (%p) – 위의 남은 수명과 같은 기준"><small>수명 변화</small><b class="num">${esc(HM.lifeRateText(wearPerLap))}</b></span>
         <span><small>온도 상태</small><b class="${tt.cls ? "t-" + (tt.key === "hot" ? "lose" : tt.key === "ok" ? "gain" : "none") : ""}">${esc(tt.label)}</b></span></div>
       <div class="gd-kvs"><span><small>표면</small><b class="num">${n1(ty.Ts)}°</b></span><span><small>코어</small><b class="num">${n1(ty.Tc)}°</b></span><span><small>작동 온도</small><b class="num">${n1(ty.Tw)}°</b></span><span><small>최적 범위</small><b class="num">${ty.win ? `${n1(ty.win.lo)}–${n1(ty.win.hi)}°` : "–"}</b></span></div>
       ${spark(h, ty.win)}
