@@ -59,8 +59,14 @@ const TEAM_CARS = { 2025: CARS_2025_TABLE, 2026: CARS_2026_TABLE }, TRACK_TAU = 
 // compound than the assumed allocation runs differently from 0.49; races within the allocation are unchanged (the same
 // steps, orders and draws). Ownership, the goal assist, the timing-line history and the presentation transitions are
 // state the race's motion never reads.
-export const ENGINE_VERSION = "0.50.0-engine.1";
+// 0.52: the red-flag change through the set check, the wet-track learning state deterministic across save / load, three
+// tyre classes in the AI, one admissibility rule for every candidate, the rain price, the unsafe-release chance (0.51).
+export const ENGINE_VERSION = "0.52.0-engine.1";
+// the coefficient / rule fingerprint (params/version.js) – saves and results carry both; see MODEL
+export { PARAMS_VERSION, PARAMS_HASH } from "../data/params/version.js";
+import { PARAMS_VERSION as PV } from "../data/params/version.js";
 export const STATE_VERSION = 1;
+export const MODEL = { engine: ENGINE_VERSION, params: PV, state: STATE_VERSION };
 
 // ---------- creation ----------
 
@@ -84,7 +90,8 @@ function createRace0({ scenario, seed = 1, userTeam = null, weatherMode = "real"
   const sc = scenario, season = sc.meta.season;
   const state = { v: STATE_VERSION, engine: ENGINE_VERSION, t: 0, step: 0, seed: seed >>> 0, scenarioId: sc.meta.id, season, tyreWear,
     userTeam, weatherMode, totalLaps: sc.race.laps, phase: "grid", finished: false, leaderLap: 0, chequeredAt: null,
-    cars: [], order: [], boxes: null, commands: CMD.newCommandState(), teamOrders: {}, log: [], results: null, own: {}, rtrans: [], rtransCut: 0 };
+    cars: [], order: [], boxes: null, commands: CMD.newCommandState(), teamOrders: {}, log: [], results: null, own: {}, rtrans: [], rtransCut: 0,
+    models: [{ t: 0, engine: ENGINE_VERSION, params: PV }] };   // (every model this race was computed with, from when)
   const race = { state, scenario: sc, cache: null, rng: new Streams(seed) };
   buildCache(race, { carParams, driverParams });
   const T = race.cache.T, w0 = truthAt(race.cache.truth, 0);
@@ -748,7 +755,7 @@ function gapOf(c, lead, ahead, T) {
 export function analysis(race, nums = null) {
   const S = race.state, want = nums ? new Set(nums.map(String)) : new Set(Object.keys(S.own || {}));
   const flags = S.log.filter((e) => ["sc", "vsc", "red", "green", "yellow", "lightsOut", "chequered", "rainStart", "rainEnd"].includes(e.type)).map((e) => ({ t: e.t, lap: e.lap, type: e.type }));
-  const out = { t: S.t, finished: S.finished, totalLaps: S.totalLaps, flags, cars: {} };
+  const out = { t: S.t, finished: S.finished, totalLaps: S.totalLaps, flags, cars: {}, models: S.models || null };
   for (const c of S.cars) {
     if (!want.has(c.num)) continue;
     const plans = [{ t: 0, lap: 0, by: c.plan0?.by || "pre-race", stints: c.plan0?.stints || [] }];
@@ -770,7 +777,7 @@ function lapAt(c, t) { let el = c.laps.length ? 0 : null, acc = 0; for (const l 
 
 export function saveRace(race) {
   race.state.surface = saveSurface(race.cache.surface);
-  return JSON.stringify({ engine: ENGINE_VERSION, stateVersion: STATE_VERSION, scenarioId: race.state.scenarioId, rng: race.rng.save(), state: race.state, cacheMeta: { profilesAt: Object.fromEntries(Object.entries(race.cache.profiles).map(([k, v]) => [k, v.at])), w: race.cache.w } });
+  return JSON.stringify({ engine: ENGINE_VERSION, params: PV, stateVersion: STATE_VERSION, scenarioId: race.state.scenarioId, rng: race.rng.save(), state: race.state, cacheMeta: { profilesAt: Object.fromEntries(Object.entries(race.cache.profiles).map(([k, v]) => [k, v.at])), w: race.cache.w } });
 }
 export function loadRace(json, scenario, opts = {}) {
   const o = typeof json === "string" ? JSON.parse(json) : json;
@@ -779,6 +786,11 @@ export function loadRace(json, scenario, opts = {}) {
   const race = { state: o.state, scenario, cache: null, rng: Streams.load(o.rng) };
   buildCache(race, opts);
   migrate(race);
+  // which model wrote the save, and is it this one? (a save without the fields is from before v0.52: unknown, not guessed)
+  race.loadInfo = { engine: o.engine ?? null, params: o.params ?? null, sameEngine: o.engine === ENGINE_VERSION, sameParams: o.params === PV };
+  const S = race.state; S.models ||= (o.engine ? [{ t: 0, engine: o.engine, params: o.params ?? null }] : [{ t: 0, engine: null, params: null, note: "unknown (saved before v0.52)" }]);
+  const lastM = S.models[S.models.length - 1];
+  if (lastM.engine !== ENGINE_VERSION || lastM.params !== PV) S.models.push({ t: S.t, engine: ENGINE_VERSION, params: PV });
   // the envelopes as they were: recompute each at the same inputs, with the same last-computed time
   Object.assign(race.cache.w, o.cacheMeta.w);
   for (const car of race.state.cars) {

@@ -113,9 +113,9 @@ export function buildSave(slot) {
   const st = R.race.state;
   // (meta: what the slot list shows without reading the whole save – the store keeps it in a small file beside it)
   const meta = { scenarioId: G.sid, scenarioMetaId: sc.meta.id, season: G.season, event: sc.meta.event, team: G.teamKey, lap: st.leaderLap, totalLaps: st.totalLaps, t: st.t,
-    engine: E.ENGINE_VERSION, stateVersion: E.STATE_VERSION, label: slot === "auto" ? "자동 저장" : "" };
+    engine: E.ENGINE_VERSION, params: E.PARAMS_VERSION ?? null, stateVersion: E.STATE_VERSION, label: slot === "auto" ? "자동 저장" : "" };
   return { kind: "f1kr-game-save", format: 1, slot, meta, label: meta.label, savedAt: new Date().toISOString(),
-    engine: E.ENGINE_VERSION, stateVersion: E.STATE_VERSION, scenarioId: G.sid, scenarioMetaId: sc.meta.id, scenarioBuiltAt: sc.meta.builtAt || null, scenarioVersion: sc.version ?? null, scenarioPrint: scenarioPrint(sc),
+    engine: E.ENGINE_VERSION, params: E.PARAMS_VERSION ?? null, stateVersion: E.STATE_VERSION, scenarioId: G.sid, scenarioMetaId: sc.meta.id, scenarioBuiltAt: sc.meta.builtAt || null, scenarioVersion: sc.version ?? null, scenarioPrint: scenarioPrint(sc),
     season: G.season, event: sc.meta.event, team: G.teamKey, seed: G.seed, lap: st.leaderLap, totalLaps: st.totalLaps, t: st.t, runOpts: G.runOpts || null,
     ui: { sel: G.sel, focus: G.adapter?.ctx.focus || null, speed: R.speed || 1, paused: !!R.paused, cam: (() => { try { return JSON.parse(window.Map3D?.game.state?.() || "{}").cam || null; } catch { return null; } })() },
     orders: G.book.list.slice(-100), race: E.saveRace(R.race) };

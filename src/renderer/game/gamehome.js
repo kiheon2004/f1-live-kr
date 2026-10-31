@@ -279,7 +279,7 @@ function finishRace() {
   const classification = res?.rows ? res.rows.map((r) => ({ pos: r.pos, num: r.num, tla: r.tla, team: r.team, laps: r.laps, gap: r.gap, lapsDown: r.lapsDown, status: r.status, stops: r.stops }))
     : [...snap.cars].sort((a, b) => a.pos - b.pos).map((c) => ({ pos: c.pos, num: c.num, tla: c.tla, team: c.team, laps: c.lap, status: c.status }));
   const accounts = res?.rows ? { cars: Object.fromEntries(res.rows.filter((r) => isMine(r.num) || (r.pos && r.pos <= 10)).map((r) => [r.tla || r.num, r.acct || {}])), by: res.by || null } : null;
-  G.result = { dev: G.dev, scenarioId: G.sid, seed: G.seed, team: G.teamKey, t: snap.t, engine: G.dev ? null : G.engine?.ENGINE_VERSION || null, classification,
+  G.result = { dev: G.dev, scenarioId: G.sid, seed: G.seed, team: G.teamKey, t: snap.t, engine: G.dev ? null : G.engine?.ENGINE_VERSION || null, params: G.dev ? null : G.engine?.PARAMS_VERSION || null, models: G.dev ? null : R.race.state.models || null, scenarioPrint: G.sc?._fp || null, classification,
     accounts, events: (R.engine.events ? R.engine.events(R.race, -1) : G.events).slice(-300), orders: G.book.list, commandLog: R.race.state.commands?.log || null,
     runOpts: G.dev ? null : G.runOpts, stints: res?.rows ? Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.stints || null])) : null, points: res?.rows ? Object.fromEntries(res.rows.map((r) => [r.tla || r.num, r.points ?? null])) : null,
     loadedFrom: G.loadedFrom, analysis: (() => { try { return !G.dev && G.engine?.analysis ? G.engine.analysis(R.race) : null; } catch { return null; } })() };

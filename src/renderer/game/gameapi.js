@@ -90,7 +90,11 @@ export function checkSave(d, E, list) {
   if (d.stateVersion !== E.STATE_VERSION) return { ok: false, why: `저장 형식(v${d.stateVersion})이 이 엔진의 형식(v${E.STATE_VERSION})과 달라 불러올 수 없어요` };
   if (typeof d.race !== "string" && typeof d.race !== "object") return { ok: false, why: "저장에 경기 상태가 없어요" };
   if (!list.some((s) => s.id === d.scenarioId)) return { ok: false, why: `이 저장의 경기(${d.scenarioId})가 준비된 경기 목록에 없어요 – 경기 선택에서 먼저 준비하세요` };
+  // (v0.52 §7: the format decides whether a save can be read; the model and its parameters only whether the race will
+  // run on exactly as it would have – said plainly, never blocking, never guessing an identity the save doesn't carry)
   const warn = [];
-  if (d.engine !== E.ENGINE_VERSION) warn.push(`다른 엔진 버전(${d.engine})에서 저장 – 이어서 진행은 되지만 결과가 그 버전과 다를 수 있어요`);
+  if (!d.engine) warn.push("저장에 계산 모델 정보가 없어요 (이전 버전 저장) – 이어서 진행은 되지만 저장 당시와 결과가 다를 수 있어요");
+  else if (d.engine !== E.ENGINE_VERSION) warn.push(`계산 모델이 바뀌었어요 (저장 ${d.engine} → 지금 ${E.ENGINE_VERSION}) – 이어서 진행은 되지만 결과가 저장 당시 모델과 다를 수 있어요`);
+  if (d.engine && E.PARAMS_VERSION && d.params !== E.PARAMS_VERSION) warn.push(d.params ? `밸런스 파라미터가 바뀌었어요 (저장 ${d.params} → 지금 ${E.PARAMS_VERSION})` : "저장에 밸런스 파라미터 정보가 없어요 (이전 버전 저장)");
   return { ok: true, warn };
 }
