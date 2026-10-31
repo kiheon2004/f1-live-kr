@@ -101,7 +101,7 @@ the walkway between the pit lane and the track, with the wall and fence on the t
 | `upperCheck`: stands on the room's floor, inside the glass, under the ceiling, rays floor / ceiling / glass / slab | – (no room) | 10/10 ok; floor rays 0.288–0.292 (want 0.29), glass 1.15–1.18 m ahead of a seat, slab 3.00 m over the lane at 1 m (G 4.0) | 10/10 ok, same figures |
 | `pitWallOrder` | 10 ok (standY 3.4: it never measured "floating") | 10 ok, standY 4.3 | 10 ok |
 | `standCheck` | ok | ok (no railing opened, no overlaps) | ok |
-| `garageCheck` (garage kit, cars in their bays) | 22/22 cars fit, headroom 2.81 m (2026) | all fit | 22/22, 0 hits, headroom 2.01 m (lower storey: openings 3.45 m, the kit's boom 2.45 m at its lowest) |
+| `garageCheck` (garage kit, cars in their bays) | 22/22 cars fit, headroom 2.81 m (2026) | the cars shown fit, 0 hits (output cut after 3 cars – not a full count) | 22/22, 0 hits, headroom 2.01 m (lower storey: openings 3.45 m, the kit's boom 2.45 m at its lowest) |
 
 The first app run of v0.53 placed the stand along the building's axis. `upperCheck` found the stands up to 0.45 m
 through the glass at one end and 0.5 m short of it at the other, because the garages' front bends between garages,
