@@ -290,6 +290,32 @@ SC/VSC는 속도 비율이 아니라: VSC는 차량별 델타 시간(최소 구�
 - `analysis(race)`: 계획 변경 이력(누가·언제), 실제 스틴트, 명령, AI 판단, 피트 손실 구성, 랩별 교통 손실, 깃발 변화 –
   반사실("다른 전략이면") 계산 없음.
 
+### 10.4 타이어 재고·결정성·우천 AI·모델 식별 (v0.52)
+- 엔진 `0.52.0-engine.1`, 매개변수 `PARAMS_VERSION` = 라벨 `0.52.0-params.1` + 모든 params·rules 표의 FNV 지문
+  (`data/params/version.js`). 저장·결과에 엔진·매개변수(결과에는 시나리오 지문도)를 남긴다. 복원한 경기는 `loadInfo`로
+  어떤 모델이 저장했는지 알고, `state.models`에 거쳐 온 모델을 쌓는다(v0.52 이전 저장은 "unknown" – 추측하지 않음).
+  불러오기 검사는 모델·매개변수 차이·식별 없음을 경고만 하고, 형식(state version)이 다를 때만 거절한다.
+- 재고(inventory.js): `canFit(car, name, setId)` – 그 차의 세트만, 컴파운드 일치, free 또는 그 요청의 예약.
+  `fit()`은 원자적(`{ok, tyre, set}`)이고 타이어를 새로 만들지 않는다. 적색기 무료 교체도 같은 검사를 거친다(검증
+  때 + 적용 때. 적용 실패는 아무것도 바꾸지 않고, 성공해야 `red.changed`에 기록). 불변식 `checkSets`: 장착 세트
+  하나, 타이어가 그 세트를 가리키고, 컴파운드가 같다. 랩 기록마다 장착 세트(`set`)를 남기고, 스틴트는 `stintsOf(laps)`
+  하나로 센다(세트가 바뀌는 곳 = 새 스틴트. 세트가 없는 옛 기록은 컴파운드 변화로 세고, 기준선이 박스 뒤 피트레인에
+  있는 서킷 – 모나코 – 에서 1랩짜리 스틴트를 만들지 않음).
+- 결정성: AI가 쓰는 노면 물(`ai.wetLine`)은 매 스텝 저장된 노면에서 계산한다(1초 캐시 제거). 팀 모델은 필요할 때
+  `teamModel()`로, 팀 키 정렬 순으로 만든다. 저장·복원을 어느 스텝에서 해도 이어 달린 경기와 저장 상태 전체가 같다
+  (`test/game/det52.test.js`: 젖음 학습 경계 위·아래·정확히, 1초 경계 앞뒤, 영국 2025 비 경기 137 s마다 복원).
+- 우천 AI(ai.js, strategy.js): 드라이·인터·웨트 세 계열의 모든 전환과 같은 컴파운드 새 세트가 후보다
+  (`switchGains` → `{gain, firstLap}`). 방향마다 근거가 따로다(→인터 / →웨트: 물 ≥ AI.wetDeep 1.2 mm 또는 물이 늘며
+  ≥ wetNow 또는 비 > AI.heavyRain 5 mm/h / 웨트→인터 / →드라이). 계열 최소 랩(familyMinLaps)은 심각할 때(랩 손실 ≥
+  AI.severeLap 3 s 또는 마모가 절벽 너머)만 무시한다. 새 세트는 minStint 전 교체 금지. 새 계획·현재 계획·이동된 계획
+  모두 `planAdmissible()` 하나로 거른다(SC 중 두 번째 정차, 새 세트 최소 스틴트, 재고). 비 임박은 금지 대신 값으로 매긴다
+  (`rainStopRisk` = 3랩 안 슬릭 정차 × 확률 × 손실, 확률 ≥ AI.rainHold일 때). AI는 자기가 낸 피트 요청만 취소한다.
+- 비 이벤트: `rainStart`(≥ 0.2 mm/h) / `rainEnd`(0.05 mm/h 미만 2분)를 로그에 남긴다(상태 `state.wx`, 저장됨).
+  랩 기록에 노면 물(`w`, 주행선 평균 mm)·강우(`rain`, mm/h), `analysis` 랩에 `water`/`rain`.
+- 감사 도구: 출차마다 `p.relLog {t, threat, draw, unsafe, holdMs, inLane, wet}`. `tools/balance.mjs`(준비된 시나리오만
+  읽음, 경기마다 커밋·엔진·매개변수·시나리오 지문·시드·날씨 모드, 실패도 기록, 4랩 안 재정차 분류, 부적합 타이어 랩,
+  계획 번복, 거절된 AI 명령) + `tools/balance-summary.mjs`.
+
 ## 11. 피트 (pit.js)
 
 단계: `call`(명령 접수) → `committed`(진입 결정 지점 `sIn − D_commit` 통과: 이후 취소 불가) → `entry`(감속, 분기)
