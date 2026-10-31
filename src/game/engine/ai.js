@@ -78,8 +78,11 @@ export function aiStep(race) {
   const t = S.t, flag = S.control?.flag || "green";
   // (a wet track slows every lap: such laps say nothing about tyre degradation – they're left out of the learning like
   // laps under a flag; v0.51: slicks in a shower read as "falloff" and the AI changed 2-lap-old sets, British 2025 seed 4)
-  const hl = race.cache.surface?.hLine; let wl = 0; if (hl) { if (t % 1000 === 0 || race.cache.aiWet == null) { for (const x of hl) wl += x; race.cache.aiWet = wl / hl.length > AI.wetLearn; } }
-  const wetNow = !!race.cache.aiWet;
+  // "wet" = the mean water film on the racing line over the lap's surface segments (weather.js hLine, mm) above
+  // AI.wetLearn at THIS step; a lap is left out of the learning when any of its steps was wet (o.dirty / cs.dirty). Computed
+  // from saved state every step – v0.52 §4: it was a cache refreshed once a second and not saved, so a race restored
+  // between a crossing and the next refresh learnt differently from the one that ran on
+  const wetNow = wetLine(race) > AI.wetLearn;
   // public observations every step: cars entering / leaving the pit lane (lane times are public), the flag
   for (const c of S.cars) {
     const o = A.seen[c.num], inPit = c.where === "pit";
@@ -126,6 +129,8 @@ export function aiStep(race) {
   }
 }
 
+// mean water film on the line (mm) – from the saved surface state (deterministic across save / load)
+export function wetLine(race) { const hl = race.cache.surface?.hLine; if (!hl?.length) return 0; let w = 0; for (const x of hl) w += x; return w / hl.length; }
 const forecastOf = (race) => (race.cache.forecastFn ? race.cache.forecastFn(race) : publicView(race, null).forecast);
 
 function queue(race, team, ev) {
@@ -138,7 +143,9 @@ function rivalStop(race, c) {
   const S = race.state, A = S.ai, T = race.cache.T, lapS = 90, vRef = T.L / lapS;
   for (const team in A.teams) {
     if (team === c.teamKey) continue;
-    const M = race.cache.aiModels?.[team]; const win = (M ? pitLoss(M, A.teams[team].est) : 20) + AI.rivalWin;
+    // (teamModel: built on demand – v0.52 §4: reading the cache only, a team whose model wasn't built yet used 20 s, and a
+    // restored race builds its models in a different order than the race that ran on)
+    const M = teamModel(race, team); const win = pitLoss(M, A.teams[team].est) + AI.rivalWin;
     if (S.cars.some((o) => o.teamKey === team && o.status === "run" && Math.abs(o.dist - c.dist) / vRef < win)) queue(race, team, { kind: "rivalStop:" + c.num });
   }
 }

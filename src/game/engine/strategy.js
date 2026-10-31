@@ -426,7 +426,9 @@ export function publicView(race, team, { forecast = null } = {}) {
 function estLapS(race) {
   const xs = []; for (const c of race.state.cars) for (const l of cleanLaps(c.laps).slice(-3)) xs.push(l.t);
   if (xs.length >= 5) return median(xs);
-  const M = race.cache.aiModels && Object.values(race.cache.aiModels)[0]; return M ? ltOfMu(M, 0.95 * M.muTrack * M.pace) : 90;
+  // (the first team by key – not whichever model happened to be built first: that order differs after a restore, v0.52 §4)
+  const team = [...new Set(race.state.cars.map((c) => c.teamKey))].sort()[0]; if (!team) return 90;
+  const M = teamModel(race, team); return ltOfMu(M, 0.95 * M.muTrack * M.pace);
 }
 
 // ---------- traffic: lap-level forecast of the field ----------
