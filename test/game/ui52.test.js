@@ -138,7 +138,9 @@ test("alerts: a car of mine on a tyre that doesn't suit the water, or nearly wor
   const A = await import("../../src/renderer/game/alerts.js");
   const set = A.defaultAlertSettings(), mk = (compound, life, age, water) => ({ totalLaps: 52, weather: { water }, cars: [{ num: "16", status: "run", lap: 30, tyre: { compound, life, age }, plan: null }] });
   const one = (snap, t) => A.checkAlerts(A.newAlertState(), { snap, mine: ["16"], settings: set, t }).filter((x) => x.rule === "tyre").map((x) => x.text);
-  assert.match(one(mk("WET", 0.6, 8, 0.0), 1)[0] || "", /마른 노면에 우천 타이어/);
+  assert.match(one(mk("WET", 0.6, 8, 0.2), 1)[0] || "", /물이 적은 노면\(0.20 mm\)에 웨트/);
+  assert.match(one(mk("INTERMEDIATE", 0.6, 8, 0.0), 1)[0] || "", /마른 노면에 인터미디어트/);
+  assert.deepStrictEqual(one(mk("INTERMEDIATE", 0.6, 8, 0.2), 1), [], "inter on a damp line: fine");
   assert.match(one(mk("MEDIUM", 0.6, 8, 0.9), 1)[0] || "", /젖은 노면/);
   assert.match(one(mk("MEDIUM", 0.1, 30, 0.0), 1)[0] || "", /수명 10%/);
   assert.deepStrictEqual(one(mk("MEDIUM", 0.6, 8, 0.0), 1), []);
