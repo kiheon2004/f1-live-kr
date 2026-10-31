@@ -8,6 +8,7 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
+import { pitLaneTest } from "./lanemember.js";
 import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
@@ -370,11 +371,12 @@ function pitLaneMeshes(m) {
 // Every car in the pit lane this frame (pitstate.js): its state from the data up to now – raw positions only (the
 // InPit flag, its place on the measured pit path, its telemetry), never what is drawn – and where across the lane that
 // puts it. Two passes: a car standing behind its box sees a teammate in it. → Map num → { state, u, off, at, team, … }
-let laneTestFor = null;
 function pitFrame(src, t, lag, isRace) {
   const G = pitTeams.G; if (!G || !world?.pitLane) return null;
   const m = pitModelFor(G), S = startState(src, t), ctx = startCtxAt(S, t);
-  if (laneTestFor?.lane !== world.pitLane) laneTestFor = { lane: world.pitLane, test: laneCells(world.pitLane.pts.map((p) => [p.x, p.z])) };
+  // (v0.53: on the measured pit path AND off the track's tarmac – lanemember.js; v0.52 took every car passing the pit exit
+  // at 300 km/h for a car in the lane and drew it at its raw position for a frame, ~18 m off)
+  const laneTest = pitLaneTest(world);
   const visits = (num) => pitVisits(S.hist.flags.get(num + ":InPit"), t), timePen = pendingTimePenalties(S.hist.rcm, t, visits);
   const pen = pendingPenalties(S.hist.rcm, t, visits), drivers = src.state.DriverList || {}, c0 = world.center;
   const raw = src.positionsAt(t), out = new Map();
@@ -383,7 +385,7 @@ function pitFrame(src, t, lag, isRace) {
   boxes.forEach(([tm, u], i) => tolOf.set(tm, Math.min(i > 0 ? u - boxes[i - 1][1] : Infinity, i + 1 < boxes.length ? boxes[i + 1][1] - u : Infinity) / 2));
   for (const [num, p] of Object.entries(raw)) {
     let x = p[0] * DM - c0.x, z = -(p[1] * DM - c0.z);
-    const onLane = laneTestFor.test(x, z), inPit = S.hist.flagAt(num, "InPit", t);
+    const onLane = laneTest(x, z, (p[2] || 0) * DM - c0.y), inPit = S.hist.flagAt(num, "InPit", t);
     if (!onLane && !inPit) continue;
     // (in the pit lane the feed has every car on the measured path's line: a position more than 3 m off it is the data
     // jumping – Barcelona 2025, Norris, one sample 13 m out towards the track – and taken back onto the line, its place
@@ -1377,6 +1379,7 @@ function trackPointFor(c, x, z) {
   return c.sample ? c.sample.p.y : null;
 }
 
+const HAND_MAX = 8;   // m (v0.53: an estimate → feed handover eased only up to this far)
 const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 // x → target as a critically damped spring of rate w (1/s), the value and its rate kept on the object
 function spring(o, key, rateKey, target, w, dt) {
@@ -1673,8 +1676,7 @@ function updateCars(dt) {
   const appLines = src.state.TimingAppData?.Lines || {}, isRace = /Race|Sprint/.test(src.state.SessionInfo?.Type || src.state.SessionInfo?.Name || "") && !/Qualifying|Shootout/.test(src.state.SessionInfo?.Name || "");
   const seen = new Set();
   const focusNum = camNum();
-  const k = 1 - Math.exp(-dt * 25), kSlow = 1 - Math.exp(-dt * 5);   // the heading is smooth already: only a touch of damping
-  const F = sm?.frame, kBody = 1 - Math.exp(-dt * 12);
+  const F = sm?.frame;   // (v0.53: the cars' easings by the session's time – sdt per car below)
   if (F) traffic(sm, F, A.t, dt, pos);
   gridCost.frames++; { const f = gridCost.ms - gridCost.last; if (f > gridCost.worst) gridCost.worst = f; gridCost.last = gridCost.ms; }
   // (live: the grid is looked for again every 5 s until the field has been seen standing on it)
@@ -1701,7 +1703,12 @@ function updateCars(dt) {
     const c = carFor(num, d);
     // (v0.45: a seek or a rewind – the moment shown jumping, as the steering's rule below – takes the heading as it is
     // then; eased from the heading before the seek it was up to 0.7 rad off on the first frames – Map3D.seekCheck)
-    const jumpT = timeJump(c.yawT, A.t); c.yawT = A.t;
+    const jumpT = timeJump(c.yawT, A.t);
+    // (v0.53 §6-4: the motion's rates and easings go by the SESSION's time between frames – sdt, s –, not the wall clock's:
+    // at 30× the heading's change over a frame divided by the wall's 1/60 s read 30× the real turning rate, and the body
+    // leaned, slipped and dipped to its limits on every bend; paused (sdt 0) the pose holds)
+    const sdt = c.yawT != null && !jumpT ? Math.max(0, (A.t - c.yawT) / 1000) : 0; c.yawT = A.t;
+    const kB = 1 - Math.exp(-sdt * 12), kS = 1 - Math.exp(-sdt * 5);
     const st = est ? (est.pit ? null : Object.assign(c.st || (c.st = {}), { s: est.s, d: est.d, vs: est.vs, vd: est.vd || 0, as: est.as || 0, run: -1 })) : F ? sm.state(num, A.t, c.st || (c.st = {})) : null;
     c.est = est || null;
     const v = vTmp;
@@ -1721,33 +1728,37 @@ function updateCars(dt) {
       c.sample = F.sampleAt(sD);
       // heading: the direction of the path over a few metres either side (3–10 m, with the speed): the lap line has
       // fine wiggles from the reference line it's made of, which its tangent shows and a chord averages out
+      // (v0.53: facing back along the lap only when the car really reverses – slowly, its telemetry under 20 km/h; the
+      // steadied s can run backwards for a moment where its correction pulls it back (a stale or frozen stretch of data,
+      // a car crawling on the grid), and v0.52 turned the car round with it: 2025 Hungary, 180° flips at 30–146 km/h)
       let pathYaw;
+      const tel = src.carAt?.(num, A.t), back = st.vs < -1.5 && (!tel || tel.speed < 20), vAl = back ? st.vs : Math.abs(st.vs);
       if (Math.abs(st.vs) > 1.5) {
         const ds = Math.max(3, Math.min(10, Math.abs(st.vs) * 0.1)), h = ds / Math.abs(st.vs);
-        F.at(sD - st.vs * h, dTot - dRate * h, PA); F.at(sD + st.vs * h, dTot + dRate * h, PB);
+        F.at(sD - vAl * h, dTot - dRate * h, PA); F.at(sD + vAl * h, dTot + dRate * h, PB);
         pathYaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
       } else pathYaw = Math.atan2(DIR[0], DIR[1]);
       if (devMotion) c.dbg = [Math.atan2(DIR[0], DIR[1]), Math.atan2(dRate, st.vs || 1), st.s, dTot, st.vs, st.d, off, P0[0], P0[2]];
-      let yawRate = c.has && dt > 0 && c.pathYaw != null ? wrap(pathYaw - c.pathYaw) / dt : 0;
+      let yawRate = c.has && sdt > 0 && c.pathYaw != null ? wrap(pathYaw - c.pathYaw) / sdt : sdt === 0 && c.has && !jumpT ? c.yawRateF ?? 0 : 0;
       if (jumpT || Math.abs(yawRate) > 3) yawRate = 0;   // (a seek)
       // (the turning rate is a difference of headings: it carries a fine ripple where the curve's pieces meet,
       // so it's low-passed before the slip, lean and steering are made from it)
-      c.yawRateF = c.has && c.yawRateF != null && !jumpT ? c.yawRateF + (yawRate - c.yawRateF) * (1 - Math.exp(-dt * 8)) : yawRate;
+      c.yawRateF = c.has && c.yawRateF != null && !jumpT ? c.yawRateF + (yawRate - c.yawRateF) * (1 - Math.exp(-sdt * 8)) : yawRate;
       yawRate = c.yawRateF;
       const aLat = speed * yawRate, aLong = st.as;
       // slip: ~1.5° at 5 g; a little more (oversteer) when it's on the power out of a slow corner
       const exitSlide = aLong > 4 && speed < 45 && Math.abs(aLat) > 8 ? Math.min(1, (aLong - 4) / 6) * Math.min(1, (Math.abs(aLat) - 8) / 10) * 0.035 * Math.sign(aLat) : 0;
       const beta = Math.max(-0.035, Math.min(0.035, aLat * 0.0006)) + exitSlide;
       const yaw = pathYaw + beta, dy = wrap(yaw - c.yaw);
-      if (!c.has || jumpT || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * (1 - Math.exp(-dt * 30));
+      if (!c.has || jumpT || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * (1 - Math.exp(-sdt * 30));
       c.pathYaw = pathYaw; c.yawRate = yawRate; c.slide = exitSlide;
       // the road's slope over ±4 m
       F.at(sD + 4, 0, PA); F.at(sD - 4, 0, PB);
-      const fwd = st.vs >= 0 ? 1 : -1, slope = -Math.atan2((PA[1] - PB[1]) * fwd, 8);
+      const fwd = back ? -1 : 1, slope = -Math.atan2((PA[1] - PB[1]) * fwd, 8);
       const pitchT = slope + Math.max(-0.006, Math.min(0.02, -aLong * 0.00032));     // −5 g: nose down ~0.9°
       const rollT = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));               // 5 g: ~0.55° out of the corner
       if (!c.has) { c.pitch = pitchT; c.roll = rollT; }
-      c.pitch += (pitchT - c.pitch) * kBody; c.roll += (rollT - c.roll) * kBody;
+      c.pitch += (pitchT - c.pitch) * kB; c.roll += (rollT - c.roll) * kB;
       c.speed = speed; c.acc = aLong;
       // on the tarmac (drawn 6 cm over the lap line), the tyres squashed a centimetre; the body drops with the downforce
       v.y += ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (speed / 90) ** 2);
@@ -1779,21 +1790,21 @@ function updateCars(dt) {
         else if (!c.has && c.sample) yaw = Math.atan2(c.sample.tan.x, c.sample.tan.z);
       }
       const dy = wrap(yaw - c.yaw);
-      if (!c.has || jumpT || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * k;   // a big swing is a jump (seek): snap
-      const yawRate = c.has && dt > 0 ? wrap(c.yaw - (c.prevYaw ?? c.yaw)) / dt : 0;
+      if (!c.has || jumpT || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * (1 - Math.exp(-sdt * 25));   // a big swing is a jump (seek): snap
+      const yawRate = c.has && sdt > 0 ? wrap(c.yaw - (c.prevYaw ?? c.yaw)) / sdt : sdt === 0 && c.has && !jumpT ? c.yawRate || 0 : 0;
       c.pathYaw = c.yaw; c.yawRate = yawRate; c.slide = 0;
       const prevSpeed = c.speed;
-      c.speed = c.has && !jumpT ? c.speed + (speed - c.speed) * Math.min(1, dt * 8) : speed;   // (v0.45: a seek – no easing from before it)
-      const acc = dt > 0 && c.has && !jumpT ? (c.speed - prevSpeed) / dt : 0;
-      c.acc = (c.acc || 0) + (Math.max(-60, Math.min(25, acc)) - (c.acc || 0)) * Math.min(1, dt * 6);
+      c.speed = c.has && !jumpT ? c.speed + (speed - c.speed) * Math.min(1, sdt * 8) : speed;   // (v0.45: a seek – no easing from before it)
+      const acc = sdt > 0 && c.has && !jumpT ? (c.speed - prevSpeed) / sdt : c.acc || 0;
+      c.acc = (c.acc || 0) + (Math.max(-60, Math.min(25, acc)) - (c.acc || 0)) * Math.min(1, sdt * 6);
       let slope = 0;
       if (c.sample) {
         const ahead = world.samples[(c.sample.i + 3) % world.n].p, behind = world.samples[(c.sample.i - 3 + world.n) % world.n].p;
         const fwd = Math.cos(c.yaw - Math.atan2(c.sample.tan.x, c.sample.tan.z)) >= 0 ? 1 : -1;
         slope = -Math.atan2((ahead.y - behind.y) * fwd, 12);
       }
-      c.pitch += (slope + Math.max(-0.006, Math.min(0.02, -c.acc * 0.00032)) - c.pitch) * kSlow;
-      c.roll += (Math.max(-0.012, Math.min(0.012, -yawRate * c.speed * 0.0002)) - c.roll) * kSlow;
+      c.pitch += (slope + Math.max(-0.006, Math.min(0.02, -c.acc * 0.00032)) - c.pitch) * kS;
+      c.roll += (Math.max(-0.012, Math.min(0.012, -yawRate * c.speed * 0.0002)) - c.roll) * kS;
     }
     c.prevYaw = c.yaw; c.onTrack = !!st;
     const yawRate = c.yawRate;
@@ -1823,7 +1834,10 @@ function updateCars(dt) {
     // From a placement without position data to the feed's own: the difference at that moment let go over 1.5 s of the
     // session's time (so the car doesn't jump when its positions start; a seek starts over)
     if (est) { c.estAt = A.t; (c.estPos || (c.estPos = new THREE.Vector3())).copy(v); }
-    else if (c.estAt != null) { if (A.t >= c.estAt && A.t - c.estAt < 1000) c.hand = { t: A.t, dx: c.estPos.x - v.x, dz: c.estPos.z - v.z }; c.estAt = null; }
+    // (v0.53: only a difference a car could close in that time – up to HAND_MAX m; further, the placement was wrong and the
+    // car is shown where its data has it at once: 2025 Hungary, cars leaving the pit lane for the grid glided 80–90 m in
+    // 1.5 s at walking pace from where the estimate had them)
+    else if (c.estAt != null) { if (A.t >= c.estAt && A.t - c.estAt < 1000 && Math.hypot(c.estPos.x - v.x, c.estPos.z - v.z) <= HAND_MAX) c.hand = { t: A.t, dx: c.estPos.x - v.x, dz: c.estPos.z - v.z }; c.estAt = null; }
     if (c.hand) {
       const w = A.t < c.hand.t || A.t - c.hand.t > 1500 ? 0 : 1 - smoothstep(0, 1500, A.t - c.hand.t);
       if (w <= 0) c.hand = null; else { v.x += c.hand.dx * w; v.z += c.hand.dz * w; }
@@ -2436,6 +2450,9 @@ function separate(dt, seen, snap = false) {
     // the lane: Monaco 2025's cars in their boxes 0.93 m under the lane's floor, Gasly's retired car 1.19 m over it)
     if (!c.onTrack && !(c.pit?.at && c.pit.inRun > 0)) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + ROAD_LIFT - 0.02; }
     c.obj.position.copy(c.pos);
+    // (v0.53: the car the cockpit cameras ride keeps its steadied height – updateCars' c.stab; v0.52 set it back to the
+    // unsteadied one here, every frame, so the steadying of the height never reached the picture)
+    if (c.stab) { if (!c.onTrack && !(c.pit?.at && c.pit.inRun > 0)) { c.stab.y = c.pos.y; } c.obj.position.y = c.stab.y; }
   }
 }
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -4230,6 +4247,42 @@ window.Map3D = {
       cam: { heightCm: hf(rec.cy, 100), sideCm: rms(side, 100), yawDeg: hf(un(rec.yaw), D), pitchDeg: hf(rec.pitch, D), rollDeg: hf(rec.roll, D) },
       parts: rec.dbg ? { lineDirDeg: hf(un(rec.dbg.map((r) => r[0])), D), sideTermDeg: hf(rec.dbg.map((r) => r[1]), D), sCm: hf(rec.dbg.map((r) => r[2]), 100), dCm: hf(rec.dbg.map((r) => r[3]), 100), vs: hf(rec.dbg.map((r) => r[4]), 1), dDataCm: hf(rec.dbg.map((r) => r[5]), 100), offCm: hf(rec.dbg.map((r) => r[6]), 100), ...(() => { const sd = (ix, iz) => { const rx = resid(rec.dbg.map((r) => r[ix])), rz = resid(rec.dbg.map((r) => r[iz])); return rms(rx.map((x, i) => x * Math.cos(rec.byaw[i]) - rz[i] * Math.sin(rec.byaw[i])), 100); }; return { p0SideCm: sd(7, 8), posSideCm: sd(9, 10), sepCm: hf(rec.dbg.map((r) => Math.hypot(r[11], r[12])), 100), kerbShare: +(rec.dbg.filter((r) => r[13]).length / rec.dbg.length).toFixed(2), onTrack: +(rec.dbg.filter((r) => r[14]).length / rec.dbg.length).toFixed(2) }; })() } : null,
       body: { heightCm: hf(rec.by, 100), yawDeg: hf(un(rec.byaw), D), pitchDeg: hf(rec.bpitch, D), rollDeg: hf(rec.broll, D) } });
+  },
+  // development (v0.53): kinks in the path the cars are drawn on – the racing line (lap line + its offset) walked every
+  // `step` m: the heading's change per metre (curvature) and how fast that changes; the worst places
+  lineKinks(step = 0.5, d = null) {
+    if (!world) return "no world";
+    const F = world.frame, A0 = [0, 0, 0], A1 = [0, 0, 0], out = [];
+    let prevH = null, prevK = null;
+    for (let s = 0; s < F.L; s += step) {
+      const dd = d ?? F.lineAt(s); F.at(s, dd, A0); F.at(s + step, d ?? F.lineAt(s + step), A1);
+      const h = Math.atan2(A1[0] - A0[0], A1[2] - A0[2]);
+      if (prevH != null) { const k = wrap(h - prevH) / step; if (prevK != null) out.push({ s: +s.toFixed(1), k: +k.toFixed(4), dk: +((k - prevK) / step).toFixed(4) }); prevK = k; }
+      prevH = h;
+    }
+    const ks = out.map((o) => Math.abs(o.k)).sort((a, b) => a - b), dks = out.map((o) => Math.abs(o.dk)).sort((a, b) => a - b);
+    return JSON.stringify({ L: +F.L.toFixed(1), kP99: ks[Math.floor(ks.length * 0.99)], kMax: ks[ks.length - 1], dkP99: dks[Math.floor(dks.length * 0.99)], dkMax: dks[dks.length - 1], worst: out.sort((a, b) => Math.abs(b.dk) - Math.abs(a.dk)).slice(0, 15) });
+  },
+  // development (v0.53): why a car's samples are or aren't on the steadied tracks – per sample its offset from the lap line
+  // and its height against the line's (smooth.js smoothCar's tests), as histograms
+  trackFit(num, w0 = null, w1 = null) {
+    const src = app().src, c = src?.tracks?.cars?.[num]; if (!c || !world) return "no car";
+    if (w0 != null) { const st0 = src.startTime?.() || 0, F = world.frame, c0 = world.center, lane = pitLaneTest(world), rows = []; let hint = null;
+      for (let k = 0; k < c.n; k++) { const x = c.x[k] * DM - c0.x, z = -(c.y[k] * DM - c0.z), y = (c.z[k] || 0) * DM - c0.y, pr = F.project(x, z, hint); if (pr) hint = pr.i; const tt = (c.t[k] - st0) / 1000; if (tt < w0 || tt > w1 || !pr) continue;
+        rows.push([+tt.toFixed(2), Math.round(((pr.s % F.L) + F.L) % F.L), +pr.d.toFixed(1), +(y - pr.sample.p.y).toFixed(1), lane(x, z, y) ? 1 : 0, Math.round(src.carAt?.(num, c.t[k])?.speed ?? -1)]); }
+      return JSON.stringify(rows); }
+    const F = world.frame, c0 = world.center, lane = pitLaneTest(world), H = { d: {}, dy: {} }; let hint = null, near = 0, level = 0, inLane = 0;
+    const bin = (o, v, w) => { const k = Math.sign(v) * Math.floor(Math.abs(v) / w) * w; o[k] = (o[k] || 0) + 1; };
+    for (let k = 0; k < c.n; k++) {
+      const x = c.x[k] * DM - c0.x, z = -(c.y[k] * DM - c0.z), y = (c.z[k] || 0) * DM - c0.y, pr = F.project(x, z, hint); if (!pr) continue; hint = pr.i;
+      const half = Math.max(pr.sample.L ?? 7, -(pr.sample.R ?? -7)); bin(H.d, Math.abs(pr.d) - half, 2); bin(H.dy, y - pr.sample.p.y, 1);
+      if (Math.abs(pr.d) <= half + 6) near++; if (Math.abs(y - pr.sample.p.y) < 4) level++; if (lane(x, z, y)) inLane++;
+    }
+    const LB = {}; { let hint2 = null; for (let k = 0; k < c.n; k++) { const x = c.x[k] * DM - c0.x, z = -(c.y[k] * DM - c0.z), y = (c.z[k] || 0) * DM - c0.y; const pr = F.project(x, z, hint2); if (pr) hint2 = pr.i; if (pr && lane(x, z, y)) { const key = Math.round(((pr.s % F.L) + F.L) % F.L / 50) * 50 + "|" + Math.round(pr.d); LB[key] = (LB[key] || 0) + 1; } } }
+    const o = smooth.tr?.coords?.(num), runs = new Set(); let off = 0; if (o) for (let i = 0; i < o.t.length; i++) { if (o.run[i]) runs.add(o.run[i]); else off++; }
+    const spans = []; if (o) { const st0 = src.startTime?.() || 0; let a = null; for (let i = 0; i <= o.t.length; i++) { const r = i < o.t.length ? o.run[i] : -1; if (a != null && r !== o.run[a]) { if (o.run[a]) spans.push([Math.round((o.t[a] - st0) / 1000), Math.round((o.t[i - 1] - st0) / 1000)]); a = null; } if (a == null && i < o.t.length) a = i; } }
+    const gaps = {}; for (let k = 1; k < c.n; k++) bin(gaps, (c.t[k] - c.t[k - 1]) / 1000, 1);
+    return JSON.stringify({ spans, laneAt: Object.entries(LB).sort((a, b) => b[1] - a[1]).slice(0, 25), n: c.n, near, level, inLane, out: o ? o.t.length : null, offOut: off, runs: runs.size, gaps, d: H.d, dy: H.dy });
   },
   // development (v0.53 §4–5): every car's FINAL drawn pose (after separate()) driven through updateCars over [t0, t1]
   // (stream ms) at `fps`, and what in it no car can do: a step faster than its own telemetry speed allows (a jump), a

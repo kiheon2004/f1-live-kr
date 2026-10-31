@@ -12,10 +12,13 @@
 // a second, so the newest moments are smoothed one-sidedly.
 // The result has the same interface as ReplayKit's CarTracks: all(t, into, vels) in F1 decimetres.
 
-import { laneCells } from "./pitlane.js";
+import { pitLaneTest, offLevel } from "./lanemember.js";
 
 const DM = 0.1;
 const STEP_OUT = 125;          // ms between output samples
+const BRIDGE_MS = 15000, BRIDGE_TOL = 1.2;   // (v0.53: a gap the speed telemetry bridges – smoothCar)
+const JOIN_MS = 1000;          // ms over which a stretch's ends are eased onto the raw positions next to it (v0.53)
+const easeRate = (x) => (x <= 0 || x >= 1 ? 0 : 6 * x * (1 - x));   // d/dx of smoothstep
 
 // Gaussian smoothing of values v at (uneven) times t, sigma in ms, in place into `out`.
 function gauss(t, v, sigma, out = new Float64Array(v.length), weight = null) {
@@ -194,14 +197,6 @@ function telemetryLag(src) {
 // within a stretch), d (m across), the stretch's id (run; 0 = off the track: pit lane, run-off, under a bridge).
 // `snapped`: the positions are matched to one line (every car on it), so across the track the car is put on the
 // racing line instead, eased in and out over 1.5 s at the ends of a stretch (the pit entry and exit).
-// (the measured pit lane's path as cells – pitlane.js laneCells –, made once per world)
-const laneCellsFor = new WeakMap();
-function laneTest(world) {
-  const lane = world.pitLane; if (!lane) return () => false;
-  let f = laneCellsFor.get(lane);
-  if (!f) { f = laneCells(lane.pts.map((p) => [p.x, p.z])); laneCellsFor.set(lane, f); }
-  return f;
-}
 function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
   const n = c.n, c0 = world.center, T = c.t;
   const half = (s) => Math.max(s.L ?? 7, -(s.R ?? -7));
@@ -211,13 +206,13 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
   // (on the measured pit lane's path – startplan.js onPitPath –: in the pit lane, however close the track runs by it –
   // a car in the lane isn't pulled onto the racing line (Barcelona: the lane within the track's edge + 6 m, a car
   // leaving its box was drawn 10 m over towards the track). Tested only off the tarmac, where a pit lane can be.)
-  const inLane = laneTest(world);
+  const inLane = pitLaneTest(world);   // (v0.53: on the measured pit path AND off the track's tarmac – lanemember.js)
   const P = [];
   let hint = null;
   for (let k = from; k < n; k++) {
     const x = c.x[k] * DM - c0.x, z = -(c.y[k] * DM - c0.z), y = (c.z[k] || 0) * DM - c0.y;
     const pr = frame.project(x, z, hint);
-    const near = !!pr && Math.abs(pr.d) <= half(pr.sample) + 6 && !inLane(x, z), level = !!pr && Math.abs(y - pr.sample.p.y) < 4;
+    const near = !!pr && Math.abs(pr.d) <= half(pr.sample) + 6 && !inLane(x, z, y), level = !!pr && !offLevel(world, pr.sample, y);   // (v0.53: only where the lap line crosses itself – lanemember.js crossings)
     if (pr) hint = pr.i;
     P.push({ t: T[k], x: c.x[k], y: c.y[k], z: c.z[k], near, level, on: near && level, s: pr?.s, d: pr?.d });
   }
@@ -230,7 +225,19 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
     if (!P[k].on) { emit(P[k].t, P[k].x, P[k].y, P[k].z); k++; continue; }
     // a run of on-track samples without gaps
     let e = k;
-    while (e + 1 < P.length && P[e + 1].on && P[e + 1].t - P[e].t < 4000) e++;
+    // (v0.53: with the speed telemetry a gap of up to 6 s is bridged – s is the telemetry's distance through it; the 2026
+    // Hungary race's positions come 1–5 s apart once its held samples are dropped – replay.js dropHeld)
+    // A longer gap (up to BRIDGE_MS) only where the two samples agree with the telemetry: the way along the lap between
+    // them is what its speed says was driven (within BRIDGE_TOL, or 30 m) – then the car went along the track in between,
+    // and is drawn there at the telemetry's pace (an estimate: no position says where in the gap it was when). Otherwise
+    // the stretch ends: the raw positions and their gap rule (CarTracks.at) take over.
+    const gapMax = Sv ? 6000 : 4000;
+    const bridges = (a, b) => {
+      if (!Sv || b.t - a.t >= BRIDGE_MS) return false;
+      const along = (((b.s - a.s) % frame.L) + frame.L) % frame.L, drove = Sv(b.t) - Sv(a.t);
+      return drove > 0 && (Math.abs(along - drove) < 30 || (along / drove > 1 / BRIDGE_TOL && along / drove < BRIDGE_TOL));
+    };
+    while (e + 1 < P.length && P[e + 1].on && (P[e + 1].t - P[e].t < gapMax || bridges(P[e], P[e + 1]))) e++;
     const m = e - k + 1;
     if (m < 8) { for (let q = k; q <= e; q++) emit(P[q].t, P[q].x, P[q].y, P[q].z); k = e + 1; continue; }
     run++;
@@ -256,15 +263,29 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
     }
     // dense output every STEP_OUT ms
     const ease = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+    // v0.53: where the stretch meets raw positions (the samples before / after it are drawn as they are: the pit lane, a
+    // trip over the run-off, a gap) its place is eased onto the raw samples' own over its first / last JOIN_MS – so it
+    // begins and ends exactly where the raw positions take over. (The steadied s – the telemetry's distance – and the
+    // positions' own s differ by up to several metres; v0.52 jumped by that at every such handover: 2025 Hungary, a car
+    // rejoining from the pit lane jumped 17–35 m in a frame.) At the session's own ends nothing joins: no easing.
+    const joinA = k > 0, joinB = e + 1 < P.length;
+    const rawSD = (tt, q) => { const f = q + 1 < m ? (tt - t[q]) / (t[q + 1] - t[q] || 1) : 0; return [s[q] + (q + 1 < m ? (s[q + 1] - s[q]) * f : 0), d[q] + (q + 1 < m ? (d[q + 1] - d[q]) * f : 0), q + 1 < m ? ((s[q + 1] - s[q]) / (t[q + 1] - t[q] || 1)) * 1000 : 0]; };
     let q = 0;
     for (let tt = t[0]; tt <= t[m - 1]; tt += STEP_OUT) {
       while (q + 1 < m && t[q + 1] <= tt) q++;
       const f = q + 1 < m ? (tt - t[q]) / (t[q + 1] - t[q] || 1) : 0;
-      const dData = dS[q] + (q + 1 < m ? (dS[q + 1] - dS[q]) * f : 0);
-      const ss = sAt(tt, q), w = snapped ? ease(Math.min(tt - t[0], t[m - 1] - tt) / 1500) : 0;
+      let dData = dS[q] + (q + 1 < m ? (dS[q + 1] - dS[q]) * f : 0);
+      let ss = sAt(tt, q), vs = vAt ? vAt(tt, q) : NaN;
+      const w = snapped ? ease(Math.min(tt - t[0], t[m - 1] - tt) / 1500) : 0;
+      const ja = joinA ? 1 - ease((tt - t[0]) / JOIN_MS) : 0, jb = joinB ? 1 - ease((t[m - 1] - tt) / JOIN_MS) : 0, j = Math.max(ja, jb);
+      if (j > 0) {
+        const [sr, dr, vr] = rawSD(tt, q), dj = ja >= jb ? -easeRate((tt - t[0]) / JOIN_MS) / JOIN_MS : easeRate((t[m - 1] - tt) / JOIN_MS) / JOIN_MS;
+        if (!Number.isNaN(vs)) vs = vs * (1 - j) + vr * j + (sr - ss) * dj * 1000;
+        ss = ss * (1 - j) + sr * j; dData = dData * (1 - j) + dr * j;
+      }
       frame.at(ss, dData * (1 - w) + frame.lineAt(ss) * w, tmp);
       // (d is kept as the data's; the racing line is added back exactly at s when the car is drawn – w)
-      emit(tt, (tmp[0] + c0.x) / DM, (c0.z - tmp[2]) / DM, (tmp[1] + c0.y) / DM, ss, dData, run, vAt ? vAt(tt, q) : NaN, aAt ? aAt(tt) : 0, w);
+      emit(tt, (tmp[0] + c0.x) / DM, (c0.z - tmp[2]) / DM, (tmp[1] + c0.y) / DM, ss, dData, run, vs, aAt ? aAt(tt) : 0, w);
     }
     k = e + 1;
   }
