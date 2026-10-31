@@ -19,11 +19,15 @@ function stubDocument() {
 const pit = { path: [[0, 0], [1000, 0], [2000, 0], [3000, 0]], limitOn: 0, limitOff: 300 };
 const toScene = ([X, Y]) => [X / 10, Y / 10];
 const edge = (x, z) => Math.min(Math.abs(z + 27), Math.abs(z - 9)) - 0.5;
-async function monaco(key = 22) {
+// (bent: the lane curving 6 m off its chord over 300 m and the ground falling 1 in 100 – as the measured lane does a little:
+// the garages' front bends from one garage to the next, the floor slopes under a stand)
+const bentPit = { path: [0, 500, 1000, 1500, 2000, 2500, 3000].map((X) => [X, 60 * Math.sin((Math.PI * X) / 3000)]), limitOn: 0, limitOff: 300 };
+const bentEdge = (x, z) => { const c = 6 * Math.sin((Math.PI * x) / 300); return Math.min(Math.abs(z - c + 27), Math.abs(z - c - 9)) - 0.5; };
+async function monaco(key = 22, bent = false) {
   const F = await import("../src/renderer/facilities.js");
-  const toTrack = () => [0, -1];
-  const spec = F.genericPitSpec({ venue: { key }, location: "Monte Carlo", year: 2025, pit, toScene, toTrack, trackEdge: edge, registry: [] });
-  const r = await F.buildFacilities({ scene: { location: "Monte Carlo", buildings: [] }, gf: { xz: ([x, y]) => [x, -y] }, groundAt: () => 0, trackEdge: edge, location: "Monte Carlo", year: 2025, toTrack, registry: [spec] });
+  const toTrack = () => [0, -1], edge0 = bent ? bentEdge : edge;
+  const spec = F.genericPitSpec({ venue: { key }, location: "Monte Carlo", year: 2025, pit: bent ? bentPit : pit, toScene, toTrack, trackEdge: edge0, registry: [] });
+  const r = await F.buildFacilities({ scene: { location: "Monte Carlo", buildings: [] }, gf: { xz: ([x, y]) => [x, -y] }, groundAt: bent ? (x) => -0.01 * x : () => 0, trackEdge: edge0, location: "Monte Carlo", year: 2025, toTrack, registry: [spec] });
   return { F, spec, group: r.group, G: r.group.children[0].userData.garages };
 }
 const named = (group, name) => { const out = []; group.traverse((o) => { if (o.isMesh && o.name === name) out.push(o); }); return out; };
@@ -58,7 +62,8 @@ test("Monaco: the first-floor room – its slab on the garages' openings, cantil
 
 test("Monaco: each team's stand stands in the room – on its floor, the people on it, inside the glazing, under the ceiling", async () => {
   stubDocument();
-  const { G } = await monaco(), Gar = await import("../src/renderer/garages.js"), { upperStandCheck } = await import("../src/renderer/pitwallcheck.js");
+  for (const bent of [false, true]) {
+  const { G } = await monaco(22, bent), Gar = await import("../src/renderer/garages.js"), { upperStandCheck } = await import("../src/renderer/pitwallcheck.js");
   const names = ["McLaren", "Ferrari", "Red Bull Racing", "Mercedes", "Aston Martin", "Alpine", "Haas F1 Team", "Racing Bulls", "Williams", "Kick Sauber"];
   const colours = ["#ff8000", "#e8002d", "#3671c6", "#27f4d2", "#229971", "#0093cc", "#b6babd", "#6692ff", "#64c4ff", "#52e252"];
   // (boxes along the run, the first and the last at its very ends: a stand is kept inside the room end to end)
@@ -69,9 +74,10 @@ test("Monaco: each team's stand stands in the room – on its floor, the people 
   for (const st of built) {
     assert.ok(st.upper && st.room, `${st.team}: in a room`);
     const r = upperStandCheck(st, G.upperRoom, G.project);
-    assert.ok(r.ok, r.problems.join("; "));
+    assert.ok(r.ok, (bent ? "bent: " : "") + r.problems.join("; "));
     // the people's feet on the room's floor (to the millimetre), facing the lane
-    for (const [x, y, z] of st.people) assert.ok(Math.abs(y - G.upperRoom(G.project(x, z).u).floor) < 1e-3);
+    // (bent: the floor is straight between the building's stations, a stand straight over its length – within 1 cm)
+    for (const [x, y, z] of st.people) { const d = y - G.upperRoom(G.project(x, z).u).floor; assert.ok(Math.abs(d) < (bent ? 0.01 : 1e-3), `${st.team}: a person ${d.toFixed(4)} m off the floor`); }
   }
   // v0.52's stand as it stood (3.4 m over the garages' floor, 0.05–1.65 m out, 0.4 m under the openings' top): found
   { const st = built[3], pr = G.project(st.p[0], st.p[1]), fl = G.upperRoom(pr.u).floor - G.top - 0.3, old = { ...st, y: fl + 3.4, people: st.people.map(([x, , z]) => [x, fl + 3.4, z]), room: { ...st.room, glass: 0.75 }, span: [-0.75, 0.85] };
@@ -79,6 +85,8 @@ test("Monaco: each team's stand stands in the room – on its floor, the people 
   // no railing opened for them (that is the walkway's, at the wall: none here) – and no canopy over a stand in a room
   assert.deepStrictEqual(layer.userData.standSpans, []);
   assert.ok(layer.userData.covers.every((c) => c.kind === "pit wall room"));
+  if (bent) assert.ok(built.some((st) => Math.abs(st.slope) > 0.005), "the floor slopes under them");
+  }
 });
 
 test("Monaco's room is Monaco's: other venues' pit walls keep their stands between the lane and the track", async () => {

@@ -1033,9 +1033,19 @@ function pitBuilding(ctx, p) {
         // 4.8 m) – floating, the user's report. Without a room (no upperRoom), none: there is nothing to stand on.)
         if (!UR) return null;
         // (with its half length: inside the room end to end)
-        const q = gEnd - gStart > 2 * half + 0.2 ? Math.max(gStart + half + 0.1, Math.min(gEnd - half - 0.1, uu)) : (gStart + gEnd) / 2, [x, z] = P(q, frontV(q) + vTrack * (UR.front - 0.05));
-        return { p: [x, floorAt(q) + UR.floor, z], out: [-v[0] * vTrack, -v[1] * vTrack], along: [u[0], u[1]], upper: true,
-          room: { glass: 0.05, back: UR.front + UR.deep, ceil: UR.h, balcony: UR.balcony.depth - UR.front + 0.05, balconyY: UR.top - UR.floor, rail: UR.balcony.rail } };
+        const q = gEnd - gStart > 2 * half + 0.2 ? Math.max(gStart + half + 0.1, Math.min(gEnd - half - 0.1, uu)) : (gStart + gEnd) / 2;
+        // (straight along the glazing's chord over its length, not the building's axis: the garages' front – and the
+        // glazing on it – bends a little from one garage to the next (the measured lane); on the axis a 5.4 m stand stood
+        // up to 0.45 m out through the glass at one end and 0.5 m short of it at the other – Monaco 2025, Map3D.upperCheck.
+        // And sloping with the floor along it – the lane's fall, ±0.035 m over a stand)
+        const gl = (qq) => { const [x, z] = P(qq, frontV(qq) + vTrack * (UR.front - 0.05)); return [x, floorAt(qq) + UR.floor, z]; };
+        const h = Math.max(half, 0.5), A = gl(q - h), B = gl(q + h), len = Math.hypot(B[0] - A[0], B[2] - A[2]) || 1, al = [(B[0] - A[0]) / len, (B[2] - A[2]) / len];
+        let n = [-al[1], al[0]]; if (n[0] * v[0] * vTrack + n[1] * v[1] * vTrack < 0) n = [-n[0], -n[1]];   // (n: towards the lane)
+        const m = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
+        // (where the glass bends in behind the chord, the stand moves in by as much: its lane side never past the glass)
+        let shift = 0; for (let t = -h; t <= h + 1e-6; t += 0.25) { const g = gl(q + t), dv = (g[0] - m[0]) * n[0] + (g[2] - m[2]) * n[1]; shift = Math.max(shift, -dv); }
+        return { p: [m[0] - n[0] * shift, m[1], m[2] - n[1] * shift], out: [-n[0], -n[1]], along: al, slope: (B[1] - A[1]) / len, upper: true,
+          room: { glass: 0.05 + shift, back: UR.front + UR.deep - shift, ceil: UR.h, balcony: UR.balcony.depth - UR.front + 0.05 + shift, balconyY: UR.top - UR.floor, rail: UR.balcony.rail } };
       } : (uu, half = 0) => {
         // (on the walkway, the pit lane's side of the wall – a mapped one too: v0.45 put it on that wall's track side,
         // between it and the tarmac, where 2.4 m were left, else none)

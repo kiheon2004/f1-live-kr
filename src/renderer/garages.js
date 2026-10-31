@@ -630,8 +630,8 @@ export function upperStandLayout(room, L, N) {
     console: { o: 0.3, depth: 0.42, h: 1.04, front: 0.53 },   // (its top 0.04 thick over it: 1.08 m – as the wall's stands)
     screens: { o: 0.2, y: 1.36 }, seats, stool: { o: 1.1, foot: 0.94 },
     label: { o: -(room.balcony + 0.03), y: room.balconyY + 0.55, h: 0.6 },
-    // (what it takes up: from the glass to behind the stools, and its top – the screens')
-    span: [-room.glass, 1.1 + 0.25], top: 1.36 + 0.135,
+    // (what it takes up, o: from the console's lane face to behind the stools; its top – the screens')
+    span: [0.3 - 0.21, 1.1 + 0.25], top: 1.36 + 0.135,
   };
 }
 
@@ -704,15 +704,16 @@ export function teamLayer(garages, teams, drivers, season = null, opts = {}) {
     boxQ(panels, at(0, lb.o + 0.012, lb.y), A, up, O, L + 0.3, lb.h, 0.02, team, 3);
     quad(labels, at(0, lb.o, lb.y), A.clone().multiplyScalar(bw), up.clone().multiplyScalar(bw / 8), f, lab.uv(t.row));
     // (no rain in the room – weather.js coverRaster: its floor plan from the glass in, under its ceiling)
-    { const cv = (da, o) => { const v = at(da, o, 0); return [v.x, v.z]; }, h = L / 2 + 0.2; group.userData.covers.push({ pts: [cv(-h, -w.room.glass), cv(h, -w.room.glass), cv(h, S.span[1]), cv(-h, S.span[1])], y: p.y + w.room.ceil, kind: "pit wall room" }); }
+    { const cv = (da, o) => { const v = at(da, o, 0); return [v.x, v.z]; }, h = L / 2 + 0.2; group.userData.covers.push({ pts: [cv(-h, -w.room.glass), cv(h, -w.room.glass), cv(h, S.span[1]), cv(-h, S.span[1])], y: p.y + w.room.ceil - Math.abs(w.slope || 0) * h, kind: "pit wall room" }); }
     t.wallStand = { seats: N, from: seat.from };
-    group.userData.wallStands.push({ team: t.team, box: t.box, boxOff: t.boxOff, p: [p.x, p.z], y: p.y, along: [...w.along], out: [...w.out], L, enclosed: true, upper: true, room: { ...w.room }, span: S.span, top: S.top, people: S.seats.map(({ a, o }) => { const v = at(a, o, 0); return [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]; }) });
+    group.userData.wallStands.push({ team: t.team, box: t.box, boxOff: t.boxOff, p: [p.x, p.z], y: p.y, along: [...w.along], out: [...w.out], L, enclosed: true, upper: true, room: { ...w.room }, slope: w.slope || 0, span: S.span, top: S.top, people: S.seats.map(({ a, o }) => { const v = at(a, o, 0); return [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]; }) });
   };
   const pitWallStand = (w, t, season) => {
     const seat = pitWallSeats(t.team, season), N = seat.seats, up = new THREE.Vector3(0, 1, 0);
     const p = new THREE.Vector3(...w.p), A = new THREE.Vector3(w.along[0], 0, w.along[1]), O = new THREE.Vector3(w.out[0], 0, w.out[1]);
     const L = N * 0.8 + 0.6, team = new THREE.Color(t.colour), dark = team.clone().multiplyScalar(0.3).lerp(new THREE.Color("#1d2024"), 0.5), steel = new THREE.Color("#8d949b"), black = new THREE.Color("#15171a");
-    const at = (a, o, y) => p.clone().addScaledVector(A, a).addScaledVector(O, o).addScaledVector(up, y);
+    // (a stand upstairs slopes with the room's floor along it – wallAt's slope)
+    const at = (a, o, y) => p.clone().addScaledVector(A, a).addScaledVector(O, o).addScaledVector(up, y + (w.room ? (w.slope || 0) * a : 0));
     if (w.room) { roomStand(w, t, seat, N, L, { p, A, O, up, at, team, dark, steel, black }); return; }
     const deck = 0.22;
     boxQ(panels, at(0, 0.05, deck / 2), A, up, O, L, deck, 1.6, dark);                                   // the deck
