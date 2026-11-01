@@ -195,3 +195,14 @@ test("an entry road coming in at an angle: the drawn line eases from the feed's 
   // (the feed's own line moves 0.39 m across per 0.25 m here – a 57° entry; v0.52's blend by u alone: a 29 m step)
   assert.ok(worst < 1, `largest step ${worst} m per 0.25 m along`);
 });
+
+test("the lines driven don't step where the wall does: a 3.5 m step in the wall's face becomes a gentle slope, met before the wall comes in", async () => {
+  const { laneLines } = await import("../src/renderer/pitlane.js");
+  // the fast lane's centre 17 m out up to u = 0, 13.5 m out after it (the wall 3.5 m nearer)
+  const raw = (u) => ({ ok: true, fastC: u < 0 ? 17 : 13.5, boxC: 4.5, floor: 0 }), at = laneLines(raw, -100, 100);
+  let prev = null, worst = 0, over = 0;
+  for (let u = -100; u <= 100; u += 0.1) { const f = at(u).fastC; if (prev != null) worst = Math.max(worst, Math.abs(f - prev) / 0.1); prev = f; over = Math.max(over, f - raw(u).fastC); }
+  assert.ok(worst < 0.15, `slope ${worst}`);
+  assert.ok(over < 0.25, `never more than a hair nearer the wall than its own line: ${over}`);
+  assert.ok(Math.abs(at(-60).fastC - 17) < 1e-9 && Math.abs(at(60).fastC - 13.5) < 1e-9, "unchanged away from the step");
+});

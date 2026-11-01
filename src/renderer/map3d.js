@@ -18,7 +18,7 @@ import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
-import { LANES, laneCells, crossSection, laneSectionAt } from "./pitlane.js";
+import { LANES, laneCells, crossSection, laneSectionAt, laneLines } from "./pitlane.js";
 import { createPitTrace } from "./pitcheck.js";
 import { boxWays, inLenTo } from "./pitpath.js";
 import { pitState, pathW, visitStands, visitPlan, runBlend, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, garagePath, PIT } from "./pitstate.js";
@@ -334,7 +334,8 @@ function pitModelFor(G) {
   // (between the garages either side of u by their centres – a run's garages can have a gap, Madrid 2026 –, the wall's
   // face the facility's own at u, within the run: laneSectionAt)
   const us = st.map((x) => x.s.uc), wf = G.wallFace ? (u) => G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, u))) : null;
-  const at = (u) => laneSectionAt(st, us, u, wf);
+  // (v0.53: the lines driven – fast lane, boxes – without the wall's steps: pitlane.js laneLines)
+  const at = laneLines((u) => laneSectionAt(st, us, u, wf), G.gStart - PIT.ends - 5, G.gEnd + PIT.ends + 5);
   m = { G, st, at, ok: st.filter((x) => x.cs.ok).length, wallFrom: [...new Set(st.map((x) => x.cs.wallFrom))] };
   pitModels.set(G, m);
   return m;

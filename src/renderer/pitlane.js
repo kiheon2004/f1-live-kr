@@ -249,3 +249,20 @@ export function laneSectionAt(st, us, u, wallFace = null) {
   const L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
   return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor, slot, along, inward };
 }
+
+// v0.53: the lines the cars drive along the lane – the fast lane's centre and the boxes' – as drawn: the cross sections
+// give them per garage and the facility's wall face every 3 m, and both step where the wall does (a gap in the pit wall,
+// a kink at a building's end: Silverstone 2025, 3.5 m at u −22 – every car in the fast lane moved 3.5 m across in one
+// frame and turned 117°). Here each line is taken no further out than it is anywhere within reach at a gentle slope (the
+// lower envelope at `k` m across per m along – so never nearer the wall than the raw line, a step towards the wall is
+// met before it), then averaged over ±`half` m (the envelope's corners rounded). rawAt(u) → a section (laneSectionAt);
+// → at(u): the same section with fastC / boxC from the smoothed lines.
+export function laneLines(rawAt, u0, u1, k = 0.12, half = 4, step = 0.5) {
+  const n = Math.max(2, Math.ceil((u1 - u0) / step) + 1), F = new Float64Array(n), B = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const c = rawAt(u0 + i * step); F[i] = c.fastC; B[i] = c.ok ? c.boxC : c.fastC; }
+  const env = (a) => { const d = k * step; for (let i = 1; i < n; i++) a[i] = Math.min(a[i], a[i - 1] + d); for (let i = n - 2; i >= 0; i--) a[i] = Math.min(a[i], a[i + 1] + d); return a; };
+  const avg = (a) => { const h = Math.round(half / step), o = new Float64Array(n); for (let i = 0; i < n; i++) { let s = 0, m = 0; for (let j = Math.max(0, i - h); j <= Math.min(n - 1, i + h); j++) { s += a[j]; m++; } o[i] = s / m; } return o; };
+  const fs = avg(env(F)), bs = avg(env(B));
+  const lerpAt = (a, u) => { const f = Math.max(0, Math.min(n - 1, (u - u0) / step)), i = Math.min(n - 2, Math.floor(f)), w = f - i; return a[i] + (a[i + 1] - a[i]) * w; };
+  return (u) => { const c = rawAt(u); return { ...c, fastC: lerpAt(fs, u), boxC: c.ok ? lerpAt(bs, u) : lerpAt(fs, u), rawFastC: c.fastC }; };
+}
