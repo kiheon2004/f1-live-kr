@@ -5009,7 +5009,8 @@ window.Map3D = {
         // from one garage to the next, the lines above run from the box's garage's front line, the stand is straight)
         const [x0, z0] = at(0), dl = G.project(x0, z0).off, cl = G.project(w.p[0] + w.along[0] * a, w.p[2] + w.along[1] * a).off;
         for (const h of hits) h.off += dl;
-        across.push({ a: +a.toFixed(2), stand: [cl - 0.85, cl + 0.75], lane: G.wallFace ? G.wallFace(uc + a) : null, edge: edge == null ? null : edge + dl, hits, upper: !!w.upper });
+        // (a stand upstairs, in its room – Monaco: from behind its stools to the glazing, garages.js upperStandLayout)
+        across.push({ a: +a.toFixed(2), stand: built?.upper && built.span ? [cl - built.span[1], cl - built.span[0]] : [cl - 0.85, cl + 0.75], lane: G.wallFace ? G.wallFace(uc + a) : null, edge: edge == null ? null : edge + dl, hits, upper: !!w.upper });
       }
       secs.push({ team: t.team, u: Math.round(t.box), at: Math.round(uc), across, standY: +(w.p[1] - s.floor).toFixed(2) });
     }
@@ -5017,6 +5018,31 @@ window.Map3D = {
     const row = (r, s) => ({ team: r.team, u: s.u, standAt: s.at, ok: r.ok, order: r.order, problems: r.problems, standY: s.standY, ...(r.worst ? { worst: r.worst } : {}) });
     return JSON.stringify({ ok: true, facility: G.facility, wallFrom: G.wallFrom ?? null, stands: v.stands, wrong: v.wrong, problems: v.problems,
       first: v.res[0] && row(v.res[0], secs[0]), wrongOnes: v.res.map((r, i) => [r, secs[i]]).filter(([r]) => !r.ok).slice(0, detail ? 99 : 2).map(([r, s]) => row(r, s)), all: detail ? v.res.map((r, i) => row(r, secs[i])) : undefined });
+  },
+  // development (v0.53): the teams' stands upstairs (Monaco) against the room they stand in – pitwallcheck.js
+  // upperStandCheck on each stand as built, and rays through the drawn facility at each: down from a seated person's hips
+  // (the floor under them), up (the ceiling), out to the lane (the glazing), and up from the lane 0.5 m out from the
+  // garages' front (the first floor's slab over it – the room not floating: on the top of the garages' openings)
+  async upperCheck() {
+    const G = pitTeams.G; if (!G) return JSON.stringify({ ok: false, why: "no garages" });
+    const built = (pitTeams.group?.userData.wallStands || []).filter((q) => q.upper);
+    if (!G.upperRoom) return JSON.stringify({ ok: !built.length, why: "no room upstairs", upperStands: built.length });
+    const { upperStandCheck } = await import("./pitwallcheck.js");
+    const fac = world.real?.group.getObjectByName("facilities"), rc = new THREE.Raycaster(), V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const first = (o, d, far = 8) => { rc.set(o, d); rc.far = far; const team = (o) => { for (let q = o; q; q = q.parent) if (q.name === "pitTeams") return true; return false; };
+      const h = fac ? rc.intersectObject(fac, true).filter((x) => x.object.visible !== false && x.object.isMesh && !x.object.isInstancedMesh && !team(x.object))[0] : null; return h ? [h.object.name || h.object.parent?.name, +h.distance.toFixed(3)] : null; };
+    const rows = built.map((st) => {
+      const r = upperStandCheck(st, G.upperRoom, G.project), [x, y, z] = st.people[0], pr = G.project(st.p[0], st.p[1]), rm = G.upperRoom(pr.u);
+      const lane = (d) => { const s = G.slots.reduce((p, q) => (Math.abs(q.uc - pr.u) < Math.abs(p.uc - pr.u) ? q : p)); return V(s.front[0] - s.inward[0] * d + s.along[0] * (pr.u - s.uc), s.floor + 1, s.front[1] - s.inward[1] * d + s.along[1] * (pr.u - s.uc)); };
+      const rays = { down: first(V(x, y + 0.3, z), V(0, -1, 0)), up: first(V(x, y + 0.3, z), V(0, 1, 0)), out: first(V(x, y + 1.2, z), V(-st.out[0], 0, -st.out[1]), 4), slabOverLane: first(lane(0.5), V(0, 1, 0), 8) };
+      // (expected: the floor 0.29 m under the hips' ray, the ceiling, the glazing ~1.15 m out, the slab G − 1 m over the lane)
+      // (out: the glass in front of the person – the console's lane face is 1.01 m ahead of the seat, the glass beyond it)
+      const pr0 = G.project(x, z), rp = G.upperRoom(pr0.u), toGlass = rp.glass - pr0.off;
+      const want = { down: ["garFloor", 0.29], up: ["garCeil", +(rp.ceil - y - 0.3).toFixed(3)], out: ["roomGlass", +toGlass.toFixed(3), 0.2], slabOverLane: ["slab", +(rm.under - lane(0.5).y).toFixed(3)] };
+      for (const k of Object.keys(want)) if (!rays[k] || rays[k][0] !== want[k][0] || Math.abs(rays[k][1] - want[k][1]) > (want[k][2] ?? 0.05)) r.problems.push(`${st.team}: ray ${k} met ${rays[k] ? rays[k].join(" @ ") : "nothing"}, not ${want[k].join(" @ ")}`);
+      return { team: st.team, ok: !r.problems.length, problems: r.problems, floorY: +(y - rm.floor).toFixed(3), rays };
+    });
+    return JSON.stringify({ ok: rows.every((q) => q.ok), stands: rows.length, bad: rows.filter((q) => !q.ok).length, rows });
   },
   // development (v0.47): the map's walls at both stages (mapwalls.js – the candidates barrierRay searched, the final ones
   // drawn): lines, segments, how many crossed the road / pit lane in their middle, test points cut by the road and the lane

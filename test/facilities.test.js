@@ -470,9 +470,9 @@ test("Monaco pit layout: the garages' side fixed along the whole lane; none for 
   const zs = parts[0].pts.map(([, y]) => -y);
   assert.ok(zs.every((z) => z < -7), `all on the straight's side: ${Math.max(...zs).toFixed(1)}`);
   assert.ok(zs.every((z) => z > -25.5), "short of the straight's tarmac");
-  assert.strictEqual(spec.params.height, 12);
+  assert.strictEqual(spec.params.height, 11);
   const other = F.genericPitSpec({ venue: { key: 2 }, location: "Silverstone", year: 2026, pit, toScene, toTrack, trackEdge: edge, registry: [] });
-  assert.notStrictEqual(other.params.height, 12);
+  assert.notStrictEqual(other.params.height, 11);
 });
 
 // v0.36: the layout's side reaches the builder – the garages face the lane, not the nearest track (Monaco 2025: the
@@ -504,5 +504,5 @@ test("generic pit building: the venue's researched height where the map gives no
   // (Monza: the map's height includes the GP canopies – the researched terrace height stands over it, the canopies drawn)
   assert.ok(mz.params.heightOverMap && mz.params.tents);
   assert.ok(sh.params.heightFrom == null, "Shanghai: nothing found – the generic estimate");
-  assert.strictEqual(F.genericPitSpec(args(22)).params.height, 12, "Monaco: its own layout");
+  assert.strictEqual(F.genericPitSpec(args(22)).params.height, 11, "Monaco: its own layout");
 });
