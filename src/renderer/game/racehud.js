@@ -30,6 +30,7 @@ import * as HM from "./hudmodel.js";
 import * as Dock from "./racedock.js";
 import * as SaveUI from "./saveui.js";
 import * as AlertsUI from "./alertsui.js";
+import { trackOutline, carPoint, fitTransform } from "./minimap.js";
 
 const TOWER_KEY = "f1kr:game:towerW", TOWER_MODE_KEY = "f1kr:game:towerMode";
 const IN_LANE = new Set(["entry", "lane", "approach", "penalty", "queue", "work", "release", "laneOut", "exit"]);
@@ -69,13 +70,56 @@ export function build() {
         <div class="ui-seg sm" role="group" aria-label="간격 기준"><button data-act="hud:towerMode" data-v="leader" aria-pressed="${H.towerMode === "leader"}">선두</button><button data-act="hud:towerMode" data-v="ahead" aria-pressed="${H.towerMode === "ahead"}">앞차</button></div>
         <button class="ui-btn ghost sm icon" data-act="hud:tower" title="${H.towerSlim ? "펼치기" : "접기"}" aria-label="${H.towerSlim ? "순위표 펼치기" : "순위표 접기"}">${H.towerSlim ? "◀" : "▶"}</button></div>
       <div class="gr-tw" id="grTw"><table class="gr-tw-t"><tbody id="grTwB"></tbody></table></div><i class="gr-resize" id="grResize" title="끌어서 너비 조절"></i>
+      <div class="gr-mini" id="grMini" role="img" aria-label="서킷 지도 – 게임 속 차량 위치"><canvas id="grMiniC"></canvas></div>
     </aside>
     <footer class="gr-bottom">${mine.map((e) => card(e)).join("")}</footer></div>`;
   H.built = true; H.ordersDirty = true;
-  wireResize(); wireFold();
+  wireResize(); wireFold(); miniStart();
   Dock.build($("grDock"));
 }
-export function teardown() { H.built = false; Dock.teardown(); }
+export function teardown() { H.built = false; if (H.miniRaf) cancelAnimationFrame(H.miniRaf); H.miniRaf = null; H.mini = null; Dock.teardown(); }
+
+// ---------- the small track map (v0.54) ----------
+// In the standings tower's empty foot: the circuit from above and every car where the GAME has it at render time (the
+// same presented picture as the tower – hudSnap), drawn on its own animation frame (~30 fps) so the dots glide between the
+// 200 ms paints. My cars: larger, outlined, named; the camera's car ringed. Reads only; never touches the race.
+function miniStart() { if (!H.miniRaf) H.miniRaf = requestAnimationFrame(miniLoop); }
+function miniLoop(now) {
+  if (!H.built) { H.miniRaf = null; return; }
+  H.miniRaf = requestAnimationFrame(miniLoop);
+  if (now - (H.miniAt || 0) < 33) return; H.miniAt = now;
+  try { drawMini(); } catch { /* (a map that can't draw stays blank – never the race screen's problem) */ }
+}
+function drawMini() {
+  const R = G.run, sc = G.sc, cv = $("grMiniC"), box = $("grMini"); if (!R || !sc?.track || !cv || !box || G.step !== "race") return;
+  const w = box.clientWidth, h = box.clientHeight; if (w < 40 || h < 40) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (!H.mini || H.mini.sc !== sc || H.mini.w !== w || H.mini.h !== h) {
+    const ol = trackOutline(sc.track); if (!ol) return;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.width = w + "px"; cv.style.height = h + "px";
+    H.mini = { sc, w, h, ol, T: fitTransform(ol, w, h, 10), ents: new Map(sc.entries.map((e) => [String(e.num), e])) };
+  }
+  const M = H.mini, snap = hudSnap(R, G.adapter); if (!snap) return;
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const path = (pts, closed) => { g.beginPath(); pts.forEach(([x, y], i) => { const [a, b] = M.T.map(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); }); if (closed) g.closePath(); };
+  g.lineJoin = "round"; g.lineCap = "round";
+  if (M.ol.pit.length) { path(M.ol.pit, false); g.strokeStyle = "rgba(255,255,255,0.18)"; g.lineWidth = 2; g.stroke(); }
+  path(M.ol.lap, true); g.strokeStyle = "rgba(255,255,255,0.32)"; g.lineWidth = 4; g.stroke();
+  { const [a, b] = M.T.map(...M.ol.lap[0]); g.fillStyle = "#fff"; g.fillRect(a - 1.5, b - 1.5, 3, 3); }   // (the line where laps are counted)
+  const focus = G.adapter?.ctx.focus, onCam = String(G.adapter?.camAuto?.num ?? focus ?? "");
+  const cars = [...snap.cars];
+  const mineOf = (c) => M.ents.get(String(c.num))?.teamKey === G.teamKey;
+  cars.sort((a, b) => (mineOf(a) - mineOf(b)) || (b.pos ?? 99) - (a.pos ?? 99));   // (mine on top, the leader above the rest)
+  for (const c of cars) {
+    if (c.status === "dnf" && c.where !== "lap" && c.where !== "pit") continue;
+    const p = carPoint(sc.track, c); if (!p) continue;
+    const [x, y] = M.T.map(p[0], p[1]), e = M.ents.get(String(c.num)), mine = mineOf(c), r = mine ? 4.5 : 3.2;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = e?.colour || "#888"; g.globalAlpha = c.status === "dnf" ? 0.4 : 1; g.fill(); g.globalAlpha = 1;
+    if (mine) { g.lineWidth = 1.5; g.strokeStyle = "#fff"; g.stroke(); }
+    if (String(c.num) === onCam) { g.beginPath(); g.arc(x, y, r + 3, 0, Math.PI * 2); g.lineWidth = 1.2; g.strokeStyle = "#ffd400"; g.stroke(); }
+    if (mine) { g.font = "600 10px Pretendard, sans-serif"; g.fillStyle = "#fff"; g.textBaseline = "middle"; g.fillText(e?.tla || String(c.num), x + r + 3, y); }
+  }
+}
 export const markOrders = () => { H.ordersDirty = true; Dock.markDirty(); };
 
 // one driver panel – the same layout for both cars, built once (v0.52 §10-1), split into BASIC and DETAIL (v0.53 §12-4):
