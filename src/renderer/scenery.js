@@ -12,7 +12,7 @@ import { buildStands } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
-import { vegGeometries, speciesMix, speciesAt, standHeight, treeTint, treeMaterial } from "./vegetation.js";
+import { vegGeometries, speciesMix, speciesAt, standHeight, treeTint, treeMaterial, nearTreeLayer } from "./vegetation.js";
 import { padPlan, polyDist } from "./footing.js";
 import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./facilities.js";
@@ -348,6 +348,7 @@ function treesMesh(scene, gf, groundAt, corridor, blocked, lat, ground, clear = 
   // mesh – seven forms at the draw calls of the four before)
   const mats = { tree: treeMaterial(), palm: treeMaterial({ side: THREE.DoubleSide }) };
   const buckets = new Map();   // chunk → form → [matrix, colour]
+  const all = [];   // (every tree once, for the near layer: { form, m, col })
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
   keep.forEach(([x, z, , size], i) => {
     const k = kinds[i], s0 = (0.7 + r() * 0.6) * size * (k === "shrub" ? 0.9 : standHeight(x, z));
@@ -357,7 +358,7 @@ function treesMesh(scene, gf, groundAt, corridor, blocked, lat, ground, clear = 
     const col = treeTint(k, r);
     const key = `${Math.floor(x / 400)},${Math.floor(z / 400)}`;
     let bk = buckets.get(key); if (!bk) buckets.set(key, (bk = {}));
-    (bk[k] || (bk[k] = [])).push([m.clone(), col]);
+    const mm = m.clone(); (bk[k] || (bk[k] = [])).push([mm, col]); all.push({ form: k, m: mm, col });
   });
   const g = new THREE.Group(); g.name = "trees";
   for (const bk of buckets.values()) {
@@ -375,6 +376,9 @@ function treesMesh(scene, gf, groundAt, corridor, blocked, lat, ground, clear = 
     }
   }
   g.userData.count = keep.length;
+  // (v0.53: the broadleaf crowns near the camera again with smooth lobes – vegetation.js nearTreeLayer; map3d.js
+  // thinFarTrees keeps it round the camera)
+  const near = nearTreeLayer(all, mats.tree); g.add(near.group); g.userData.near = near;
   return g;
 }
 

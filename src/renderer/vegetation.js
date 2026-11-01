@@ -39,6 +39,22 @@ function noisy(geo, amount, seed) {
   geo.computeVertexNormals();
   return geo;
 }
+// The near crown's lobe (v0.53): each of the lobe's 20 faces cut in four, the new corners pushed out onto the round
+// through their edge's ends (|m| = the ends' mean distance from the lobe's middle), the whole 1.5 % larger – a surface
+// that holds the far lobe inside it everywhere (the far lobe's corners are its corners, its faces lie within the new
+// ones), so drawn over the far tree it hides it without any flicker between them. 80 faces.
+export function smoothLobe(geo) {
+  const g = geo.index ? geo.toNonIndexed() : geo, P = g.attributes.position, out = [];
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+  const mid = (u, v) => { const m = u.clone().add(v), L = (u.length() + v.length()) / 2; return m.setLength(L); };
+  for (let i = 0; i < P.count; i += 3) {
+    A.fromBufferAttribute(P, i); B.fromBufferAttribute(P, i + 1); C.fromBufferAttribute(P, i + 2);
+    const ab = mid(A, B), bc = mid(B, C), ca = mid(C, A);
+    for (const [x, y, z] of [[A, ab, ca], [ab, B, bc], [ca, bc, C], [ab, bc, ca]]) out.push(x.x, x.y, x.z, y.x, y.y, y.z, z.x, z.y, z.z);
+  }
+  const r = new THREE.BufferGeometry(); r.setAttribute("position", new THREE.Float32BufferAttribute(out.map((v) => v * 1.015), 3));
+  r.computeVertexNormals(); return r;
+}
 // [geometry, x, y, z, sx, sy, sz, bark] → one non-indexed geometry (position, normal, bark)
 function merge(list) {
   const pos = [], nor = [], bark = [], v = new THREE.Vector3(), nm = new THREE.Matrix3();
@@ -83,12 +99,19 @@ export function vegGeometries() {
     for (let i = 0; i < p.count; i++) { const y = p.getY(i); if (y > -h / 2 + 1e-4) continue; const key = p.getX(i).toFixed(3) + "," + p.getZ(i).toFixed(3);
       if (!k.has(key)) k.set(key, [0.8 + rr() * 0.4, -rr() * 0.22 * h]); const [f, dy] = k.get(key); p.setXYZ(i, p.getX(i) * f, y + dy, p.getZ(i) * f); }
     g.computeVertexNormals(); return g; };
-  const round = soften(merge([[trunk(4, 0.38, 0.22), 0, 0, 0, 1, 1, 1, 1],
-    [lobe(1), 0, 5.4, 0, 2.6, 2.2, 2.6], [lobe(2), 1.5, 4.6, 0.6, 1.8], [lobe(3), -1.3, 4.8, -0.7, 1.9], [lobe(4), 0.2, 6.6, -0.3, 1.6]]), 5.4, 3.4);
-  const oval = soften(merge([[trunk(4.6, 0.32, 0.2), 0, 0, 0, 1, 1, 1, 1],
-    [lobe(41), 0, 5.8, 0, 1.9, 2.5, 1.9], [lobe(42), 0.35, 7.9, 0.2, 1.55, 2.0, 1.55], [lobe(43), -0.55, 4.9, -0.35, 1.5, 1.3, 1.5], [lobe(44), 0.1, 9.6, -0.1, 1.05, 1.3, 1.05]]), 7.2, 4.2);
-  const spread = soften(merge([[trunk(5.8, 0.36, 0.24), 0, 0, 0, 1, 1, 1, 1],
-    [lobe(51), 0, 6.9, 0, 3.3, 1.35, 3.3], [lobe(52), 2.3, 6.4, 0.9, 2.0, 1.05, 2.0], [lobe(53), -2.1, 6.5, -1.0, 2.1, 1.1, 2.1], [lobe(54), 0.6, 7.6, -1.7, 1.8, 0.95, 1.8]]), 6.6, 3.2, 0.8);
+  // the broadleaf crowns as data – lobes [seed, x, y, z, sx, sy, sz] and the shading's [centre y, radius, k] – so the near
+  // version (below) is built from the very same lobes
+  const BROAD = {
+    round: { trunk: [4, 0.38, 0.22], soft: [5.4, 3.4, 0.85], lobes: [[1, 0, 5.4, 0, 2.6, 2.2, 2.6], [2, 1.5, 4.6, 0.6, 1.8, 1.8, 1.8], [3, -1.3, 4.8, -0.7, 1.9, 1.9, 1.9], [4, 0.2, 6.6, -0.3, 1.6, 1.6, 1.6]] },
+    oval: { trunk: [4.6, 0.32, 0.2], soft: [7.2, 4.2, 0.85], lobes: [[41, 0, 5.8, 0, 1.9, 2.5, 1.9], [42, 0.35, 7.9, 0.2, 1.55, 2.0, 1.55], [43, -0.55, 4.9, -0.35, 1.5, 1.3, 1.5], [44, 0.1, 9.6, -0.1, 1.05, 1.3, 1.05]] },
+    spread: { trunk: [5.8, 0.36, 0.24], soft: [6.6, 3.2, 0.8], lobes: [[51, 0, 6.9, 0, 3.3, 1.35, 3.3], [52, 2.3, 6.4, 0.9, 2.0, 1.05, 2.0], [53, -2.1, 6.5, -1.0, 2.1, 1.1, 2.1], [54, 0.6, 7.6, -1.7, 1.8, 0.95, 1.8]] },
+    shrub: { trunk: null, soft: [0.7, 1.1, 0.85], lobes: [[7, 0, 0.7, 0, 1.3, 0.8, 1.3], [8, 0.7, 0.55, 0.3, 0.8, 0.8, 0.8]] },
+  };
+  const crown = (f, near) => { const d = BROAD[f], list = d.lobes.map(([seed, ...t]) => [near ? smoothLobe(lobe(seed)) : lobe(seed), ...t]);
+    if (d.trunk && !near) list.unshift([trunk(...d.trunk), 0, 0, 0, 1, 1, 1, 1]);
+    return soften(merge(list), ...d.soft); };
+  const round = crown("round"), oval = crown("oval"), spread = crown("spread"), shrub = crown("shrub");
+  const near = { round: crown("round", true), oval: crown("oval", true), spread: crown("spread", true), shrub: crown("shrub", true) };
   const spruce = soften(merge([[trunk(3, 0.3, 0.18), 0, 0, 0, 1, 1, 1, 1],
     [tier(2.6, 4.2, 9, 21), 0, 4.2, 0], [tier(2.0, 3.6, 9, 22), 0, 6.3, 0], [tier(1.3, 3.0, 7, 23), 0, 8.2, 0]]), 5.6, 4.6, 0.78, CON_BARK);
   const slender = soften(merge([[trunk(1.8, 0.24, 0.16), 0, 0, 0, 1, 1, 1, 1],
@@ -105,9 +128,8 @@ export function vegGeometries() {
     fronds.push([f, 0.97, 9, 0]);
   }
   const palm = soften(merge(fronds), 9, 2, 0.4, PALM_BARK);
-  const shrub = soften(merge([[lobe(7), 0, 0.7, 0, 1.3, 0.8, 1.3], [lobe(8), 0.7, 0.55, 0.3, 0.8]]), 0.7, 1.1);
   const rock = noisy(new THREE.IcosahedronGeometry(1, 1), 0.55, 11); rock.scale(1, 0.62, 0.9); rock.translate(0, 0.25, 0);
-  VEG = { round, oval, spread, spruce, slender, palm, shrub, rock };
+  VEG = { round, oval, spread, spruce, slender, palm, shrub, rock, near };
   return VEG;
 }
 
@@ -164,4 +186,51 @@ export function treeMaterial(opts = {}) {
   };
   m.customProgramCacheKey = () => "tree-bark-v53";
   return m;
+}
+
+// ---- near trees (v0.53) ----
+// The broadleaf crowns and shrubs within `radius` of the camera drawn again with the smooth lobes (VEG.near: 80-face
+// lobes instead of 20 – no gem-like facets where a tree fills part of the picture), over the far instances, which they
+// enclose (smoothLobe). One instanced mesh per form, refilled from a 40 m grid only when the camera has moved 15 m or
+// the radius changed – a few hundred matrices, never a geometry or a shader built on the way. radius 0: none (the
+// smooth quality tier – map3d.js nearTreeRadius). No shadows of their own: the far trees cast them.
+//   entries: [{ form, m: Matrix4, col: Color }] (the far trees' own) → { group, update(cam, radius), shown() }
+export const NEAR_FORMS = ["round", "oval", "spread", "shrub"];
+export const NEAR = { cell: 40, move: 15, cap: 2500 };
+export function nearTreeLayer(entries, material) {
+  const V = vegGeometries(), group = new THREE.Group(); group.name = "nearTrees";
+  const grid = new Map(), meshes = {};
+  entries.forEach((e, i) => { if (!NEAR_FORMS.includes(e.form)) return; const x = e.m.elements[12], z = e.m.elements[14], k = `${Math.floor(x / NEAR.cell)},${Math.floor(z / NEAR.cell)}`; let c = grid.get(k); if (!c) grid.set(k, (c = [])); c.push(i); });
+  for (const f of NEAR_FORMS) {
+    const im = new THREE.InstancedMesh(V.near[f], material, NEAR.cap); im.name = "nearTrees:" + f;
+    im.count = 0; im.frustumCulled = false; im.castShadow = false; im.receiveShadow = true;
+    im.setColorAt(0, new THREE.Color(1, 1, 1));   // (the colour buffer made up front: no new attribute later)
+    meshes[f] = im; group.add(im);
+  }
+  let at = null, rad = -1, shown = 0;
+  return {
+    group,
+    shown: () => shown,
+    // → true when the set was refilled this call
+    update(cam, radius) {
+      if (radius === rad && at && Math.hypot(cam.x - at.x, cam.z - at.z) < NEAR.move) return false;
+      at = { x: cam.x, z: cam.z }; rad = radius; shown = 0;
+      const n = {}; for (const f of NEAR_FORMS) n[f] = 0;
+      if (radius > 0) {
+        const r2 = radius * radius, i0 = Math.floor((cam.x - radius) / NEAR.cell), i1 = Math.floor((cam.x + radius) / NEAR.cell), j0 = Math.floor((cam.z - radius) / NEAR.cell), j1 = Math.floor((cam.z + radius) / NEAR.cell);
+        for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (const k of grid.get(`${i},${j}`) || []) {
+          const e = entries[k], dx = e.m.elements[12] - cam.x, dz = e.m.elements[14] - cam.z; if (dx * dx + dz * dz > r2) continue;
+          const im = meshes[e.form]; if (n[e.form] >= NEAR.cap) continue;
+          im.setMatrixAt(n[e.form], e.m); im.setColorAt(n[e.form], e.col); n[e.form]++; shown++;
+        }
+      }
+      for (const f of NEAR_FORMS) {
+        const im = meshes[f], c = n[f]; im.count = c; im.visible = c > 0;
+        if (!c) continue;
+        im.instanceMatrix.clearUpdateRanges(); im.instanceMatrix.addUpdateRange(0, c * 16); im.instanceMatrix.needsUpdate = true;
+        im.instanceColor.clearUpdateRanges(); im.instanceColor.addUpdateRange(0, c * 3); im.instanceColor.needsUpdate = true;
+      }
+      return true;
+    },
+  };
 }

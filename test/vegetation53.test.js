@@ -68,3 +68,51 @@ test("the material keeps the bark's colour from the instance's tint (shader chan
   assert.strictEqual(m.customProgramCacheKey(), treeMaterial({ side: 2 }).customProgramCacheKey());
   assert.ok(m.vertexColors);
 });
+
+test("near crowns: smooth lobes enclose the far ones (no flicker where both are drawn), 4× the faces, no trunk", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const { vegGeometries, smoothLobe, NEAR_FORMS } = await load();
+  const V = vegGeometries();
+  for (const f of NEAR_FORMS) {
+    const far = V[f], near = V.near[f]; assert.ok(near, f);
+    assert.strictEqual(near.attributes.bark.array.every((b) => b === 0), true, `${f}: no trunk in the near crown`);
+    const farCrown = far.attributes.bark.array.filter((b) => b === 0).length;
+    assert.strictEqual(near.attributes.position.count, farCrown * 4, `${f}: each face in four`);
+  }
+  // enclosure of one lobe: every far vertex inside the near surface along its ray from the middle
+  const lobe = new THREE.IcosahedronGeometry(1, 0), p = lobe.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setXYZ(i, p.getX(i) * (0.85 + (i % 5) * 0.06), p.getY(i) * (0.85 + (i % 5) * 0.06), p.getZ(i) * (0.85 + (i % 5) * 0.06));
+  const s = smoothLobe(lobe), ray = new THREE.Raycaster(), mesh = new THREE.Mesh(s, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })), v = new THREE.Vector3();
+  let worst = Infinity;
+  // (points inside each far face – its middle and near its corners and edges; a ray through a corner exactly can slip
+  // between the near faces meeting there)
+  const W = [[1 / 3, 1 / 3, 1 / 3], [0.9, 0.05, 0.05], [0.05, 0.9, 0.05], [0.05, 0.05, 0.9], [0.48, 0.48, 0.04], [0.04, 0.48, 0.48], [0.48, 0.04, 0.48]];
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < p.count; i += 3) for (const [wa, wb, wc] of W) {
+    a.fromBufferAttribute(p, i); b.fromBufferAttribute(p, i + 1); c.fromBufferAttribute(p, i + 2);
+    v.set(0, 0, 0).addScaledVector(a, wa).addScaledVector(b, wb).addScaledVector(c, wc);
+    const L = v.length(); ray.set(new THREE.Vector3(), v.clone().normalize()); const h = ray.intersectObject(mesh)[0];
+    assert.ok(h, "the ray meets the near lobe"); worst = Math.min(worst, h.distance - L);
+  }
+  assert.ok(worst > 0.002, `the near lobe outside the far one everywhere (≥ 2 mm a metre) (${worst.toFixed(4)})`);
+});
+
+test("near layer: only broadleaf crowns within the radius, refilled on a 15 m move or a new radius, none at radius 0", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const { nearTreeLayer, NEAR } = await load();
+  const entries = [];
+  const forms = ["round", "oval", "spread", "spruce", "slender", "palm", "shrub"];
+  for (let i = 0; i < 400; i++) { const x = (i % 20) * 25, z = Math.floor(i / 20) * 25; entries.push({ form: forms[i % forms.length], m: new THREE.Matrix4().makeTranslation(x, 0, z), col: new THREE.Color(0.2, 0.4, 0.1) }); }
+  const L = nearTreeLayer(entries, new THREE.MeshStandardMaterial());
+  const cam = { x: 250, y: 2, z: 250 };
+  assert.strictEqual(L.update(cam, 100), true);
+  const want = entries.filter((e) => ["round", "oval", "spread", "shrub"].includes(e.form) && Math.hypot(e.m.elements[12] - 250, e.m.elements[14] - 250) <= 100).length;
+  assert.strictEqual(L.shown(), want);
+  const drawn = L.group.children.reduce((a, m) => a + m.count, 0); assert.strictEqual(drawn, want);
+  for (const m of L.group.children) for (let i = 0; i < m.count; i++) { const q = new THREE.Matrix4(); m.getMatrixAt(i, q); assert.ok(Math.hypot(q.elements[12] - 250, q.elements[14] - 250) <= 100); }
+  assert.strictEqual(L.update({ x: 255, y: 2, z: 255 }, 100), false, "a small move: kept");
+  assert.strictEqual(L.update({ x: 250 + NEAR.move + 1, y: 2, z: 250 }, 100), true, "15 m: refilled");
+  assert.strictEqual(L.update({ x: 266, y: 2, z: 250 }, 0), true); assert.strictEqual(L.shown(), 0);
+  assert.ok(L.group.children.every((m) => !m.visible && m.count === 0), "radius 0: nothing drawn");
+  assert.ok(L.group.children.every((m) => !m.castShadow), "no shadows of their own");
+});

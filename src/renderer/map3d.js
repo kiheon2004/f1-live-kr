@@ -3807,10 +3807,19 @@ function realPart(name) {
 }
 // (done again when the camera has moved 5 m: the forest a frame later is the same)
 let treesAt = null;
+// (v0.53) the radius of smooth broadleaf crowns round the camera (vegetation.js nearTreeLayer) by the quality setting:
+// 선명 170 m, 균형 120 m, 부드러움 none – the heavier look only in the higher tiers (the setting read once a second)
+const NEAR_TREES = { sharp: 170, balanced: 120, smooth: 0 };
+let nearTreeR = { r: 0, at: -1e9 };
+function nearTreeRadius() {
+  const now = performance.now(); if (now - nearTreeR.at < 1000) return nearTreeR.r;
+  const q = geoSettings().quality; nearTreeR = { r: NEAR_TREES[q] ?? NEAR_TREES.balanced, at: now }; return nearTreeR.r;
+}
 function thinFarTrees() {
   const trees = realPart("trees");
   if (!trees) return;
   const cam = camera.position;
+  trees.userData.near?.update(cam, nearTreeRadius());
   if (treesAt && treesAt.trees === trees && treesAt.p.distanceToSquared(cam) < 25) return;
   treesAt = { trees, p: cam.clone() };
   for (const im of trees.children) {
@@ -5255,6 +5264,8 @@ window.Map3D = {
     const out = []; g.traverse((o) => { if (!o.isMesh) return; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (!v) return; const ix = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count; const path = []; for (let p = o; p && p !== g; p = p.parent) path.push(p.name || p.type); out.push([path.reverse().join("/"), Math.round((ix / 3) * (o.isInstancedMesh ? o.count : 1)), o.isInstancedMesh ? o.count : 1]); });
     return JSON.stringify(out.sort((a, b) => b[1] - a[1]).slice(0, n));
   },
+  // development (v0.53): the smooth near crowns – the radius in use and how many are drawn now
+  nearTrees() { const n = realPart("trees")?.userData.near; return JSON.stringify({ radius: nearTreeRadius(), shown: n ? n.shown() : null }); },
   sceneStats() {
     const out = {}, add = (k, o) => { const r = out[k] || (out[k] = { objects: 0, meshes: 0, visibleMeshes: 0, tris: 0 }); r.objects++; if (o.isMesh || o.isPoints || o.isSprite || o.isLine) { r.meshes++; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (v) { r.visibleMeshes++; const g = o.geometry; if (g?.attributes?.position) r.tris += Math.round(((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1)); } } };
     scene.traverse((o) => { let top = o, sub = null; while (top.parent && top.parent !== scene) { sub = top; top = top.parent; } const name = top === world?.group ? "world/" + (sub ? (sub === world.real?.group ? "real" : sub.name || sub.type) : "-") : top.name || top.type; add(name, o); });
