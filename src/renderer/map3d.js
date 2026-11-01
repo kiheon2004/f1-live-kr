@@ -453,7 +453,7 @@ function waysOf(G, m, boxU) {
 }
 // This pit visit's stands (pitstate.js visitStands / visitPlan): a replay the record's whole visit (the InPit flag's, its
 // positions to 3 s past it), live only up to now – kept per visit (a live one again as its positions grow). A stand
-// counts only on the pit path (laneTestFor: not the grid or the track beside the lane) and in front of the garages.
+// counts only on the pit path (lanemember.js pitLaneTest, the lead's membership: not the grid or the track beside the lane) and in front of the garages.
 const visitMemo = new Map();
 function pitVisitOf(src, S, num, trk, t, G, boxU, tol, ways) {
   const live = !!src.isLive, ch = S.hist.flags.get(num + ":InPit"), vs = pitVisits(ch, live ? t : Infinity);
@@ -462,8 +462,8 @@ function pitVisitOf(src, S, num, trk, t, G, boxU, tol, ways) {
   const key = `${v ? v[0] : Math.floor(t / 30000)}|${boxU.toFixed(1)}|${tol.toFixed(1)}|${live ? trk.n : ""}`;
   let e = visitMemo.get(num);
   if (!e || e.key !== key || e.trk !== trk) {
-    const c0 = world.center, lt = laneTestFor.test;
-    const uOf = (i) => { const x = trk.x[i] * DM - c0.x, z = -(trk.y[i] * DM - c0.z); if (!lt(x, z)) return null; const pr = G.project(x, z); return pr.off > -3 && pr.off < 40 && pr.u > G.gStart - PIT.ends && pr.u < G.gEnd + PIT.ends ? pr.u : null; };
+    const c0 = world.center, lt = pitLaneTest(world);
+    const uOf = (i) => { const x = trk.x[i] * DM - c0.x, z = -(trk.y[i] * DM - c0.z); if (!lt(x, z, trk.z ? trk.z[i] * DM - c0.y : null)) return null; const pr = G.project(x, z); return pr.off > -3 && pr.off < 40 && pr.u > G.gStart - PIT.ends && pr.u < G.gEnd + PIT.ends ? pr.u : null; };
     const stands = visitStands(trk, tA, tB, uOf), plan = visitPlan(stands, boxU, tol);
     e = { key, trk, stands, plan, live, tA }; if (visitMemo.size > 200) visitMemo.clear(); visitMemo.set(num, e);
   }
