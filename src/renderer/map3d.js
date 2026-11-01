@@ -49,6 +49,7 @@ import { createPitKit } from "./garagekit/pitkit.js";
 import { createSpecHud } from "./spectator/hud.js";
 import { pickTags, cameraCar } from "./spectator/layout.js";
 import { EYE_PITCH, cockpitFov as lensFov, HEAD, headYawFor, eyeTurned } from "./eyecam.js";
+import { readMotionPrefs, vibrationAt, MOTION_KEYS } from "./motionprefs.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -2666,7 +2667,7 @@ function updateCamera(dt) {
     c.model.updateWorldMatrix(true, true);
     const u = c.model.userData, eye = camMode === "eye";
     // (a game's car: from the engine's front-wheel angle – no path ahead here; game/cars3d.js sets c.steer)
-    const hy = !eye || !headTurn ? 0 : game ? headYawFor([Math.tan(c.steer || 0) / 3.4], c.speed || 0) : c.headYaw || 0;
+    const mo = motionNow(), hy = !eye || !headTurn || !mo.headGain ? 0 : mo.headGain * (game ? headYawFor([Math.tan(c.steer || 0) / 3.4], c.speed || 0) : c.headYaw || 0);
     if (hy) { eyeTurned([u.mounts.eye.x, u.mounts.eye.y, u.mounts.eye.z], hy, EYE_AT); camera.position.set(EYE_AT[0], EYE_AT[1], EYE_AT[2]).applyMatrix4(c.model.matrixWorld); }
     else camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
     c.model.getWorldQuaternion(qTmp);
@@ -2674,6 +2675,9 @@ function updateCamera(dt) {
     // a touch down)
     // (v0.52: the eyes turn with the driver's head into the bend – eyecam.js; the T-cam is bolted to the car)
     shakeE.set(eye ? EYE_PITCH : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI + (eye ? hy : ((u.profile.tcamYaw || 0) * Math.PI) / 180), 0, "YXZ");
+    // (v0.53: kerb vibration only when the viewer asked for it – f1kr:camVibration, 0 by default; the camera alone)
+    const vib = mo.vibration ? vibrationAt(c.onKerb ? c.bump : 0, c.speed || 0, mo.vibration) : null;
+    if (vib) { shakeE.x += vib[1]; camera.position.y += vib[0]; }
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
@@ -2742,6 +2746,14 @@ const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 0, dragged: false, down: null 
 // (v0.52: the eye camera turns with the driver's head into bends – on unless turned off: Map3D.headTurn(false), kept)
 const EYE_AT = [0, 0, 0];
 let headTurn = (() => { try { return localStorage.getItem("f1kr:eyeHead") !== "off"; } catch { return true; } })();
+// (v0.53: the cockpit cameras' motion settings – motionprefs.js: head turn 0–1, kerb vibration 0–1 (0 by default),
+// reduced motion on / off / auto; read again once a second – a setting written anywhere shows within a second)
+let motionCache = null, motionAt = -1e9;
+function motionNow() {
+  const now = performance.now(); if (motionCache && now - motionAt < 1000) return motionCache;
+  let sys = false; try { sys = matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.reduceMotion === "1" || !!game?.prefs?.reduceMotion; } catch {}
+  motionAt = now; return (motionCache = readMotionPrefs((k) => localStorage.getItem(k), sys));
+}
 function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 0; }
 // v0.42: the eyes' lens 80° wide (it was 95°: the steering wheel ~30 % of the picture's width against ~45 % in the
 // helmet camera's frames – research/cockpit.md: that camera ~75–85° wide, L) and looking down 8° (it was 3.4°) – the
@@ -3823,10 +3835,19 @@ function realPart(name) {
 }
 // (done again when the camera has moved 5 m: the forest a frame later is the same)
 let treesAt = null;
+// (v0.53) the radius of smooth broadleaf crowns round the camera (vegetation.js nearTreeLayer) by the quality setting:
+// 선명 170 m, 균형 120 m, 부드러움 none – the heavier look only in the higher tiers (the setting read once a second)
+const NEAR_TREES = { sharp: 170, balanced: 120, smooth: 0 };
+let nearTreeR = { r: 0, at: -1e9 };
+function nearTreeRadius() {
+  const now = performance.now(); if (now - nearTreeR.at < 1000) return nearTreeR.r;
+  const q = geoSettings().quality; nearTreeR = { r: NEAR_TREES[q] ?? NEAR_TREES.balanced, at: now }; return nearTreeR.r;
+}
 function thinFarTrees() {
   const trees = realPart("trees");
   if (!trees) return;
   const cam = camera.position;
+  trees.userData.near?.update(cam, nearTreeRadius());
   if (treesAt && treesAt.trees === trees && treesAt.p.distanceToSquared(cam) < 25) return;
   treesAt = { trees, p: cam.clone() };
   for (const im of trees.children) {
@@ -5271,6 +5292,25 @@ window.Map3D = {
     const out = []; g.traverse((o) => { if (!o.isMesh) return; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (!v) return; const ix = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count; const path = []; for (let p = o; p && p !== g; p = p.parent) path.push(p.name || p.type); out.push([path.reverse().join("/"), Math.round((ix / 3) * (o.isInstancedMesh ? o.count : 1)), o.isInstancedMesh ? o.count : 1]); });
     return JSON.stringify(out.sort((a, b) => b[1] - a[1]).slice(0, n));
   },
+  // development (v0.53): the smooth near crowns – the radius in use and how many are drawn now
+  // development (v0.53): the ground's class raster round scene (x, z), ±r m, drawn over the window (the fine raster
+  // where it covers, else the whole-area one; one colour a class) – off: removed. → which raster, its m a texel
+  groundClasses(x, z, r = 60, on = true) {
+    document.getElementById("devClasses")?.remove(); if (!on) return "off";
+    const t = realPart("terrain")?.userData.classes; if (!t) return "no classes";
+    const F = t.fine && x - r > t.fine.ext.x0 && z - r > t.fine.ext.z0 && x + r < t.fine.ext.x0 + t.fine.W * t.fine.mpp && z + r < t.fine.ext.z0 + t.fine.H * t.fine.mpp ? t.fine : t;
+    const n = Math.round((2 * r) / F.mpp), cv = document.createElement("canvas"); cv.width = cv.height = n; const g = cv.getContext("2d"), im = g.createImageData(n, n);
+    const PAL = [[90, 160, 70], [140, 150, 80], [40, 100, 40], [200, 180, 120], [150, 110, 70], [70, 70, 75], [180, 180, 175], [170, 160, 140], [170, 150, 60], [60, 90, 200], [255, 0, 255]];
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const gx = Math.floor((x - r + i * F.mpp - F.ext.x0) / F.mpp), gz = Math.floor((z - r + j * F.mpp - F.ext.z0) / F.mpp), c = gx < 0 || gz < 0 || gx >= F.W || gz >= F.H ? 255 : F.R[gz * F.W + gx];
+      const col = PAL[Math.min(c, PAL.length - 1)] || [0, 0, 0], o = (j * n + i) * 4; im.data[o] = col[0]; im.data[o + 1] = col[1]; im.data[o + 2] = col[2]; im.data[o + 3] = 255;
+    }
+    g.putImageData(im, 0, 0); cv.id = "devClasses"; Object.assign(cv.style, { position: "fixed", left: "20px", top: "60px", width: "700px", height: "700px", zIndex: 99999, imageRendering: "pixelated" }); document.body.appendChild(cv);
+    return JSON.stringify({ fine: F === t.fine, mpp: F.mpp, n });
+  },
+  // development (v0.53): set one of the class ground's uniforms (gFine 0 / 1 …); no value: read them
+  groundUniform(name, v) { const sh = realPart("terrain")?.material.userData.shader; if (!sh) return "no shader"; if (v != null) sh.uniforms[name].value = v; return JSON.stringify(Object.fromEntries(["gFine", "gExt", "gExt2", "gClsSize", "gCls2Size"].map((k) => [k, sh.uniforms[k].value]))); },
+  nearTrees() { const n = realPart("trees")?.userData.near; return JSON.stringify({ radius: nearTreeRadius(), shown: n ? n.shown() : null }); },
   sceneStats() {
     const out = {}, add = (k, o) => { const r = out[k] || (out[k] = { objects: 0, meshes: 0, visibleMeshes: 0, tris: 0 }); r.objects++; if (o.isMesh || o.isPoints || o.isSprite || o.isLine) { r.meshes++; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (v) { r.visibleMeshes++; const g = o.geometry; if (g?.attributes?.position) r.tris += Math.round(((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1)); } } };
     scene.traverse((o) => { let top = o, sub = null; while (top.parent && top.parent !== scene) { sub = top; top = top.parent; } const name = top === world?.group ? "world/" + (sub ? (sub === world.real?.group ? "real" : sub.name || sub.type) : "-") : top.name || top.type; add(name, o); });
@@ -5591,6 +5631,12 @@ window.Map3D = {
   },
   // (v0.52) the eye camera's turn with the driver's head into bends: on / off (kept in this computer's settings); no
   // argument: the state and the head's turn now (deg)
+  // (v0.53) the cockpit cameras' motion settings: { head: 0–1, vib: 0–1, reduce: "on" | "off" | "auto" } stored (null
+  // clears a key); no argument: the stored values and what applies now
+  motion(o) {
+    if (o) for (const [k, key] of [["head", MOTION_KEYS.head], ["vib", MOTION_KEYS.vib], ["reduce", MOTION_KEYS.reduce]]) if (k in o) { try { if (o[k] == null) localStorage.removeItem(key); else localStorage.setItem(key, String(o[k])); } catch {} }
+    motionCache = null; return JSON.stringify(motionNow());
+  },
   headTurn(on) { if (on != null) { headTurn = !!on; try { localStorage.setItem("f1kr:eyeHead", headTurn ? "on" : "off"); } catch {} } const c = cars.get(camNum()); return JSON.stringify({ on: headTurn, deg: c ? +((c.headYaw || 0) * 180 / Math.PI).toFixed(1) : null }); },
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones

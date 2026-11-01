@@ -282,17 +282,37 @@ function cleanShoulders(R, W, H, samples, S, mpp) {
   }
 }
 
+// v0.53 (request §11 – run-off, gravel and grass edges "torn" in a sawtooth near the cameras, Hungary / Monza): the
+// raster for the shader – each texel's class in bits 0–6, and bit 7 set wherever ANOTHER class lies within `r` texels
+// (a square; set from the texels either side of each boundary, so it may reach r + 1 – safe, a little more work). The shader reconstructs the boundary from the 5×5 texels round the
+// nearest one, and may take the one-class shortcut only where that flag is clear – the v0.52 shortcut (the 2×2 corners
+// alike) cut the smooth contour off in a kink at every step of the staircase (a 0.5 m raster: teeth ~0.5 × 1.4 m).
+// The CPU keeps the plain raster (classAt: trees, rocks).
+export function edgeFlagged(R, W, H, r = 2) {
+  const n = W * H, edge = new Uint8Array(n), tmp = new Uint8Array(n), out = new Uint8Array(n);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, c = R[i];
+    if ((x + 1 < W && R[i + 1] !== c) || (y + 1 < H && R[i + W] !== c)) { edge[i] = 1; if (x + 1 < W && R[i + 1] !== c) edge[i + 1] = 1; if (y + 1 < H && R[i + W] !== c) edge[i + W] = 1; }
+  }
+  // (dilated by r: a running count along rows, then along columns)
+  for (let y = 0; y < H; y++) { const o = y * W; let c = 0; for (let x = 0; x <= Math.min(r, W - 1); x++) c += edge[o + x];
+    for (let x = 0; x < W; x++) { tmp[o + x] = c > 0 ? 1 : 0; if (x + r + 1 < W) c += edge[o + x + r + 1]; if (x - r >= 0) c -= edge[o + x - r]; } }
+  for (let x = 0; x < W; x++) { let c = 0; for (let y = 0; y <= Math.min(r, H - 1); y++) c += tmp[y * W + x];
+    for (let y = 0; y < H; y++) { const i = y * W + x; out[i] = Math.min(R[i], N_CLASS - 1) | (c > 0 ? 128 : 0); if (y + r + 1 < H) c += tmp[(y + r + 1) * W + x]; if (y - r >= 0) c -= tmp[(y - r) * W + x]; } }
+  return out;
+}
+
 // ---------- material ----------
 // Terrain material painting classes. tintCanvas: the satellite image (any size, covering ext); R: class raster
 // W×H covering ext; ext: { x0, z0, x1, z1 } scene metres of the raster/canvas.
 // fine (optional): { R, W, H, ext, mpp } – a finer class raster near the track, used where it covers
 export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
   const L = detailLayers();
-  const cls = new THREE.DataTexture(R, W, H, THREE.RedFormat, THREE.UnsignedByteType);
+  const cls = new THREE.DataTexture(edgeFlagged(R, W, H), W, H, THREE.RedFormat, THREE.UnsignedByteType);
   cls.magFilter = cls.minFilter = THREE.NearestFilter; cls.generateMipmaps = false; cls.flipY = false; cls.needsUpdate = true;
   cls.unpackAlignment = 1;
   const F = fine || { R: new Uint8Array(1).fill(255), W: 1, H: 1, ext: { x0: 0, z0: 0 }, mpp: 1 };
-  const cls2 = new THREE.DataTexture(F.R, F.W, F.H, THREE.RedFormat, THREE.UnsignedByteType);
+  const cls2 = new THREE.DataTexture(fine ? edgeFlagged(F.R, F.W, F.H) : F.R, F.W, F.H, THREE.RedFormat, THREE.UnsignedByteType);
   cls2.magFilter = cls2.minFilter = THREE.NearestFilter; cls2.generateMipmaps = false; cls2.flipY = false; cls2.needsUpdate = true;
   cls2.unpackAlignment = 1;
   // satellite tint: small and soft (its job is the large-scale colour only)
@@ -313,6 +333,7 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
 
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
+    mat.userData.shader = sh;   // (development: its uniforms – Map3D.groundUniform)
     Object.assign(sh.uniforms, {
       gCls: { value: cls }, gClsSize: { value: new THREE.Vector2(W, H) }, gExt: { value: new THREE.Vector4(ext.x0, ext.z0, W * mpp, H * mpp) },
       gCls2: { value: cls2 }, gCls2Size: { value: new THREE.Vector2(F.W, F.H) }, gExt2: { value: new THREE.Vector4(F.ext.x0, F.ext.z0, F.W * F.mpp, F.H * F.mpp) }, gFine: { value: fine ? 1 : 0 },
@@ -326,10 +347,12 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
       uniform sampler2D gCls2; uniform vec2 gCls2Size; uniform vec4 gExt2; uniform float gFine;
       bool gUseFine = false; ivec2 gMx = ivec2(0);
       // the class at texel i of the raster in use (the fine one near the track, else the whole-area one)
-      int gClass(ivec2 i) {
+      int gTexel(ivec2 i) {
         float v = gUseFine ? texelFetch(gCls2, clamp(i, ivec2(0), gMx), 0).r : texelFetch(gCls, clamp(i, ivec2(0), gMx), 0).r;
-        return min(int(v * 255.0 + 0.5), ${N_CLASS - 1});
+        return int(v * 255.0 + 0.5);
       }
+      // (bits 0–6 the class; bit 7: another class within 2 texels – ground.js edgeFlagged)
+      int gClass(ivec2 i) { return min(gTexel(i) & 127, ${N_CLASS - 1}); }
       uniform sampler2DArray gDetail; uniform sampler2D gTint;
       uniform float gScale[${N_CLASS}]; uniform float gTintAmt[${N_CLASS}]; uniform vec3 gSatMean[${N_CLASS}];
       varying vec3 vGPos;
@@ -386,9 +409,10 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
           vec4 wf = gShare2(c00, c10, c01, c11, f);
           col = gFlat(c00, sat) * wf.x + gFlat(c10, sat) * wf.y + gFlat(c01, sat) * wf.z + gFlat(c11, sat) * wf.w;
         }
-        else if (c00 == c10 && c00 == c01 && c00 == c11) col = gSurface(c00, w, sat);
         else if (gd > 700.0) {
           // (further out the cheaper 2×2 blend; the texels are too coarse there for more to show)
+          if (c00 == c10 && c00 == c01 && c00 == c11) col = gSurface(c00, w, sat);
+          else {
           vec4 wf = gShare2(c00, c10, c01, c11, f);
           col = vec3(0.0);
           if (wf.x > 0.001) col += gSurface(c00, w, sat) * wf.x;
@@ -396,25 +420,33 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
           if (wf.z > 0.001) col += gSurface(c01, w, sat) * wf.z;
           if (wf.w > 0.001) col += gSurface(c11, w, sat) * wf.w;
           col /= max(0.001, dot(wf, vec4(greaterThan(wf, vec4(0.001)))));
+          }
         }
         else {
-          // Each of the (up to four) classes here gets its share of the 3×3 texels around, weighted by a quadratic
-          // B-spline (a smooth bump, so the share changes smoothly across texels), then sharpened (share⁸): two
-          // classes meet along the smooth ½ contour of their shares, not along the texels' staircase.
-          vec2 tq = tc, cq = floor(tq + 0.5), u = tq - cq;
-          vec3 wx = vec3(0.5 * (0.5 - u.x) * (0.5 - u.x), 0.75 - u.x * u.x, 0.5 * (0.5 + u.x) * (0.5 + u.x));
-          vec3 wy = vec3(0.5 * (0.5 - u.y) * (0.5 - u.y), 0.75 - u.y * u.y, 0.5 * (0.5 + u.y) * (0.5 + u.y));
-          ivec4 cand = ivec4(c00, c10, c01, c11);
+          // Each of the (up to four) classes here gets its share of the 5×5 texels round the nearest one, weighted by a
+          // Gaussian (σ 1 texel, separable), then sharpened (share⁸): two classes meet along the smooth ½ contour of
+          // their shares, not along the texels' staircase. (v0.53: 5×5 Gaussian for v0.52's 3×3 quadratic B-spline, and
+          // the one-class shortcut only where no other class is within 2 texels – the flag in bit 7 – so the contour is
+          // never cut off: the v0.52 shortcut on the 2×2 corners made a kink at each step, a sawtooth along every edge)
+          vec2 cq = floor(tc + 0.5), u = tc - cq;
+          int t0 = gTexel(ivec2(cq));
+          if (t0 < 128) col = gSurface(min(t0, ${N_CLASS - 1}), w, sat);
+          else {
+          float gx[5], gy[5];
+          for (int k = 0; k < 5; k++) { float dx = float(k - 2) - u.x, dy = float(k - 2) - u.y; gx[k] = exp(-0.5 * dx * dx); gy[k] = exp(-0.5 * dy * dy); }
+          // (the classes as met in the 5×5 – up to four –, so every class that can win here is weighed: candidates from
+          // the 2×2 corners alone would cut the contour where a class lies just beyond them)
+          ivec4 cand = ivec4(-1);
           vec4 share = vec4(0.0);
-          for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) {
-            int c = gClass(ivec2(cq) + ivec2(i - 1, j - 1));
-            float wgt = wx[i] * wy[j];
-            share += wgt * vec4(equal(cand, ivec4(c)));
+          for (int j = 0; j < 5; j++) for (int i = 0; i < 5; i++) {
+            int c = gClass(ivec2(cq) + ivec2(i - 2, j - 2));
+            float wg = gx[i] * gy[j];
+            if (cand.x < 0 || c == cand.x) { cand.x = c; share.x += wg; }
+            else if (cand.y < 0 || c == cand.y) { cand.y = c; share.y += wg; }
+            else if (cand.z < 0 || c == cand.z) { cand.z = c; share.z += wg; }
+            else if (cand.w < 0 || c == cand.w) { cand.w = c; share.w += wg; }
           }
-          // a class listed twice counts once
-          if (cand.y == cand.x) share.y = 0.0;
-          if (cand.z == cand.x || cand.z == cand.y) share.z = 0.0;
-          if (cand.w == cand.x || cand.w == cand.y || cand.w == cand.z) share.w = 0.0;
+          share /= max(share.x + share.y + share.z + share.w, 1e-6);
           vec4 wv = pow(share, vec4(8.0));
           float wt = max(wv.x + wv.y + wv.z + wv.w, 1e-12);
           col = vec3(0.0);
@@ -423,6 +455,7 @@ export function groundMaterial({ R, W, H, ext, mpp, tintCanvas, fine = null }) {
           if (wv.z > 1e-4 * wt) col += gSurface(cand.z, w, sat) * wv.z;
           if (wv.w > 1e-4 * wt) col += gSurface(cand.w, w, sat) * wv.w;
           col /= wt;
+          }
         }
         // mown stripes on grass
         float grassW = (c00 == 0 ? (1.0 - f.x) * (1.0 - f.y) : 0.0) + (c10 == 0 ? f.x * (1.0 - f.y) : 0.0) + (c01 == 0 ? (1.0 - f.x) * f.y : 0.0) + (c11 == 0 ? f.x * f.y : 0.0);
