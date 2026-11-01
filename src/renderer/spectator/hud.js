@@ -17,7 +17,7 @@
 // preference only (layout.js loadPrefs / savePrefs). Layout runs on a resize, a preference change, a camera change, a
 // widget's own size change and – in the cockpit cameras – every half second against the keep-clear zones map3d measures.
 import { WIDGETS, WIDGET_IDS, PRESETS, PRESET_IDS, nextCols, loadPrefs, savePrefs, applyPreset, resetWidgets, setWidget, stepScale, placeRect, anchorFor, avoidZones, clampRect, towerKey } from "./layout.js";
-import { flagOf, gapText, gapSec, hms, parseClock, playText, tyreLetter, pitText, camNoteShort } from "./hudtext.js";
+import { flagOf, gapText, gapSec, hms, parseClock, playText, tyreLetter, pitText, camNoteShort, motionUi, motionPatch, feedNote } from "./hudtext.js";
 
 const RATE = { tower: 500, strip: 500, driver: 500, tel: 100, pit: 200, ready: 250, zones: 500 };
 const ORDER = ["cam", "strip", "driver", "tower", "pit", "notes"];   // layout priority (who keeps its place)
@@ -65,6 +65,9 @@ export function createSpecHud(host, api) {
   for (const id of WIDGET_IDS) if (id !== "notes") root.appendChild(W[id].outer);
   root.appendChild(W.notes.outer); root.append(ready, editor);
   host.appendChild(root); host.appendChild(notes);
+  // (round 2: the feed's own trouble – a line of the HUD's own in the same notes stack)
+  const feedLine = h("div", "note3d-line"); feedLine.id = "feedNote3d"; feedLine.style.order = 5; feedLine.hidden = true; notes.appendChild(feedLine);
+  let feedNums = null;
 
   // ---------- the widgets' static parts ----------
   W.strip.inner.innerHTML = '<span class="ui-flag" data-k="flag"></span><span class="st-lap num" data-k="lap"></span><span class="st-clock num" data-k="clock"></span><span class="ui-badge" data-k="play"></span><span class="ui-badge info" data-k="wx" hidden></span><button class="ui-btn sm ghost st-notes" data-act="notes" aria-expanded="false" aria-controls="notes3d" hidden title="이 장면에서 추정하거나 자료가 없는 부분의 설명 (메디컬카·차고·출발 신호 등)">자료 메모 <b class="num" data-k="ncount"></b></button>';
@@ -85,6 +88,11 @@ export function createSpecHud(host, api) {
       <div class="ui-menu spec-menu" id="specMenu" hidden>
         <label class="ui-check" role="menuitemcheckbox" title="켜면 드라이버를 고를 때 카메라도 그 차로 가요 · 끄면 카메라는 ◀ ▶로 따로 움직여요"><input type="checkbox" data-act="follow"> 선택한 차를 카메라가 따라가기</label>
         <hr><button role="menuitem" data-act="edit">HUD 배치 편집…</button><button role="menuitem" data-act="hudreset">HUD 위치 초기화</button>
+        <hr><p class="sm-h">카메라 움직임 <small>온보드·1인칭</small></p>
+        <label class="sm-range" title="1인칭 시점에서 코너에 들어갈 때 드라이버 머리가 돌아가는 정도 (0 %: 정면 고정)"><span>머리 돌림</span><input type="range" min="0" max="100" step="10" data-motion="head" aria-label="머리 돌림 (%)"><output class="num" data-k="mhead"></output></label>
+        <label class="sm-range" title="연석을 밟을 때 온보드·1인칭 카메라가 흔들리는 정도 (기본 0 %: 흔들림 없음 · 차의 자세는 바뀌지 않아요)"><span>진동</span><input type="range" min="0" max="100" step="10" data-motion="vib" aria-label="진동 (%)"><output class="num" data-k="mvib"></output></label>
+        <label class="sm-range" title="켬: 머리 돌림·진동을 모두 끄기 · 자동: 시스템의 '동작 줄이기'나 게임의 움직임 줄이기를 따름"><span>움직임 줄이기</span><select class="ui-select" data-motion="reduce" aria-label="움직임 줄이기"><option value="auto">자동</option><option value="on">켬</option><option value="off">끔</option></select></label>
+        <p class="sm-note faint" data-k="mnote" hidden></p>
         <hr><button role="menuitem" data-act="geo">지도·그래픽 설정…</button>
       </div></span>`;
   W.pit.inner.innerHTML = '<header class="pt-h"><b data-k="ptitle"></b><span class="ui-drv"><i data-k="pbar"></i><b data-k="pwho"></b></span></header><dl class="pt-rows"></dl>';
@@ -184,6 +192,9 @@ export function createSpecHud(host, api) {
     const pb = q("strip", "play"); setText(pb, p.ko); setAttr(pb, "class", "ui-badge " + p.cls);
     const w = s.WeatherData, wx = q("strip", "wx"), rain = w?.Rainfall === "1";
     setHid(wx, !w); if (w) { setText(wx, `${rain ? "비 · " : ""}노면 ${w.TrackTemp}°`); setCls(wx, "warn", rain); setCls(wx, "info", !rain); }
+    // the feed's own trouble (Map3D.feedState, read defensively – absent: nothing) as one more data note
+    let fn = null; try { fn = feedNote(window.Map3D?.feedState?.(), (n) => A.src?.state.DriverList?.[n]?.Tla || n); } catch { fn = null; }
+    feedNums = fn ? fn.nums : null; setHid(feedLine, !fn); setText(feedLine, fn ? fn.text : "");
     // the provenance notes: closed by default (detail on demand) – the strip says how many there are and opens them
     const nn = notes.querySelectorAll(".note3d-line:not([hidden])").length, nb = W.strip.inner.querySelector(".st-notes");
     setHid(nb, !nn && !prefs.widgets.notes.on); setText(q("strip", "ncount"), nn || ""); setAttr(nb, "aria-expanded", String(!!prefs.widgets.notes.on));
@@ -201,8 +212,10 @@ export function createSpecHud(host, api) {
     setText(W.driver.inner.querySelector(".dc-name b"), KO ? KO.surname(d.Tla, d.LastName) : d.LastName || d.Tla);
     setText(W.driver.inner.querySelector(".dc-name small"), `${d.Tla || num} · ${(KO?.TEAMS?.[d.TeamName]) || d.TeamName || ""}`);
     // (the filmed car's position source in two words – the whole sentence stays in the notes and the tooltip)
-    const cn = document.getElementById("camNote3d"), est = q("driver", "est"), sh = camNoteShort(cn && !cn.hidden ? cn.textContent : "");
-    setHid(est, !sh); if (sh) { setText(est, sh.ko); setAttr(est, "class", "ui-badge dc-est " + sh.cls); if (est.title !== cn.textContent) est.title = cn.textContent; }
+    const cn = document.getElementById("camNote3d"), est = q("driver", "est");
+    let sh = camNoteShort(cn && !cn.hidden ? cn.textContent : ""), tip = sh ? cn.textContent : "";
+    if (!sh && feedNums?.has(String(num))) { sh = { ko: "위치 보정", cls: "info" }; tip = feedLine.textContent; }
+    setHid(est, !sh); if (sh) { setText(est, sh.ko); setAttr(est, "class", "ui-badge dc-est " + sh.cls); if (est.title !== tip) est.title = tip; }
     const leader = l.Position === "1", gap = gapText(l.GapToLeader || l.TimeDiffToFastest), int = gapText(l.IntervalToPositionAhead?.Value || l.TimeDiffToPositionAhead);
     const g = q("driver", "gap"), iv = q("driver", "int");
     setText(g, leader ? "선두" : gap || "–"); setCls(g, "t-none", !leader && !gap);
@@ -412,8 +425,24 @@ export function createSpecHud(host, api) {
   });
   // the settings menu (UIKit.menu: ↑↓ between items, Escape closes and gives the focus back, a click outside closes)
   const menuBtn = W.cam.inner.querySelector("#specMenuBtn"), menuEl = W.cam.inner.querySelector("#specMenu");
-  window.UIKit?.menu?.(menuBtn, menuEl);
+  // (the cockpit cameras' motion: read when the menu opens, written on every change – Map3D.motion, motionprefs.js keys)
+  const motionRead = () => { try { const m = window.Map3D?.motion?.(); return m ? (typeof m === "string" ? JSON.parse(m) : m) : null; } catch { return null; } };
+  function paintMotion(state = motionRead()) {
+    const u = motionUi(state), hd = menuEl.querySelector('[data-motion="head"]'), vb = menuEl.querySelector('[data-motion="vib"]'), rd = menuEl.querySelector('[data-motion="reduce"]');
+    if (document.activeElement !== hd) hd.value = u.headPct; if (document.activeElement !== vb) vb.value = u.vibPct; rd.value = u.mode;
+    setText(menuEl.querySelector('[data-k="mhead"]'), `${hd.value}%`); setText(menuEl.querySelector('[data-k="mvib"]'), `${vb.value}%`);
+    const nt = menuEl.querySelector('[data-k="mnote"]'); setHid(nt, !u.note); setText(nt, u.note);
+    hd.disabled = vb.disabled = !state;   // (no 3D view lent: nothing to set)
+  }
+  window.UIKit?.menu?.(menuBtn, menuEl, { onOpen: () => paintMotion() });
+  menuEl.addEventListener("input", (e) => {
+    const k = e.target.dataset?.motion; if (k !== "head" && k !== "vib") return;
+    setText(menuEl.querySelector(`[data-k="m${k}"]`), `${e.target.value}%`);
+    const p = motionPatch(k, e.target.value); if (p) { try { window.Map3D?.motion?.(p); } catch {} }
+  });
   menuEl.addEventListener("change", (e) => {
+    const k = e.target.dataset?.motion;
+    if (k) { const p = motionPatch(k, e.target.value); if (p) { try { window.Map3D?.motion?.(p); } catch {} } paintMotion(); return; }
     if (e.target.dataset?.act !== "follow") return;
     const on = !!e.target.checked; api.setFollow(on); prefs.follow = on; savePrefs(window.localStorage, prefs); paintCam(api.app());
   });
@@ -467,7 +496,7 @@ export function createSpecHud(host, api) {
     const ms = performance.now() - t0; cost.ms += ms; cost.frames++; if (ms > cost.worst) cost.worst = ms;
   }
   function setGame(on) {
-    gameOn = !!on; root.hidden = gameOn;
+    gameOn = !!on; root.hidden = gameOn; if (gameOn) feedLine.hidden = true;   // (the game's own feed has no such trouble)
     if (gameOn) { if (editing) setEditing(false); notes.style.left = notes.style.top = notes.style.bottom = ""; notes.hidden = false; notes.classList.add("game"); }
     else { notes.classList.remove("game"); applyPrefsToDom(); }
   }

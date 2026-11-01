@@ -480,6 +480,11 @@ body.game-on { grid-template-rows: auto 1fr; }
   }
   @media (max-height: 600px) {
     .gr-card { gap: var(--s-2); padding-block: var(--s-2); }
+    /* (round 2: the view is ~170 px high here – a pop-up above the card covered the race bar and its speed buttons; it
+       opens beside its card instead, over the other one, bottom-aligned) */
+    .gr-card.ctl-open .gc-ctl { bottom: -1px; width: calc(100% + 2px); }
+    .gr-card:first-child.ctl-open .gc-ctl { left: calc(100% + var(--s-4)); right: auto; }
+    .gr-card:last-child.ctl-open .gc-ctl { right: calc(100% + var(--s-4)); left: auto; }
   }
   .gr-ord b { font-weight: var(--fw-med); }
   .gr-ord.queued b, .gr-ord.sending b { color: var(--warn); } .gr-ord.applied b { color: var(--ok); } .gr-ord.refused b, .gr-ord.rejected b { color: var(--bad-ink); }

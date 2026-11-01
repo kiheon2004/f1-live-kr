@@ -97,3 +97,37 @@ export function camNoteShort(text) {
   if (/위치 자료가 없어|추정/.test(t)) return { ko: "위치 추정", cls: "info" };
   return null;
 }
+
+// v0.53 round 2: the cockpit cameras' motion controls in the HUD's 설정 menu (the keys and the rule: motionprefs.js;
+// written through Map3D.motion). state: what Map3D.motion() reports ({ head, vib, mode, reduce } – head / vib 0–1).
+// → the controls' values (percent in steps of 10) and a short line when reduced motion overrides them
+export function motionUi(state) {
+  const pct = (v, d) => (Number.isFinite(+v) ? Math.max(0, Math.min(100, Math.round(+v * 10) * 10)) : d);
+  const s = state || {}, mode = s.mode === "on" || s.mode === "off" ? s.mode : "auto";
+  const headPct = pct(s.head, 100), vibPct = pct(s.vib, 0);
+  const note = s.reduce ? (mode === "on" ? "움직임 줄이기 켬 – 머리 돌림·진동 없음" : "시스템 설정으로 움직임 줄이기 중 – 머리 돌림·진동 없음") : "";
+  return { headPct, vibPct, mode, note };
+}
+// one control's change → the Map3D.motion patch (head / vib 0–1, reduce "auto" | "on" | "off"); null for nonsense
+export function motionPatch(kind, value) {
+  if (kind === "head" || kind === "vib") { const v = +value; if (!Number.isFinite(v)) return null; return { [kind]: Math.max(0, Math.min(100, Math.round(v))) / 100 }; }
+  if (kind === "reduce") return ["auto", "on", "off"].includes(value) ? { reduce: value } : null;
+  return null;
+}
+
+// v0.53 round 2: the feed's own trouble as a data note (Map3D.feedState – the lead's: { held, rewound, degradedCars }).
+// Read defensively: a missing hook, a JSON string, numbers or { num } entries, counts or lists for held / rewound.
+// tla(num) → the three letters. → { text, nums: Set } or null (nothing to say)
+export function feedNote(fs, tla = (n) => n) {
+  let s = fs; if (typeof s === "string") { try { s = JSON.parse(s); } catch { return null; } }
+  if (!s || typeof s !== "object") return null;
+  const numOf = (x) => (x && typeof x === "object" ? x.num ?? x.n ?? x.car : x);
+  const list = (v) => (Array.isArray(v) ? v.map(numOf).filter((x) => x != null && x !== "").map(String) : []);
+  const count = (v) => (Array.isArray(v) ? v.length : Number.isFinite(+v) ? +v : 0);
+  const deg = [...new Set(list(s.degradedCars))], held = count(s.held), rew = count(s.rewound);
+  const parts = [];
+  if (deg.length) parts.push(`위치 자료 불안정 – 텔레메트리로 보정: ${deg.slice(0, 6).map((n) => tla(n) || n).join(", ")}${deg.length > 6 ? ` 외 ${deg.length - 6}대` : ""}`);
+  if (held > 0) parts.push(`위치가 크게 튄 차 ${held}대 잠시 숨김`);
+  if (rew > 0) parts.push(`되돌아간 위치 자료 ${rew}건 무시`);
+  return parts.length ? { text: parts.join(" · "), nums: new Set(deg) } : null;
+}

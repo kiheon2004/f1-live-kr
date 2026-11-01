@@ -91,3 +91,37 @@ test("game card: an incident says what it is (not '주행 중' in yellow)", asyn
   assert.strictEqual(incKo("spin"), "스핀"); assert.strictEqual(incKo("puncture"), "펑크"); assert.strictEqual(incKo("wide"), "코스 이탈");
   assert.strictEqual(incKo("something-new"), "사고 처리 중"); assert.strictEqual(incKo(null), "");
 });
+
+test("round 2 – cockpit motion controls: percent steps, the patch Map3D.motion stores, and back through motionprefs.js", async () => {
+  const { motionUi, motionPatch } = await T();
+  const { readMotionPrefs, MOTION_KEYS } = await import("../src/renderer/motionprefs.js");
+  // defaults: head 100 %, vibration 0, auto
+  assert.deepStrictEqual(motionUi(readMotionPrefs(() => null, false)), { headPct: 100, vibPct: 0, mode: "auto", note: "" });
+  assert.deepStrictEqual(motionUi(null), { headPct: 100, vibPct: 0, mode: "auto", note: "" });
+  // a change from the menu, stored the way Map3D.motion stores it, reads back the same
+  const store = new Map(), put = (p) => { for (const [k, key] of [["head", MOTION_KEYS.head], ["vib", MOTION_KEYS.vib], ["reduce", MOTION_KEYS.reduce]]) if (k in p) store.set(key, String(p[k])); };
+  put(motionPatch("head", "40")); put(motionPatch("vib", 70)); put(motionPatch("reduce", "off"));
+  const st = readMotionPrefs((k) => store.get(k) ?? null, true);
+  assert.deepStrictEqual([st.head, st.vib, st.mode, st.reduce], [0.4, 0.7, "off", false]);
+  assert.deepStrictEqual(motionUi(st), { headPct: 40, vibPct: 70, mode: "off", note: "" });
+  // reduced motion: on by choice, or auto with the system asking – the line says why the sliders do nothing
+  assert.match(motionUi(readMotionPrefs((k) => (k === MOTION_KEYS.reduce ? "on" : null))).note, /움직임 줄이기 켬/);
+  assert.match(motionUi(readMotionPrefs(() => null, true)).note, /시스템/);
+  // bounds and nonsense
+  assert.deepStrictEqual(motionPatch("head", 250), { head: 1 }); assert.deepStrictEqual(motionPatch("vib", -5), { vib: 0 });
+  assert.strictEqual(motionPatch("head", "x"), null); assert.strictEqual(motionPatch("reduce", "maybe"), null); assert.strictEqual(motionPatch("other", 1), null);
+  assert.strictEqual(motionUi({ head: 0.37, vib: 0.04 }).headPct, 40); assert.strictEqual(motionUi({ head: 0.37, vib: 0.04 }).vibPct, 0);
+});
+
+test("round 2 – feed trouble note: read defensively (absent, string, numbers or { num }), names the cars, says nothing when fine", async () => {
+  const { feedNote } = await T();
+  const tla = (n) => ({ 1: "VER", 44: "HAM", 16: "LEC" }[n]);
+  assert.strictEqual(feedNote(undefined), null); assert.strictEqual(feedNote(null), null); assert.strictEqual(feedNote("{oops"), null);
+  assert.strictEqual(feedNote({ held: 0, rewound: 0, degradedCars: [] }), null);
+  const a = feedNote({ held: 0, rewound: 0, degradedCars: ["1", { num: "44" }, 1] }, tla);
+  assert.match(a.text, /위치 자료 불안정 – 텔레메트리로 보정: VER, HAM/); assert.deepStrictEqual([...a.nums], ["1", "44"]);
+  const b = feedNote(JSON.stringify({ held: [1, 2], rewound: 3 }), tla);
+  assert.match(b.text, /2대 잠시 숨김/); assert.match(b.text, /3건/); assert.strictEqual(b.nums.size, 0);
+  const many = feedNote({ degradedCars: Array.from({ length: 9 }, (_, i) => String(i + 100)) });
+  assert.match(many.text, /외 3대/);
+});

@@ -90,7 +90,9 @@
   const isDialogOpen = () => openDialogs > 0 || !!doc.querySelector('[aria-modal="true"]:not([hidden])');
 
   // ---------- menu ----------
-  const ITEM = 'button:not([disabled]), [role="menuitem"]:not([aria-disabled="true"]), [role="menuitemcheckbox"], label, a[href]';
+  // (v0.53: the focusable control itself – a checkbox, slider or select inside a label – not the label, which can't take
+  // the focus; ↑ / ↓ always move between items, ← / → and Home / End stay a slider's own keys)
+  const ITEM = 'button:not([disabled]), [role="menuitem"]:not([aria-disabled="true"]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), a[href]';
   function menu(button, el, { onOpen = null, onClose = null } = {}) {
     if (!button || !el) return null;
     el.setAttribute("role", el.getAttribute("role") || "menu");
@@ -113,7 +115,7 @@
     el.addEventListener("keydown", (e) => {
       const list = items(), i = list.indexOf(doc.activeElement);
       if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const n = list.length; if (n) list[(i + (e.key === "ArrowDown" ? 1 : -1) + n) % n].focus(); }
-      else if (e.key === "Home" || e.key === "End") { e.preventDefault(); list[e.key === "Home" ? 0 : list.length - 1]?.focus(); }
+      else if ((e.key === "Home" || e.key === "End") && !e.target.matches?.('input[type="range"], select')) { e.preventDefault(); list[e.key === "Home" ? 0 : list.length - 1]?.focus(); }
       else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
       else if (e.key === "Tab") close(false);
     });
