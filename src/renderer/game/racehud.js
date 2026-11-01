@@ -110,6 +110,7 @@ function drawMini() {
   const cars = [...snap.cars];
   const mineOf = (c) => M.ents.get(String(c.num))?.teamKey === G.teamKey;
   cars.sort((a, b) => (mineOf(a) - mineOf(b)) || (b.pos ?? 99) - (a.pos ?? 99));   // (mine on top, the leader above the rest)
+  const labels = [];
   for (const c of cars) {
     if (c.status === "dnf" && c.where !== "lap" && c.where !== "pit") continue;
     const p = carPoint(sc.track, c); if (!p) continue;
@@ -117,7 +118,16 @@ function drawMini() {
     g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = e?.colour || "#888"; g.globalAlpha = c.status === "dnf" ? 0.4 : 1; g.fill(); g.globalAlpha = 1;
     if (mine) { g.lineWidth = 1.5; g.strokeStyle = "#fff"; g.stroke(); }
     if (String(c.num) === onCam) { g.beginPath(); g.arc(x, y, r + 3, 0, Math.PI * 2); g.lineWidth = 1.2; g.strokeStyle = "#ffd400"; g.stroke(); }
-    if (mine) { g.font = "600 10px Pretendard, sans-serif"; g.fillStyle = "#fff"; g.textBaseline = "middle"; g.fillText(e?.tla || String(c.num), x + r + 3, y); }
+    if (mine) labels.push({ x, y, r, t: e?.tla || String(c.num) });
+  }
+  // my two cars' names: inside the box, flipped left at its right edge, the second moved off the first when they'd overlap
+  g.font = "600 10px Pretendard, sans-serif"; g.textBaseline = "middle"; const placed = [];
+  for (const L of labels) {
+    const tw = g.measureText(L.t).width; let lx = L.x + L.r + 3; if (lx + tw > w - 2) lx = L.x - L.r - 3 - tw;
+    let ly = Math.max(7, Math.min(h - 7, L.y));
+    for (const q of placed) if (Math.abs(q.y - ly) < 11 && lx < q.x + q.w && q.x < lx + tw) ly = q.y + (ly >= q.y && q.y + 11 <= h - 7 ? 11 : -11);
+    placed.push({ x: lx, y: ly, w: tw });
+    g.lineWidth = 3; g.strokeStyle = "rgba(0,0,0,0.75)"; g.strokeText(L.t, lx, ly); g.fillStyle = "#fff"; g.fillText(L.t, lx, ly);
   }
 }
 export const markOrders = () => { H.ordersDirty = true; Dock.markDirty(); };
