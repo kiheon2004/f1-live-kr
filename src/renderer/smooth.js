@@ -283,7 +283,7 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
       // from the leading edge of the samples over ±DEGRADED_WIN (the most advanced: a late sample is only ever behind).
       let bLead = bias, sigUse = sig;
       if (late.some((x) => x)) {
-        bLead = new Float64Array(m); sigUse = DEGRADED_SIG; degraded = true;
+        bLead = new Float64Array(m); sigUse = DEGRADED_SIG; degraded = true; (out.deg ||= []).push([t[0], t[m - 1]]);
         let lo = 0, hi = 0; const dq = [];
         for (let q = 0; q < m; q++) {
           while (hi < m && t[hi] <= t[q] + DEGRADED_WIN) { while (dq.length && bias0[dq[dq.length - 1]] <= bias0[hi]) dq.pop(); dq.push(hi); hi++; }
@@ -404,6 +404,7 @@ export function smoothedTracks(src, world, CarTracks) {
       const o = { t: tr.cars[num].t, s: Float64Array.from(out.s), d: Float32Array.from(out.d), run: Int32Array.from(out.run), vs: Float32Array.from(out.vs), as: Float32Array.from(out.as), w: Float32Array.from(out.w) };
       derive(o);
       tr.coords[num] = o;
+      if (out.deg) (tr.degraded ||= {})[num] = out.deg;   // (v0.53: the stretches drawn from the telemetry for a late / re-sent feed)
     }
     return tr;
   };
@@ -444,14 +445,14 @@ export function smoothedTracks(src, world, CarTracks) {
     const tr = build(null);
     // (coords: a car's track coordinates over time – aero.js finds the zone's entry in them; stateLag: the time state()
     // is asked for is t − stateLag on these coordinates' clock)
-    return { all: (t, into, vels) => tr.all(t, into, vels), state: (num, t, out) => stateOf(tr, num, t, out), coords: (num) => tr.coords[num] || null, stateLag: 0, telLag: lag, update() {}, lag, frame, snapped };
+    return { all: (t, into, vels) => tr.all(t, into, vels), state: (num, t, out) => stateOf(tr, num, t, out), coords: (num) => tr.coords[num] || null, degraded: () => tr.degraded || {}, stateLag: 0, telLag: lag, update() {}, lag, frame, snapped };
   }
   // live: redo the last 30 s once a second (drawn 0.6 s behind the newest data)
   let tr = null, last = 0;
   return {
     all(t, into, vels) { return (tr || src.tracks).all(t - 600, into, vels); },
     state(num, t, out) { return stateOf(tr, num, t - 600, out, true); },
-    coords(num) { return tr?.coords?.[num] || null; }, stateLag: 600,   // (live: rebuilt from the data so far – nothing ahead of now)
+    coords(num) { return tr?.coords?.[num] || null; }, degraded() { return tr?.degraded || {}; }, stateLag: 600,   // (live: rebuilt from the data so far – nothing ahead of now)
     update(now) { if (now - last < 1000) return; last = now; const latest = Math.max(0, ...Object.values(src.tracks.cars).map((c) => (c.n ? c.t[c.n - 1] : 0))); tr = build(latest - 30000); },
     get telLag() { return lag; }, frame, get snapped() { return snapped; },   // (telLag, not lag: the live pit / start placement read sm.lag – undefined live – and keep doing so)
   };

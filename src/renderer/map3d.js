@@ -4351,6 +4351,16 @@ window.Map3D = {
     const gaps = {}; for (let k = 1; k < c.n; k++) bin(gaps, (c.t[k] - c.t[k - 1]) / 1000, 1);
     return JSON.stringify({ spans, laneAt: Object.entries(LB).sort((a, b) => b[1] - a[1]).slice(0, 25), n: c.n, near, level, inLane, out: o ? o.t.length : null, offOut: off, runs: runs.size, gaps, d: H.d, dy: H.dy });
   },
+  // (v0.53) the feed's state for the viewer's notes: positions dropped as held / re-sent (replay.js feedAudit), the cars with
+  // stretches drawn from the telemetry for a late feed (smooth.js degraded) – now (degradedNow) and over the session –,
+  // and how many frames a car was left out for a leap. null without a session.
+  feedState() {
+    const src = app().src; if (!src) return null;
+    const fa = src.feedAudit?.held || {}, sm = smooth.src === src ? smooth.tr : null, deg = sm?.degraded?.() || {}, t = app().t;
+    const held = Object.values(fa).reduce((a, b) => a + b.samples, 0), rewound = Object.values(fa).reduce((a, b) => a + (b.rewound || 0), 0);
+    const degradedCars = Object.keys(deg).filter((n) => deg[n].length), degradedNow = degradedCars.filter((n) => deg[n].some(([a, b]) => t >= a && t <= b));
+    return { held, rewound, degradedCars, degradedNow, leapFrames: leapHidden };
+  },
   // development (v0.53 §4–5): every car's FINAL drawn pose (after separate()) driven through updateCars over [t0, t1]
   // (stream ms) at `fps`, and what in it no car can do: a step faster than its own telemetry speed allows (a jump), a
   // height change faster than any road's slope at that speed (a lift), a heading swing, the body pitched / rolled past
