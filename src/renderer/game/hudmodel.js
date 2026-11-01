@@ -332,6 +332,9 @@ export function boxBlocked(car, pv) {
 // ======================================================================================================================
 // v0.52 (request §10-2): the race explained on ONE lap axis per driver (results.js)
 // ======================================================================================================================
+// a stop under an SC / VSC: its loss is against the field over the same stretch then (v0.53), not a free lap – under the SC
+// what the car wins back closing up to the queue afterwards is not in it (said, not hidden)
+export const underNote = (p) => !p.under ? "" : p.refBy === "field" ? ` · ${p.under.toUpperCase()} 중 다른 차 기준${p.under === "sc" ? " (대열 따라잡기 미포함)" : ""}` : ` · ${p.under.toUpperCase()} 중 (기준: 정상 주행)`;
 // Input: one car of engine.analysis (plans, stints, orders, ai, pitParts, traffic, laps, events), the race's flags
 // (analysis.flags), the race's laps, and a weather series [{ t, rain, water? }] (the game's own weather as the race ran –
 // gamehome finishRace). Output: everything placed on that car's laps, each item marked by where its number comes from:
@@ -382,7 +385,7 @@ export function raceStory(A, o = {}) {
   // stops: each pitPart is the stop at the end of lap `lap` (the stint before it ends there)
   const pits = (A.pitParts || []).map((p, i) => {
     const before = actual.find((s) => s.toLap === p.lap) || actual[i] || null, after = actual[actual.indexOf(before) + 1] || null;
-    return { lap: p.lap, loss: p.loss, queue: p.queue || 0, stationary: p.stationary ?? null, rest: p.rest ?? null, from: before?.compound || null, to: after?.compound || null, src: "measured", red: !!p.red, susp: p.susp ?? null };
+    return { lap: p.lap, loss: p.loss, queue: p.queue || 0, stationary: p.stationary ?? null, rest: p.rest ?? null, from: before?.compound || null, to: after?.compound || null, src: "measured", red: !!p.red, susp: p.susp ?? null, under: p.under || null, refBy: p.refBy || null };
   });
   // plan changes, each with its decider and (team AI) the decision that made it – reason codes and the AI's estimate
   const ai = (A.ai || []).slice().sort((a, b) => a.t - b.t);
@@ -423,7 +426,7 @@ export const SRC_KO = { measured: "엔진 기록", estimate: "당시 추정", re
 export function storyRows(S, ordText = (x) => x.type) {
   if (!S) return [];
   const R = [];
-  for (const p of S.pits) R.push({ lap: p.lap, kind: "pit", who: "", cls: "", text: `${p.red ? "적색기 피트레인" : "피트"} ${p.from ? CMP_1[p.from] || "?" : "?"}→${p.to ? CMP_1[p.to] || "?" : "?"}`, num: `${p.red && fin(p.susp) ? `중단 ${fmtS(p.susp)} (손실 아님) · ` : ""}손실 ${fmtS(p.loss)}${p.queue > 0.05 ? ` · 동료 대기 ${fmtS(p.queue)}` : ""}${fin(p.stationary) ? ` · 정지 ${fmtS(p.stationary)}` : ""}`, src: "measured", bad: p.queue > 0.05 });
+  for (const p of S.pits) R.push({ lap: p.lap, kind: "pit", who: "", cls: "", text: `${p.red ? "적색기 피트레인" : `피트${p.under ? ` (${p.under.toUpperCase()} 중)` : ""}`} ${p.from ? CMP_1[p.from] || "?" : "?"}→${p.to ? CMP_1[p.to] || "?" : "?"}`, num: `${p.red && fin(p.susp) ? `중단 ${fmtS(p.susp)} (손실 아님) · ` : ""}손실 ${fmtS(p.loss)}${p.queue > 0.05 ? ` · 동료 대기 ${fmtS(p.queue)}` : ""}${fin(p.stationary) ? ` · 정지 ${fmtS(p.stationary)}` : ""}${underNote(p)}`, src: "measured", bad: p.queue > 0.05 });
   for (const c of S.changes) R.push({ lap: c.lap, kind: "plan", who: c.who, cls: c.cls, text: `계획 → ${c.text}${c.why ? ` (${c.why})` : ""}`, num: fin(c.gain) ? `AI 기대 ${c.gain >= 0 ? "+" : "−"}${Math.abs(c.gain).toFixed(1)}초` : "", src: fin(c.gain) ? "estimate" : "record" });
   for (const c of S.aiOther) R.push({ lap: c.lap, kind: "ai", who: c.who, cls: c.cls, text: `${c.text}${c.why ? ` (${c.why})` : ""}`, num: fin(c.gain) ? `AI 기대 ${c.gain >= 0 ? "+" : "−"}${Math.abs(c.gain).toFixed(1)}초` : "", src: fin(c.gain) ? "estimate" : "record" });
   for (const x of S.orders) R.push({ lap: x.lap, kind: "order", who: x.who, cls: x.cls, text: ordText(x), num: "", src: "record", refused: !x.ok, why: x.why });

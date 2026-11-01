@@ -145,5 +145,11 @@ test("alerts: a car of mine on a tyre that doesn't suit the water, or nearly wor
   assert.match(one(mk("MEDIUM", 0.1, 30, 0.0), 1)[0] || "", /수명 10%/);
   assert.deepStrictEqual(one(mk("MEDIUM", 0.6, 8, 0.0), 1), []);
   assert.deepStrictEqual(one(mk("INTERMEDIATE", 0.9, 1, 0.0), 1), [], "a fresh inter on a drying track: not yet");
+  // (v0.53 regress: a fresh full wet on a damp line is worn out in 2–3 laps – the wrong tyre is told from its first lap and
+  // before the life, not hidden behind "worn"; both when both hold)
+  assert.match(one(mk("WET", 0.66, 1, 0.09), 1)[0] || "", /물이 적은 노면\(0.09 mm\)에 웨트/, "full wet, 1 lap old, damp line");
+  assert.deepStrictEqual(one(mk("WET", 1, 0, 0.09), 1), [], "not on the out-lap");
+  { const both = one(mk("WET", 0.12, 2, 0.15), 1); assert.ok(both.length === 2 && /에 웨트/.test(both[0]) && /수명 12%/.test(both[1]), "wrong tyre and worn: both – " + both); }
+  assert.deepStrictEqual(one(mk("WET", 0.6, 3, 0.9), 1), [], "full wet on 0.9 mm: fine");
   assert.strictEqual(set.tyre, "slow");
 });
