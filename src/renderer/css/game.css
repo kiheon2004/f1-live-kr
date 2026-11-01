@@ -352,6 +352,9 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gr-view #hud3d { display: none; }
 
   .gr-tower { grid-column: 3; grid-row: 2 / 4; position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); border-left: var(--bw) solid var(--line); }
+  .gr-mini { flex: 0 0 auto; aspect-ratio: 1 / 1; max-height: 42%; min-height: 0; border-top: var(--bw) solid var(--line); background: var(--bg-0); }
+  .gr-mini canvas { display: block; }
+  .gr-tower.slim .gr-mini { aspect-ratio: auto; height: 140px; }
   .gr-tower-h { display: flex; align-items: center; gap: var(--s-4); padding: var(--s-3) var(--s-4); border-bottom: var(--bw) solid var(--line); }
   .gr-tower-h b { flex: 1; font-size: var(--fs-sm); }
   .gr-tw { overflow: auto; min-height: 0; flex: 1; }
