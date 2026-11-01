@@ -185,15 +185,18 @@
 /* the small (not expanded) map: camera buttons and the selected driver only */
 #map3d .spec-hud.small .spec-strip, #map3d .spec-hud.small .spec-tower, #map3d .spec-hud.small .spec-pit, #map3d .spec-hud.small .spec-notes { display: none; }
 #map3d .spec-hud.small .spec-cam .ui-seg { flex-direction: column; }
-#map3d .spec-hud.small .spec-cam .spec-in { display: grid; grid-template-columns: auto auto; justify-content: start; align-items: center; gap: var(--s-3); background: none; border: 0; padding: 0; }
-#map3d .spec-hud.small .spec-cam .spec-in { align-items: start; }
-#map3d .spec-hud.small .spec-cam .ui-seg { grid-column: 1; grid-row: 1 / span 2; }   /* (◀ ▶ and 설정 in a second column beside the cameras: the short map keeps all of them at its top left, clear of the driver card) */
-#map3d .spec-hud.small .spec-cam .cam-car { grid-column: 2; grid-row: 1; }
-#map3d .spec-hud.small .spec-cam .spec-menu-wrap { grid-column: 2; grid-row: 2; }
+#map3d .spec-hud.small .spec-cam .spec-in { flex-direction: column; align-items: flex-start; background: none; border: 0; padding: 0; }
+/* the small map in the timing layout (as in v0.52): cameras and ◀ ▶ only – its 158 px high view (150 % zoom) has no room for
+ * a menu; the map settings keep their own button there. The full window narrowed by 상세: ◀ ▶ and 설정 in a second column */
+#map3d .spec-hud.small:not(.xp) .spec-cam .spec-menu-wrap { display: none; }
+#map3d .spec-hud.small.xp .spec-cam .spec-in { display: grid; grid-template-columns: auto auto; justify-content: start; align-items: start; gap: var(--s-3); }
+#map3d .spec-hud.small.xp .spec-cam .ui-seg { grid-column: 1; grid-row: 1 / span 2; }
+#map3d .spec-hud.small.xp .spec-cam .cam-car { grid-column: 2; grid-row: 1; }
+#map3d .spec-hud.small.xp .spec-cam .spec-menu-wrap { grid-column: 2; grid-row: 2; }
 #map3d .spec-hud.small .spec-cam .ui-seg { background: var(--hud-bg); }
 #map3d .spec-hud.small .spec-cam .cam-who { display: none; }
 #map3d .spec-hud.small .spec-cam .spec-menu-wrap > .ui-btn { background: var(--hud-bg); border: var(--bw) solid var(--line); }
-#map3d .spec-hud.small .spec-menu { left: 0; top: calc(100% + 6px); bottom: auto; }   /* (the small map: the button is at its top left – the menu opens downwards) */
+#map3d .spec-hud.small .spec-menu { left: 0; top: calc(100% + 6px); bottom: auto; }   /* (the narrowed full window: the button is at the top left – the menu opens downwards) */
 #map3d .spec-hud.small .spec-cam .cam-car { background: var(--hud-bg); border: var(--bw) solid var(--line); border-radius: var(--r-2); }
 #map3d .spec-hud.small .spec-driver .dc-name small, #map3d .spec-hud.small .spec-driver .dc-kv:not(:has([data-k="gap"])), #map3d .spec-hud.small .spec-driver .dc-row { display: none; }
 #map3d .spec-hud.small .spec-driver .dc-main { gap: var(--s-4); padding: var(--s-2) var(--s-4) var(--s-2) var(--s-3); }
@@ -213,6 +216,6 @@
 #map3d .spec-menu-wrap { position: relative; display: inline-flex; }
 #map3d .spec-menu { left: 0; bottom: calc(100% + 6px); min-width: 240px; font-size: var(--fs-md); }
 #map3d .spec-menu > label.ui-check { min-height: var(--ctl-h); padding: 0 var(--s-4); color: var(--text-1); }
-#map3d[data-mode="spec"] > .geo3d-btn { display: none; }
+#map3d[data-mode="spec"]:not(:has(> .spec-hud.small:not(.xp))) > .geo3d-btn { display: none; }
 #map3d .spec-hud.small.xp .spec-strip { display: block; }
 #map3d .spec-hud.small.xp .spec-strip .st-clock, #map3d .spec-hud.small.xp .spec-strip [data-k="wx"] { display: none; }
