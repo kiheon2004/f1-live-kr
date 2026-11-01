@@ -538,7 +538,7 @@ function movePit(race, car, t, ctx = {}) {
     // the stop's loss: time from the branch to the merge minus the time the car would have taken on the lap over the same
     // stretch at its free reference pace (forward pass of its envelope at entry) – the parts: queue, stationary (penalty +
     // work), the rest (braking to the limiter, the lane, the launch). Approximate: the reference is a free lap's pace.
-    const susp = (tm.susp || 0) / 1000, fieldRef = tm.neut ? stretchRef(race, car, tm.entry) : null, ref = fieldRef ?? car.pit.refS ?? 0;
+    const susp = (tm.susp || 0) / 1000, fieldRef = tm.neut && !tm.red ? stretchRef(race, car, tm.entry) : null, ref = fieldRef ?? car.pit.refS ?? 0;
     // the queue: the approach from where it began to the stop at the box against a free approach from the same place and
     // speed (the limiter speed held, then the box braking) – only for a car that queued; the standstill alone otherwise
     let queue = tm.queue != null ? (tm.queueEnd - tm.queue) / 1000 : 0;
@@ -548,7 +548,7 @@ function movePit(race, car, t, ctx = {}) {
     // (stationary: the box stop – under a red flag the car stops in the lane without one, and that wait is the suspension)
     const still = tm.release != null && tm.stop != null ? (tm.release - tm.stop) / 1000 : 0;
     const loss = tm.red ? Math.max(0, lane - susp - ref) : lane - ref;   // (into the lane BY the red flag: driven at the red's pace, never a gain)
-    car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2), ...(tm.red ? { red: true, susp: +susp.toFixed(1) } : {}), ...(tm.neut ? { under: tm.neut, refBy: fieldRef != null ? "field" : "free" } : {}) });
+    car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2), ...(tm.red ? { red: true, susp: +susp.toFixed(1) } : {}), ...(tm.neut && !tm.red ? { under: tm.neut, refBy: fieldRef != null ? "field" : "free" } : {}) });
     log(race, { t, car: car.num, type: "pitExit", cause: tm.red ? "red flag" : "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s${susp ? ` − suspension ${susp.toFixed(1)} s` : ""} − ${fieldRef != null ? `field under the ${tm.neut.toUpperCase()}` : "free"} ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
     car.pit.times = {};
     }
