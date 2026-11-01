@@ -13,7 +13,8 @@
 // direction for that visit (no switching back); picking 피트 by hand keeps the pit view until another is picked.
 // Two cars of the team in the lane: the selected car first; the subject is kept until its visit is over (no switching
 // back and forth), then the other one if it is still in the lane.
-// Auto-slow (optional): from 150 m before the box at more than 2× the race is slowed to 1× for the stop and put back to
+// Auto-slow (G.settings.pitSlow – on by default from v0.54: at 10–60× a stop's work lasted 40–300 ms on screen; in any
+// view following the car, not only the pit view): from 150 m before the box at more than 2× the race is slowed to 1× for the stop and put back to
 // the speed it had once the release shot ends – unless the speed was changed meanwhile by anyone else (the viewer, the
 // event auto-slow): then that choice stands. Never while paused (it would unpause). The race itself is never touched –
 // the runner's speed is the screen's (the engine computes the same steps at any speed).
@@ -31,10 +32,14 @@ const IN_LANE = new Set(["entry", "lane", "approach", "queue", "penalty", "work"
 // spots [a, b, h] (b: + the garages' side) and the look ([a, b, h] in the box's frame, or "car": the car itself)
 export const SHOTS = {
   approach: { spots: [[17, -7.5, 5.5], [17, -5, 7.5], [24, -9, 9], [11, -9.5, 4.2]], look: "car", fov: 38 },
-  wide: { spots: [[6.8, -8.2, 7.6], [-6.8, -8.2, 7.6], [0.5, -10.5, 9.5], [8.5, -6, 10.5]], look: [-0.2, 0, 0.45], fov: 42 },
+  // (v0.54: the wide and idle shots look a little up and towards the garages – [0, 1.5, 1] at 46° rather than the car's middle –
+  // so the team's garage boards over the openings (the team's name, each driver's number and name: garages.js teamLayer)
+  // are in the picture with the car and its whole crew, as in the replay; the car's middle at 0.45 m left the boards ~8°
+  // above the top edge of every spot)
+  wide: { spots: [[6.8, -8.2, 7.6], [-6.8, -8.2, 7.6], [0.5, -10.5, 9.5], [8.5, -6, 10.5]], look: [0, 1.5, 1], fov: 46 },
   close: { spots: [[3.8, -5.9, 2.8], [-2.9, -5.9, 2.8], [5.2, -4.9, 3.3], [0.6, -6.5, 3.5]], look: [0.5, -0.4, 0.4], fov: 40 },
   release: { spots: [[15, -9, 3.4], [13, -7, 5], [19, -10, 6.5]], look: "car", fov: 40 },
-  idle: { spots: [[6.8, -8.2, 7.6], [-6.8, -8.2, 7.6], [0.5, -10.5, 9.5]], look: [-0.2, 0, 0.45], fov: 42 },
+  idle: { spots: [[6.8, -8.2, 7.6], [-6.8, -8.2, 7.6], [0.5, -10.5, 9.5]], look: [0, 1.5, 1], fov: 46 },
 };
 export const SHOT_KO = { approach: "피트 진입", wide: "정비 전경", close: "정비 근접", release: "출발", idle: "피트 박스" };
 
@@ -93,7 +98,17 @@ export function createPitCam(K) {
   // ---------- the director (each frame, before the camera is placed) ----------
   function direct(A, fr, now) {
     const T = fr.t, paused = !(A.ctx.rate > 0), mode = K.camMode(), focus = K.focus();
-    if (!S.auto && mode !== "pit") { endSlow(A, true); S.subject = null; S.took = false; A.camAuto = null; return; }
+    if (!S.auto && mode !== "pit") {
+      // (no auto-direction: the view the viewer chose stays – chase, onboard, heli … – but the scene's slow-down (S.slow)
+      // still plays the stop of the car that view follows at 1×, then puts the speed back: v0.54 – at 10–60× a stop's
+      // 2–3 s of work was 40–300 ms on screen, the crew never seen working)
+      S.took = false; A.camAuto = null;
+      const sub = S.slow ? pickSubject(S.subject, fr.cars, [focus], (g) => boxOfRow(A, g), T) : null;
+      if (sub !== S.subject) { if (S.subject) endSlow(A, true); S.subject = sub; }
+      const g = sub ? fr.cars.find((r) => r.num === sub) : null, want = g ? shotFor(g, T, boxOfRow(A, g)) : null;
+      if (want && want !== "end") maybeSlow(A, g, T); else endSlow(A, true);
+      return;
+    }
     const order = [focus, ...(S.cars || [])].filter((x, i, a) => x && a.indexOf(x) === i);
     const sub = pickSubject(S.subject, fr.cars, order, (g) => boxOfRow(A, g), T);
     if (sub !== S.subject) {
@@ -106,10 +121,11 @@ export function createPitCam(K) {
     if (want === "end") { finish(A); want = null; }
     // auto-direction: a visit takes the camera over (once), unless the viewer chose another view during it
     if (want && S.auto && !S.manual && mode !== "pit" && !S.took && !paused) { S.prev = mode; S.took = true; K.setCamByDirector("pit"); S.shot = null; }
+    // auto-slow for the stop (screen speed only) – also when the viewer took another view during the visit (v0.54: the
+    // stop is then watched in that view, at 1×)
+    if (S.slow && g && want) maybeSlow(A, g, T);
     if (K.camMode() !== "pit") return;
     if (!want) want = "idle";
-    // auto-slow for the stop (screen speed only)
-    if (S.slow && g && want !== "idle") maybeSlow(A, g, T);
     if (want !== S.shot && (S.shot == null || (!paused && (now - S.shotWall) / 1000 >= SHOT_HOLD))) cut(want, now, T, sub);
     // (for the HUD: which car the camera shows and why – the selected car may be another; racehud.js reads A.camAuto)
     A.camAuto = S.took && sub ? { num: sub, why: "피트 " + SHOT_KO[S.shot || "idle"] } : null;
