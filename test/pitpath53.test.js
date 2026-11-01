@@ -180,3 +180,18 @@ test("the lane's directions turn smoothly from one garage's to the next (a curve
   const m = laneSectionAt(st, us, 5);
   assert.ok(Math.abs(Math.hypot(...m.along) - 1) < 1e-12 && Math.abs((Math.atan2(m.along[1], m.along[0]) * 180) / Math.PI - 2) < 0.01);
 });
+
+test("an entry road coming in at an angle: the drawn line eases from the feed's line to the fast lane – no step where the feed's line is 40 m out", async () => {
+  const { laneOffsetOf } = await PS();
+  const cs = { ok: true, fastC: 10.5, boxC: 4.5, wall: 12.5 };
+  // the feed's line coming in steeply: 40 m out 5 m before the run, 9 m out 15 m into it, into the garages' run at u = 0 (ends 40 m)
+  let prev = null, worst = 0;
+  for (let u = -120; u <= 20; u += 0.25) {
+    const feed = Math.max(9, 9 + ((15 - u) / 20) * 31), off = laneOffsetOf({ lane: "fast", w: 0 }, cs, feed, u, 0, 300);
+    // (a car more than 40 m out isn't in front of the garages at all: the caller draws the feed's line)
+    const drawn = feed >= 40 ? feed : off;
+    if (prev != null) worst = Math.max(worst, Math.abs(drawn - prev)); prev = drawn;
+  }
+  // (the feed's own line moves 0.39 m across per 0.25 m here – a 57° entry; v0.52's blend by u alone: a 29 m step)
+  assert.ok(worst < 1, `largest step ${worst} m per 0.25 m along`);
+});

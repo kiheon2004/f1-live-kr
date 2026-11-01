@@ -422,7 +422,7 @@ function pitFrame(src, t, lag, isRace) {
     // without one: as before)
     const offAt = (u) => { const w = pathW(r.state.path, u); return laneOffsetOf(w == null ? pitState({ ...r.input, u }) : { lane: r.state.lane, w }, m.at(u), r.off, u, G.gStart, G.gEnd); };
     const slope = r.state.lane === "garage" ? 0 : (offAt(r.u + 1) - offAt(r.u - 1)) / 2;
-    Object.assign(r, { at, want, turn: Math.atan(slope), inRun: runBlend(r.u, G.gStart, G.gEnd) });
+    Object.assign(r, { at, want, turn: Math.atan(slope), inRun: runBlend(r.u, G.gStart, G.gEnd, PIT, r.off, at.wall) });
   }
   return out;
 }
@@ -3974,7 +3974,7 @@ const gameKit = {
     const G = pitTeams.G; if (!G || !world) return null;
     const pr = G.project(x, z); if (!(pr.off > -3 && pr.off < 40) || pr.u < G.gStart - PIT.ends || pr.u > G.gEnd + PIT.ends) return null;
     const at = pitModelFor(G).at(pr.u);
-    return { u: pr.u, off: pr.off, fastC: at.fastC, boxC: at.ok ? at.boxC : at.fastC, along: at.along, inward: at.inward, floor: at.floor + 0.004, inRun: runBlend(pr.u, G.gStart, G.gEnd) };
+    return { u: pr.u, off: pr.off, fastC: at.fastC, boxC: at.ok ? at.boxC : at.fastC, along: at.along, inward: at.inward, floor: at.floor + 0.004, inRun: runBlend(pr.u, G.gStart, G.gEnd, PIT, pr.off, at.wall) };
   },
   pitSurfaceY: (x, z, y, floor, inRun) => pitSurfaceY(x, z, y, floor, inRun),
   // the cross section's distance from the fast lane to the box at a point (the ways' length – pitpath.js boxWays)

@@ -197,12 +197,20 @@ export function laneOffsetOf(s, cs, off, u, gStart, gEnd, P = PIT) {
   if (s.lane === "feed") want = off;
   else if (s.lane === "garage") want = cs.boxC + (-2.5 - cs.boxC) * s.w;   // (into its garage, 2.5 m inside the front)
   else want = cs.fastC + ((cs.ok ? cs.boxC : cs.fastC) - cs.fastC) * (s.lane === "box" ? s.w : 0);
-  return off + (want - off) * runBlend(u, gStart, gEnd, P);
+  return off + (want - off) * runBlend(u, gStart, gEnd, P, off, cs.wall);
 }
 
 // in the garages' run (1) – back to the feed's line over `ends` m past either end (0): a quintic (v0.53: the heading's
-// turn continuous there too)
-export const runBlend = (u, gStart, gEnd, P = PIT) => Math.min(q5((u - (gStart - P.ends)) / P.ends), 1 - q5((u - gEnd) / P.ends));
+// turn continuous there too). With the feed's offset there (off) and the lane's width (wall): also back to the feed's
+// line as that runs away from the lane – an entry or exit road coming in at an angle (v0.53: the run's blend by u alone
+// was near 1 where the feed's line was still 30–40 m out (faded over 20 m of offset from 2 m past the wall), and at 40 m out – where a car stops counting as in front of
+// the garages – the car was drawn 8 m across and 80° round in one frame: every game car at Hungary's pit entry)
+export const runBlend = (u, gStart, gEnd, P = PIT, off = null, wall = null) => {
+  const r = Math.min(q5((u - (gStart - P.ends)) / P.ends), 1 - q5((u - gEnd) / P.ends));
+  if (off == null) return r;
+  const w0 = (wall > 0 ? wall : 12) + 2;
+  return r * (1 - q5((off - w0) / 20));
+};
 
 // v0.49: a car going into its garage (lane "garage": retired and standing, or a long stay outside a race) – where it is at
 // w (0 → 1, pitState's), from where it stood in the lane to its own work space's car spot (garages.js garageZones), never
