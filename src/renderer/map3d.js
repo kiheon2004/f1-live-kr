@@ -368,6 +368,9 @@ function pitLaneMeshes(m) {
   mk(line, lidx, new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }), "laneLine");
   return g;
 }
+// (the car's state on the steadied tracks at t, or null – they aren't built yet, or it is off them)
+const smoothStTmp = {};
+function smoothSt(src, num, t) { const sm = smooth.src === src ? smooth.tr : null; return sm?.frame ? sm.state(num, t, smoothStTmp) : null; }
 // Every car in the pit lane this frame (pitstate.js): its state from the data up to now – raw positions only (the
 // InPit flag, its place on the measured pit path, its telemetry), never what is drawn – and where across the lane that
 // puts it. Two passes: a car standing behind its box sees a teammate in it. → Map num → { state, u, off, at, team, … }
@@ -387,6 +390,10 @@ function pitFrame(src, t, lag, isRace) {
     let x = p[0] * DM - c0.x, z = -(p[1] * DM - c0.z);
     const onLane = laneTest(x, z, (p[2] || 0) * DM - c0.y), inPit = S.hist.flagAt(num, "InPit", t);
     if (!onLane && !inPit) continue;
+    // (v0.53: a car the steadied tracks have on the track, which the timing doesn't have in the pit lane, is the track's –
+    // its raw position here is only interpolated between the feed's samples, which come 4–5 s apart at times (2026 Hungary:
+    // the straight line between two of them cut across the lane, and the car was drawn in it for a moment, 300–500 m off)
+    if (!inPit && smoothSt(src, num, t)) continue;
     // (in the pit lane the feed has every car on the measured path's line: a position more than 3 m off it is the data
     // jumping – Barcelona 2025, Norris, one sample 13 m out towards the track – and taken back onto the line, its place
     // along the lane kept)
@@ -1379,7 +1386,7 @@ function trackPointFor(c, x, z) {
   return c.sample ? c.sample.p.y : null;
 }
 
-const HAND_MAX = 8;   // m (v0.53: an estimate → feed handover eased only up to this far)
+const HAND_MAX = 8, READY_MS = 600;   // m (v0.53: an estimate → feed handover eased only up to this far); ms: raw → steadied when those come
 const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 // x → target as a critically damped spring of rate w (1/s), the value and its rate kept on the object
 function spring(o, key, rateKey, target, w, dt) {
@@ -1841,6 +1848,17 @@ function updateCars(dt) {
     if (c.hand) {
       const w = A.t < c.hand.t || A.t - c.hand.t > 1500 ? 0 : 1 - smoothstep(0, 1500, A.t - c.hand.t);
       if (w <= 0) c.hand = null; else { v.x += c.hand.dx * w; v.z += c.hand.dz * w; }
+    }
+    // (v0.53: the steadied tracks arriving – a moment after a session opens, smoothFor – take the car from the raw
+    // positions it was drawn by so far to its steadied place over READY_MS of the wall's time (also while paused: it is
+    // the drawing that changed, not the moment), if that is a step a car could make (HAND_MAX); a seek starts afresh)
+    if (c.smFor !== sm) {
+      if (c.smFor === null && sm && c.has && !jumpT && c.pos && Math.hypot(c.pos.x - v.x, c.pos.z - v.z) <= HAND_MAX) c.smHand = { at: performance.now(), dx: c.pos.x - v.x, dz: c.pos.z - v.z, dy: c.pos.y - v.y };
+      c.smFor = sm;
+    }
+    if (c.smHand) {
+      const e = performance.now() - c.smHand.at, w = jumpT || e > READY_MS ? 0 : 1 - smoothstep(0, READY_MS, e);
+      if (w <= 0) c.smHand = null; else { v.x += c.smHand.dx * w; v.z += c.smHand.dz * w; v.y += c.smHand.dy * w; }
     }
     c.pos.copy(v); c.has = true;
     c.obj.position.copy(v);
@@ -4314,7 +4332,7 @@ window.Map3D = {
             const dy = Math.abs(P.y - q.y), yAllow = (0.2 * Math.max(step / dt, 5) + 0.6) * dt;   // (20 % slope at the speed it moved, + 0.6 m/s)
             if (dy > yAllow) add("lift", num, dy, base);
             const dyaw = Math.abs(wrap(c.yaw - q.yaw));
-            if (dyaw > Math.max(0.12, (c.speed || 0) / 12 * dt * 1.5 + 0.05) && step > 0.02) add("yaw", num, dyaw * 57.3, base);
+            if (dyaw > Math.max(0.12, (c.speed || 0) / 12 * dt * 1.5 + 0.05) && step > 0.02) add("yaw", num, dyaw * 57.3, { ...base, traf: [+(c.trafD || 0).toFixed(2), +(c.trafRate || 0).toFixed(2), c.trafMode || ""], vs: c.st ? +c.st.vs.toFixed(1) : null, d: c.st ? +c.st.d.toFixed(2) : null, vd: c.st ? +c.st.vd.toFixed(2) : null });
             if (q.tag !== tg) add("switch", num, step, base);
           }
           if (Math.abs(c.model.rotation.x) > 0.09 || Math.abs(c.model.rotation.z) > 0.06) add("tilt", num, Math.max(Math.abs(c.model.rotation.x), Math.abs(c.model.rotation.z)) * 57.3, { tag: tg });

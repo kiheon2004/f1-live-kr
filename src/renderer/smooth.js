@@ -18,7 +18,6 @@ const DM = 0.1;
 const STEP_OUT = 125;          // ms between output samples
 const BRIDGE_MS = 15000, BRIDGE_TOL = 1.2;   // (v0.53: a gap the speed telemetry bridges – smoothCar)
 const JOIN_MS = 1000;          // ms over which a stretch's ends are eased onto the raw positions next to it (v0.53)
-const easeRate = (x) => (x <= 0 || x >= 1 ? 0 : 6 * x * (1 - x));   // d/dx of smoothstep
 
 // Gaussian smoothing of values v at (uneven) times t, sigma in ms, in place into `out`.
 function gauss(t, v, sigma, out = new Float64Array(v.length), weight = null) {
@@ -208,16 +207,21 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
   // leaving its box was drawn 10 m over towards the track). Tested only off the tarmac, where a pit lane can be.)
   const inLane = pitLaneTest(world);   // (v0.53: on the measured pit path AND off the track's tarmac – lanemember.js)
   const P = [];
-  let hint = null;
+  let hint = null, prevS = null, prevT = null;
+  const Sv = speedIntegral(car, lag);
   for (let k = from; k < n; k++) {
     const x = c.x[k] * DM - c0.x, z = -(c.y[k] * DM - c0.z), y = (c.z[k] || 0) * DM - c0.y;
+    // (v0.53: the search starts where the telemetry says the car got to since the last sample – samples 4–5 s and 200 m
+    // apart (2026 Hungary) were otherwise matched to the nearest bit of the lap line anywhere, now and then another part of
+    // the lap close by across the infield: s jumped, and the car's speed along with it)
+    if (Sv && prevS != null && T[k] - prevT > 600) { const ahead = Sv(T[k]) - Sv(prevT); if (ahead > 0 && ahead < frame.L / 2) hint = frame.sampleAt(prevS + ahead).i; }
     const pr = frame.project(x, z, hint);
+    if (pr) { prevS = pr.s; prevT = T[k]; }
     const near = !!pr && Math.abs(pr.d) <= half(pr.sample) + 6 && !inLane(x, z, y), level = !!pr && !offLevel(world, pr.sample, y);   // (v0.53: only where the lap line crosses itself – lanemember.js crossings)
     if (pr) hint = pr.i;
     P.push({ t: T[k], x: c.x[k], y: c.y[k], z: c.z[k], near, level, on: near && level, s: pr?.s, d: pr?.d });
   }
   for (let k = 1; k + 1 < P.length; k++) if (P[k].near && !P[k].level && P[k - 1].on && P[k + 1].near && P[k + 1].level) P[k].on = true;
-  const Sv = speedIntegral(car, lag);
   const tmp = [0, 0, 0];
   const emit = (t, x, y, z, s = 0, d = 0, run = 0, vs = NaN, as = 0, w = 0) => { out.t.push(t); out.x.push(x); out.y.push(y); out.z.push(z); out.s.push(s); out.d.push(d); out.run.push(run); out.vs.push(vs); out.as.push(as); out.w.push(w); };
   let k = 0, run = runBase;
@@ -249,10 +253,13 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
     // along the track: speed-integrated distance + a slow correction (robust: big misfits weigh less)
     let sAt, vAt = null, aAt = null;
     if (Sv) {
-      const bias = new Float64Array(m); for (let q = 0; q < m; q++) bias[q] = s[q] - Sv(t[q]);
-      let bS = gauss(t, bias, 1500);
+      // (v0.53: a single sample's misfit taken out first – median of 5 – and the smoothing at least as wide as the samples
+      // are apart there: with one sample in a window, the Gaussian is that sample, however far off)
+      const bias0 = new Float64Array(m); for (let q = 0; q < m; q++) bias0[q] = s[q] - Sv(t[q]);
+      const bias = median5(bias0), sig = 1500 * Math.max(1, Math.min(4, (t[m - 1] - t[0]) / Math.max(1, m - 1) / 300));
+      let bS = gauss(t, bias, sig);
       const w = new Float64Array(m);
-      for (let it = 0; it < 2; it++) { for (let q = 0; q < m; q++) { const r = Math.abs(bias[q] - bS[q]); w[q] = r < 3 ? 1 : 3 / r; } bS = gauss(t, bias, 1500, undefined, w); }
+      for (let it = 0; it < 2; it++) { for (let q = 0; q < m; q++) { const r = Math.abs(bias[q] - bS[q]); w[q] = r < 3 ? 1 : 3 / r; } bS = gauss(t, bias, sig, undefined, w); }
       sAt = (tt, q) => { const f = q + 1 < m ? (tt - t[q]) / (t[q + 1] - t[q] || 1) : 0; return Sv(tt) + bS[q] + (q + 1 < m ? (bS[q + 1] - bS[q]) * f : 0); };
       // its exact rate: the telemetry speed plus the correction's slope
       vAt = (tt, q) => Sv.v(tt) + (q + 1 < m ? ((bS[q + 1] - bS[q]) / (t[q + 1] - t[q] || 1)) * 1000 : 0);
@@ -269,7 +276,7 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
     // positions' own s differ by up to several metres; v0.52 jumped by that at every such handover: 2025 Hungary, a car
     // rejoining from the pit lane jumped 17–35 m in a frame.) At the session's own ends nothing joins: no easing.
     const joinA = k > 0, joinB = e + 1 < P.length;
-    const rawSD = (tt, q) => { const f = q + 1 < m ? (tt - t[q]) / (t[q + 1] - t[q] || 1) : 0; return [s[q] + (q + 1 < m ? (s[q + 1] - s[q]) * f : 0), d[q] + (q + 1 < m ? (d[q + 1] - d[q]) * f : 0), q + 1 < m ? ((s[q + 1] - s[q]) / (t[q + 1] - t[q] || 1)) * 1000 : 0]; };
+    const rawSD = (tt, q) => { const f = q + 1 < m ? (tt - t[q]) / (t[q + 1] - t[q] || 1) : 0; return [s[q] + (q + 1 < m ? (s[q + 1] - s[q]) * f : 0), d[q] + (q + 1 < m ? (d[q + 1] - d[q]) * f : 0)]; };
     let q = 0;
     for (let tt = t[0]; tt <= t[m - 1]; tt += STEP_OUT) {
       while (q + 1 < m && t[q + 1] <= tt) q++;
@@ -279,8 +286,10 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
       const w = snapped ? ease(Math.min(tt - t[0], t[m - 1] - tt) / 1500) : 0;
       const ja = joinA ? 1 - ease((tt - t[0]) / JOIN_MS) : 0, jb = joinB ? 1 - ease((t[m - 1] - tt) / JOIN_MS) : 0, j = Math.max(ja, jb);
       if (j > 0) {
-        const [sr, dr, vr] = rawSD(tt, q), dj = ja >= jb ? -easeRate((tt - t[0]) / JOIN_MS) / JOIN_MS : easeRate((t[m - 1] - tt) / JOIN_MS) / JOIN_MS;
-        if (!Number.isNaN(vs)) vs = vs * (1 - j) + vr * j + (sr - ss) * dj * 1000;
+        // (the speed along stays the telemetry's: the place's easing would add its own rate – the two places differ by up
+        // to 20 m where a car turns off for the pit lane, and over the second of easing that read as 15 m/s off the car's
+        // real speed, the heading (made from the speed along and across) swinging 40–80°: 2025 Hungary's pit entry)
+        const [sr, dr] = rawSD(tt, q);
         ss = ss * (1 - j) + sr * j; dData = dData * (1 - j) + dr * j;
       }
       frame.at(ss, dData * (1 - w) + frame.lineAt(ss) * w, tmp);
