@@ -5535,6 +5535,8 @@ window.Map3D = {
   // in the label atlas, the layer's distance LOD, which way it faces, what stands between it and the camera, its size
   // on screen). → { facility, plan, layer, drivers: [{ num, code, team, status, reason, slot, px, hit }] }
   boardsDiag() { updatePitTeams(true); return JSON.stringify(boardsDiag()); },
+  // development (v0.54): the garage boards of the teams' layer as built (replay or game): driver, team, bay, place, facing
+  garageBoards() { updatePitTeams(true); const g = pitTeams.group; return JSON.stringify({ game: !!game, layer: !!g, visible: !!g?.visible, facility: pitTeams.G?.facility || null, slots: pitTeams.G?.slots.length || 0, teams: (pitTeams.teams || []).map((t) => ({ team: t.team, box: t.box, slots: t.slots, from: t.from })), boards: (g?.userData.boards || []).map((b) => ({ num: b.num, team: b.team, slot: b.slot, label: b.label, u: pitTeams.G ? +pitTeams.G.project(b.p[0], b.p[2]).u.toFixed(2) : null, p: b.p.map((v) => +v.toFixed(2)), n: b.n.map((v) => +v.toFixed(3)) })) }); },
   pitTeams() { updatePitTeams(true); return JSON.stringify({ ...pitTeamsInfo(), teams: pitTeams.key?.split("|"), evidence: !Array.isArray(pitTeams.info?.evidence) ? pitTeams.info?.evidence ?? null : pitTeams.info.evidence.map((e) => [e.team, e.ok ? "ok" : "no", e.reason, e.n, e.spread, e.u != null ? Math.round(e.u) : null]) }); },
   facilityState() {
     const g = world?.real?.group; let n = 0; g?.traverse((o) => { if (o.userData?.facility) n++; });

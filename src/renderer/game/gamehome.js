@@ -30,8 +30,16 @@ import * as Res from "./results.js";
 import * as AlertsUI from "./alertsui.js";
 
 const SETTINGS_KEY = "f1kr:game:settings";
-const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: false, garageQuality: "auto", alerts: defaultAlertSettings() };
-function loadSettings() { try { return { ...DEFAULT_SETTINGS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}) }; } catch { return { ...DEFAULT_SETTINGS }; } }
+const DEFAULT_SETTINGS = { autoSlow: false, autosave: true, autosaveLaps: 5, reduceMotion: false, garageOrbit: true, autoPitCam: true, pitSlow: true, garageQuality: "auto", alerts: defaultAlertSettings() };
+// (v0.54: the pit scene's 1× – pitSlow – is on by default; settings saved before it with the old default (off, the pit
+// alert left as it was) take the new one once – pitScene54 marks them done; a pit alert chosen by hand keeps its pitSlow)
+function loadSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}, s = { ...DEFAULT_SETTINGS, ...raw };
+    if (raw.pitScene54 == null && raw.pitSlow === false && (raw.alerts?.myPit ?? "slow") === "slow") s.pitSlow = true;
+    s.pitScene54 = 1; return s;
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
 
 export const G = {
   on: false, step: "team", sheet: null, list: null, listErr: null, season: null, teamKey: null, sid: null, sc: null, scErr: null, seed: 1,
