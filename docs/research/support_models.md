@@ -1,6 +1,6 @@
 # F1 support cars: shape and dimension sheet for low-poly 3D models (v0.39 research)
 
-Research date: 2026-10-18. Anonymous web fetches only. Builds on `/Users/namkiheon/projects/f1-live-kr/docs/research/support_cars_start.md`.
+Research date: 2026-10-18. Anonymous web fetches only. Builds on `docs/research/support_cars_start.md`.
 Confidence: **H** = manufacturer document read today; **M** = reputable press or spec database quoting the manufacturer, or several sources agree; **L** = from memory or estimated from photos.
 Section A per car = road-car spec sheet. Section B per car = race-car (SC / medical) facts from official photos and releases, with date and event.
 
