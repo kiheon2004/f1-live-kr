@@ -4395,7 +4395,9 @@ window.Map3D = {
             if (q.tag !== tg) add("switch", num, step, base);
           }
           if (Math.abs(c.model.rotation.x) > 0.09 || Math.abs(c.model.rotation.z) > 0.06) add("tilt", num, Math.max(Math.abs(c.model.rotation.x), Math.abs(c.model.rotation.z)) * 57.3, { tag: tg });
-          if (frames % Math.max(1, Math.round(fps / 2)) === 0) { const g = groundY(P.x, P.z); if (Number.isFinite(g) && Math.abs(P.y - g) > (o.hTol ?? 0.6)) add("height", num, P.y - g, { tag: tg, x: +P.x.toFixed(1), z: +P.z.toFixed(1), ground: +g.toFixed(2) }); }
+          // (on the steadied track: the lap line's height at the car's own s – at a crossover the nearest sample can be the
+          // other level's; elsewhere the road / ground under it)
+          if (frames % Math.max(1, Math.round(fps / 2)) === 0) { const g = c.onTrack && c.st && Number.isFinite(c.st.s) ? (world.frame.at(c.st.s, 0, P0), P0[1]) : groundY(P.x, P.z); if (Number.isFinite(g) && Math.abs(P.y - g) > (o.hTol ?? 0.6)) add("height", num, P.y - g, { tag: tg, x: +P.x.toFixed(1), z: +P.z.toFixed(1), ground: +g.toFixed(2) }); }
           prev.set(num, { x: P.x, y: P.y, z: P.z, yaw: c.yaw, tag: tg, v: vt });
         }
       }
