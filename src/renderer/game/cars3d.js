@@ -94,7 +94,7 @@ export function updateGameCars(K, A, dt) {
     }
     c.game = g;
     const v = c.pos, Pf0 = c.model.userData.profile, lr = Pf0 ? -Pf0.RZ : 1.8, wb = Pf0 ? Pf0.FZ - Pf0.RZ : 3.6;
-    let onTrack = g.where === "lap" && g.s != null;
+    let onTrack = g.where === "lap" && g.s != null, slope = 0;   // (slope: the road's grade under the car – ride.js follows it, v0.54)
     if (onTrack) {
       // v0.54 (request §2): posed on the path the engine drives – the racing line at s plus the car's own offset from it
       // (gamepose.js): heading along that path at the rear axle, slip, lean, dip and steering from its curvature and the
@@ -103,7 +103,7 @@ export function updateGameCars(K, A, dt) {
       const dE = o.e != null ? lineAt(g.s) + o.e : g.d ?? 0;
       geo.at(g.s, dE, P0);
       const q = lapPose(geo, g.s, dE, o.e != null ? o.rate : 0, g.v || 0, aBody, { lr, wb }, POSE);
-      c.yaw = q.yaw; c.pathYaw = q.pathYaw; c.yawRate = q.yawRate; c.pitch = q.pitch; c.roll = q.roll; c.slide = q.slide; c.steerPath = q.steer;
+      c.yaw = q.yaw; c.pathYaw = q.pathYaw; c.yawRate = q.yawRate; c.pitch = q.pitch; c.roll = q.roll; slope = q.grade; c.slide = q.slide; c.steerPath = q.steer;
       v.set(P0[0], P0[1] + K.ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (g.v / 90) ** 2), P0[2]);
       const w = map.sd(g.s, dE); c.sample = F.sampleAt(w.s); c.worldS = w.s;
     } else if (g.where === "pit" && P && g.u != null) {

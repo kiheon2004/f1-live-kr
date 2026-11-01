@@ -61,7 +61,7 @@ export function lapPose(geo, s, d, eRate, v, aLong, o = {}, out = {}) {
   geo.at(s + fwd * 4, d, PA); geo.at(s - fwd * 4, d, PB);
   const grade = -Math.atan2(PA[1] - PB[1], 8);
   out.pathYaw = wrap(pathYaw); out.yaw = wrap(pathYaw + beta); out.beta = beta; out.slide = exitSlide;
-  out.kappa = kappa; out.yawRate = yawRate; out.aLat = aLat;
+  out.kappa = kappa; out.yawRate = yawRate; out.aLat = aLat; out.grade = grade;
   out.pitch = grade + clamp(-(aLong || 0) * PITCH_PER_A, -0.006, 0.02);   // (−5 g: nose down ~0.9°; under power up a little)
   out.roll = clamp(-aLat * ROLL_PER_ALAT, -ROLL_MAX, ROLL_MAX);           // (5 g: ~0.55° out of the corner)
   // front wheels: the path's curvature over the wheelbase, plus the tyres' slip angle (~0.6° per g), a touch of
