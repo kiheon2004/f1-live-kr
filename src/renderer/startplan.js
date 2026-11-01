@@ -162,6 +162,29 @@ export function arrivalBy(car, t, need, lag = 0) {
   return { still: true, stillSince, drove: dist, ok: dist >= need && t - stillSince >= PLAN.standMin };
 }
 
+// (v0.53) Does a car standing still at t pull away from where the feed has it standing? Its first departure after t by
+// the telemetry, and the feed's place just before it against DEP_CHECK_MS later: a car that moves off from its feed place
+// covers about the telemetry's distance in that time. A frozen (stale) place would be left in one leap instead. A car
+// standing far from its grid slot whose feed passes this test is where the feed has it – in its garage, or short of its
+// slot (2025 Hungary: cars in their garages drawn on their slots; Silverstone: three standing 70–110 m behind theirs) –
+// and was drawn on its slot, then snapped 40–200 m when it moved. pos(t) → [x, z] in metres or null. null: no departure
+// in the data (live, or the session's end) – unknown.
+export const DEP_CHECK_MS = 8000;
+export function departsFromFeed(car, t, lag, pos) {
+  if (!car?.t?.length) return null;
+  const T = car.t, V = car.v;
+  let i = 0; while (i < T.length && T[i] - lag <= t) i++;
+  while (i < T.length && V[i] <= PLAN.still) i++;
+  if (i >= T.length) return null;
+  const t0 = T[i] - lag, t1 = t0 + DEP_CHECK_MS;
+  if (T[T.length - 1] - lag < t1) return null;
+  let tel = 0; for (let k = i; k < T.length && T[k] - lag <= t1; k++) { const dt = (T[k] - T[k - 1]) / 1000; if (k > 0 && dt > 0 && dt < 3) tel += ((V[k] + V[k - 1]) / 2 / 3.6) * dt; }
+  const a = pos(t0 - 500), b = pos(t1);
+  if (!a || !b) return null;
+  const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  return d <= tel + 25 && d >= 0.6 * tel - 25;
+}
+
 const smooth = (e0, e1, x) => { const u = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return u * u * (3 - 2 * u); };
 
 // The moment a moving car last set off from a standstill (by its telemetry, samples ≤ t), or null.

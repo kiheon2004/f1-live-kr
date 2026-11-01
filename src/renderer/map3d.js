@@ -12,7 +12,7 @@ import { pitLaneTest } from "./lanemember.js";
 import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
-import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch } from "./startplan.js";
+import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch, departsFromFeed } from "./startplan.js";
 import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
 import { makeFlag } from "./flag3d.js";
@@ -3524,6 +3524,13 @@ function carsWithout(src, t, pos, F, lag) {
       if (!slot || !F) continue;
       const a = arrivalFor(S, src, num, t, need, lag);
       if (!a?.still || !a.ok || kind.inPitNow) continue;
+      // (v0.53, a replay: a car that pulls away from its feed place is there – drawn on its slot it snapped 40–200 m as it
+      // moved off, 35 of 47 races; live the departure isn't known yet – the slot as before)
+      if (!src.isLive) {
+        const k = num + ":" + a.stillSince, dep = S.dep || (S.dep = new Map());
+        if (!dep.has(k)) dep.set(k, departsFromFeed(src.car?.[num], t, lag, (tt) => { const q = src.positionsAt(tt)[num]; return q ? [q[0] * DM, q[1] * DM] : null; }));
+        if (dep.get(k)) continue;
+      }
       const p = pos[num], pr = F.project(p[0] * DM - c0.x, -(p[1] * DM - c0.z));
       let ds = pr ? pr.s - slot.s : Infinity; if (pr) ds = ((ds % F.L) + F.L * 1.5) % F.L - F.L / 2;
       const onTrack = pr && Math.abs(pr.d) <= Math.max(edgeOf(pr.sample, 1), -edgeOf(pr.sample, -1)) + 1;
