@@ -88,7 +88,9 @@ export const markOrders = () => { H.ordersDirty = true; Dock.markDirty(); };
 //     foot          goal state · the last order and its state – a refusal in red with its short reason, kept until the
 //                   next order (and a toast when it happens: refusals are never only in a tooltip)
 //   DETAIL, one card at a time, a pop-up over the view above its card (조작 ▴; Escape or the button closes it, the focus
-//   goes to the mode in force and back to the button):
+//   goes to the mode in force and back to the button). In the DOM it follows the box row, so the Tab order is 조작 → its
+//   controls → the foot (round 2). In a short window (under 600 px high – 1280 × 720 at 150 %) it opens beside its card,
+//   over the other card, so the race bar's speed buttons stay uncovered:
 //     페이스 / 에너지 – who decides (AI / 직접 / 목표 chip) + the modes: IN FORCE solid, SENT-not-yet dashed with a dot,
 //     the rest selectable · 목표 select · AI에 맡기기 · fuel margin · the box line in full · 차량 상세 (the dock's car panel:
 //     temperatures, energy per lap, trends)
@@ -120,10 +122,6 @@ function card(e) {
       <span class="gc-pre" data-f="pre"></span>
       <button class="ui-btn sm gc-fold" data-act="hud:fold" data-num="${n}" aria-expanded="false" aria-controls="gcCtl${n}" title="페이스·에너지·목표·AI 위임 (Esc로 닫기)">조작 ▴</button>
     </div>
-    <div class="gc-foot">
-      <span class="gc-goalst" data-f="goal"></span>
-      <span class="gc-ord" data-f="ord"></span>
-    </div>
     <div class="gc-ctl" id="gcCtl${n}" role="group" aria-label="${esc(e.tla)} 조작">
       <div class="gc-ctl-h"><b>${esc(e.tla)} 조작</b><span class="gc-kv gc-fuel" title="연료: 이 차가 지금까지 쓴 양으로 추정한 완주 여유 (랩, 게임 추정)"><small>연료 여유</small><b class="num" data-f="fuel">–</b></span>
         <button class="ui-btn sm ghost" data-act="hud:carDetail" data-num="${n}" title="온도·랩당 에너지·추세 – 오른쪽 차량 패널">차량 상세</button>
@@ -135,6 +133,10 @@ function card(e) {
         <button class="ui-btn sm quiet gc-deleg" data-act="hud:delegate" data-num="${n}" data-f="deleg" ${hasDelegate() ? "" : "disabled"} title="직접 지시한 페이스·에너지·계획을 팀 AI에게 다시 맡겨요">AI에 맡기기</button></span>
       <span class="gc-grp gc-plang"><small class="gc-lbl">피트 계획</small><span class="gc-own" data-f="ownPlan2">–</span></span>
       <span class="gc-pre2" data-f="pre2"></span>
+    </div>
+    <div class="gc-foot">
+      <span class="gc-goalst" data-f="goal"></span>
+      <span class="gc-ord" data-f="ord"></span>
     </div>
   </section>`;
 }
