@@ -179,7 +179,8 @@
       syncPicker(path, info, job);
       dispatchEvent(new CustomEvent("f1kr-loaded", { detail: { path, job } }));
       showLoad(100, "준비 완료 ·");
-      loadHideTimer = setTimeout(() => { $("loadBar").hidden = true; $("progress").textContent = "준비 완료"; }, 2500);
+      // (done: the bar and the word go – a "준비 완료" left beside the picker for the whole session says nothing)
+      loadHideTimer = setTimeout(() => { $("loadBar").hidden = true; $("progress").textContent = ""; }, 2500);
       paintHomeBtn();
       return { ok: true, job };
     } catch (e) {
@@ -477,7 +478,8 @@
     const box = $("sbSource"); if (!box) return;
     let html = "";
     if (mode === "replay") {
-      if (replay) html = `<span class="src" title="저장된 기록을 재생 중이에요 · 남은 시간과 랩은 그 순간의 기록이에요">다시보기</span><span>${playing ? `재생 중 <b>${esc(speed)}배속</b>` : `${ico("pause", { size: 14 })}일시정지`}</span>`;
+      // (v0.53: the app bar's 다시보기 tab already says where the data comes from – the session bar says only how it plays)
+      if (replay) html = `<span title="저장된 기록을 재생 중이에요 · 남은 시간과 랩은 그 순간의 기록이에요">${playing ? `재생 중 <b>${esc(speed)}배속</b>` : `${ico("pause", { size: 14 })}일시정지`}</span>`;
     } else {
       const st = liveStatus.state, conn = { live: ["수신 중", "ok"], connecting: ["연결 중…", "warn"], reconnecting: ["다시 연결 중…", "warn"], error: ["오류", "bad"], stopped: ["연결 안 됨", ""] }[st] || [st, ""];
       const delay = Math.round(live.delayMs / 1000), stale = liveStale(), wait = st !== "stopped" ? live.waitingMs() : 0;
@@ -515,7 +517,9 @@
     const st = s.SessionStatus?.Status, qp = sessionType() === "Qualifying" ? s.TimingData?.SessionPart : null, qn = `${isSprint() ? "SQ" : "Q"}${qp}`;
     const ss = qp && st === "Finished" && qp < 3 ? `${qn} 종료` : qp && st === "Inactive" && qp > 1 ? `${qn} 시작 전` : qp && st === "Started" ? `${qn} 진행 중`
       : { Inactive: "시작 전", Started: "진행 중", Aborted: "중단", Finished: "종료", Finalised: "결과 확정", Ends: "세션 종료" }[st];
-    $("sessStatus").hidden = !ss; $("sessStatus").textContent = ss || "";
+    // (a race or practice under way is the normal case – said by the flag and the clock; the chip only for the other states)
+    const usual = st === "Started" && !qp;
+    $("sessStatus").hidden = !ss || usual; $("sessStatus").textContent = ss || "";
     $("sessStatus").className = "chip " + (s.SessionStatus?.Status === "Started" ? "ok" : s.SessionStatus?.Status === "Aborted" ? "bad" : "");
     const w = s.WeatherData;
     const wv = (v) => (v == null || v === "" ? "–" : esc(v));
@@ -836,6 +840,17 @@
   $("tabTrace").addEventListener("click", () => setPanel("trace"));
   $("tabStrat").addEventListener("click", () => setPanel("strat"));
   $("tabChamp").addEventListener("click", () => setPanel("champ"));
+  // (v0.53 §12-5: the tab row as a tab list for the keyboard – ← / → / Home / End move and open, one tab in the Tab order)
+  const tabBtns = [...document.querySelectorAll(".tabs-card .tabs > [role=tab]")];
+  const rovingTabs = () => tabBtns.forEach((b) => { b.tabIndex = b.getAttribute("aria-selected") === "true" ? 0 : -1; });
+  document.querySelector(".tabs-card .tabs").addEventListener("keydown", (e) => {
+    const i = tabBtns.indexOf(document.activeElement); if (i < 0 || e.isComposing || e.altKey || e.metaKey || e.ctrlKey) return;
+    const j = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabBtns.length - 1 }[e.key]; if (j == null) return;
+    e.preventDefault(); e.stopPropagation();   // (not the replay's ← / → seek)
+    const b = tabBtns[(j + tabBtns.length) % tabBtns.length]; b.click(); b.focus();
+  });
+  new MutationObserver(rovingTabs).observe(document.querySelector(".tabs-card .tabs"), { subtree: true, attributes: true, attributeFilter: ["aria-selected"] });
+  rovingTabs();
 
   // ---------- tyre strategy: every driver's stints on one lap axis ----------
   // Stint laps come from TimingAppData (TotalLaps = tyre age now, StartLaps = age when fitted), so used tyres
@@ -1714,13 +1729,37 @@
   document.querySelectorAll(".view-switch button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
   setView(mapView);
   function setExpanded(on) {
+    if (!on) setDetail(false);
     $("mapCard").classList.toggle("expanded", on);
     $("expandMap").setAttribute("aria-pressed", String(on));
     document.querySelector(".expand-hint").hidden = !on; $("miniBoard").hidden = !on;
     renderMiniBoard(true);
   }
   $("expandMap").addEventListener("click", () => setExpanded(!$("mapCard").classList.contains("expanded")));
-  addEventListener("keydown", (e) => { if (e.key === "Escape" && $("mapCard").classList.contains("expanded")) setExpanded(false); });
+  addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.isComposing || !$("mapCard").classList.contains("expanded")) return;
+    if ($("mapCard").classList.contains("detail-on")) { setDetail(false, true); return; }   // (Escape: the detail panel first, then the full window)
+    setExpanded(false);
+  });
+  // v0.53 §12-1/12-2: the full-window view's ONE detail panel. The spectating view stays the scene with a minimal HUD;
+  // 상세 opens the timing screen's own panel (레이스 컨트롤 · 드라이버 · 라디오 · 스틴트 · 갭 차트 · 챔피언십 – one tab at a
+  // time, the same tabs and the same content as in the timing layout) as a column on the right; the 3D view narrows beside
+  // it (the HUD lays itself out in what is left). The panel element itself is moved, not copied: one place to paint,
+  // one state (its tab, its filters), and the timing layout gets it back unchanged when the window view closes.
+  function setDetail(on, focusBack = false) {
+    const card = $("mapCard"), dock = document.querySelector(".tabs-card"), btn = $("detailBtn");
+    on = !!on && card.classList.contains("expanded");
+    if (on === card.classList.contains("detail-on")) return;
+    if (on) { card.appendChild(dock); dock.setAttribute("aria-label", "상세 패널"); }
+    else { $("splitH").after(dock); dock.removeAttribute("aria-label"); }
+    card.classList.toggle("detail-on", on); btn.setAttribute("aria-expanded", String(on));
+    btn.textContent = on ? "상세 닫기" : "상세";
+    radioKey = traceKey = champKey = stratKey = ""; renderDriver(); if (src) { renderRadio(); renderTrace(); renderChamp(); renderStrat(); }
+    if (on) requestAnimationFrame(() => dock.querySelector('.tabs [aria-selected="true"]')?.focus({ preventScroll: true }));
+    else if (focusBack) btn.focus({ preventScroll: true });
+    requestAnimationFrame(() => dispatchEvent(new Event("resize")));
+  }
+  $("detailBtn").addEventListener("click", () => setDetail(!$("mapCard").classList.contains("detail-on"), true));
   // Compact standings shown over the full-window map.
   let miniKey = "";
   function renderMiniBoard(force) {

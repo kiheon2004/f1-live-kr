@@ -163,16 +163,22 @@ function initGeoSettings() {
     document.getElementById("geoMirrors").value = ["full", "low", "simple"].includes(o.mirrors) ? o.mirrors : "auto";
     document.getElementById("geoGloves").value = kitMode(o.gloves);
   };
+  // (v0.53 §12-5: the pop-up takes the focus when opened and gives it back – to the button, or to the HUD's 설정 menu
+  // button when it was opened from there – on Escape)
+  const closePop = (focusBack) => { if (pop.hidden) return; pop.hidden = true; btn.setAttribute("aria-expanded", "false"); const o = btn.__opener && btn.__opener.offsetParent ? btn.__opener : btn; btn.__opener = null; if (focusBack) o.focus?.(); };
+  pop.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.isComposing) { e.preventDefault(); e.stopPropagation(); closePop(true); } });
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
-    pop.hidden = !open; btn.setAttribute("aria-expanded", String(open));
+    if (!open) { closePop(false); return; }
+    pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+    pop.querySelector("input:checked, input, select, button")?.focus({ preventScroll: true });
     if (open) {
       paint();
       const g = await window.api.geo.google();
       document.getElementById("geoKey").placeholder = g.hasKey ? "저장된 키가 있어요 (바꾸려면 새 키 입력)" : "Google Maps Platform API 키";
     }
   });
-  document.addEventListener("click", (e) => { if (!pop.hidden && !e.target.closest("#geo3dPop, #geo3dBtn")) { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); } });
+  document.addEventListener("click", (e) => { if (!pop.hidden && !e.target.closest("#geo3dPop, #geo3dBtn")) closePop(false); });
   const change = (patch, rebuildGeo = true) => { saveGeoSettings({ ...geoSettings(), ...patch }); if (rebuildGeo) rebuild(); else applyLighting(); };
   document.querySelectorAll('input[name="geoProvider"]').forEach((r) => r.addEventListener("change", async () => {
     if (r.value === "google") {
