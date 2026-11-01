@@ -136,7 +136,7 @@ const WARM_KO = { oneLap: "1랩 워밍업", slowWarm: "워밍업 느림", wet: "
 const WHYNOT_KO = { noStopPlanned: "계획된 피트 없음", tooLate: "이번 랩은 늦음" };
 function optionsHtml(num, c) {
   const op = D.opts[num];
-  if (!op || op.err === "none") return `<h4>다음 피트 대안</h4><p class="g-pending">엔진 연결 전</p>`;
+  if (!op || op.err === "none") return `<h4>다음 피트 대안</h4><p class="g-pending">자료 없음</p>`;
   if (op.err) return `<h4>다음 피트 대안</h4><p class="g-warn">계산하지 못했어요: ${esc(op.err)}</p>`;
   const v = op.v; if (!v) return `<h4>다음 피트 대안</h4><p class="muted">주행 중인 차만 계산해요</p>`;
   const rows = v.options.map((o) => {

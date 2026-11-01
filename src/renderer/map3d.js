@@ -164,16 +164,22 @@ function initGeoSettings() {
     document.getElementById("geoMirrors").value = ["full", "low", "simple"].includes(o.mirrors) ? o.mirrors : "auto";
     document.getElementById("geoGloves").value = kitMode(o.gloves);
   };
+  // (v0.53 §12-5: the pop-up takes the focus when opened and gives it back – to the button, or to the HUD's 설정 menu
+  // button when it was opened from there – on Escape)
+  const closePop = (focusBack) => { if (pop.hidden) return; pop.hidden = true; btn.setAttribute("aria-expanded", "false"); const o = btn.__opener && btn.__opener.offsetParent ? btn.__opener : btn; btn.__opener = null; if (focusBack) o.focus?.(); };
+  pop.addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.isComposing) { e.preventDefault(); e.stopPropagation(); closePop(true); } });
   btn.addEventListener("click", async () => {
     const open = pop.hidden;
-    pop.hidden = !open; btn.setAttribute("aria-expanded", String(open));
+    if (!open) { closePop(false); return; }
+    pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+    pop.querySelector("input:checked, input, select, button")?.focus({ preventScroll: true });
     if (open) {
       paint();
       const g = await window.api.geo.google();
       document.getElementById("geoKey").placeholder = g.hasKey ? "저장된 키가 있어요 (바꾸려면 새 키 입력)" : "Google Maps Platform API 키";
     }
   });
-  document.addEventListener("click", (e) => { if (!pop.hidden && !e.target.closest("#geo3dPop, #geo3dBtn")) { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); } });
+  document.addEventListener("click", (e) => { if (!pop.hidden && !e.target.closest("#geo3dPop, #geo3dBtn")) closePop(false); });
   const change = (patch, rebuildGeo = true) => { saveGeoSettings({ ...geoSettings(), ...patch }); if (rebuildGeo) rebuild(); else applyLighting(); };
   document.querySelectorAll('input[name="geoProvider"]').forEach((r) => r.addEventListener("change", async () => {
     if (r.value === "google") {
@@ -1386,8 +1392,17 @@ function trackPointFor(c, x, z) {
   c.sample = s && d < 25 ? s : null;
   return c.sample ? c.sample.p.y : null;
 }
+// v0.53: the height for a car drawn from its raw position (off the steadied tracks, not in the pit lane): the lap line's
+// within 25 m (trackPointFor); further out the ground's (the real map's terrain) unless the feed's own height agrees with it
+// within GROUND_TOL m – the feed's Z can be tens of metres off (2026 Hungary: cars 52 m under the ground in the run-off)
+const GROUND_TOL = 3;
+function groundFor(c, x, z, feedY) {
+  const g = trackPointFor(c, x, z); if (g != null) return g + ROAD_LIFT - 0.02;
+  const t = world.real?.groundAt?.(x, z);
+  return Number.isFinite(t) && Math.abs(feedY - t) > GROUND_TOL ? t + 0.02 : feedY;
+}
 
-const HAND_MAX = 8, READY_MS = 600;   // m (v0.53: an estimate → feed handover eased only up to this far); ms: raw → steadied when those come
+const HAND_MAX = 8, READY_MS = 600, ACROSS_MAX = Math.tan(0.35);   // m (v0.53: an estimate → feed handover eased only up to this far); ms: raw → steadied when those come
 const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 // x → target as a critically damped spring of rate w (1/s), the value and its rate kept on the object
 function spring(o, key, rateKey, target, w, dt) {
@@ -1740,10 +1755,17 @@ function updateCars(dt) {
       // steadied s can run backwards for a moment where its correction pulls it back (a stale or frozen stretch of data,
       // a car crawling on the grid), and v0.52 turned the car round with it: 2025 Hungary, 180° flips at 30–146 km/h)
       let pathYaw;
-      const tel = src.carAt?.(num, A.t), back = st.vs < -1.5 && (!tel || tel.speed < 20), vAl = back ? st.vs : Math.abs(st.vs);
-      if (Math.abs(st.vs) > 1.5) {
-        const ds = Math.max(3, Math.min(10, Math.abs(st.vs) * 0.1)), h = ds / Math.abs(st.vs);
-        F.at(sD - vAl * h, dTot - dRate * h, PA); F.at(sD + vAl * h, dTot + dRate * h, PB);
+      // (v0.53: the speed along the track for the heading is the telemetry's where there is some – the steadied s's own rate
+      // dips where its place is eased onto the raw positions at a stretch's end: 2025 Hungary's pit entry, where the feed's
+      // position steps 8.6 m across onto the pit lane's line and 4 m back, it fell to 2 m/s at 105 km/h and the heading went
+      // 40–80° across – and the part of the heading from moving across is held within ACROSS_MAX of the track's direction
+      // at speed: no car on the tarmac goes sideways at 100 km/h; a jump of the data does)
+      const tel = src.carAt?.(num, A.t), back = st.vs < -1.5 && (!tel || tel.speed < 20);
+      const vTel = tel && tel.speed > 5 && !est ? tel.speed / 3.6 : null, vAl = back ? st.vs : vTel ?? Math.abs(st.vs);
+      if (Math.abs(vAl) > 1.5) {
+        const ds = Math.max(3, Math.min(10, Math.abs(vAl) * 0.1)), h = ds / Math.abs(vAl);
+        const dR = Math.abs(vAl) > 15 ? Math.max(-ACROSS_MAX, Math.min(ACROSS_MAX, dRate / Math.abs(vAl))) * Math.abs(vAl) : dRate;
+        F.at(sD - vAl * h, dTot - dR * h, PA); F.at(sD + vAl * h, dTot + dR * h, PB);
         pathYaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
       } else pathYaw = Math.atan2(DIR[0], DIR[1]);
       if (devMotion) c.dbg = [Math.atan2(DIR[0], DIR[1]), Math.atan2(dRate, st.vs || 1), st.s, dTot, st.vs, st.d, off, P0[0], P0[2]];
@@ -1781,8 +1803,7 @@ function updateCars(dt) {
         mx = Math.sin(q.yaw) * est.vs; mz = Math.cos(q.yaw) * est.vs;
       } else {
         v.set(p[0] * DM - world.center.x, (p[2] || 0) * DM - world.center.y, -(p[1] * DM - world.center.z));
-        const ground = trackPointFor(c, v.x, v.z);
-        if (ground != null) v.y = ground + ROAD_LIFT - 0.02;   // (the pit lane's tarmac is laid 4 cm over the ground)
+        v.y = groundFor(c, v.x, v.z, v.y);   // (the pit lane's tarmac is laid 4 cm over the ground)
         const vel = velBuf[num];                                               // dm/ms → m/s is ×100
         mx = vel ? vel[0] * 100 : 0; mz = vel ? -vel[1] * 100 : 0;
       }
@@ -2467,7 +2488,7 @@ function separate(dt, seen, snap = false) {
     // (on the track the height is right already; in the pit lane pitDraw put it on the lane's / the garage's floor – v0.49:
     // this set every pit-lane car off the steadied tracks to the NEAREST LAP-LINE point's height, the start straight beside
     // the lane: Monaco 2025's cars in their boxes 0.93 m under the lane's floor, Gasly's retired car 1.19 m over it)
-    if (!c.onTrack && !(c.pit?.at && c.pit.inRun > 0)) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + ROAD_LIFT - 0.02; }
+    if (!c.onTrack && !(c.pit?.at && c.pit.inRun > 0)) c.pos.y = groundFor(c, c.pos.x, c.pos.z, c.pos.y);
     c.obj.position.copy(c.pos);
     // (v0.53: the car the cockpit cameras ride keeps its steadied height – updateCars' c.stab; v0.52 set it back to the
     // unsteadied one here, every frame, so the steadying of the height never reached the picture)

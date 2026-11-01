@@ -17,6 +17,8 @@ import { pitLaneTest, offLevel } from "./lanemember.js";
 const DM = 0.1;
 const STEP_OUT = 125;          // ms between output samples
 const BRIDGE_MS = 15000, BRIDGE_TOL = 1.2;   // (v0.53: a gap the speed telemetry bridges – smoothCar)
+const LATE_M = 20, LATE_WIN = 6000;   // (v0.53: a late position – smoothCar)
+const DEGRADED_WIN = 20000, DEGRADED_SIG = 8000;   // (v0.53: a degraded stretch's leading edge and its smoothing – smoothCar)
 const JOIN_MS = 1000;          // ms over which a stretch's ends are eased onto the raw positions next to it (v0.53)
 
 // Gaussian smoothing of values v at (uneven) times t, sigma in ms, in place into `out`.
@@ -251,15 +253,46 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
     for (let q = 1; q < m; q++) { let ds = s[q] - s[q - 1]; while (ds < -frame.L / 2) { s[q] += frame.L; ds += frame.L; } while (ds > frame.L / 2) { s[q] -= frame.L; ds -= frame.L; } }
     const dS = gauss(t, median5(d), 500);
     // along the track: speed-integrated distance + a slow correction (robust: big misfits weigh less)
-    let sAt, vAt = null, aAt = null;
+    let sAt, vAt = null, aAt = null, degraded = false;
     if (Sv) {
       // (v0.53: a single sample's misfit taken out first – median of 5 – and the smoothing at least as wide as the samples
       // are apart there: with one sample in a window, the Gaussian is that sample, however far off)
       const bias0 = new Float64Array(m); for (let q = 0; q < m; q++) bias0[q] = s[q] - Sv(t[q]);
+      // (v0.53: LATE positions – the feed sending where a car was seconds ago, stamped now: 2026 Hungary race, behind by up
+      // to ~15 s at times, then a leap ahead as it caught up – are always behind where the car is. Where a stretch has
+      // many samples more than LATE_M m behind the leading edge of the samples round them (the most advanced over
+      // ±LATE_WIN ms), only the samples on that edge set where the car is; on healthy data none is that far behind and
+      // nothing changes)
+      const late = new Uint8Array(m);
+      { let lo = 0, hi = 0, nLate = 0; const dq = [];
+        for (let q = 0; q < m; q++) {
+          while (hi < m && t[hi] <= t[q] + LATE_WIN) { while (dq.length && bias0[dq[dq.length - 1]] <= bias0[hi]) dq.pop(); dq.push(hi); hi++; }
+          while (t[lo] < t[q] - LATE_WIN) lo++;
+          while (dq[0] < lo) dq.shift();
+          if (bias0[dq[0]] - bias0[q] > LATE_M) { late[q] = 1; nLate++; }
+        }
+        if (nLate < Math.max(3, m * 0.02)) late.fill(0); }
       const bias = median5(bias0), sig = 1500 * Math.max(1, Math.min(4, (t[m - 1] - t[0]) / Math.max(1, m - 1) / 300));
-      let bS = gauss(t, bias, sig);
+      // (on a late stretch: the samples themselves, each late one given the on-time samples' value at its moment – linear
+      // between the nearest on-time ones either side; a window of late samples alone would otherwise keep its own)
+      // A stretch with late samples is a DEGRADED one (2026 Hungary: whole minutes 5–15 s behind, then a leap ahead): its
+      // positions can't be trusted second by second, and the telemetry's distance can – it drifts off the lap line's by a
+      // few metres a lap at most. There the place is the telemetry's distance plus a slow correction (DEGRADED_SIG) taken
+      // from the leading edge of the samples over ±DEGRADED_WIN (the most advanced: a late sample is only ever behind).
+      let bLead = bias, sigUse = sig;
+      if (late.some((x) => x)) {
+        bLead = new Float64Array(m); sigUse = DEGRADED_SIG; degraded = true;
+        let lo = 0, hi = 0; const dq = [];
+        for (let q = 0; q < m; q++) {
+          while (hi < m && t[hi] <= t[q] + DEGRADED_WIN) { while (dq.length && bias0[dq[dq.length - 1]] <= bias0[hi]) dq.pop(); dq.push(hi); hi++; }
+          while (t[lo] < t[q] - DEGRADED_WIN) lo++;
+          while (dq[0] < lo) dq.shift();
+          bLead[q] = bias0[dq[0]];
+        }
+      }
       const w = new Float64Array(m);
-      for (let it = 0; it < 2; it++) { for (let q = 0; q < m; q++) { const r = Math.abs(bias[q] - bS[q]); w[q] = r < 3 ? 1 : 3 / r; } bS = gauss(t, bias, sig, undefined, w); }
+      let bS = gauss(t, bLead, sigUse);
+      for (let it = 0; it < 2; it++) { for (let q = 0; q < m; q++) { const r = Math.abs(bLead[q] - bS[q]); w[q] = r < 3 ? 1 : 3 / r; } bS = gauss(t, bLead, sigUse, undefined, w); }
       sAt = (tt, q) => { const f = q + 1 < m ? (tt - t[q]) / (t[q + 1] - t[q] || 1) : 0; return Sv(tt) + bS[q] + (q + 1 < m ? (bS[q + 1] - bS[q]) * f : 0); };
       // its exact rate: the telemetry speed plus the correction's slope
       vAt = (tt, q) => Sv.v(tt) + (q + 1 < m ? ((bS[q + 1] - bS[q]) / (t[q + 1] - t[q] || 1)) * 1000 : 0);
@@ -275,7 +308,8 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
     // begins and ends exactly where the raw positions take over. (The steadied s – the telemetry's distance – and the
     // positions' own s differ by up to several metres; v0.52 jumped by that at every such handover: 2025 Hungary, a car
     // rejoining from the pit lane jumped 17–35 m in a frame.) At the session's own ends nothing joins: no easing.
-    const joinA = k > 0, joinB = e + 1 < P.length;
+    // (a degraded stretch's raw ends are as late as the rest: not eased onto)
+    const joinA = k > 0 && !degraded, joinB = e + 1 < P.length && !degraded;
     const rawSD = (tt, q) => { const f = q + 1 < m ? (tt - t[q]) / (t[q + 1] - t[q] || 1) : 0; return [s[q] + (q + 1 < m ? (s[q + 1] - s[q]) * f : 0), d[q] + (q + 1 < m ? (d[q + 1] - d[q]) * f : 0)]; };
     let q = 0;
     for (let tt = t[0]; tt <= t[m - 1]; tt += STEP_OUT) {

@@ -110,3 +110,20 @@ test("steadied tracks: a stretch begins and ends on the raw positions next to it
   const p59 = sm.all(t[59] - 1, {})["1"], miss = Math.hypot(p59[0] - x[59], p59[1] - y[59]) * 0.1;
   assert.ok(miss < 1.5, `at the handover ${miss.toFixed(2)} m off the raw position`);
 });
+
+test("re-sent positions: a leap back onto ground covered seconds before, then over it again, is dropped; a hairpin is kept", () => {
+  // forward at 50 m/s along x; at 10 s the feed jumps back 150 m and replays the last 3 s (other numbers, same places)
+  const N = 120, t = new Float64Array(N), x = new Float32Array(N), y = new Float32Array(N), z = new Float32Array(N), tel = { t: [], v: [] };
+  for (let k = 0; k < N; k++) {
+    t[k] = 1000 + k * 250; const s = (t[k] - 1000) / 1000;
+    const shown = s >= 10 && s < 13 ? s - 3 : s;
+    x[k] = Math.round(shown * 50 * 10) + (k % 3); tel.t.push(t[k]); tel.v.push(180);
+  }
+  const r = RK.dropHeld({ t, x, y, z, n: N }, tel);
+  assert.ok(r.rewound >= 10, `rewound ${r.rewound}`);
+  for (let k = 1; k < r.track.n; k++) assert.ok(r.track.x[k] >= r.track.x[k - 1] - 5, "never back");
+  // a hairpin: 15 m/s round a 10 m radius – the exit passes within 8 m of the entry a few seconds later; no leap
+  const M = 80, t2 = new Float64Array(M), x2 = new Float32Array(M), y2 = new Float32Array(M), tel2 = { t: [], v: [] };
+  for (let k = 0; k < M; k++) { t2[k] = k * 250; const s = 15 * k * 0.25; let px, py; if (s < 100) { px = s; py = 0; } else if (s < 100 + Math.PI * 10) { const a = (s - 100) / 10; px = 100 + 10 * Math.sin(a); py = 10 - 10 * Math.cos(a); } else { px = 100 - (s - 100 - Math.PI * 10); py = 20; } x2[k] = px * 10; y2[k] = py * 3; tel2.t.push(t2[k]); tel2.v.push(54); }
+  assert.strictEqual(RK.dropHeld({ t: t2, x: x2, y: y2, z: new Float32Array(M), n: M }, tel2).rewound, 0, "hairpin kept");
+});

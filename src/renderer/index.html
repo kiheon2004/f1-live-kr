@@ -113,7 +113,7 @@
 <!-- The strategy game (game/gamehome.js): over the home screen; game state, results and saves are the game's own -->
 <section id="game" class="game" aria-label="전략 게임" hidden>
   <div class="game-bar"><b class="game-title">전략 게임</b><nav id="gameCrumbs" class="game-crumbs"></nav><span id="gameEngine" class="game-engine"></span>
-    <button id="gameExit" class="ghost small" title="게임을 닫고 라이브 타이밍(홈)으로 돌아가요">라이브 타이밍으로 ←</button></div>
+    <button id="gameExit" class="ghost small" data-act="game:exit" title="게임을 닫고 라이브 타이밍(홈)으로 돌아가요">라이브 타이밍으로 ←</button></div>
   <div id="gameBody" class="game-body"></div>
 </section>
 
@@ -162,6 +162,7 @@
         <button data-view="2d" title="위에서 내려다본 평면 맵">2D</button><button data-view="3d" title="실제 높낮이를 살린 3D 서킷">3D</button><button data-view="tel" title="선택한 드라이버의 속도·페달 그래프와 기준 랩과의 시간 차이 (3D 카메라는 그대로 두어요)">텔레메트리</button><button data-view="laps" title="선택한 드라이버와 비교 드라이버의 랩타임·섹터 비교 (3D 카메라는 그대로 두어요)">랩 비교</button>
       </div>
       <button id="expandMap" class="expand-btn" title="크게 보기 · Esc로 닫기" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+      <button id="detailBtn" class="detail-btn" aria-expanded="false" title="레이스 컨트롤 · 드라이버 · 스틴트 같은 상세 패널을 오른쪽에 열어요 (한 번에 하나 · Esc로 닫기)">상세</button>
       <canvas id="map"></canvas>
       <div id="map3d" class="map3d" hidden>
         <div class="cam3d" role="group" aria-label="카메라">

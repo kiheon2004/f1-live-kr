@@ -34,7 +34,7 @@ import * as AlertsUI from "./alertsui.js";
 const TOWER_KEY = "f1kr:game:towerW", TOWER_MODE_KEY = "f1kr:game:towerMode";
 const IN_LANE = new Set(["entry", "lane", "approach", "penalty", "queue", "work", "release", "laneOut", "exit"]);
 const PACE_ORDER = ["manage", "balanced", "attack"];
-const H = { built: false, pitCmp: {}, fuel: {}, ordersDirty: true, towerSlim: false, towerMode: "leader", pp: null, ppTried: false, ppErr: null, n: 0, rows: new Map(), order: "", seen: new Map(), costs: { paints: 0, ms: 0, tower: 0, towerMs: 0, writes: 0 } };
+const H = { told: new Set(), flash: [], built: false, pitCmp: {}, fuel: {}, ordersDirty: true, towerSlim: false, towerMode: "leader", pp: null, ppTried: false, ppErr: null, n: 0, rows: new Map(), order: "", seen: new Map(), costs: { paints: 0, ms: 0, tower: 0, towerMs: 0, writes: 0 } };
 const season = () => G.sc?.meta?.season ?? G.season ?? 2025;
 export const hasGoal = () => CMD_TYPES.includes("goal");
 export const hasDelegate = () => CMD_TYPES.includes("delegate");
@@ -78,26 +78,30 @@ export function build() {
 export function teardown() { H.built = false; Dock.teardown(); }
 export const markOrders = () => { H.ordersDirty = true; Dock.markDirty(); };
 
-// one driver panel – the same layout for both cars; every control row is here from the start (v0.52 §10-1):
-//   state row     position · name · status · gaps (s) · last lap · camera            – always visible
-//   stats row     tyre (left %, temperature) · battery % · fuel margin (laps) · next stop
-//   controls      페이스 / 에너지: who decides (AI / 직접 / 목표 chip) + the modes – IN FORCE pressed, SENT-not-yet
-//                 dashed with a dot, the rest selectable; 목표 select                 – folds into a pop-up (see below)
-//   modes line    the same three states in words – shown only while the controls are folded
-//   box row       who owns the plan · tyre + sets · 박스 · 취소 · what the call will do – ALWAYS visible (both cars can
-//                 always box), long text cut with the full text in its tooltip
-//   foot          goal state · the last order and its state (short refusal) · AI에 맡기기
-// Narrow or short windows (the card under ~470 px wide, or the window under 600 px high – 1280×720 at 125 / 150 %): the
-// controls fold behind the 조작 button into a pop-up over the view (nothing deleted, the modes line says what is in force);
-// Escape or the button closes it.
+// one driver panel – the same layout for both cars, built once (v0.52 §10-1), split into BASIC and DETAIL (v0.53 §12-4):
+//   BASIC, always on screen for both cars
+//     state row     position · name · a status badge only when it isn't plain running (pit, box called, incident, out)
+//                   · gaps (s) · last lap · camera
+//     stats row     tyre (left %, temperature) · battery % · next stop
+//     target line   what is in force for pace / energy / goal and who decides it, a sent-not-yet order marked "→ … 대기"
+//     box row       tyre + sets · 박스 · 취소 · what the call will do (cut, whole line in its tooltip) · 조작 (the detail)
+//     foot          goal state · the last order and its state – a refusal in red with its short reason, kept until the
+//                   next order (and a toast when it happens: refusals are never only in a tooltip)
+//   DETAIL, one card at a time, a pop-up over the view above its card (조작 ▴; Escape or the button closes it, the focus
+//   goes to the mode in force and back to the button):
+//     페이스 / 에너지 – who decides (AI / 직접 / 목표 chip) + the modes: IN FORCE solid, SENT-not-yet dashed with a dot,
+//     the rest selectable · 목표 select · AI에 맡기기 · fuel margin · the box line in full · 차량 상세 (the dock's car panel:
+//     temperatures, energy per lap, trends)
+// Before v0.53 the controls were open on both cards all the time and folded only on small windows; now the same pop-up at
+// every size – the same action in the same place and look.
 function card(e) {
   const n = esc(e.num), EK = HM.energyKo(season()), cmp = compoundsFor(G.sc);
   const LEG = "채워진 버튼: 지금 적용 중 · 점선과 점: 보냈지만 아직 적용 전 · 나머지: 누르면 바로 지시";
   const seg = (k, list, ko) => `<div class="ui-seg gc-seg" data-k="${k}" role="group" aria-label="${k === "pace" ? "페이스" : "에너지"}" title="${LEG}">${list.map((p) => `<button data-act="hud:${k}" data-num="${n}" data-v="${p}">${ko[p]}</button>`).join("")}</div>`;
-  return `<section class="gr-card" data-car="${n}" style="--tc:${esc(e.colour || "#888")}">
+  return `<section class="gr-card" data-car="${n}" style="--tc:${esc(e.colour || "#888")}" aria-label="${esc(e.tla)} 운영">
     <header class="gc-h">
       <button class="gc-sel" data-act="hud:sel" data-num="${n}" title="이 차를 선택 (패널의 상세가 이 차를 보여줘요)"><b class="gc-pos num" data-f="pos">–</b><span class="gc-name"><b>${esc(e.tla)}</b><small>#${n}</small></span></button>
-      <span class="ui-badge" data-f="status"></span><i class="gc-br" aria-hidden="true"></i>
+      <span class="ui-badge" data-f="status" hidden></span><i class="gc-br" aria-hidden="true"></i>
       <span class="gc-gaps num" title="앞차·뒤차와의 시간 차 (초, 계측선 통과 기준 · 자료 없으면 –)"><small>앞</small><b data-f="ahead">–</b><small>뒤</small><b data-f="behind">–</b></span>
       <span class="gc-lapt num" title="최근 랩 · 이 차의 최고 랩 대비 (초)"><small>최근</small><b data-f="last">–</b><em data-f="delta"></em></span>
       <button class="ui-btn sm quiet gc-cam" data-act="hud:cam" data-num="${n}" data-f="cam" title="3D 카메라가 이 차를 따라가요">카메라</button>
@@ -106,28 +110,31 @@ function card(e) {
       <span class="gc-tyre" title="타이어: 컴파운드 · 이번 스틴트 랩 · 남은 수명 (새 타이어 100%, 줄어들수록 마모) · 온도 상태"><span data-f="cmp"></span><small class="num" data-f="age"></small>
         <span class="ui-meter" data-f="lifeM"><i><em data-f="lifebar"></em></i></span><small class="gc-u">남은</small><b class="num" data-f="life">–</b><span class="ui-badge" data-f="temp"></span></span>
       <span class="gc-kv" title="배터리: 남은 충전량 (%)"><small>배터리</small><span class="ui-meter" data-f="socM"><i><em data-f="socbar"></em></i></span><b class="num" data-f="soc">–</b></span>
-      <span class="gc-kv gc-fuel" title="연료: 이 차가 지금까지 쓴 양으로 추정한 완주 여유 (랩, 게임 추정)"><small><span class="lg">연료 여유</span><span class="sh">연료</span></small><b class="num" data-f="fuel">–</b></span>
       <span class="gc-kv gc-next" title="계획의 다음 피트 (랩 · 타이어)"><small><span class="lg">다음 피트</span><span class="sh">다음</span></small><b data-f="next">–</b></span>
     </div>
-    <div class="gc-ctl" id="gcCtl${n}" role="group" aria-label="${esc(e.tla)} 조작">
-      <span class="gc-grp" data-k="pace"><small class="gc-lbl">페이스</small><span class="gc-own" data-f="ownPace">–</span>${seg("pace", PACE.slice().sort((a, b) => PACE_ORDER.indexOf(a) - PACE_ORDER.indexOf(b)), PACE_KO)}</span>
-      <span class="gc-grp" data-k="energy" title="${esc(HM.energyHelp(season()))}"><small class="gc-lbl">에너지</small><span class="gc-own" data-f="ownEnergy">–</span>${seg("energy", ENERGY, EK)}</span>
-      <span class="gc-pre2" data-f="pre2"></span>
-    </div>
-    <div class="gc-modes" data-f="modes" aria-live="off"></div>
+    <div class="gc-modes" data-f="modes" aria-live="off" title="${LEG}"></div>
     <div class="gc-box">
-      <small class="gc-lbl">피트 계획</small><span class="gc-own" data-f="ownPlan" title="계획(피트 시점·타이어)을 누가 정하는지">–</span>
+      <small class="gc-lbl">피트</small><span class="gc-own" data-f="ownPlan" title="계획(피트 시점·타이어)을 누가 정하는지">–</span>
       <select class="ui-select gc-cmp" data-chg="hud:cmp" data-num="${n}" aria-label="장착할 타이어">${cmp.list.map((c) => `<option value="${c}">${esc(CMP_KO[c] || c)}</option>`).join("")}</select>
       <button class="ui-btn gc-boxbtn" data-act="hud:box" data-num="${n}">박스</button><button class="ui-btn sm gc-cancel" data-act="hud:cancel" data-num="${n}">취소</button>
       <span class="gc-pre" data-f="pre"></span>
-      <button class="ui-btn sm gc-fold" data-act="hud:fold" data-num="${n}" aria-expanded="false" aria-controls="gcCtl${n}" title="페이스·에너지 조작 열기 (Esc로 닫기)">조작 ▴</button>
+      <button class="ui-btn sm gc-fold" data-act="hud:fold" data-num="${n}" aria-expanded="false" aria-controls="gcCtl${n}" title="페이스·에너지·목표·AI 위임 (Esc로 닫기)">조작 ▴</button>
     </div>
     <div class="gc-foot">
-      <span class="gc-grp gc-goalg"><small class="gc-lbl">목표</small><select class="ui-select gc-goal" data-chg="hud:goal" data-num="${n}" ${hasGoal() ? "" : "disabled"} aria-label="운영 목표" title="목표를 고르면 목표 보조가 페이스·에너지를 정해요 (직접 누르면 목표 종료)">
-        <option value="">${hasGoal() ? "없음" : "엔진 연결 전"}</option>${HM.GOALS.map((g) => `<option value="${g}">${HM.GOAL_KO[g]}</option>`).join("")}</select></span>
       <span class="gc-goalst" data-f="goal"></span>
       <span class="gc-ord" data-f="ord"></span>
-      <button class="ui-btn sm quiet gc-deleg" data-act="hud:delegate" data-num="${n}" data-f="deleg" ${hasDelegate() ? "" : "disabled"} title="직접 지시한 페이스·에너지·계획을 팀 AI에게 다시 맡겨요">AI에 맡기기</button>
+    </div>
+    <div class="gc-ctl" id="gcCtl${n}" role="group" aria-label="${esc(e.tla)} 조작">
+      <div class="gc-ctl-h"><b>${esc(e.tla)} 조작</b><span class="gc-kv gc-fuel" title="연료: 이 차가 지금까지 쓴 양으로 추정한 완주 여유 (랩, 게임 추정)"><small>연료 여유</small><b class="num" data-f="fuel">–</b></span>
+        <button class="ui-btn sm ghost" data-act="hud:carDetail" data-num="${n}" title="온도·랩당 에너지·추세 – 오른쪽 차량 패널">차량 상세</button>
+        <button class="ui-btn sm ghost icon" data-act="hud:fold" data-num="${n}" aria-label="닫기" title="닫기 (Esc)">✕</button></div>
+      <span class="gc-grp" data-k="pace"><small class="gc-lbl">페이스</small><span class="gc-own" data-f="ownPace">–</span>${seg("pace", PACE.slice().sort((a, b) => PACE_ORDER.indexOf(a) - PACE_ORDER.indexOf(b)), PACE_KO)}</span>
+      <span class="gc-grp" data-k="energy" title="${esc(HM.energyHelp(season()))}"><small class="gc-lbl">에너지</small><span class="gc-own" data-f="ownEnergy">–</span>${seg("energy", ENERGY, EK)}</span>
+      <span class="gc-grp gc-goalg"><small class="gc-lbl">목표</small><select class="ui-select gc-goal" data-chg="hud:goal" data-num="${n}" ${hasGoal() ? "" : "disabled"} aria-label="운영 목표" title="목표를 고르면 목표 보조가 페이스·에너지를 정해요 (직접 누르면 목표 종료)">
+        <option value="">${hasGoal() ? "없음" : "사용할 수 없음"}</option>${HM.GOALS.map((g) => `<option value="${g}">${HM.GOAL_KO[g]}</option>`).join("")}</select>
+        <button class="ui-btn sm quiet gc-deleg" data-act="hud:delegate" data-num="${n}" data-f="deleg" ${hasDelegate() ? "" : "disabled"} title="직접 지시한 페이스·에너지·계획을 팀 AI에게 다시 맡겨요">AI에 맡기기</button></span>
+      <span class="gc-grp gc-plang"><small class="gc-lbl">피트 계획</small><span class="gc-own" data-f="ownPlan2">–</span></span>
+      <span class="gc-pre2" data-f="pre2"></span>
     </div>
   </section>`;
 }
@@ -146,6 +153,8 @@ export function paint() {
   const snap = hudSnap(R, G.adapter); if (!snap) return;
   const sc = G.sc, ents = new Map(sc.entries.map((e) => [String(e.num), e])), T = R.renderT;
   H.n++;
+  // (orders already settled when this race was opened – a loaded save – are not news: only refusals from now on toast)
+  if (H.toldRun !== R) { H.toldRun = R; H.told = new Set(G.book.list.filter((o) => o.state === "refused" || o.state === "rejected").map((o) => o.id)); H.flash = []; }
   // ---- top bar ----
   setT($("grLap"), `${Math.min(snap.leaderLap || 0, snap.totalLaps ?? Infinity)}/${snap.totalLaps ?? "?"}`);
   const fl = $("grFlag"), flag = snap.flag || "";
@@ -165,8 +174,12 @@ export function paint() {
   // ---- tags: selected vs camera ----
   const focus = G.adapter?.ctx.focus, auto = G.adapter?.camAuto, onCam = String(auto?.num ?? focus ?? "");
   const tla = (n) => ents.get(String(n))?.tla || n || "–";
-  setH($("grSelTag"), `<small>선택</small> <b>${esc(tla(G.sel))}</b>`);
-  setH($("grCamTag"), `<small>카메라</small> <b>${esc(tla(auto?.num ?? focus))}</b>${auto ? ` <small>자동${auto.why ? " · " + esc(auto.why) : ""}</small>` : ""}`);
+  // (one tag when the camera is on the selected car – two only when they differ)
+  const camN = String(auto?.num ?? focus ?? ""), same = camN === String(G.sel ?? "") && !auto;
+  setH($("grSelTag"), `<small>${same ? "선택 · 카메라" : "선택"}</small> <b>${esc(tla(G.sel))}</b>`);
+  setH($("grCamTag"), same ? "" : `<small>카메라</small> <b>${esc(tla(auto?.num ?? focus))}</b>${auto ? ` <small>자동${auto.why ? " · " + esc(auto.why) : ""}</small>` : ""}`);
+  // (the 3D view's provenance notes stay one short line each over the race – the whole sentence in the tooltip)
+  if (H.n % 5 === 0) document.querySelectorAll("#notes3d.game .note3d-line").forEach((l) => { if (l.title !== l.textContent) l.title = l.textContent; });
   // ---- tower (every other call) ----
   if (H.n % 2 === 1 || H.ordersDirty) { const a = performance.now(); paintTower(snap, ents, onCam); H.costs.tower++; H.costs.towerMs += performance.now() - a; }
   // ---- the panels ----
@@ -227,8 +240,10 @@ function paintCard(e, snap, T, onCam, mine) {
   root.classList.toggle("out", out);
   setT(f(root, "pos"), c.pos ? `P${c.pos}` : "–");
   const st = f(root, "status"), ph = c.pit?.phase || "none";
-  setT(st, c.status === "pit" ? PIT_KO[ph] || "피트" : ph === "called" ? "박스 요청" : ph === "committed" ? "진입 확정" : STATUS_KO[c.status] || c.status || "");
+  setT(st, c.status === "pit" ? PIT_KO[ph] || "피트" : ph === "called" ? "박스 요청" : ph === "committed" ? "진입 확정" : c.status === "run" && c.inc ? HM.incKo(c.inc) : STATUS_KO[c.status] || c.status || "");
   setC(st, `ui-badge ${c.status === "pit" || ph === "called" || ph === "committed" ? "info" : c.status === "dnf" ? "bad" : c.inc ? "warn" : ""}`);
+  // (plain running is the usual state – no badge saying "주행 중" on both cards all race long)
+  { const plain = HM.plainRunning(c); if (st.hidden !== plain) st.hidden = plain; }
   setT(f(root, "cam"), onCam === String(e.num) ? "카메라 ●" : "카메라");
   // gaps (timing line; "–" when there is no data – never 0), last lap and delta
   // (seconds to that car – "앞 1.2초 · 뒤 0.4초"; laps "+1랩"; the leader has no car ahead: "없음"; no data "–")
@@ -258,11 +273,12 @@ function paintCard(e, snap, T, onCam, mine) {
     const pend = pendingShown(e.num, k, T), btns = HM.modeButtons([...root.querySelectorAll(`.ui-seg[data-k="${k}"] button`)].map((b) => b.dataset.v), cur, pend?.args?.mode, out);
     root.querySelectorAll(`.ui-seg[data-k="${k}"] button`).forEach((b, i) => { const m = btns[i]; if (b.getAttribute("aria-pressed") !== String(m.inForce)) b.setAttribute("aria-pressed", String(m.inForce)); b.classList.toggle("pending", m.pending); if (b.disabled !== m.disabled) b.disabled = m.disabled; });
     const oc = HM.ownChip(c.own, k), el = f(root, k === "pace" ? "ownPace" : "ownEnergy"); setT(el, oc.text); setC(el, oc.cls); if (el.title !== oc.tip) el.title = oc.tip;
-    modeWords.push(`${k === "pace" ? "페이스" : "에너지"} ${HM.modeLine(ko[cur], oc.key ? oc.text : null, pend ? ko[pend.args?.mode] : null)}`);
+    modeWords.push(`<span class="gm-k"><small>${k === "pace" ? "페이스" : "에너지"}</small> <b>${esc(ko[cur] || "–")}</b>${oc.key ? ` <i class="${esc(oc.cls)}">${esc(oc.text)}</i>` : ""}${pend ? ` <em class="gm-pend">→ ${esc(ko[pend.args?.mode] || "")} 대기</em>` : ""}</span>`);
   }
-  const op = HM.ownChip(c.own, "plan"), ope = f(root, "ownPlan"); setT(ope, op.key ? op.text : "–"); setC(ope, op.cls); { const tt = `피트 계획: ${op.tip}`; if (ope.title !== tt) ope.title = tt; }
-  if (c.goal && c.goal.state !== "done") modeWords.push(`목표 ${HM.GOAL_SHORT[c.goal.kind] || c.goal.kind}`);
-  setT(f(root, "modes"), modeWords.join(" · "));
+  const op = HM.ownChip(c.own, "plan");
+  for (const ope of [f(root, "ownPlan"), f(root, "ownPlan2")]) { setT(ope, op.key ? op.text : "–"); setC(ope, op.cls); const tt = `피트 계획: ${op.tip}`; if (ope.title !== tt) ope.title = tt; }
+  modeWords.push(`<span class="gm-k"><small>목표</small> <b>${c.goal && c.goal.state !== "done" ? esc(HM.GOAL_SHORT[c.goal.kind] || c.goal.kind) : "없음"}</b></span>`);
+  setH(f(root, "modes"), modeWords.join(""));
   // goal (the select follows the engine unless the player is on it)
   const gs = root.querySelector(".gc-goal"); if (gs && document.activeElement !== gs) { const v = c.goal && c.goal.state !== "done" ? c.goal.kind : ""; if (gs.value !== (v || "")) gs.value = v || ""; gs.disabled = !hasGoal() || out; }
   const tlaOf = (n) => G.sc.entries.find((x) => String(x.num) === String(n))?.tla || (n ? "#" + n : "");
@@ -287,6 +303,8 @@ function paintCard(e, snap, T, onCam, mine) {
   // the last order of this car and what became of it (its state at the render time)
   const o = G.book.last(e.num);
   setH(f(root, "ord"), o ? orderLine(o, T) : "");
+  // (a refused order also as a toast, once – never only a word in a card's corner)
+  if (o) { const os = G.book.stateAt ? G.book.stateAt(o, T) : o.state; if ((os === "refused" || os === "rejected") && !H.told.has(o.id)) { H.told.add(o.id); H.flash.push({ id: "o" + o.id, at: performance.now(), cls: "bad", head: `거절 · ${e.tla}`, text: `${o.text || o.type}${o.why ? " – " + whyKo(o.why) : ""}` }); } }
   const dl = f(root, "deleg"); if (dl) dl.disabled = !hasDelegate() || out || !c.own || !["pace", "energy", "plan"].some((k) => c.own[k] === "player" || c.own[k] === "goal");
 }
 // the order of a kind still waiting at render time (shown as pending on its button, never as the mode in force)
@@ -312,9 +330,11 @@ function paintToasts() {
   const el = $("grToasts"); if (!el) return;
   const now = performance.now(), list = (G.notices || []).slice(-6);
   for (const a of list) if (!H.seen.has(a.id)) H.seen.set(a.id, now);
-  const live = list.filter((a) => now - H.seen.get(a.id) < 8000).slice(-3).reverse();
   const tlaOf = (n) => G.sc.entries.find((x) => String(x.num) === String(n))?.tla || "";
-  setH(el, live.map((a) => `<div class="ui-toast ${HM.noticeCls(a.level)}"><b>${esc(AlertsUI.RULE_KO[a.rule] || a.rule)}${a.car ? " · " + esc(tlaOf(a.car)) : ""}</b><span>${esc(a.text)}</span><small>${a.action === "pause" ? "자동 정지" : a.action === "slow" ? "1배속으로" : ""}</small></div>`).join(""));
+  H.flash = H.flash.filter((x) => now - x.at < 8000);
+  const items = list.filter((a) => now - H.seen.get(a.id) < 8000).map((a) => ({ at: H.seen.get(a.id), html: `<div class="ui-toast ${HM.noticeCls(a.level)}"><b>${esc(AlertsUI.RULE_KO[a.rule] || a.rule)}${a.car ? " · " + esc(tlaOf(a.car)) : ""}</b><span>${esc(a.text)}</span><small>${a.action === "pause" ? "자동 정지" : a.action === "slow" ? "1배속으로" : ""}</small></div>` }))
+    .concat(H.flash.map((x) => ({ at: x.at, html: `<div class="ui-toast ${x.cls}"><b>${esc(x.head)}</b><span>${esc(x.text)}</span></div>` })));
+  setH(el, items.sort((a, b) => a.at - b.at).slice(-3).reverse().map((x) => x.html).join(""));
 }
 
 // the pit-work panel: pitpanel.js render(el, car, renderT, ctx) – never the stop's future length
@@ -365,6 +385,7 @@ export function onClick(act, b) {
   if (act === "dock") { Dock.toggle(v); $("grRoot")?.classList.toggle("dock-on", !!Dock.open()); document.querySelectorAll('[data-act="hud:dock"]').forEach((x) => x.setAttribute("aria-selected", String(x.dataset.v === Dock.open()))); requestAnimationFrame(() => dispatchEvent(new Event("resize"))); H.ordersDirty = true; paint(); return; }
   if (act === "save") { SaveUI.savePrompt(); return; }
   if (act === "fold") { foldCtl(num); return; }
+  if (act === "carDetail") { G.sel = String(num); if (Dock.open() !== "car") onClick("dock", { dataset: { v: "car" } }); else { Dock.markDirty(); paint(); } return; }
   const EK = HM.energyKo(season());
   if (act === "pace") { sendOrder("pace", num, { mode: v }, `${tla} 페이스 ${PACE_KO[v]}`); return; }
   if (act === "energy") { sendOrder("energy", num, { mode: v }, `${tla} 에너지 ${EK[v]}`); return; }

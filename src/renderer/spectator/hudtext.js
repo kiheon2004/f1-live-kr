@@ -86,3 +86,14 @@ export function pitText(p) {
   if (st === "exit") return { title: "피트 레인", rows: [{ k: "", v: "피트 출구", cls: "" }], cls: "" };
   return null;
 }
+
+// The filmed car's camera note (map3d carNoteFor / the helicopter's) in two words for the driver card – the whole sentence
+// stays in the "자료 메모" notes and the badge's tooltip (v0.53 §12-2: no long estimate explanations over the view).
+// → { ko, cls } or null
+export function camNoteShort(text) {
+  const t = String(text || "");
+  if (!t) return null;
+  if (/그릴 수 없어요/.test(t)) return { ko: "위치 자료 없음", cls: "warn" };
+  if (/위치 자료가 없어|추정/.test(t)) return { ko: "위치 추정", cls: "info" };
+  return null;
+}

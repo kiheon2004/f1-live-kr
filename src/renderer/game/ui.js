@@ -16,7 +16,7 @@ export const FLAG_KO = { grid: "출발 전", green: "녹색기", yellow: "황색
 // the pit phases as the engine names them (pit.js) – what the player sees
 export const PIT_KO = { none: "", called: "박스 요청됨", committed: "피트 진입 확정", entry: "피트 진입", lane: "피트레인 주행", approach: "박스 접근",
   penalty: "페널티 정지", queue: "앞차 정비 대기", work: "정비 중", release: "출발 대기", laneOut: "피트레인 출구로", exit: "피트 출구" };
-export const PENDING = `<span class="g-pending">엔진 연결 전</span>`;
+export const PENDING = `<span class="g-pending">자료 없음</span>`;
 
 // race clock "1:02:03" / "02:03"
 export const fmtT = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""}${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };

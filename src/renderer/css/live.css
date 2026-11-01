@@ -89,7 +89,7 @@ body { font-size: var(--fs-md); }
 .cols-pop input { accent-color: var(--text-1); }
 .cols-pop button { margin-top: var(--s-4); }
 /* (the game covers everything below the bar: the data-source switch would read as if game data were live timing) */
-body.game-on .top .modes, body.game-on .top .right .cols-wrap, body.game-on .top #compactBtn { display: none; }
+body.game-on .top .modes, body.game-on .top .right .cols-wrap, body.game-on .top #compactBtn, body.game-on .top #homeBtn { display: none; }   /* (the game bar has its own way back – v0.53) */
 
 /* ---------- session bar ---------- */
 .status-bar { display: flex; align-items: center; gap: var(--s-5); padding: var(--s-3) var(--s-6); min-height: 40px; border-bottom: var(--bw) solid var(--line); background: var(--bg-0); flex-wrap: wrap; row-gap: var(--s-2); min-width: 0; }
@@ -588,3 +588,21 @@ body.compact .home-left { grid-row: 1; } body.compact .home-lower { grid-templat
 body.compact .home-side { grid-row: 2; border-left: 0; border-top: var(--bw) solid var(--line); }
 body.compact .home-bar { flex-wrap: wrap; padding: var(--s-3) var(--s-4); gap: var(--s-3); } body.compact .home-meta { margin-left: 0; text-align: left; }
 body.compact.home-on .home-btn { padding: 0 var(--s-3); }
+
+/* v0.53 §12-1/12-2: the full-window view's one detail panel (app.js setDetail). 상세 sits beside the expand button and
+ * only in the full window; open, the timing screen's tab panel is a column on the right and the view narrows beside it
+ * (the 2D map, the 3D view and its HUD, the switch and the buttons all keep to what is left) */
+.map-card > .detail-btn { display: none; }
+.map-card.expanded > .detail-btn { display: inline-flex; align-items: center; position: absolute; top: var(--s-5); right: 48px; z-index: 6; min-height: 30px; padding: 0 var(--s-5);
+  border: var(--bw) solid var(--line); border-radius: var(--r-2); background: var(--hud-bg); color: var(--text-1); font-size: var(--fs-sm); font-weight: var(--fw-med); }
+.map-card.expanded > .detail-btn[aria-expanded="true"] { background: var(--bg-3); border-color: var(--text-3); }
+.map-card.expanded[data-view="tel"] > .detail-btn, .map-card.expanded[data-view="laps"] > .detail-btn { display: none; }
+.map-card.expanded { --dock-w: 0px; }
+.map-card.expanded.detail-on { --dock-w: clamp(300px, 30vw, 440px); }
+.map-card.expanded.detail-on > .tabs-card { position: absolute; top: 0; right: 0; bottom: 0; width: var(--dock-w); z-index: 7; border-left: var(--bw) solid var(--line); border-radius: 0; background: var(--bg-1); }
+.map-card.expanded.detail-on > #map3d { right: var(--dock-w); }
+.map-card.expanded.detail-on > #map { width: calc(100% - var(--dock-w)); }
+.map-card.expanded > .view-switch { left: calc((100% - var(--dock-w)) / 2); }
+.map-card.expanded > .expand-btn { right: calc(var(--dock-w) + 10px); }
+.map-card.expanded > .detail-btn { right: calc(var(--dock-w) + 48px); }
+.map-card.expanded.detail-on > .mini-board { right: calc(var(--dock-w) + 10px); }

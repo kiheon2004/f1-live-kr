@@ -472,6 +472,7 @@
   // a short one from the speed telemetry, CarTracks.at holds then hides a long one) – never a standstill followed by a leap.
   // Only the record is changed in what is drawn: the timing, laps and pit times come from the timing data, not from here.
   const HELD = { far: 12, share: 0.35, fast: 15, moving: 8, minRun: 2, leap: 110 };
+  const REWIND = { min: 1500, max: 20000, near: 8, drove: 60, leap: 30 };
   // the distance (m) the telemetry says was driven between t0 and t1 (ms), or null without it
   function telDistance(tel, t0, t1) {
     if (!tel?.t?.length) return null;
@@ -479,6 +480,16 @@
     if (tel.t[i] > t1 || (tel.t[tel.t.length - 1] < t0)) return null;
     for (i++; i < tel.t.length && tel.t[i] <= t1; i++) { d += ((vp + tel.v[i]) / 2 / 3.6) * ((tel.t[i] - tp) / 1000); tp = tel.t[i]; vp = tel.v[i]; }
     return d + (vp / 3.6) * ((t1 - tp) / 1000);
+  }
+  // the telemetry's odometer: t (ms) → metres since its first sample (trapezoids between samples, linear in a sample's
+  // interval) – built once per telemetry
+  const odoMemo = new WeakMap();
+  function telOdo(tel) {
+    let f = odoMemo.get(tel); if (f) return f;
+    const T = tel.t, n = T.length, D = new Float64Array(n);
+    for (let i = 1; i < n; i++) { const dt = (T[i] - T[i - 1]) / 1000; D[i] = D[i - 1] + (dt > 0 && dt < 3 ? ((tel.v[i] + tel.v[i - 1]) / 2 / 3.6) * dt : 0); }
+    f = (t) => { const i = sampleAt(tel, t); if (i < 0) return 0; if (i >= n - 1) return D[n - 1]; return D[i] + (D[i + 1] - D[i]) * Math.min(1, (t - T[i]) / (T[i + 1] - T[i] || 1)); };
+    odoMemo.set(tel, f); return f;
   }
   // is the run of samples a..b (same X/Y), followed by sample `next` (index, or -1: none yet), held? c: { t, x, y }
   function heldRun(c, a, b, next, tel) {
@@ -514,10 +525,39 @@
         runs++; f++;
       }
     }
-    if (!dropped) return { track: c, dropped, runs };
+    // Re-sent positions (v0.53): the feed sometimes jumps back to where a car was some seconds before and goes on from
+    // there at its speed, stamped as new – 2026 Hungary race: car 81 from 662 m round the lap back to 467 m, then forward
+    // again over the same ground; car 23 back 300 m, then 600 m; car 16 back 1.2 km (not copies: other numbers, the same
+    // places). Such a REPLAY begins with a step back no car makes (a leap past REWIND.leap m beyond what its telemetry
+    // allows in the time) onto ground it covered REWIND.min–max s before (within REWIND.near m of a kept sample then), and
+    // lasts while the samples keep going over that ground; they are dropped (the steadied tracks bridge the gap from the
+    // telemetry). A slow hairpin, where a car does come back within metres of where it was, has no leap: kept. Without
+    // telemetry nothing is dropped here.
+    let rewound = 0;
+    if (tel?.t?.length) {
+      const odo = telOdo(tel), dist = (t0, t1) => odo(t1) - odo(t0);
+      let j0 = 0, mode = 0, p = 0;
+      // (onto the path it drove then: within REWIND.near m of a piece between two kept samples – at 260 km/h they are 15–22 m
+      // apart, and a replayed sample falls between them)
+      const segD = (k, a, b) => { const ax = c.x[a], ay = c.y[a], ex = c.x[b] - ax, ey = c.y[b] - ay, l2 = ex * ex + ey * ey, f = l2 > 0 ? Math.max(0, Math.min(1, ((c.x[k] - ax) * ex + (c.y[k] - ay) * ey) / l2)) : 0; return Math.hypot(c.x[k] - ax - ex * f, c.y[k] - ay - ey * f) / 10; };
+      const near = (k) => { let a = -1; for (let j = j0; j < k && c.t[k] - c.t[j] >= REWIND.min; j++) { if (!keep[j]) continue; if (a >= 0 && c.t[j] - c.t[a] < 2000 && segD(k, a, j) < REWIND.near && dist(c.t[j], c.t[k]) > REWIND.drove) return true; a = j; } return false; };
+      for (let k = 1; k < n; k++) {
+        if (!keep[k]) continue;
+        while (j0 < k && c.t[k] - c.t[j0] > REWIND.max) j0++;
+        if (mode && c.t[k] - mode > REWIND.max) mode = 0;
+        if (!mode) {
+          const dt = (c.t[k] - c.t[p]) / 1000, step = Math.hypot(c.x[k] - c.x[p], c.y[k] - c.y[p]) / 10, i = sampleAt(tel, c.t[k]), v = i >= 0 ? tel.v[i] / 3.6 : 0;
+          if (step > REWIND.leap + 1.5 * v * dt && near(k)) { mode = c.t[k]; keep[k] = 0; dropped++; rewound++; continue; }
+        } else if (near(k)) { keep[k] = 0; dropped++; rewound++; continue; }
+        else mode = 0;
+        p = k;
+      }
+      if (rewound) runs++;
+    }
+    if (!dropped) return { track: c, dropped, runs, rewound };
     const m = n - dropped, o = { t: new Float64Array(m), x: new Float32Array(m), y: new Float32Array(m), z: new Float32Array(m), n: m };
     for (let k = 0, j = 0; k < n; k++) if (keep[k]) { o.t[j] = c.t[k]; o.x[j] = c.x[k]; o.y[j] = c.y[k]; o.z[j] = c.z[k]; j++; }
-    return { track: o, dropped, runs };
+    return { track: o, dropped, runs, rewound };
   }
 
   class Replay {
@@ -532,7 +572,7 @@
       this.car = topics.CarData || {};
       // (held positions taken out – dropHeld; what was dropped per car: feedAudit)
       this.feedAudit = { held: {} };
-      for (const [num, c] of Object.entries(this.tracks.cars)) { const r = dropHeld(c, this.car[num]); if (r.dropped) { this.tracks.cars[num] = r.track; this.feedAudit.held[num] = { runs: r.runs, samples: r.dropped }; } }
+      for (const [num, c] of Object.entries(this.tracks.cars)) { const r = dropHeld(c, this.car[num]); if (r.dropped) { this.tracks.cars[num] = r.track; this.feedAudit.held[num] = { runs: r.runs, samples: r.dropped, rewound: r.rewound }; } }
       for (const [topic, list] of Object.entries(topics)) {
         if (topic === "Position" || topic === "PositionTracks" || topic === "CarData") continue;
         for (const [ms, data] of list) this.events.push({ ms, topic, data });
@@ -1073,6 +1113,6 @@
   }
 
   const API = { Replay, LiveSource, CarTracks, SUPPORT_NUMS, isSupportNum, LapTracker, PitLog, StatusLog, TyreLog, merge, newMessages, applyMessages, resetMessages, toSec, clockMs, parseUtc, extractLap, findLap, outlineFrom,
-    pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, GEAR_GAP, carTrace, timeAtDistance, sampleAt, HELD, dropHeld, heldRun };
+    pitLoss, pitRejoin, gapSec, deletedLaps, deletedLapsMemo, canvasPixels, separateCars, CAR_LEN, CAR_WID, carAt, GEAR_GAP, carTrace, timeAtDistance, sampleAt, HELD, REWIND, dropHeld, heldRun };
   if (typeof module !== "undefined" && module.exports) module.exports = API; else root.ReplayKit = API;
 })(typeof window !== "undefined" ? window : globalThis);
