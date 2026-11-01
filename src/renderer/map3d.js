@@ -4391,11 +4391,11 @@ window.Map3D = {
             const dy = Math.abs(P.y - q.y), yAllow = (0.2 * Math.max(step / dt, 5) + 0.6) * dt;   // (20 % slope at the speed it moved, + 0.6 m/s)
             if (dy > yAllow) add("lift", num, dy, base);
             const dyaw = Math.abs(wrap(c.yaw - q.yaw));
-            if (dyaw > Math.max(0.12, (c.speed || 0) / 12 * dt * 1.5 + 0.05) && step > 0.02) add("yaw", num, dyaw * 57.3, { ...base, traf: [+(c.trafD || 0).toFixed(2), +(c.trafRate || 0).toFixed(2), c.trafMode || ""], vs: c.st ? +c.st.vs.toFixed(1) : null, d: c.st ? +c.st.d.toFixed(2) : null, vd: c.st ? +c.st.vd.toFixed(2) : null });
+            if (dyaw > Math.max(0.12, (c.speed || 0) / 12 * dt * 1.5 + 0.05) && step > 0.02) add("yaw", num, dyaw * 57.3, { ...base, traf: [+(c.trafD || 0).toFixed(2), +(c.trafRate || 0).toFixed(2), c.trafMode || ""], vs: Number.isFinite(c.st?.vs) ? +c.st.vs.toFixed(1) : null, d: Number.isFinite(c.st?.d) ? +c.st.d.toFixed(2) : null, vd: Number.isFinite(c.st?.vd) ? +c.st.vd.toFixed(2) : null });
             if (q.tag !== tg) add("switch", num, step, base);
           }
           if (Math.abs(c.model.rotation.x) > 0.09 || Math.abs(c.model.rotation.z) > 0.06) add("tilt", num, Math.max(Math.abs(c.model.rotation.x), Math.abs(c.model.rotation.z)) * 57.3, { tag: tg });
-          if (frames % Math.max(1, Math.round(fps / 2)) === 0) { const g = groundY(P.x, P.z); if (g != null && Math.abs(P.y - g) > (o.hTol ?? 0.6)) add("height", num, P.y - g, { tag: tg, x: +P.x.toFixed(1), z: +P.z.toFixed(1), ground: +g.toFixed(2) }); }
+          if (frames % Math.max(1, Math.round(fps / 2)) === 0) { const g = groundY(P.x, P.z); if (Number.isFinite(g) && Math.abs(P.y - g) > (o.hTol ?? 0.6)) add("height", num, P.y - g, { tag: tg, x: +P.x.toFixed(1), z: +P.z.toFixed(1), ground: +g.toFixed(2) }); }
           prev.set(num, { x: P.x, y: P.y, z: P.z, yaw: c.yaw, tag: tg, v: vt });
         }
       }
