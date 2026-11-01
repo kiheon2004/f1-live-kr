@@ -617,6 +617,24 @@ function atlas(rows) {
 }
 const textOn = (hex) => { const n = parseInt(hex.slice(1), 16), l = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); return l > 150 ? "#111111" : "#ffffff"; };
 
+// A team's stand upstairs (Monaco – facilities.js wallAt with `room`: the first-floor room over the garages, glazed to
+// the lane): no deck, posts, canopy, railings or step of its own – it stands on the room's floor, the console along the
+// glazing (its lane face 0.14 m behind the glass), the screens on it, the stools behind it, the people on them facing the
+// lane through the glass; the team's name on the balcony's railing over the room (as on the photos' banners). In the
+// stand's frame: a along it, o from wallAt's point (0.05 m inside the glass) into the room, y over the room's floor.
+// Pure (node-tested: test/monaco53.test.js – inside the room, on its floor, under its ceiling).
+export function upperStandLayout(room, L, N) {
+  const seats = [];
+  for (let i = 0; i < N; i++) seats.push({ a: -L / 2 + 0.3 + 0.8 * (i + 0.5), o: 1.1 });
+  return {
+    console: { o: 0.3, depth: 0.42, h: 1.04, front: 0.53 },   // (its top 0.04 thick over it: 1.08 m – as the wall's stands)
+    screens: { o: 0.2, y: 1.36 }, seats, stool: { o: 1.1, foot: 0.94 },
+    label: { o: -(room.balcony + 0.03), y: room.balconyY + 0.55, h: 0.6 },
+    // (what it takes up, o: from the console's lane face to behind the stools; its top – the screens')
+    span: [0.3 - 0.21, 1.1 + 0.25], top: 1.36 + 0.135,
+  };
+}
+
 // The layer for one allocation: returns a THREE.Group owning its geometry, materials and label texture.
 // opts.kit (v0.49): the garage interior kit (garagekit/pitkit.js) furnishes the team bays – this layer then leaves out its
 // own simple equipment and booms (both would draw); its lining, floors, ceiling strips, boards and pit wall stay.
@@ -658,11 +676,45 @@ export function teamLayer(garages, teams, drivers, season = null, opts = {}) {
     for (let f = 0; f < 6; f++) if (faces & (1 << f)) quad(store, ctr[f], ax[f][0].clone().multiplyScalar(ax[f][1]), ax[f][2].clone().multiplyScalar(ax[f][3]), n[f], null, colour);
   };
   const people = [], screenQuads = { pos: [], uv: [], nor: [] }, teamQuads = new Map();
+  // (upstairs – upperStandLayout: the same console, screens, stools and people, in the room)
+  const roomStand = (w, t, seat, N, L, { p, A, O, up, at, team, dark, steel, black }) => {
+    const S = upperStandLayout(w.room, L, N), c = S.console;
+    boxQ(panels, at(0, c.o, c.h / 2), A, up, O, L - 0.2, c.h, c.depth, dark);                            // the console
+    boxQ(panels, at(0, c.front, c.h / 2), A, up, O, L - 0.2, 0.9, 0.02, team, 2);                        // its face to the seats in the team's colour
+    boxQ(panels, at(0, c.o, c.h + 0.02), A, up, O, L - 0.1, 0.04, 0.5, black, 16);                       // its top
+    const tq = teamQuads.get(t.team) || { pos: [], uv: [], nor: [], t }; teamQuads.set(t.team, tq);
+    const two = (t.drivers || []).length > 1;
+    for (let i = 0; i < N; i++) for (const k of [-1, 1]) {
+      const a = S.seats[i].a + k * 0.2, sc = at(a, S.screens.o, S.screens.y);
+      boxQ(panels, sc, A, up, O, 0.4, 0.27, 0.035, black, 63);
+      const half = two && i % 2 ? [0.5, 0, 1, 1] : [0, 0, 0.5, 1];
+      quad(k < 0 ? screenQuads : tq, sc.clone().addScaledVector(O, 0.019), A.clone().multiplyScalar(0.37), up.clone().multiplyScalar(0.24), O, k < 0 ? [0, 0, 1, 1] : half);
+    }
+    const f = O.clone().negate(), yaw = Math.atan2(f.x, f.z) - Math.PI / 2;
+    for (let i = 0; i < N; i++) {
+      const { a, o } = S.seats[i];
+      boxQ(panels, at(a, o, 0.37), A, up, O, 0.05, 0.74, 0.05, steel);
+      boxQ(panels, at(a, o, 0.745), A, up, O, 0.38, 0.05, 0.36, black);
+      boxQ(panels, at(a, S.stool.foot, 0.3), A, up, O, 0.34, 0.025, 0.03, steel);
+      const q = at(a, o, 0), sd = hashStr(t.team + i), lean = i % 3 === 1, hz = (sd % 5) * 0.012;
+      people.push({ x: q.x, y: q.y, z: q.z, yaw, shirt: t.colour, pose: lean ? "sitLean" : "sit", seed: sd, hands: [[0.6, 1.11, 0.21 + hz, 1, 0, 0, 1], [lean ? 0.68 : 0.6, 1.11, -0.2 - hz, 1, 0, 0, 1]] });
+    }
+    // the team's banner on the balcony's railing over the room, facing the lane
+    const lb = S.label, bw = Math.min(L, 3.6);
+    boxQ(panels, at(0, lb.o + 0.012, lb.y), A, up, O, L + 0.3, lb.h, 0.02, team, 3);
+    quad(labels, at(0, lb.o, lb.y), A.clone().multiplyScalar(bw), up.clone().multiplyScalar(bw / 8), f, lab.uv(t.row));
+    // (no rain in the room – weather.js coverRaster: its floor plan from the glass in, under its ceiling)
+    { const cv = (da, o) => { const v = at(da, o, 0); return [v.x, v.z]; }, h = L / 2 + 0.2; group.userData.covers.push({ pts: [cv(-h, -w.room.glass), cv(h, -w.room.glass), cv(h, S.span[1]), cv(-h, S.span[1])], y: p.y + w.room.ceil - Math.abs(w.slope || 0) * h, kind: "pit wall room" }); }
+    t.wallStand = { seats: N, from: seat.from };
+    group.userData.wallStands.push({ team: t.team, box: t.box, boxOff: t.boxOff, p: [p.x, p.z], y: p.y, along: [...w.along], out: [...w.out], L, enclosed: true, upper: true, room: { ...w.room }, slope: w.slope || 0, span: S.span, top: S.top, people: S.seats.map(({ a, o }) => { const v = at(a, o, 0); return [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]; }) });
+  };
   const pitWallStand = (w, t, season) => {
     const seat = pitWallSeats(t.team, season), N = seat.seats, up = new THREE.Vector3(0, 1, 0);
     const p = new THREE.Vector3(...w.p), A = new THREE.Vector3(w.along[0], 0, w.along[1]), O = new THREE.Vector3(w.out[0], 0, w.out[1]);
     const L = N * 0.8 + 0.6, team = new THREE.Color(t.colour), dark = team.clone().multiplyScalar(0.3).lerp(new THREE.Color("#1d2024"), 0.5), steel = new THREE.Color("#8d949b"), black = new THREE.Color("#15171a");
-    const at = (a, o, y) => p.clone().addScaledVector(A, a).addScaledVector(O, o).addScaledVector(up, y);
+    // (a stand upstairs slopes with the room's floor along it – wallAt's slope)
+    const at = (a, o, y) => p.clone().addScaledVector(A, a).addScaledVector(O, o).addScaledVector(up, y + (w.room ? (w.slope || 0) * a : 0));
+    if (w.room) { roomStand(w, t, seat, N, L, { p, A, O, up, at, team, dark, steel, black }); return; }
     const deck = 0.22;
     boxQ(panels, at(0, 0.05, deck / 2), A, up, O, L, deck, 1.6, dark);                                   // the deck
     boxQ(panels, at(0, -0.52, deck + 0.52), A, up, O, L - 0.2, 1.04, 0.42, dark);                        // the console

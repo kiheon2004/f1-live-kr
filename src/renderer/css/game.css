@@ -98,7 +98,6 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gm-more button small { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .gm-more button:hover { background: var(--bg-3); }
   .gm-more button[aria-pressed="true"] { background: var(--bg-3); box-shadow: inset 2px 0 0 var(--text-1); }
-  .gm-exit.ui-btn { align-self: start; background: var(--hud-bg); border-color: var(--line); color: var(--text-1); }
   .gm-note { color: var(--warn); font-size: var(--fs-sm); margin: 0; }
   .gm-right { grid-column: 3; display: flex; flex-direction: column; gap: var(--s-4); align-self: start; max-height: 100%; min-height: 0; }
   .gm-src { display: grid; gap: var(--s-1); padding: var(--s-4) var(--s-5); border-radius: var(--r-2); background: var(--hud-bg); border: var(--bw) solid var(--line); }
@@ -384,7 +383,7 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gr-bottom { position: relative; z-index: 2; }
   .gr-bottom:has(.ctl-open) { z-index: var(--z-menu); }   /* (the folded controls' pop-up sits over the view and its tools) */
   .gc-kv .sh { display: none; }
-  .gr-card { position: relative; container: gcard / inline-size; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); padding: var(--s-3) var(--s-5) var(--s-3); border-radius: var(--r-2); background: var(--bg-1); border: var(--bw) solid var(--line); box-shadow: inset 0 2px 0 var(--tc); }
+  .gr-card { position: relative; container: gcard / inline-size; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--s-3); padding: var(--s-3) var(--s-5) var(--s-3); border-radius: var(--r-2); background: var(--bg-1); border: var(--bw) solid var(--line); box-shadow: inset 0 2px 0 var(--tc); }
   .gr-card.sel { border-color: var(--text-3); }
   .gr-card.out { opacity: 0.72; }
   /* state row */
@@ -393,16 +392,16 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gc-pos { font-size: var(--fs-xl); font-weight: var(--fw-bold); min-width: 40px; }
   .gc-name { display: flex; align-items: baseline; gap: var(--s-2); } .gc-name b { font-size: var(--fs-lg); } .gc-name small { color: var(--text-3); }
   .gr-card.sel .gc-name b { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--tc); }
-  .gc-h .ui-badge { width: 78px; flex: none; justify-content: center; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 18px; text-align: center; }
-  .gc-gaps, .gc-lapt { display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-sm); white-space: nowrap; }
-  .gc-gaps small, .gc-lapt small, .gc-kv > small, .gc-u { color: var(--text-3); font-size: var(--fs-2xs); white-space: nowrap; }
+  .gc-h .ui-badge { width: 84px; flex: none; justify-content: center; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 18px; text-align: center; }
+  .gc-gaps, .gc-lapt { display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--fs-md); white-space: nowrap; }
+  .gc-gaps small, .gc-lapt small, .gc-kv > small, .gc-u { color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
   .gc-gaps b { min-width: 44px; text-align: right; font-weight: var(--fw-med); }
   .gc-lapt b { min-width: 62px; font-weight: var(--fw-med); }
   .gc-lapt em { font-style: normal; min-width: 46px; font-size: var(--fs-xs); }
   .gc-cam { margin-left: auto; flex: none; min-height: 24px; }
   .gr-card.cam .gc-cam { color: var(--text-1); box-shadow: inset 0 0 0 1px var(--text-3); }
   /* stats row */
-  .gc-stats { display: flex; align-items: center; gap: var(--s-2) var(--s-5); min-height: 24px; font-size: var(--fs-sm); flex-wrap: wrap; min-width: 0; }
+  .gc-stats { display: flex; align-items: center; gap: var(--s-2) var(--s-6); min-height: 24px; font-size: var(--fs-md); flex-wrap: wrap; min-width: 0; }
   .gc-tyre { display: flex; align-items: center; gap: var(--s-3); }
   .gc-tyre .g-cmp { width: 22px; height: 22px; font-size: 11px; }
   .gc-tyre > small.num { color: var(--text-2); min-width: 30px; }
@@ -412,65 +411,76 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gc-kv > b { min-width: 38px; font-weight: var(--fw-med); white-space: nowrap; }
   .gc-kv .ui-meter > i { width: 36px; }
   .gc-tyre .ui-meter > i { width: 32px; }
-  /* controls: label · who decides · the modes (in force pressed, pending dashed + dot, the rest selectable) */
-  .gc-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-6); min-width: 0; padding: var(--s-2) 0; border-block: var(--bw) solid var(--line-soft); }
+  /* DETAIL (v0.53 §12-4): pace · energy · goal · AI 위임 · fuel · the box line in full – a pop-up over the view above its
+     card, one card at a time, at every window size (조작 ▴; Escape or ✕ closes it) */
+  .gc-ctl { display: none; }
+  .gr-card.ctl-open .gc-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-4) var(--s-6); position: absolute; left: -1px; right: -1px; bottom: calc(100% + var(--s-2)); z-index: var(--z-menu);
+    background: var(--bg-1); border: var(--bw) solid var(--line); border-radius: var(--r-2); padding: var(--s-4) var(--s-5) var(--s-5); box-shadow: 0 -6px 18px rgb(0 0 0 / 0.45), inset 0 2px 0 var(--tc); }
+  .gc-ctl-h { display: flex; align-items: center; gap: var(--s-5); flex-basis: 100%; min-width: 0; }
+  .gc-ctl-h > b { font-size: var(--fs-md); margin-right: auto; }
   .gc-grp { display: flex; align-items: center; gap: var(--s-3); min-width: 0; flex: none; }
-  .gc-lbl { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
-  .gc-own { flex: none; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 20px; padding: 0 var(--s-2); border-radius: var(--r-1); font-size: var(--fs-2xs); font-weight: var(--fw-bold); white-space: nowrap; border: 1px solid var(--line); color: var(--text-2); background: transparent; cursor: help; }
+  .gc-lbl { color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
+  .gc-ctl .gc-lbl { min-width: 3em; }
+  .gc-own { flex: none; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 20px; padding: 0 var(--s-2); border-radius: var(--r-1); font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; border: 1px solid var(--line); color: var(--text-2); background: transparent; cursor: help; }
   .gc-own.own-ai { color: var(--text-2); border-color: var(--line); }
   .gc-own.own-player { color: var(--text-inv); background: var(--text-1); border-color: var(--text-1); }
   .gc-own.own-goal { color: var(--info); border-color: var(--info); background: var(--info-soft); }
-  .gc-seg > button { min-height: 24px; min-width: 40px; padding: 0 var(--s-3); font-size: var(--fs-sm); position: relative; }
+  .gc-seg > button { min-height: 28px; min-width: 44px; padding: 0 var(--s-4); font-size: var(--fs-md); position: relative; }
   .gc-seg > button[aria-pressed="true"] { background: var(--text-1); color: var(--text-inv); box-shadow: none; font-weight: var(--fw-bold); }
   .gc-seg > button.pending { box-shadow: inset 0 0 0 1px var(--warn); color: var(--warn); outline: 1px dashed var(--warn); outline-offset: -3px; }
   .gc-seg > button.pending::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--warn); }
-  .gc-foot .gc-goalg { flex: none; }
-  .gc-goal { min-height: 24px; width: 104px; font-size: var(--fs-sm); padding: 0 var(--s-2); }
-  .gc-modes { display: none; font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .gc-goal { min-height: 28px; width: 112px; font-size: var(--fs-sm); padding: 0 var(--s-2); }
+  .gc-deleg { min-height: 28px; font-size: var(--fs-sm); flex: none; }
+  .gc-pre2 { flex-basis: 100%; font-size: var(--fs-sm); color: var(--text-2); }
+  .gc-pre2 .g-cmp { width: 16px; height: 16px; font-size: 9px; border-width: 1.5px; vertical-align: -3px; }
+  /* BASIC: the target line – what is in force for pace / energy / goal, who decides, what was sent and waits */
+  .gc-modes { display: flex; gap: var(--s-2) var(--s-6); align-items: baseline; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-1); min-width: 0; min-height: 20px; }
+  .gc-modes .gm-k { display: inline-flex; align-items: baseline; gap: var(--s-2); white-space: nowrap; }
+  .gc-modes small { color: var(--text-2); font-size: var(--fs-xs); }
+  .gc-modes b { font-weight: var(--fw-med); }
+  .gc-modes i { font-style: normal; font-size: var(--fs-2xs); font-weight: var(--fw-bold); padding: 0 var(--s-2); border-radius: var(--r-1); border: 1px solid var(--line); color: var(--text-2); }
+  .gc-modes i.own-player { color: var(--text-inv); background: var(--text-1); border-color: var(--text-1); }
+  .gc-modes i.own-goal { color: var(--info); border-color: var(--info); }
+  .gc-modes .gm-pend { font-style: normal; color: var(--warn); }
   /* box row: always visible – both cars can always box */
   .gc-box { display: flex; align-items: center; gap: var(--s-3); min-width: 0; min-height: 28px; }
-  .gc-cmp { min-height: 26px; width: 100px; font-size: var(--fs-sm); padding: 0 var(--s-2); flex: none; }
-  .gc-boxbtn { min-width: 56px; min-height: 28px; padding: 0 var(--s-4); background: var(--text-1); border-color: var(--text-1); color: var(--text-inv); font-weight: var(--fw-bold); flex: none; }
+  .gc-cmp { min-height: 28px; width: 112px; font-size: var(--fs-sm); padding: 0 var(--s-2); flex: none; }
+  .gc-boxbtn { min-width: 60px; min-height: 30px; padding: 0 var(--s-5); background: var(--text-1); border-color: var(--text-1); color: var(--text-inv); font-weight: var(--fw-bold); flex: none; }
   .gc-boxbtn:hover:not(:disabled) { background: #fff; }
   .gc-boxbtn:disabled { background: var(--bg-3); border-color: var(--line); color: var(--text-3); }
-  .gc-box .ui-btn.sm { flex: none; min-height: 26px; }
+  .gc-box .ui-btn.sm { flex: none; min-height: 28px; }
   .gc-pre { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--text-2); }
   .gc-pre b { color: var(--text-1); font-weight: var(--fw-med); }
   .gc-pre .g-cmp { width: 15px; height: 15px; font-size: 9px; border-width: 1.5px; vertical-align: -3px; }
-  .gc-fold { display: none; }
+  .gc-fold { flex: none; margin-left: auto; }
+  .gc-fold[aria-expanded="true"] { background: var(--bg-3); border-color: var(--text-3); }
   .gc-br { display: none; }
-  .gc-pre2 { display: none; flex-basis: 100%; font-size: var(--fs-xs); color: var(--text-2); }   /* (the box line, inside the folded pop-up) */
-  .gc-foot { display: flex; align-items: center; gap: var(--s-4); min-height: 24px; font-size: var(--fs-xs); color: var(--text-2); }
+  .gc-foot { display: flex; align-items: center; gap: var(--s-4); min-height: 20px; font-size: var(--fs-sm); color: var(--text-2); }
   .gc-goalst { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 55%; }
+  .gc-goalst:empty { display: none; }
   .gc-ord { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .gc-deleg { margin-left: auto; min-height: 24px; font-size: var(--fs-xs); flex: none; }
-  /* folding by priority (narrow card or short window): 1) captions go (values stay, captions in tooltips) 2) the controls
-     fold into a pop-up behind 조작 – the modes line keeps saying what is in force; box, the state and the stats stay */
-  @container gcard (max-width: 560px) {
+  .gc-ord:has(.refused), .gc-ord:has(.rejected) { color: var(--bad-ink); }
+  /* folding by priority (narrow card or short window): captions go first (values stay, captions in the tooltips) */
+  .gc-plang { display: none; }
+  @container gcard (max-width: 470px) { .gc-plang { display: flex; } }
+  @container gcard (max-width: 640px) {
     .gc-lapt em { display: none; }
     .gc-u { display: none; }
     .gc-kv .lg { display: none; } .gc-kv .sh { display: inline; }
-    .gc-ctl { gap: var(--s-2) var(--s-4); }
   }
   @container gcard (max-width: 470px) {
-    .gc-ctl { display: none; }
-    .gc-modes, .gc-fold { display: block; }
-    .gc-lapt em { display: none; }
     .gc-h { flex-wrap: wrap; row-gap: var(--s-1); }
     .gc-h .gc-cam { order: 3; } .gc-br { display: block; order: 4; flex-basis: 100%; height: 0; } .gc-gaps { order: 5; } .gc-lapt { order: 6; }   /* (the same two rows on both cards) */
-    .gc-box > .gc-lbl, .gc-box > .gc-pre, .gc-goalg > .gc-lbl { display: none; }
-    .gc-goal { width: 92px; }
-    .gc-pre2 { display: block; }
-    .gc-cmp { width: 84px; }
+    .gc-box > .gc-pre, .gc-box > .gc-lbl, .gc-box > .gc-own { display: none; }   /* (the plan's owner is in the 조작 pop-up) */
+    .gr-card.ctl-open .gc-ctl { gap: var(--s-3) var(--s-4); padding: var(--s-3) var(--s-4) var(--s-4); }
+    .gc-seg > button { min-height: 26px; min-width: 40px; padding: 0 var(--s-3); }
+    .gc-cmp { width: 92px; }
     .gc-box .gc-fold { padding: 0 var(--s-3); }
+    .gc-modes { gap: var(--s-1) var(--s-4); }
   }
   @media (max-height: 600px) {
-    .gr-card .gc-ctl { display: none; }
-    .gr-card .gc-modes, .gr-card .gc-fold { display: block; }
-    .gr-card .gc-pre2 { display: block; }
     .gr-card { gap: var(--s-2); padding-block: var(--s-2); }
   }
-  .gr-card.ctl-open .gc-ctl { display: flex; position: absolute; left: -1px; right: -1px; bottom: calc(100% + var(--s-2)); z-index: var(--z-menu); background: var(--bg-1); border: var(--bw) solid var(--line); border-radius: var(--r-2); padding: var(--s-4) var(--s-5); box-shadow: 0 -6px 18px rgb(0 0 0 / 0.45), inset 0 2px 0 var(--tc); }
   .gr-ord b { font-weight: var(--fw-med); }
   .gr-ord.queued b, .gr-ord.sending b { color: var(--warn); } .gr-ord.applied b { color: var(--ok); } .gr-ord.refused b, .gr-ord.rejected b { color: var(--bad-ink); }
   b.gr-ord.queued { color: var(--warn); } b.gr-ord.applied { color: var(--ok); } b.gr-ord.refused, b.gr-ord.rejected { color: var(--bad-ink); }
@@ -578,8 +588,20 @@ body.game-on { grid-template-rows: auto 1fr; }
     .gr-speeds > button { min-width: 28px; padding: 0 var(--s-2); }
     .gr-docktabs > button { padding: 0 var(--s-3); font-size: var(--fs-xs); }
     .gr-dock { width: 260px; }
-    .gc-goal { width: 92px; }
   }
   @media (max-width: 1400px) { .gc-h { overflow: hidden; } .gc-name small, .gc-lapt small { display: none; } .gc-h .gc-cam { padding: 0 var(--s-3); flex: none; } }
   @media (max-height: 640px) { .gr-view .note3d, .gr-view #notes3d .note3d-line:not(.cam) { display: none; } }   /* (the source notes give way to the camera tools in a short view) */
+
+  /* v0.53 §12: the race screen keeps the view for the cars – the crumbs row goes during the race (메뉴로 is in the race
+     bar), the camera buttons are one short row instead of a column of big boxes, the selected / camera tags merge when they
+     are the same car, the provenance notes are one short line each (the sentence in the tooltip) */
+  &:has(#gameBody[data-step="race"]) { grid-template-rows: minmax(0, 1fr); } &:has(#gameBody[data-step="race"]) > .game-bar { display: none; }
+  #gameView .gr-tag:empty { display: none; }
+  #map3d[data-mode="game"] > .cam3d { display: inline-flex; gap: 1px; padding: 1px; border: var(--bw) solid var(--line); border-radius: var(--r-2); background: var(--hud-bg); }
+  #map3d[data-mode="game"] > .cam3d button { min-width: 0; min-height: 26px; padding: 0 var(--s-4); border: 0; border-radius: var(--r-1); background: transparent; font-size: var(--fs-sm); }
+  #map3d[data-mode="game"] > .cam3d button[aria-pressed="true"] { background: var(--bg-3); color: var(--text-1); box-shadow: inset 0 -2px 0 var(--text-1); }
+  #map3d .notes3d.game .note3d-line { max-width: min(420px, 60vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); pointer-events: auto; }
+  /* a big window: the cards, the tower and the bar a size up (13 px type over a 1920 px race reads small) */
+  @media (min-width: 1680px) and (min-height: 900px) { .gr-bottom, .gr-tower, .gr-top { zoom: 1.12; } }
+  .gr-tower-h .ui-seg.sm > button { min-height: 24px; }   /* (targets ≥ 24 px – v0.53 measured 20 px) */
 }

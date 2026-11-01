@@ -91,3 +91,28 @@ export function solidBarrierSegs(lines, xz, onTarmac = () => false, kinds = /^(w
   // the map's wall stood through three stands, ours at the edge behind it; run/pitwall)
   return runSegs(clipBarrierLines(lines.filter((l) => l.k === "barrier" && kinds.test(l.sub || "")), xz, { cut: onTarmac }));
 }
+
+// Monaco's stands upstairs (v0.53, the user's report: "the pit wall looks like it floats in the air"): each stand as
+// garages.js built it (its userData.wallStands record: p [x, z], y – the people's floor –, out – into the room –, along,
+// L, room, span, top, people) against the room the building has there (facilities.js garages.upperRoom(u): floor,
+// ceiling, the glazing and the back wall, metres out from the garages' front; project(x, z) → { u, off }). Right when,
+// along its whole length, it stands on the room's floor (and every person on it), inside the room's glazing and in front
+// of its back wall, under its ceiling, within the garages' run. → { ok, problems }
+export function upperStandCheck(st, roomAt, project, tol = 0.02) {
+  const problems = [];
+  if (!st.upper || !st.room) return { ok: false, problems: [`${st.team}: not a stand in a room`] };
+  const off = (a, o) => project(st.p[0] + st.along[0] * a + st.out[0] * o, st.p[1] + st.along[1] * a + st.out[1] * o);
+  for (let a = -st.L / 2; a <= st.L / 2 + 1e-6; a += st.L / 8) {
+    const pr = off(a, 0), r = roomAt(pr.u), y = st.y + (st.slope || 0) * a;
+    if (!r.inRun) problems.push(`${st.team}: ${a.toFixed(2)} m along – past the garages' run`);
+    if (Math.abs(y - r.floor) > tol) problems.push(`${st.team}: ${a.toFixed(2)} m along – ${(y - r.floor).toFixed(3)} m off the room's floor`);
+    // (out = into the room: the stand's lane side is its span's start, its back the span's end)
+    const lane = off(a, st.span[0]).off, back = off(a, st.span[1]).off;
+    if (lane > r.glass - 0.02) problems.push(`${st.team}: ${a.toFixed(2)} m along – its console ${(lane - r.glass).toFixed(2)} m from the glazing (out past it, or touching)`);
+    if (lane < r.glass - 0.6) problems.push(`${st.team}: ${a.toFixed(2)} m along – ${(r.glass - lane).toFixed(2)} m short of the glazing`);
+    if (back < r.back + 0.1) problems.push(`${st.team}: ${a.toFixed(2)} m along – through the room's back wall`);
+    if (y + st.top > r.ceil - 0.1) problems.push(`${st.team}: ${a.toFixed(2)} m along – into the ceiling`);
+  }
+  for (const [x, y, z] of st.people || []) { const r = roomAt(project(x, z).u); if (Math.abs(y - r.floor) > tol) problems.push(`${st.team}: a person ${(y - r.floor).toFixed(3)} m off the floor`); }
+  return { ok: !problems.length, problems };
+}

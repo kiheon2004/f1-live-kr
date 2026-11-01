@@ -445,3 +445,14 @@ export function storyRows(S, ordText = (x) => x.type) {
   for (const r of out) if (r.kind === "goalrun" && r.n === 1) { r.kind = "order"; r.text = r.first; }
   return out;
 }
+
+// v0.53 §12-4: a card's status badge only when the car is NOT plainly running – in the pit lane, a box called or
+// committed, an incident, finished or out. "주행 중" on both cards all race long was a badge that never said anything.
+export function plainRunning(c) {
+  if (!c) return false;
+  const ph = c.pit?.phase || "none";
+  return c.status === "run" && ph === "none" && !c.inc;
+}
+// the incident in a word for the card's badge (engine car.inc kinds – incidents.js); unknown kinds say "사고 처리 중"
+export const INC_KO = { moment: "실수", wide: "코스 이탈", spin: "스핀", crash: "사고", puncture: "펑크", limp: "손상 주행" };
+export const incKo = (k) => (k ? INC_KO[k] || "사고 처리 중" : "");

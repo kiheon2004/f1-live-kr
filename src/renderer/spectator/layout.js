@@ -19,7 +19,10 @@
 // on one spot. The HUD editor draws no tags of its own.
 
 export const PREF_KEY = "f1kr:spechud";
-export const PREF_VERSION = 1;
+// v2 (v0.53 §12): the provenance notes are detail on demand – closed by default, opened by the strip's "자료 메모" button.
+// A v1 record is kept (places, scales, presets, follow) and only its notes switch is closed once (in v1 it meant "always
+// on screen", which the default view no longer does).
+export const PREF_VERSION = 2;
 export const MARGIN = 8;                 // px kept between a widget and the view's edge
 export const SCALE = { min: 0.7, max: 1.6, step: 0.1 };
 
@@ -30,7 +33,7 @@ export const WIDGETS = {
   driver: { name: "선택 드라이버", hide: true },
   cam: { name: "카메라 도구", hide: false },   // (the camera tools hold the editor's own button: never hidden)
   pit: { name: "피트 정보", hide: true },
-  notes: { name: "자료 출처 메모", hide: true },
+  notes: { name: "자료 메모", hide: true },
 };
 export const WIDGET_IDS = Object.keys(WIDGETS);
 
@@ -47,7 +50,7 @@ export const PRESETS = {
       driver: W(true, "c", "b", 0, 12),
       cam: W(true, "l", "b", 10, 12),
       pit: W(true, "l", "b", 10, 58),
-      notes: W(true, "l", "b", 10, 150),
+      notes: W(false, "l", "b", 10, 150),
     },
   },
   analysis: {
@@ -58,7 +61,7 @@ export const PRESETS = {
       driver: W(true, "c", "b", 0, 12, 1, { detail: true }),
       cam: W(true, "l", "b", 10, 12),
       pit: W(true, "l", "b", 10, 58),
-      notes: W(true, "l", "b", 10, 150),
+      notes: W(false, "l", "b", 10, 150),
     },
   },
   minimal: {
@@ -91,7 +94,7 @@ export function defaultPrefs(preset = "watch") {
 // Whatever was stored, made safe: unknown keys dropped, numbers bounded, a missing widget taken from the preset. A newer
 // or broken record falls back to the defaults (never throws).
 export function sanitizePrefs(raw) {
-  if (!raw || typeof raw !== "object" || raw.v !== PREF_VERSION) return defaultPrefs();
+  if (!raw || typeof raw !== "object" || (raw.v !== PREF_VERSION && raw.v !== 1)) return defaultPrefs();
   const out = defaultPrefs(raw.preset);
   out.edited = !!raw.edited; out.follow = raw.follow !== false;
   for (const id of WIDGET_IDS) {
@@ -104,6 +107,7 @@ export function sanitizePrefs(raw) {
     d.scale = clamp(Math.round(num(r.scale, d.scale) * 100) / 100, SCALE.min, SCALE.max);
     if (id === "tower" && TOWER_COLS.includes(r.cols)) d.cols = r.cols;
   }
+  if (raw.v === 1) out.widgets.notes.on = false;   // (v1 → v2: see PREF_VERSION)
   return out;
 }
 // storage: anything with getItem / setItem (window.localStorage); a failing or missing one gives the defaults
@@ -209,4 +213,27 @@ export function pickTags(cands, view) {
 export function cameraCar({ follow, camPick, focus, leader, exists }) {
   if (!follow && camPick != null && (!exists || exists(camPick))) return camPick;
   return focus || leader || null;
+}
+
+// The position tower's keys (v0.51, v0.52 §8, pure since v0.53 so the tests drive it): rows = the driver numbers of the
+// rows ON SCREEN, top to bottom (not the DOM order – the rows are placed by transform – and never the hidden ones);
+// cur = the focused row's number. ↑ / ↓ the next row (stopping at the ends), Home / End the ends of the rows shown, Enter
+// or Space selects (Shift: toggles the comparison driver), a held Enter / Space selects once. An IME composing (Korean
+// input) or a modifier other than Shift is not the tower's key. → { focus: num } | { select: num, compare: bool } |
+// { prevent: true } (the key is the tower's but nothing to do) | null (not the tower's key – let it through)
+export function towerKey(ev, rows, cur) {
+  if (!ev || ev.isComposing || ev.keyCode === 229 || ev.metaKey || ev.ctrlKey || ev.altKey) return null;
+  const list = Array.isArray(rows) ? rows : [], i = list.indexOf(cur);
+  if (ev.key === "Enter" || ev.key === " ") {
+    if (ev.repeat) return { prevent: true };
+    return cur != null ? { select: cur, compare: !!ev.shiftKey } : null;
+  }
+  if (!list.length) return null;
+  let to = null;
+  if (ev.key === "ArrowDown") to = list[i < 0 ? 0 : Math.min(list.length - 1, i + 1)];
+  else if (ev.key === "ArrowUp") to = list[i < 0 ? 0 : Math.max(0, i - 1)];
+  else if (ev.key === "Home") to = list[0];
+  else if (ev.key === "End") to = list[list.length - 1];
+  else return null;
+  return to === cur ? { prevent: true } : { focus: to };
 }
