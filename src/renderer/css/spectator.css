@@ -186,7 +186,10 @@
 #map3d .spec-hud.small .spec-strip, #map3d .spec-hud.small .spec-tower, #map3d .spec-hud.small .spec-pit, #map3d .spec-hud.small .spec-notes { display: none; }
 #map3d .spec-hud.small .spec-cam .ui-seg { flex-direction: column; }
 #map3d .spec-hud.small .spec-cam .spec-in { display: grid; grid-template-columns: auto auto; justify-content: start; align-items: center; gap: var(--s-3); background: none; border: 0; padding: 0; }
-#map3d .spec-hud.small .spec-cam .ui-seg { grid-column: 1 / -1; justify-self: start; }   /* (◀ ▶ and 설정 share one row under the cameras: the short map keeps them on screen) */
+#map3d .spec-hud.small .spec-cam .spec-in { align-items: start; }
+#map3d .spec-hud.small .spec-cam .ui-seg { grid-column: 1; grid-row: 1 / span 2; }   /* (◀ ▶ and 설정 in a second column beside the cameras: the short map keeps all of them at its top left, clear of the driver card) */
+#map3d .spec-hud.small .spec-cam .cam-car { grid-column: 2; grid-row: 1; }
+#map3d .spec-hud.small .spec-cam .spec-menu-wrap { grid-column: 2; grid-row: 2; }
 #map3d .spec-hud.small .spec-cam .ui-seg { background: var(--hud-bg); }
 #map3d .spec-hud.small .spec-cam .cam-who { display: none; }
 #map3d .spec-hud.small .spec-cam .spec-menu-wrap > .ui-btn { background: var(--hud-bg); border: var(--bw) solid var(--line); }
