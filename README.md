@@ -48,4 +48,4 @@ Claude Code와 회차별로 증상 재현 → 원인 단계 찾기 → 수정 �
 
 `src/renderer/` `replay.js` `smooth.js` `startplan.js` `pitpath.js` `heading.js`
 
-[라이선스](LICENSE.md) · [출처](THIRD_PARTY_NOTICES.md)
+[출처](THIRD_PARTY_NOTICES.md)

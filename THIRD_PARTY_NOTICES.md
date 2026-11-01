@@ -1,8 +1,7 @@
 # Third-party notices
 
-The license in [LICENSE.md](LICENSE.md) (PolyForm Noncommercial 1.0.0) covers the original code and content of this
-project only. The components and data below are not ours: each stays under its own license, which this project's
-license does not change or replace. Where you use them, their terms apply.
+The components and data below are not this project's own: each stays under its own license. Where you use them,
+their terms apply.
 
 ## Bundled in the repository and the app
 
@@ -21,7 +20,7 @@ license does not change or replace. Where you use them, their terms apply.
 Parts of the hand-made circuit data in `src/data/` (e.g. grandstand outlines and the map objects they refer to) and the
 generated tables in `src/renderer/*data.js` were identified with the help of OpenStreetMap. Where such data is a
 substantial extract of the OpenStreetMap database it is © OpenStreetMap contributors and available under the Open Data
-Commons Open Database License (ODbL) 1.0 – https://www.openstreetmap.org/copyright – not under PolyForm.
+Commons Open Database License (ODbL) 1.0 – https://www.openstreetmap.org/copyright – not under this project's terms.
 
 ## Fetched at run time (not in the repository)
 
