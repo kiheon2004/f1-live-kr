@@ -4763,6 +4763,9 @@ window.Map3D = {
     return out;
   },
   // development: groundDiag's counts over the whole map (no list)
+  // development (v0.53): the buildings most buried by their own ground (groundDiag over the whole map), within `near` m
+  // of the track: [{ name, kind, size, h, buried, plinth, gap, terrain, base, trackD, ll, worstAt, modelled, yard }]
+  buriedList(n = 25, near = 400) { const R = world?.real; if (!R?.scene) return "no map"; const [la, lo] = R.scene.center || R.geo.toLL(0, 0), d = JSON.parse(this.groundDiag(la, lo, 1e5, 100000)); return JSON.stringify({ footing: d.footing, n: d.n, buried1m: d.buried1m, buried1mNear: d.buried1mNear, list: d.list.filter((b) => b.trackD < near).slice(0, n).map(({ ko, ...b }) => b), floating: d.list.filter((b) => b.trackD < near && b.gap > 0.3).sort((a, b) => b.gap - a.gap).slice(0, 10).map(({ ko, ...b }) => b) }); },
   groundDiagAll() { const R = world?.real; if (!R?.scene) return "no map"; const [la, lo] = R.scene.center || R.geo.toLL(0, 0), d = JSON.parse(this.groundDiag(la, lo, 1e5, 0)); delete d.list; return JSON.stringify(d); },
   // development: pick the n buildings nearest the track (within maxD m) most buried by the drawn ground – the cameras
   // for groundCam(k) – and keep them, so the same cameras can be used with the fix off and on

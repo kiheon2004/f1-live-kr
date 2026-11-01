@@ -1672,7 +1672,9 @@ export function makeCar({ teamName, teamColour, number, season = null, date = nu
   const fwPaint = skyLit(new THREE.MeshStandardMaterial({ color: l.fw || l.wing || l.base, roughness: matte ? 0.55 : 0.24, metalness: 0.05 }));
   // (rubber: matte, a faint sheen at grazing angles; the wheel's black parts satin, its metal parts – the rim's lip, the
   // nut, the hub – metal that now has a sky to reflect: without one a metalness of 0.85 drew them near black)
-  const tyreMat = mat("tyre", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.88, metalness: 0 }), 0.6));
+  // (v0.53, request §10 "no crushed black": the rubber's albedo ~0.02 in linear light – sRGB #262628 – not #18181a's
+  // 0.009, which read as a flat black hole in daylight; a used slick's faint sheen: roughness 0.85)
+  const tyreMat = mat("tyre", () => skyLit(new THREE.MeshStandardMaterial({ color: 0x262628, roughness: 0.85, metalness: 0 }), 0.6));
   const coverMat = mat("cover", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.2 }), 0.6));
   const lipMat = mat("lip", () => skyLit(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.32, metalness: 0.85 })));
   const pad = mat("pad", () => new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.85, metalness: 0 }));
