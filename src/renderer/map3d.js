@@ -5265,6 +5265,23 @@ window.Map3D = {
     return JSON.stringify(out.sort((a, b) => b[1] - a[1]).slice(0, n));
   },
   // development (v0.53): the smooth near crowns – the radius in use and how many are drawn now
+  // development (v0.53): the ground's class raster round scene (x, z), ±r m, drawn over the window (the fine raster
+  // where it covers, else the whole-area one; one colour a class) – off: removed. → which raster, its m a texel
+  groundClasses(x, z, r = 60, on = true) {
+    document.getElementById("devClasses")?.remove(); if (!on) return "off";
+    const t = realPart("terrain")?.userData.classes; if (!t) return "no classes";
+    const F = t.fine && x - r > t.fine.ext.x0 && z - r > t.fine.ext.z0 && x + r < t.fine.ext.x0 + t.fine.W * t.fine.mpp && z + r < t.fine.ext.z0 + t.fine.H * t.fine.mpp ? t.fine : t;
+    const n = Math.round((2 * r) / F.mpp), cv = document.createElement("canvas"); cv.width = cv.height = n; const g = cv.getContext("2d"), im = g.createImageData(n, n);
+    const PAL = [[90, 160, 70], [140, 150, 80], [40, 100, 40], [200, 180, 120], [150, 110, 70], [70, 70, 75], [180, 180, 175], [170, 160, 140], [170, 150, 60], [60, 90, 200], [255, 0, 255]];
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const gx = Math.floor((x - r + i * F.mpp - F.ext.x0) / F.mpp), gz = Math.floor((z - r + j * F.mpp - F.ext.z0) / F.mpp), c = gx < 0 || gz < 0 || gx >= F.W || gz >= F.H ? 255 : F.R[gz * F.W + gx];
+      const col = PAL[Math.min(c, PAL.length - 1)] || [0, 0, 0], o = (j * n + i) * 4; im.data[o] = col[0]; im.data[o + 1] = col[1]; im.data[o + 2] = col[2]; im.data[o + 3] = 255;
+    }
+    g.putImageData(im, 0, 0); cv.id = "devClasses"; Object.assign(cv.style, { position: "fixed", left: "20px", top: "60px", width: "700px", height: "700px", zIndex: 99999, imageRendering: "pixelated" }); document.body.appendChild(cv);
+    return JSON.stringify({ fine: F === t.fine, mpp: F.mpp, n });
+  },
+  // development (v0.53): set one of the class ground's uniforms (gFine 0 / 1 …); no value: read them
+  groundUniform(name, v) { const sh = realPart("terrain")?.material.userData.shader; if (!sh) return "no shader"; if (v != null) sh.uniforms[name].value = v; return JSON.stringify(Object.fromEntries(["gFine", "gExt", "gExt2", "gClsSize", "gCls2Size"].map((k) => [k, sh.uniforms[k].value]))); },
   nearTrees() { const n = realPart("trees")?.userData.near; return JSON.stringify({ radius: nearTreeRadius(), shown: n ? n.shown() : null }); },
   sceneStats() {
     const out = {}, add = (k, o) => { const r = out[k] || (out[k] = { objects: 0, meshes: 0, visibleMeshes: 0, tris: 0 }); r.objects++; if (o.isMesh || o.isPoints || o.isSprite || o.isLine) { r.meshes++; let v = true; for (let p = o; p; p = p.parent) if (!p.visible) { v = false; break; } if (v) { r.visibleMeshes++; const g = o.geometry; if (g?.attributes?.position) r.tris += Math.round(((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1)); } } };

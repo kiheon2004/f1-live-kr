@@ -867,6 +867,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     const gm = groundMaterial({ R, W: ground.canvas.width, H: ground.canvas.height, ext, mpp: ground.mpp, tintCanvas: ground.canvas, fine });
     tmat.dispose();
     terrain.material = gm.material;
+    terrain.userData.classes = { R, W: cw, H: chh, ext: { x0: ext.x0, z0: ext.z0 }, mpp: ground.mpp, fine };   // (development: Map3D.groundClasses)
   }
 
   // (tplan, the covered stretches: planned with the terrain, above)
