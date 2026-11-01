@@ -559,6 +559,21 @@ function barriersMesh(lines, gf, heightAt) {
 //   isCurrent() → false once this build's world is gone (a facility model still loading is then dropped) }
 // (a build that fails part way frees what it made – its meshes, a facility's hold on a model file, the night field –
 // and the error goes on to the caller; a build that finishes hands everything over in the result)
+// A value given per vertex of the terrain grid ((nx+1)×(nz+1) vertices over ext, W × H m; arr[k·stride + off]), read across
+// the grid's triangles as the mesh draws them: triangles a-e-b and b-e-f (a = i,j; b = i+1,j; e = i,j+1; f = i+1,j+1).
+// (v0.53: u, v held to the edge cell – a point beyond the grid took the edge triangle's slope extrapolated: Hungary's
+// buildings 2 km out at the map's edge stood on ground "50 m" below them, Monaco's floated in the sky over the hillside;
+// Map3D.buriedList)
+export function gridReader(arr, stride, off, ext, W, H, nx, nz) {
+  return (x, z) => {
+    const fi = ((x - ext.x0) / W) * nx, fj = ((z - ext.z0) / H) * nz;
+    const i = Math.max(0, Math.min(nx - 1, Math.floor(fi))), j = Math.max(0, Math.min(nz - 1, Math.floor(fj))), u = Math.max(0, Math.min(1, fi - i)), v = Math.max(0, Math.min(1, fj - j));
+    const y = (ii, jj) => arr[(jj * (nx + 1) + ii) * stride + off];
+    return u + v <= 1 ? y(i, j) + (y(i + 1, j) - y(i, j)) * u + (y(i, j + 1) - y(i, j)) * v
+      : y(i + 1, j + 1) + (y(i, j + 1) - y(i + 1, j + 1)) * (1 - u) + (y(i + 1, j) - y(i + 1, j + 1)) * (1 - v);
+  };
+}
+
 export async function buildScenery(api, scene, world, opts, onStep) {
   const own = { group: new THREE.Group(), night: null, t0: performance.now() };
   try { return await buildReal(api, scene, world, opts, onStep, own); }
@@ -671,17 +686,8 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     uvs[k * 2] = i / nx; uvs[k * 2 + 1] = 1 - j / nz;
   }
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const a = j * (nx + 1) + i, b = a + 1, e = a + nx + 1, f = e + 1; idx.push(a, e, b, b, e, f); }
-  // a value given per grid vertex, read across the grid's triangles (as the mesh draws them)
-  const onGrid = (arr, stride, off) => (x, z) => {
-    const fi = ((x - ext.x0) / W) * nx, fj = ((z - ext.z0) / H) * nz;
-    // (v0.53: u, v held to the edge cell – a point beyond the grid took the edge triangle's slope extrapolated: Hungary's
-    // buildings 2 km out at the map's edge stood on ground "50 m" below them, floating over the far plane, Map3D.buriedList)
-    const i = Math.max(0, Math.min(nx - 1, Math.floor(fi))), j = Math.max(0, Math.min(nz - 1, Math.floor(fj))), u = Math.max(0, Math.min(1, fi - i)), v = Math.max(0, Math.min(1, fj - j));
-    const y = (ii, jj) => arr[(jj * (nx + 1) + ii) * stride + off];
-    // triangles a-e-b and b-e-f (a = i,j; b = i+1,j; e = i,j+1; f = i+1,j+1)
-    return u + v <= 1 ? y(i, j) + (y(i + 1, j) - y(i, j)) * u + (y(i, j + 1) - y(i, j)) * v
-      : y(i + 1, j + 1) + (y(i, j + 1) - y(i + 1, j + 1)) * (1 - u) + (y(i + 1, j) - y(i + 1, j + 1)) * (1 - v);
-  };
+  // a value given per grid vertex, read across the grid's triangles (as the mesh draws them) – gridReader above
+  const onGrid = (arr, stride, off) => gridReader(arr, stride, off, ext, W, H, nx, nz);
   // height of the drawn terrain surface (the grid's triangles), for things that must lie on it
   const terrainAt = onGrid(pos, 3, 1);
   const edgeAt = (s, side) => (side > 0 ? s.L ?? 7 : s.R ?? -7);
