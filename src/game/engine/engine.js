@@ -65,7 +65,11 @@ const TEAM_CARS = { 2025: CARS_2025_TABLE, 2026: CARS_2026_TABLE }, TRACK_TAU = 
 // 0.53: every car's lap clock starts at lights out (lap 1 of a car gridded past the timing line took in the start sequence);
 // a stop under an SC / VSC is measured against the field over the same stretch, a double stack's queue is its approach
 // beyond a free one – lap records and accounts only: the cars' motion, the orders and the draws are those of 0.52
-export const ENGINE_VERSION = "0.53.0-engine.1";
+// 0.54: two cars one behind the other keep the bodies' length ON THE ROAD apart (traffic.js bodyLen): on the inside of a
+// bend a metre of the lap line is less road, and cars nose to tail there were drawn up to 0.9 m into each other – a car short
+// of that is held back (<= 0.25 m a step, at the other's speed – no contact), the room check of a lateral move uses it, and
+// contacts are resolved from the front of the queue back
+export const ENGINE_VERSION = "0.54.0-engine.1";
 // the coefficient / rule fingerprint (params/version.js) – saves and results carry both; see MODEL
 export { PARAMS_VERSION, PARAMS_HASH } from "../data/params/version.js";
 import { PARAMS_VERSION as PV } from "../data/params/version.js";

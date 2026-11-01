@@ -2553,17 +2553,24 @@ let sepMemory = {};
 // ~1 s, the frame time being capped at 0.1 s so `dt > 0.5` never caught a seek: a pit-lane car drawn up to 2 m off
 // where playing up to the same moment draws it, sliding back – Map3D.seekCheck, Monaco 2025)
 let sepT = null;
-const sepSkip = (a, b) => a.track && b.track;
+// (v0.54: two cars on the track that traffic() leaves overlapping – its residual, both cars: a side chosen too late for the
+// lateral speed it may use, the steadied tracks bringing two cars together within a frame – are parted here as well, by
+// at most SEP_TRACK m: Monaco 2025 had 620 such episodes, 2026 Hungary 1400, up to 2.5 m deep)
+const sepSkip = (a, b) => a.track && b.track && !(a.res > 0.05 && b.res > 0.05), SEP_MAX = 5, SEP_STAND = 14, SEP_TRACK = 2;
 function separate(dt, seen, snap = false) {
   const list = [];
   for (const num of seen) {
     const c = cars.get(num);
-    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw), track: c.onTrack && !c.est && !c.pit && !(c.grid && c.grid.state !== "free") });   // c.pos is this frame's raw position
+    const track = c.onTrack && !c.est && !c.pit && !(c.grid && c.grid.state !== "free");
+    // (v0.54: a car standing off the steadied tracks – a queue in the pit lane, the field parked after the flag – may be
+    // drawn up to SEP_STAND m off the feed's place, the others SEP_MAX: Hungary 2025's field after the flag, 8–10 cars within
+    // a few metres in the pit lane, stood 2 m into each other for up to a minute)
+    list.push({ id: num, x: c.pos.x, z: c.pos.z, hx: Math.sin(c.yaw), hz: Math.cos(c.yaw), track, res: track ? c.trafRes || 0 : 0, max: track ? SEP_TRACK : (c.speed || 0) < 2 ? SEP_STAND : SEP_MAX });   // c.pos is this frame's raw position
   }
   // (v0.44: two cars on the track are traffic.js's – traffic() above, along and across the track, checked as boxes; this
   // pass is for the rest – the pit lane, a car off the steadied tracks, grid slots, placements without data – so no pair
   // gets two corrections on top of each other)
-  const off = window.ReplayKit.separateCars(list, sepMemory, 16, 5, sepSkip);
+  const off = window.ReplayKit.separateCars(list, sepMemory, 40, SEP_MAX, sepSkip);
   const k = Math.min(1, dt * 9);
   for (const o of list) {
     const c = cars.get(o.id);
@@ -2576,7 +2583,8 @@ function separate(dt, seen, snap = false) {
       if (latRaw <= hi && latRaw >= lo) { const cl = Math.max(lo, Math.min(hi, lat)) - lat; tx += s.nor.x * cl; tz += s.nor.z * cl; }
     }
     // (a spring, ω 6/s: the correction comes and goes without a kink, which at 60 fps read as a shake)
-    if (dt > 0.5 || snap) { c.sepX = tx; c.sepZ = tz; c.sepVX = c.sepVZ = 0; } else { spring(c, "sepX", "sepVX", tx, 6, dt); spring(c, "sepZ", "sepVZ", tz, 6, dt); }
+    // (v0.54: faster – ω 9/s – while the push grows, the cars meeting; ω 6/s while it is let go)
+    if (dt > 0.5 || snap) { c.sepX = tx; c.sepZ = tz; c.sepVX = c.sepVZ = 0; } else { const w = tx * tx + tz * tz > (c.sepX || 0) ** 2 + (c.sepZ || 0) ** 2 ? 9 : 6; spring(c, "sepX", "sepVX", tx, w, dt); spring(c, "sepZ", "sepVZ", tz, w, dt); }
     c.pos.set(o.x + c.sepX, c.pos.y, o.z + c.sepZ);
     // (on the track the height is right already; in the pit lane pitDraw put it on the lane's / the garage's floor – v0.49:
     // this set every pit-lane car off the steadied tracks to the NEAREST LAP-LINE point's height, the start straight beside
@@ -4121,6 +4129,7 @@ const gameKit = {
 function gameCars(dt) {
   const fr = updateGameCars(gameKit, game, dt);
   if (fr && gamePitTrace) gameTraceFrame(fr, dt);
+  if (fr && gameOv) gameOvFrame(fr);
   if (fr) { const t0 = performance.now(); gamePitCam.direct(game, fr, t0); gamePitCost.direct += performance.now() - t0; gamePitCost.frames++; gamePitFr = fr; }
   // the safety car where the engine has it (snapshot.sc: on the engine's lap, mapped like the cars)
   const sc = fr?.snap?.sc, SP = supportCtx(game, 0);
@@ -4146,6 +4155,31 @@ function gameTraceFrame(fr, dt) {
     list.push({ num, x: P.x, z: P.z, yaw: c.model.rotation.y, speed: Math.abs(g.v || 0), state: g.pit?.phase || "?", team: d?.TeamName || null, boxU: tm?.box ?? null });
   }
   gamePitTrace.frames++; gamePitTrace.trace.frame(fr.t / 1000, dt * (game.ctx.rate || 1), list);
+}
+// development (v0.54): the game's cars as drawn overlapping each other, every frame while on (Map3D.game.overlapRec) –
+// oriented boxes (5.6 × 2.0 m, placed along the car as its model is), per kind: the start (to 40 s), the pit lane, side by
+// side (centres under ¾ of a length apart along the heading), nose to tail; episodes per pair (a gap of 1 s of race time
+// joins frames), the worst with the engine's (s, d) of both
+let gameOv = null;
+function gameOvFrame(fr) {
+  const O = gameOv, list = [], t = fr.t;
+  O.frames++;
+  for (const [num, c] of cars) {
+    const g = c.game; if (!c.has || !c.obj.visible || !g || num === "SC" || g.where === "garage") continue;
+    let D = carDims(c); const k = O.box[0] / (D.front + D.back); D = { front: D.front * k, back: D.back * k, half: O.box[1] / 2 };
+    list.push({ num, x: c.obj.position.x, y: c.obj.position.y, z: c.obj.position.z, yaw: c.model.rotation.y, D, g });
+  }
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j]; if (Math.hypot(a.x - b.x, a.z - b.z) > 8 || Math.abs(a.y - b.y) > 2.5) continue;
+    const dep = boxDepth(a.x, a.z, a.yaw, a.D, b.x, b.z, b.yaw, b.D); if (!dep) continue;
+    const along = Math.abs((b.x - a.x) * Math.sin(a.yaw) + (b.z - a.z) * Math.cos(a.yaw));
+    const kind = a.g.where === "pit" || b.g.where === "pit" ? "pit" : t < 40000 ? "start" : along < 5.6 * 0.75 ? "side" : "tail";
+    const q = O.kinds[kind] || (O.kinds[kind] = { frames: 0, eps: 0, maxDepth: 0 }); q.frames++; if (dep > q.maxDepth) q.maxDepth = +dep.toFixed(2);
+    const key = a.num < b.num ? a.num + "/" + b.num : b.num + "/" + a.num, e = O.open.get(key);
+    const info = () => ({ t: +(t / 1000).toFixed(1), depth: +dep.toFixed(2), kind, along: +along.toFixed(2), sd: [a.g.s != null ? [+a.g.s.toFixed(1), +(a.g.d || 0).toFixed(2)] : a.g.pit?.phase, b.g.s != null ? [+b.g.s.toFixed(1), +(b.g.d || 0).toFixed(2)] : b.g.pit?.phase], v: [Math.round(a.g.v || 0), Math.round(b.g.v || 0)] });
+    if (!e || t - e.t1 > 1000) { q.eps++; const n = { key, t0: t, t1: t, ...info() }; O.open.set(key, n); O.eps.push(n); }
+    else { e.t1 = t; if (dep > e.depth) Object.assign(e, info()); }
+  }
 }
 // the pit view's camera (camMode "pit"): game/pitcam.js's pose for this frame, or the camera left where it is
 let gamePitFr = null, pitCamDirecting = false;
@@ -4263,6 +4297,12 @@ window.Map3D = {
       cars: [...cars.values()].filter((c) => c.obj.visible).map((c) => ({ num: c.num, x: +c.pos.x.toFixed(2), y: +c.pos.y.toFixed(2), z: +c.pos.z.toFixed(2), yaw: +c.yaw.toFixed(3), s: c.worldS != null ? +c.worldS.toFixed(1) : null, where: c.game?.where, phase: c.game?.pit?.phase, lifted: !!c.lifted, cmp: c.game?.tyre?.compound })),
       crews: world?.crews ? true : false, boxes: gameKit.boxDiag || null, cam: camMode, focus: app().focus || null, t: app().t }),
     setCam: (m) => setCam(m),
+    // development (v0.54): drawn cars overlapping (gameOvFrame) – on: from now; off: the report
+    overlapRec(on = true, box = [5.6, 2.0]) {
+      if (on) { gameOv = { box, frames: 0, kinds: {}, open: new Map(), eps: [], w0: performance.now() }; return "recording"; }
+      const O = gameOv; gameOv = null; if (!O) return "not recording";
+      return JSON.stringify({ frames: O.frames, wallS: Math.round((performance.now() - O.w0) / 1000), kinds: O.kinds, episodes: O.eps.length, worst: O.eps.sort((x, y) => y.depth - x.depth).slice(0, 14).map((e) => ({ ...e, dur: +((e.t1 - e.t0) / 1000).toFixed(1), t0: undefined, t1: undefined })) });
+    },
     // development (v0.53 §8): record the pit cars as drawn from now (on) / stop and report (off) – pitcheck.js
     pitTrace(on = true) {
       if (on) { gamePitTrace = { trace: null, frames: 0, t0: performance.now() }; return "recording"; }
@@ -4611,7 +4651,10 @@ window.Map3D = {
         const list = [];
         for (const [num, c] of cars) {
           if (!c.has || !c.obj.visible || !c.pos) continue;
-          const D = carDims(c); res.dims[D.era] = [+(D.front + D.back).toFixed(2), +(2 * D.half).toFixed(2)];
+          let D = carDims(c);
+          // (o.box [length, width] m: a fixed footprint instead of the model's bounds – the body, 5.6 × 2.0 m, kept where the model has it along)
+          if (o.box) { const k = o.box[0] / (D.front + D.back); D = { ...D, front: D.front * k, back: D.back * k, half: o.box[1] / 2 }; }
+          res.dims[D.era] = [+(D.front + D.back).toFixed(2), +(2 * D.half).toFixed(2)];
           const onT = c.onTrack && c.st && !c.est && !c.pit;
           if (onT) F.at(c.st.s, c.st.d, B);
           const r = src.tracks.at(num, fakeT, RAW) ? [RAW[0] * DM - c0.x, -(RAW[1] * DM - c0.z)] : null;
@@ -4648,6 +4691,12 @@ window.Map3D = {
             cancel: [a, b].some((q) => q.want[0] > 0.3 && q.want[1] < -0.3), tgtSep: a.d != null && b.d != null ? Math.abs(a.d + a.tgt - b.d - b.tgt) : 0, moved: Math.abs(a.off) + Math.abs(b.off) > 0.3 });
           if (Math.max(a.c.trafRes || 0, b.c.trafRes || 0) > 0) res.acknowledged++;
           { const mk = cause + "|" + [a.c.trafMode || "-", b.c.trafMode || "-"].sort().join("+"); res.byMode[mk] = (res.byMode[mk] || 0) + 1; if (a.s != null) { const bin = Math.floor(((a.s % F.L) + F.L) % F.L / 50) * 50; res.byPlace[bin] = (res.byPlace[bin] || 0) + 1; } }   // (frames the correction itself reports as left over)
+          // (v0.54: the kind – the start (lights out to +40 s), the pit lane, side by side (centres less than a car's length apart
+          // along the heading) or nose to tail, braking (−12 m/s² or harder))
+          { const fx = Math.sin(a.yaw), fz = Math.cos(a.yaw), along = Math.abs((b.x - a.x) * fx + (b.z - a.z) * fz), rel = fakeT - st0;
+            const kind = a.pit || b.pit ? "pit" : rel >= -5000 && rel < 40000 ? "start" : along < (a.D.front + a.D.back) * 0.75 ? "side" : "tail";
+            const K = res.kinds || (res.kinds = {}), q = K[kind] || (K[kind] = { frames: 0, eps: new Set(), brake: 0, maxDepth: 0, frameMs: step });
+            q.frames++; q.eps.add(a.num + "/" + b.num + "@" + Math.floor(fakeT / 2000)); if (Math.min(a.as, b.as) < -12) q.brake++; if (dC > q.maxDepth) q.maxDepth = +dC.toFixed(2); }
           log.add(fakeT, a.num + "/" + b.num, dC, cause, { s: a.s != null ? Math.round(((a.s % F.L) + F.L) % F.L) : null, x: +a.x.toFixed(1), y: +a.y.toFixed(1), z: +a.z.toFixed(1), off: [+a.off.toFixed(2), +b.off.toFixed(2)], sOff: [+(a.c.trafS || 0).toFixed(2), +(b.c.trafS || 0).toFixed(2)], mode: [a.c.trafMode || "", b.c.trafMode || ""], pit: [a.c.pit?.state?.state || "", b.c.pit?.state?.state || ""], sep: [+Math.hypot(a.c.sepX || 0, a.c.sepZ || 0).toFixed(2), +Math.hypot(b.c.sepX || 0, b.c.sepZ || 0).toFixed(2)], raw: +dA.toFixed(2), aligned: +dB.toFixed(2) });
         }
       }
@@ -4655,6 +4704,7 @@ window.Map3D = {
     // the feed's sample spacing (ms) over the window: median and 95th percentile
     { const g = []; for (const c of Object.values(src.tracks.cars)) for (let k = 1; k < c.n; k++) if (c.t[k] >= t0 && c.t[k] <= t1) g.push(c.t[k] - c.t[k - 1]); g.sort((x, y) => x - y); res.rawGapMs = g.length ? [g[g.length >> 1], g[Math.floor(g.length * 0.95)]] : null; }
     const eps = log.finish();
+    if (res.kinds) for (const q of Object.values(res.kinds)) { q.eps = q.eps.size; }
     res.episodes = eps.length; res.overlapFrames = eps.reduce((x, e) => x + e.frames, 0);
     res.byCause = summarise(eps, step);
     res.worst = eps.sort((x, y) => y.depth * (y.t1 - y.t0 + step) - x.depth * (x.t1 - x.t0 + step)).slice(0, o.top ?? 12).map((e) => ({ t: +((e.worstT - st0) / 1000).toFixed(1), pair: e.key, cause: e.cause, depth: +e.depth.toFixed(2), dur: +((e.t1 - e.t0 + step) / 1000).toFixed(1), ...e.at }));

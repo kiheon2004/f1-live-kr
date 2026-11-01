@@ -810,7 +810,10 @@
   //   nose to tail → along the track, keeping who's ahead.
   // cars: [{ id, x, z, hx, hz }] in metres with unit heading (hx, hz); returns { id: [dx, dz] } offsets.
   // `memory` (an object kept between calls) holds each pair's side.
-  const CAR_LEN = 5.5, CAR_WID = 2.05;
+  // (v0.54: the body 5.6 × 2.0 m and 0.2 m clear each way – 5.5 × 2.05 left the drawn bodies 0.1 m into each other nose to
+  // tail; a car's own `max` (m) instead of maxShift: a standing queue – the field parked in the pit lane after the flag,
+  // the feed's positions of ten cars within a few metres – needs more than 5 m to be laid out one behind the other)
+  const CAR_LEN = 5.8, CAR_WID = 2.2;
   // (skip(a, b): a pair left to another correction – v0.44: two cars on the track, which map3d's traffic.js keeps apart)
   function separateCars(cars, memory = {}, iterations = 16, maxShift = 5, skip = null) {
     const off = {}, P = cars.map((c) => ({ ...c, ox: 0, oz: 0 }));
@@ -845,7 +848,7 @@
       if (!moved) break;
     }
     // never move a car far from where the data puts it (a pile-up in the data is better left than invented)
-    for (const c of P) { const l = Math.hypot(c.ox, c.oz), k = l > maxShift ? maxShift / l : 1; off[c.id] = [c.ox * k, c.oz * k]; }
+    for (const c of P) { const l = Math.hypot(c.ox, c.oz), mx = c.max ?? maxShift, k = l > mx ? mx / l : 1; off[c.id] = [c.ox * k, c.oz * k]; }
     return off;
   }
 
