@@ -115,8 +115,10 @@ export function motionPatch(kind, value) {
   return null;
 }
 
-// v0.53 round 2: the feed's own trouble as a data note (Map3D.feedState – the lead's: { held, rewound, degradedCars }).
-// Read defensively: a missing hook, a JSON string, numbers or { num } entries, counts or lists for held / rewound.
+// v0.53 round 2: the feed's own trouble as a data note (Map3D.feedState: { held, rewound, degradedCars, leapFrames } –
+// held / rewound are SAMPLES left out (frozen / re-sent positions, 2026 Hungary: ~355k), leapFrames frames a car was
+// not drawn for a leap of its raw positions). Read defensively: a missing hook, a JSON string, numbers or { num }
+// entries, counts or lists.
 // tla(num) → the three letters. → { text, nums: Set } or null (nothing to say)
 export function feedNote(fs, tla = (n) => n) {
   let s = fs; if (typeof s === "string") { try { s = JSON.parse(s); } catch { return null; } }
@@ -124,10 +126,11 @@ export function feedNote(fs, tla = (n) => n) {
   const numOf = (x) => (x && typeof x === "object" ? x.num ?? x.n ?? x.car : x);
   const list = (v) => (Array.isArray(v) ? v.map(numOf).filter((x) => x != null && x !== "").map(String) : []);
   const count = (v) => (Array.isArray(v) ? v.length : Number.isFinite(+v) ? +v : 0);
-  const deg = [...new Set(list(s.degradedCars))], held = count(s.held), rew = count(s.rewound);
+  const deg = [...new Set(list(s.degradedCars))], held = count(s.held), rew = count(s.rewound), leap = count(s.leapFrames);
   const parts = [];
   if (deg.length) parts.push(`위치 자료 불안정 – 텔레메트리로 보정: ${deg.slice(0, 6).map((n) => tla(n) || n).join(", ")}${deg.length > 6 ? ` 외 ${deg.length - 6}대` : ""}`);
-  if (held > 0) parts.push(`위치가 크게 튄 차 ${held}대 잠시 숨김`);
-  if (rew > 0) parts.push(`되돌아간 위치 자료 ${rew}건 무시`);
+  if (held > 0) parts.push(`멈춘 위치 자료 ${held.toLocaleString("ko-KR")}건 제외`);
+  if (rew > 0) parts.push(`되돌아간 위치 자료 ${rew.toLocaleString("ko-KR")}건 무시`);
+  if (leap > 0) parts.push("크게 튄 위치는 잠시 숨김");
   return parts.length ? { text: parts.join(" · "), nums: new Set(deg) } : null;
 }

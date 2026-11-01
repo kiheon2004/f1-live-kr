@@ -121,7 +121,10 @@ test("round 2 – feed trouble note: read defensively (absent, string, numbers o
   const a = feedNote({ held: 0, rewound: 0, degradedCars: ["1", { num: "44" }, 1] }, tla);
   assert.match(a.text, /위치 자료 불안정 – 텔레메트리로 보정: VER, HAM/); assert.deepStrictEqual([...a.nums], ["1", "44"]);
   const b = feedNote(JSON.stringify({ held: [1, 2], rewound: 3 }), tla);
-  assert.match(b.text, /2대 잠시 숨김/); assert.match(b.text, /3건/); assert.strictEqual(b.nums.size, 0);
+  assert.match(b.text, /멈춘 위치 자료 2건 제외/); assert.match(b.text, /3건 무시/); assert.strictEqual(b.nums.size, 0);
+  // the real hook's shape: held / rewound are sample counts (not cars), leapFrames frames
+  const r = feedNote({ held: 355012, rewound: 7800, degradedCars: ["16"], degradedNow: [], leapFrames: 12 }, tla);
+  assert.match(r.text, /멈춘 위치 자료 355,012건 제외/); assert.doesNotMatch(r.text, /\d+대 잠시/); assert.match(r.text, /크게 튄 위치는 잠시 숨김/);
   const many = feedNote({ degradedCars: Array.from({ length: 9 }, (_, i) => String(i + 100)) });
   assert.match(many.text, /외 3대/);
 });
