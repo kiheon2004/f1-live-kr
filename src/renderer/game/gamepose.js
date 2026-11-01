@@ -93,6 +93,21 @@ export function offsetAt(snaps, num, T, lineAt, W = 300, out = {}) {
   if (T - t0 > 1) out.rate = ((out.e - eAt(t0)) / (T - t0)) * 1000;
   return out;
 }
+// the mean of a car's value (snapshot field `key`) over the last W ms before T, the snapshots' values joined linearly –
+// the body's dip under braking from it: the engine's acceleration steps from +1 g to −4 g between two 50 ms steps, the
+// car's pitch takes a moment (its springs and dampers) – a pure function of the buffer and T, as offsetAt
+export function meanAt(snaps, num, T, key, W = 150) {
+  const pts = [];
+  for (const b of snaps || []) { const c = carIn(b, num), x = c?.[key]; if (Number.isFinite(x)) pts.push(b.t, x); }
+  if (!pts.length) return 0;
+  const at = (t) => { if (t <= pts[0]) return pts[1]; for (let i = 2; i < pts.length; i += 2) if (t <= pts[i]) { const f = (t - pts[i - 2]) / (pts[i] - pts[i - 2] || 1); return pts[i - 1] + (pts[i + 1] - pts[i - 1]) * f; } return pts[pts.length - 1]; };
+  const t0 = Math.max(pts[0], T - W); if (!(T - t0 > 1)) return at(T);
+  // (trapezoids over the pieces inside [t0, T])
+  let acc = 0, ta = t0, xa = at(t0);
+  for (let i = 0; i < pts.length; i += 2) { const tb = pts[i]; if (tb <= ta) continue; if (tb >= T) break; const xb = pts[i + 1]; acc += (xa + xb) * 0.5 * (tb - ta); ta = tb; xa = xb; }
+  acc += (xa + at(T)) * 0.5 * (T - ta);
+  return acc / (T - t0);
+}
 const byNum = new WeakMap();
 function carIn(snap, num) {
   let m = byNum.get(snap); if (!m) { m = new Map(); for (const c of snap.cars || []) m.set(c.num, c); byNum.set(snap, m); }

@@ -8,7 +8,7 @@ import { rollAngle, smearOf } from "../wheelspin.js";
 import { CHANGE } from "../crew.js";
 import { updateGameCrews } from "./pitcrew.js";
 import { boxWays, gameLaneW } from "../pitpath.js";
-import { lapPose, lineOf, offsetAt } from "./gamepose.js";
+import { lapPose, lineOf, offsetAt, meanAt } from "./gamepose.js";
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];   // (scratch points)
@@ -98,10 +98,10 @@ export function updateGameCars(K, A, dt) {
       // v0.54 (request §2): posed on the path the engine drives – the racing line at s plus the car's own offset from it
       // (gamepose.js): heading along that path at the rear axle, slip, lean, dip and steering from its curvature and the
       // engine's acceleration – all from this moment's state (no easing, no frame-to-frame rates: same t → same pose)
-      const o = offsetAt(snapsOf(A, fr), g.num, fr.t, lineAt, 300, OFF);
+      const SN = snapsOf(A, fr), o = offsetAt(SN, g.num, fr.t, lineAt, 300, OFF), aBody = meanAt(SN, g.num, fr.t, "a", 150);
       const dE = o.e != null ? lineAt(g.s) + o.e : g.d ?? 0;
       geo.at(g.s, dE, P0);
-      const q = lapPose(geo, g.s, dE, o.e != null ? o.rate : 0, g.v || 0, g.a || 0, { lr, wb }, POSE);
+      const q = lapPose(geo, g.s, dE, o.e != null ? o.rate : 0, g.v || 0, aBody, { lr, wb }, POSE);
       c.yaw = q.yaw; c.pathYaw = q.pathYaw; c.yawRate = q.yawRate; c.pitch = q.pitch; c.roll = q.roll; c.slide = q.slide; c.steerPath = q.steer;
       v.set(P0[0], P0[1] + K.ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (g.v / 90) ** 2), P0[2]);
       const w = map.sd(g.s, dE); c.sample = F.sampleAt(w.s); c.worldS = w.s;
@@ -117,7 +117,7 @@ export function updateGameCars(K, A, dt) {
       const kappa = k > 0 ? wrap(pitYawAt(K, P, g, g.u + hk, world.center) - pitYawAt(K, P, g, g.u - hk, world.center)) / (2 * hk) : 0;
       const aLat = sp * sp * kappa;
       c.yaw = yaw; c.pathYaw = yaw; c.yawRate = sp * kappa; c.slide = 0; c.steerPath = null;
-      c.pitch = Math.max(-0.006, Math.min(0.02, -(g.a || 0) * 0.00032)); c.roll = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));
+      c.pitch = Math.max(-0.006, Math.min(0.02, -meanAt(snapsOf(A, fr), g.num, fr.t, "a", 150) * 0.00032)); c.roll = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));
       c.sample = null; c.worldS = null;
     } else { c.obj.visible = false; continue; }
     c.speed = Math.abs(g.v); c.acc = g.a || 0; c.onTrack = onTrack; c.onKerb = false; c.bump = 0; c.est = null; c.grid = null; c.pit = null;

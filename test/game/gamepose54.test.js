@@ -65,3 +65,13 @@ test("offset from the racing line and its rate from the snapshots (mean over the
   near(q.rate, 2, 1e-6, "from the lap snapshots after the pit stretch only");
   assert.strictEqual(offsetAt([], "4", 0, line).e, null);
 });
+
+test("the body's acceleration: the mean over the last W ms of the snapshots' (linear between them)", async () => {
+  const { meanAt } = await R("renderer/game/gamepose.js");
+  const sn = (t, a) => ({ t, cars: [{ num: "4", a }] });
+  const S = [sn(0, 5), sn(50, 5), sn(100, -40), sn(150, -40)];
+  near(meanAt(S, "4", 150, "a", 50), -40, 1e-9, "flat");
+  near(meanAt(S, "4", 100, "a", 100), (5 * 50 + (5 - 40) / 2 * 50) / 100, 1e-9, "ramp half the window");
+  near(meanAt(S, "4", 75, "a", 0), -17.5, 1e-9, "W 0: the value at T");
+  assert.strictEqual(meanAt([], "4", 0, "a"), 0);
+});
