@@ -65,7 +65,11 @@ export function pitState(c, P = PIT) {
   // Williams stopped, the feed's position frozen there). Still moving: the fast lane, or its box if it is there.
   if (c.retired) {
     ev.push("retired / stopped (timing)");
-    if (standing) { ev.push("wheeled into the garage (estimate)"); return { state: "retired", lane: "garage", w: ss(0, P.garageIn, Math.min(c.retiredFor ?? Infinity, c.stillFor)), evidence: ev }; }
+    // (v0.53: once it has stood in this visit, the push goes on from when it first stood – the standstill as the feed shows
+    // it can flicker for minutes (Barcelona 2026: positions held and released, "standing" on and off for 500 s) and each
+    // flicker put the car back in the lane from inside its garage, 10 m in a frame)
+    const first = c.visit?.first || c.visit?.box, since = first && c.t != null && c.t >= first.t0 ? (c.t - first.t0) / 1000 : null;
+    if (standing || since != null) { ev.push("wheeled into the garage (estimate)"); return { state: "retired", lane: "garage", w: ss(0, P.garageIn, Math.min(c.retiredFor ?? Infinity, since ?? c.stillFor)), evidence: ev }; }
     // (v0.53: moving, on this visit's own way – into its box and out – like any car: v0.52 put it straight in its box
     // or the fast lane by the box's tolerance, a jump across)
     if (c.visit?.ways && box) { const s = visitState(c, d, tol, standing, ev, P); s.state = "retired"; return s; }

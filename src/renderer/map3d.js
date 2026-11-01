@@ -431,6 +431,9 @@ function pitFrame(src, t, lag, isRace) {
     if (r.u == null) continue;
     // (v0.49: going into its garage – to its own work space's car spot, garages.js garageZones; none known: it stays in the
     // inner lane where it stands, never pushed through a garage's front)
+    // (a car standing beyond the pit wall – the entry road beside the track, the track – isn't wheeled into a garage: it
+    // stays where the feed has it; Barcelona 2026, Hülkenberg 35 m out, drawn 20 m across into the lane)
+    if (r.state.lane === "garage" && r.off > (m.at(r.u).wall ?? 15) + 2) { r.state = { ...r.state, lane: "feed", w: 0, path: { kind: "const", w: 0 } }; r.state.evidence = [...r.state.evidence, "beyond the pit wall: left where it stands"]; }
     if (r.state.lane === "garage") { r.spot = (pitTeams.zones || []).find((z) => z.kind === "car" && z.num === r.num) || null; r.state.evidence.push(r.spot ? `parked at its work space, bay ${r.spot.slot} (estimate)` : "no work space known: left in the inner lane"); }
     const at = m.at(r.u), want = laneOffsetOf(r.state, at, r.off, r.u, G.gStart, G.gEnd);
     // the way across changing along the lane: the heading turns by its slope (pulling into / out of the box) – the same

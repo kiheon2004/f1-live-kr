@@ -206,3 +206,16 @@ test("the lines driven don't step where the wall does: a 3.5 m step in the wall'
   assert.ok(over < 0.25, `never more than a hair nearer the wall than its own line: ${over}`);
   assert.ok(Math.abs(at(-60).fastC - 17) < 1e-9 && Math.abs(at(60).fastC - 13.5) < 1e-9, "unchanged away from the step");
 });
+
+test("a retired car is pushed into its garage from when it first stood – a flickering standstill (held positions) never puts it back in the lane", async () => {
+  const { pitState } = await PS(), { boxWays } = await PP();
+  const ways = boxWays(400, [375, 400, 425], 6), first = { t0: 10000, t1: 600000, u: 401, open: true };
+  const base = { u: 401, gStart: 300, gEnd: 600, inPit: true, onLane: true, boxU: 400, boxFrom: "order", race: true, retired: true, retiredFor: 2, boxTol: 10, visit: { ways, first, box: first, live: false } };
+  let prev = -1;
+  for (let k = 0; k < 40; k++) {
+    const t = 12000 + k * 500, flick = k % 3 === 1;   // (every third frame "moving": the feed releasing a held position)
+    const s = pitState({ ...base, t, retiredFor: 2 + k * 0.5, speed: flick ? 3 : 0, stillFor: flick ? 0 : 1 });
+    assert.strictEqual(s.lane, "garage"); assert.ok(s.w >= prev, `w never back: ${prev} → ${s.w}`); prev = s.w;
+  }
+  assert.strictEqual(prev, 1);
+});
