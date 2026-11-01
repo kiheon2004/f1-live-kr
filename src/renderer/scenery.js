@@ -674,7 +674,9 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // a value given per grid vertex, read across the grid's triangles (as the mesh draws them)
   const onGrid = (arr, stride, off) => (x, z) => {
     const fi = ((x - ext.x0) / W) * nx, fj = ((z - ext.z0) / H) * nz;
-    const i = Math.max(0, Math.min(nx - 1, Math.floor(fi))), j = Math.max(0, Math.min(nz - 1, Math.floor(fj))), u = fi - i, v = fj - j;
+    // (v0.53: u, v held to the edge cell – a point beyond the grid took the edge triangle's slope extrapolated: Hungary's
+    // buildings 2 km out at the map's edge stood on ground "50 m" below them, floating over the far plane, Map3D.buriedList)
+    const i = Math.max(0, Math.min(nx - 1, Math.floor(fi))), j = Math.max(0, Math.min(nz - 1, Math.floor(fj))), u = Math.max(0, Math.min(1, fi - i)), v = Math.max(0, Math.min(1, fj - j));
     const y = (ii, jj) => arr[(jj * (nx + 1) + ii) * stride + off];
     // triangles a-e-b and b-e-f (a = i,j; b = i+1,j; e = i,j+1; f = i+1,j+1)
     return u + v <= 1 ? y(i, j) + (y(i + 1, j) - y(i, j)) * u + (y(i, j + 1) - y(i, j)) * v
