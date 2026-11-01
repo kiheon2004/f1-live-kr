@@ -7,7 +7,7 @@ their terms apply.
 
 | Component | Where | License | License text |
 |---|---|---|---|
-| three.js r186 (and the addons in `vendor/`: OrbitControls, GLTFLoader, BufferGeometryUtils, SkeletonUtils) | `src/renderer/vendor/` | MIT | `src/renderer/vendor/THREE_LICENSE` |
+| three.js r186 (and the addons OrbitControls, GLTFLoader, BufferGeometryUtils, SkeletonUtils) | npm dependency `three`; copied into `src/renderer/vendor/` by `npm install` (`postinstall` → `npm run vendor`), not tracked in the repository | MIT | `src/renderer/vendor/THREE_LICENSE` |
 | Pretendard Variable 1.3.9 (font) | `src/renderer/fonts/` | SIL Open Font License 1.1 | `src/renderer/fonts/PRETENDARD-LICENSE.txt` |
 | Lucide icons (subset, lucide-static 1.54.0) | `src/renderer/icons.js` | ISC | `src/renderer/ICONS-LICENSE.txt` |
 | bacinger/f1-circuits (circuit centre lines, lengths, opening years) | `src/data/f1-circuits.json` | MIT, © Tomislav Bacinger | `src/data/f1-circuits-LICENSE.md` |
