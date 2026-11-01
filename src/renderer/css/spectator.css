@@ -193,7 +193,7 @@
 #map3d .spec-hud.small .spec-cam .ui-seg { background: var(--hud-bg); }
 #map3d .spec-hud.small .spec-cam .cam-who { display: none; }
 #map3d .spec-hud.small .spec-cam .spec-menu-wrap > .ui-btn { background: var(--hud-bg); border: var(--bw) solid var(--line); }
-#map3d .spec-hud.small .spec-menu { left: 100%; bottom: 0; margin-left: 6px; }
+#map3d .spec-hud.small .spec-menu { left: 0; top: calc(100% + 6px); bottom: auto; }   /* (the small map: the button is at its top left – the menu opens downwards) */
 #map3d .spec-hud.small .spec-cam .cam-car { background: var(--hud-bg); border: var(--bw) solid var(--line); border-radius: var(--r-2); }
 #map3d .spec-hud.small .spec-driver .dc-name small, #map3d .spec-hud.small .spec-driver .dc-kv:not(:has([data-k="gap"])), #map3d .spec-hud.small .spec-driver .dc-row { display: none; }
 #map3d .spec-hud.small .spec-driver .dc-main { gap: var(--s-4); padding: var(--s-2) var(--s-4) var(--s-2) var(--s-3); }
