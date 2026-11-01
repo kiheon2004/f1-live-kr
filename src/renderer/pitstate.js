@@ -140,7 +140,11 @@ function visitState(c, d, tol, standing, ev, P) {
   const end = first ? Math.min(W.queueU, first.u) : W.queueU, from = end - inLenTo(W, end);
   // (the record's stand ahead: on along the way to it, even where it stands past the box's tolerance on the way – a car
   // creeping up to a stand at the tolerance's edge flicked to the fast lane and back, 6 m, Hungary 2025 car 87)
-  if (c.u < from || (!first && d > tol) || (first && c.u > first.u + 3)) return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
+  // (the record with no stand at its box this visit: it doesn't stop – the fast lane throughout, never the live guess
+  // from its speed: Monaco 2025, Hamilton 4388 s, across 5.4 m and back as it slowed by its box without stopping)
+  if (c.u < from || (!first && (d > tol || !V.live))) return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
+  // (a car that runs on past where it will stand – and is pushed or reverses back to it, as the record has it: Monaco
+  // 2025, Gasly 22 m then 8 m along – stays in the box lane: not forced back onto the fast lane, 5 m across)
   if (first) { ev.push("its stop ahead (record)", `way in ${(end - from).toFixed(0)} m (estimate)`); const w = c.u >= end ? 1 : q5((c.u - from) / (end - from)); return { state: "to box", lane: "box", w, path: { kind: "in", from, to: end }, evidence: ev }; }
   // live: not known whether it stops – slowing under the limit on the way in (its slowest since the way began: never
   // back out once across, never across while at the limit)
