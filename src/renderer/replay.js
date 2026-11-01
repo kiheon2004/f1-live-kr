@@ -472,7 +472,7 @@
   // a short one from the speed telemetry, CarTracks.at holds then hides a long one) – never a standstill followed by a leap.
   // Only the record is changed in what is drawn: the timing, laps and pit times come from the timing data, not from here.
   const HELD = { far: 12, share: 0.35, fast: 15, moving: 8, minRun: 2, leap: 110 };
-  const REWIND = { min: 1500, max: 20000, near: 8, drove: 60, leap: 30 };
+  const REWIND = { min: 1500, max: 40000, near: 8, drove: 60, leap: 30 };
   // the distance (m) the telemetry says was driven between t0 and t1 (ms), or null without it
   function telDistance(tel, t0, t1) {
     if (!tel?.t?.length) return null;
