@@ -241,7 +241,9 @@ function smoothCar(c, from, frame, world, car, out, lag, snapped, runBase) {
     const bridges = (a, b) => {
       if (!Sv || b.t - a.t >= BRIDGE_MS) return false;
       const along = (((b.s - a.s) % frame.L) + frame.L) % frame.L, drove = Sv(b.t) - Sv(a.t);
-      return drove > 0 && (Math.abs(along - drove) < 30 || (along / drove > 1 / BRIDGE_TOL && along / drove < BRIDGE_TOL));
+      // (behind the telemetry is allowed – a late feed is always behind, and the stretch's leading-edge correction deals
+      // with it –; ahead of it is not: that is another lap, or the data wrong the other way)
+      return drove > 0 && (along - drove < 30 || along / drove < BRIDGE_TOL);
     };
     while (e + 1 < P.length && P[e + 1].on && (P[e + 1].t - P[e].t < gapMax || bridges(P[e], P[e + 1]))) e++;
     const m = e - k + 1;

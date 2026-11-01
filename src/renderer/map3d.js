@@ -1401,7 +1401,10 @@ function groundFor(c, x, z, feedY) {
   return Number.isFinite(t) && Math.abs(feedY - t) > GROUND_TOL ? t + 0.02 : feedY;
 }
 
-const HAND_MAX = 8, READY_MS = 600, ACROSS_MAX = Math.tan(0.35);   // m (v0.53: an estimate → feed handover eased only up to this far); ms: raw → steadied when those come
+// (v0.53) HAND_MAX m: an estimate → feed handover eased only up to this far; READY_MS: raw → steadied when those come;
+// ACROSS_MAX: the across part of an on-track heading; LEAP_V m/s: raw positions further apart than this are a leap
+const HAND_MAX = 8, READY_MS = 600, ACROSS_MAX = Math.tan(0.35), LEAP_V = 130, leapSt = {};
+let leapHidden = 0;   // (development: frames a car was left out for a leap of its raw positions)
 const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 // x → target as a critically damped spring of rate w (1/s), the value and its rate kept on the object
 function spring(o, key, rateKey, target, w, dt) {
@@ -1721,6 +1724,10 @@ function updateCars(dt) {
   for (const [num, p, est] of list) {
     const d = drivers[num]; if (!d || !world) continue;
     if (est && !est.pit && !F) continue;
+    // (v0.53: a car drawn from its raw positions where two of them are further apart than any car goes in the time between –
+    // faster than LEAP_V: the feed jumping, 2026 Hungary: 300–650 m in a fraction of a second – is not drawn until the next
+    // sample: an honest gap, not a car streaking across the circuit)
+    if (!est && p && !(F && sm.state(num, A.t, leapSt))) { const vel = velBuf[num]; if (vel && Math.hypot(vel[0], vel[1]) * 100 > LEAP_V) { leapHidden++; continue; } }
     seen.add(num);
     const c = carFor(num, d);
     // (v0.45: a seek or a rewind – the moment shown jumping, as the steering's rule below – takes the heading as it is
@@ -1763,7 +1770,7 @@ function updateCars(dt) {
       const vTel = tel && tel.speed > 5 && !est ? tel.speed / 3.6 : null, vAl = back ? st.vs : vTel ?? Math.abs(st.vs);
       if (Math.abs(vAl) > 1.5) {
         const ds = Math.max(3, Math.min(10, Math.abs(vAl) * 0.1)), h = ds / Math.abs(vAl);
-        const dR = Math.abs(vAl) > 15 ? Math.max(-ACROSS_MAX, Math.min(ACROSS_MAX, dRate / Math.abs(vAl))) * Math.abs(vAl) : dRate;
+        const dR = Math.max(-ACROSS_MAX, Math.min(ACROSS_MAX, dRate / Math.abs(vAl))) * Math.abs(vAl);
         F.at(sD - vAl * h, dTot - dR * h, PA); F.at(sD + vAl * h, dTot + dR * h, PB);
         pathYaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
       } else pathYaw = Math.atan2(DIR[0], DIR[1]);

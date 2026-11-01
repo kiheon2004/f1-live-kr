@@ -131,6 +131,7 @@ export const TRAFFIC = {
   LAT_W: 5, LAT_V: 4.5,           // across: a critically damped spring of 5/s, at most 4.5 m/s sideways
   LONG_W: 8, LONG_V: 5,           // along: 8/s, at most 5 m/s
   PASS_V: 5,       // m/s of the target's own motion passed through as it is (more: eased)
+  LAT_MIN: 0.3, LAT_SHARE: 0.3,   // (v0.53) the fastest a car moves across: LAT_MIN m/s + LAT_SHARE of its speed along (~17°)
   LEVELS: 2.5,     // m of height apart: different levels (a bridge over the track, the pit lane under it) – no interaction
   BOX_ROUNDS: 3, BOX_MAX: 2.5,    // boxes checked: up to 3 more solves, up to 2.5 m more asked for a pair
   JUMP_MS: 2000, ITER: 8, FORGET_MS: 3000,
@@ -233,6 +234,7 @@ export function stepTraffic(S, list, env, t) {
     // the target moves faster than that – a pair taken up or let go, a side chosen – goes into e and is eased)
     if (jump) { m.dOff = m.tD; m.sOff = m.tS; m.dRate = m.sRate = 0; m.eD = m.eDr = m.eS = m.eSr = 0; }
     else if (dt > 0) {
+      const prevD = m.dOff;
       const vD = T.PASS_V * dt, kD = m.pD == null ? 0 : Math.max(-vD, Math.min(vD, m.tD - m.pD)), kS = m.pS == null ? 0 : Math.max(-vD, Math.min(vD, m.tS - m.pS));
       m.eD = m.dOff - m.tD + kD; m.eS = m.sOff - m.tS + kS;
       follow(m, "eD", "eDr", 0, T.LAT_W, T.LAT_V, dt); follow(m, "eS", "eSr", 0, T.LONG_W, T.LONG_V, dt);
@@ -243,6 +245,10 @@ export function stepTraffic(S, list, env, t) {
       // at Monaco 2025 (v0.45 Map3D.trafficAudit); a car the data has outside the allowance keeps its own place)
       const lo = Math.min(c.lo, c.d), hi = Math.max(c.hi, c.d), x = c.d + m.dOff;
       if (x > hi || x < lo) { const y = x > hi ? hi : lo; m.dOff = y - c.d; m.eD = m.dOff - m.tD; if (m.eDr * (x - y) > 0) { m.dRate -= m.eDr; m.eDr = 0; } }
+      // (v0.53: no faster across than a car can move across – LAT_SHARE of its speed along, + LAT_MIN m/s: a car standing in
+      // a queue was slid sideways at 5 m/s, its heading turned 60–95° by it – 2026 Hungary under the safety car)
+      { const cap = (T.LAT_MIN + T.LAT_SHARE * Math.abs(c.vs || 0)) * dt, step = m.dOff - prevD;
+        if (Math.abs(step) > cap) { m.dOff = prevD + Math.sign(step) * cap; m.eD = m.dOff - m.tD; m.dRate = (m.dOff - prevD) / dt; if (m.eDr * step > 0) m.eDr = 0; } }
       // (and along within S_MAX: the eased offset can overshoot a target at the limit – v0.45, the same 20-car pack)
       if (Math.abs(m.sOff) > T.S_MAX) { const y = Math.sign(m.sOff) * T.S_MAX; m.eS = y - m.tS; if (m.eSr * m.sOff > 0) { m.sRate -= m.eSr; m.eSr = 0; } m.sOff = y; }
     }
