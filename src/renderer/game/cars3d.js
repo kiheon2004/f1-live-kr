@@ -8,9 +8,10 @@ import { rollAngle, smearOf } from "../wheelspin.js";
 import { CHANGE } from "../crew.js";
 import { updateGameCrews } from "./pitcrew.js";
 import { boxWays, gameLaneW } from "../pitpath.js";
+import { lapPose, lineOf, offsetAt } from "./gamepose.js";
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
-const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
+const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];   // (scratch points)
 const ss = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 // v0.53: where across the lane the engine's pit state is drawn – pitpath.js gameLaneW (the engine decides the phases, the
 // box, the queue and the release; this only draws them): the fast lane, the way in to the box (to the queue place, then
@@ -40,7 +41,20 @@ function pitPose(K, P, g, u, c0, out = {}) {
   out.x = q.x - L.inward[0] * d; out.z = q.z - L.inward[1] * d; out.inRun = L.inRun; out.w = lw.w; out.off = off;
   return out;
 }
-const PA0 = {}, PA1 = {}, PA2 = {};
+const PA0 = {}, PA1 = {}, PA2 = {}, PA3 = {}, OFF = {}, POSE = {}, lineMemo = { tr: null, f: null };
+// engine (s, d) → a scene point, through the adapter's mapping and the world's frame (gamepose.js geo)
+const geo = { map: null, F: null, lineAt: null, at(s, d, out) { const w = this.map.sd(s, d); this.F.at(w.s, w.d, out); return out; } };
+// the snapshots buffered around the render time (the runner's; a source without a buffer: the pair drawn between)
+function snapsOf(A, fr) { const src = A.source; if (Array.isArray(src?.buf) && src.buf.length) return src.buf; const p = src?.pair?.(); return p ? [p.a, p.b].filter(Boolean) : [fr.snap]; }
+// the drawn pit way's heading at u (a metre either side on the same state): along the lane, turned by the way across –
+// eased to the engine path's heading over the run's ends (v0.53's, made a function of u alone)
+function pitYawAt(K, P, g, u, c0) {
+  const p = pitPose(K, P, g, u, c0, PA3); if (!p.L) return p.yaw;
+  const pYaw = p.yaw, inRun = p.inRun, [ax, az] = p.L.along, [ix, iz] = p.L.inward;
+  const a = pitPose(K, P, g, u - 0.5, c0, PA1), b = pitPose(K, P, g, u + 0.5, c0, PA2), sl = a.off != null && b.off != null ? b.off - a.off : 0;
+  const laneYaw = Math.atan2(ax - ix * sl, az - iz * sl);
+  return wrap(pYaw + wrap(laneYaw - pYaw) * inRun);
+}
 const SC_DRIVER = { TeamName: "", TeamColour: "C8C8C8", Tla: "SC", LastName: "Safety Car" };
 
 // a point of the engine's pit path at u (m): scene x, z, the path's heading as a scene yaw, and the lap s it lies by
@@ -54,9 +68,11 @@ export function pitPoint(P, u, c0) {
 
 export function updateGameCars(K, A, dt) {
   const fr = A.frameCars(), world = K.world(), F = world?.frame, map = A.map;
-  const seen = new Set();
+  const seen = new Set(); A.devCars = K.cars;   // (development: the cars as drawn – motion probes read them, nothing else)
   if (!fr || !F || !map) { for (const c of K.cars.values()) c.obj.visible = false; return null; }
-  const P = A.scenario.track.pit, focusNum = K.focus(), cam = K.camMode(), kBody = 1 - Math.exp(-dt * 12), kYaw = 1 - Math.exp(-dt * 30);
+  const P = A.scenario.track.pit, focusNum = K.focus(), cam = K.camMode();
+  if (lineMemo.tr !== A.scenario.track) { lineMemo.tr = A.scenario.track; lineMemo.f = lineOf(lineMemo.tr); }
+  const lineAt = lineMemo.f; geo.map = map; geo.F = F; geo.lineAt = lineAt;
   // (the cars' flag lights from the engine's flag: red for a red flag, amber under yellow / SC / VSC – race control's, the game's)
   const fl = fr.snap.flag, flagCol = fl === "red" ? "#ff2414" : fl === "yellow" || fl === "sc" || fl === "vsc" ? "#ffb21a" : null;
   const jumped = A.lastT != null && (fr.t < A.lastT - 50 || fr.t - A.lastT > 5000); A.lastT = fr.t;
@@ -76,44 +92,35 @@ export function updateGameCars(K, A, dt) {
       continue;
     }
     c.game = g;
-    const v = c.pos;
-    let yaw, slope = 0, aLat = 0, onTrack = g.where === "lap" && g.s != null;
+    const v = c.pos, Pf0 = c.model.userData.profile, lr = Pf0 ? -Pf0.RZ : 1.8, wb = Pf0 ? Pf0.FZ - Pf0.RZ : 3.6;
+    let onTrack = g.where === "lap" && g.s != null;
     if (onTrack) {
-      const w = map.sd(g.s, g.d);
-      F.at(w.s, w.d, P0, DIR);
-      const ds = Math.max(3, Math.min(10, Math.abs(g.v) * 0.1));
-      F.at(w.s - ds, w.d, PA); F.at(w.s + ds, w.d, PB);
-      yaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
-      slope = -Math.atan2(PB[1] - PA[1], 2 * ds);
+      // v0.54 (request §2): posed on the path the engine drives – the racing line at s plus the car's own offset from it
+      // (gamepose.js): heading along that path at the rear axle, slip, lean, dip and steering from its curvature and the
+      // engine's acceleration – all from this moment's state (no easing, no frame-to-frame rates: same t → same pose)
+      const o = offsetAt(snapsOf(A, fr), g.num, fr.t, lineAt, 300, OFF);
+      const dE = o.e != null ? lineAt(g.s) + o.e : g.d ?? 0;
+      geo.at(g.s, dE, P0);
+      const q = lapPose(geo, g.s, dE, o.e != null ? o.rate : 0, g.v || 0, g.a || 0, { lr, wb }, POSE);
+      c.yaw = q.yaw; c.pathYaw = q.pathYaw; c.yawRate = q.yawRate; c.pitch = q.pitch; c.roll = q.roll; c.slide = q.slide; c.steerPath = q.steer;
       v.set(P0[0], P0[1] + K.ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (g.v / 90) ** 2), P0[2]);
-      c.sample = F.sampleAt(w.s);
-      c.worldS = w.s;
+      const w = map.sd(g.s, dE); c.sample = F.sampleAt(w.s); c.worldS = w.s;
     } else if (g.where === "pit" && P && g.u != null) {
       const p = pitPose(K, P, g, g.u, world.center, PA0);
       let y = K.groundAt(p.x, p.z) + K.ROAD_LIFT - 0.02;
-      yaw = p.yaw;
-      if (p.L) {
-        // on the lane's floor in the garages' run; the heading the drawn way's own (a metre either side on the same state):
-        // along the lane, turned by the way across – eased to the engine path's heading over the run's ends
-        y = K.pitSurfaceY ? K.pitSurfaceY(p.x, p.z, y, p.L.floor - 0.004, p.inRun) : y + (p.L.floor - y) * p.inRun;
-        const a = pitPose(K, P, g, g.u - 0.5, world.center, PA1), b = pitPose(K, P, g, g.u + 0.5, world.center, PA2);
-        const [ax, az] = p.L.along, [ix, iz] = p.L.inward, sl = a.off != null && b.off != null ? b.off - a.off : 0;
-        const laneYaw = Math.atan2(ax - ix * sl, az - iz * sl);
-        yaw = wrap(p.yaw + wrap(laneYaw - p.yaw) * p.inRun);
-      }
-      const x = p.x, z = p.z;
-      v.set(x, y, z);
+      if (p.L) y = K.pitSurfaceY ? K.pitSurfaceY(p.x, p.z, y, p.L.floor - 0.004, p.inRun) : y + (p.L.floor - y) * p.inRun;
+      v.set(p.x, y, p.z);
+      // v0.54: the drawn way's heading at the rear axle (moving: a standing car keeps its own heading – the phase that
+      // shapes the way changes at the box), turning rate = speed × the way's curvature over ±2 m; lean and dip from them
+      const sp = Math.abs(g.v || 0), k = ss(0.5, 3, sp), hk = 2;
+      const yaw = pitYawAt(K, P, g, g.u - lr * k, world.center);
+      const kappa = k > 0 ? wrap(pitYawAt(K, P, g, g.u + hk, world.center) - pitYawAt(K, P, g, g.u - hk, world.center)) / (2 * hk) : 0;
+      const aLat = sp * sp * kappa;
+      c.yaw = yaw; c.pathYaw = yaw; c.yawRate = sp * kappa; c.slide = 0; c.steerPath = null;
+      c.pitch = Math.max(-0.006, Math.min(0.02, -(g.a || 0) * 0.00032)); c.roll = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));
       c.sample = null; c.worldS = null;
     } else { c.obj.visible = false; continue; }
-    // heading, pitch and roll (the snapshot's acceleration: nose down under braking; lean with the turning rate)
-    const dy = wrap(yaw - c.yaw);
-    if (!c.has || jumped || Math.abs(dy) > 1.2) c.yaw = yaw; else c.yaw += dy * kYaw;
-    const yawRate = c.has && dt > 0 && !jumped ? wrap(yaw - (c.pathYaw ?? yaw)) / dt : 0;
-    c.pathYaw = yaw; c.yawRate = yawRate; aLat = g.v * yawRate;
-    const pitchT = slope + Math.max(-0.006, Math.min(0.02, -(g.a || 0) * 0.00032)), rollT = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));
-    if (!c.has || jumped) { c.pitch = pitchT; c.roll = rollT; }
-    c.pitch += (pitchT - c.pitch) * kBody; c.roll += (rollT - c.roll) * kBody;
-    c.speed = Math.abs(g.v); c.acc = g.a || 0; c.onTrack = onTrack; c.slide = 0; c.onKerb = false; c.bump = 0; c.est = null; c.grid = null; c.pit = null;
+    c.speed = Math.abs(g.v); c.acc = g.a || 0; c.onTrack = onTrack; c.onKerb = false; c.bump = 0; c.est = null; c.grid = null; c.pit = null;
     c.obj.position.copy(v); c.has = true; c.obj.visible = true;
     const ride = (cam === "onboard" || cam === "eye") && g.num === focusNum;
     if (ride) {
@@ -122,11 +129,13 @@ export function updateGameCars(K, A, dt) {
       c.obj.position.y = S.y; c.model.rotation.set(S.p, c.yaw, S.r, "YXZ");
     } else { c.stab = null; c.model.rotation.set(c.pitch, c.yaw, c.roll, "YXZ"); }
     // wheels: rolled the engine's own distance over each axle's radius (wheelspin.js rollAngle) – a pause, any speed, a
-    // camera change: the same angle at the same sim moment; steering: the engine's front-wheel angle (rad, + left)
+    // camera change: the same angle at the same sim moment; steering (rad, + left): the drawn path's on the lap, else the engine's
     const Pf = c.model.userData.profile;
     c.spinW = c.spinW || [0, 0]; c.spinW[0] = rollAngle(g.wheelDist || 0, Pf.FR); c.spinW[1] = rollAngle(g.wheelDist || 0, Pf.RR);
     const L = lockFor(c.speed);
-    c.steer = Math.max(-0.4, Math.min(0.4, g.steer || 0)); if (Math.abs(c.steer * STEER_RATIO) > L) c.steer = Math.sign(c.steer) * L / STEER_RATIO;
+    // (v0.54: on the lap the drawn path's own steer – the same curvature that turns the body; the engine's is its racing
+    // line's, not the path drawn)
+    c.steer = Math.max(-0.4, Math.min(0.4, c.steerPath ?? g.steer ?? 0)); if (Math.abs(c.steer * STEER_RATIO) > L) c.steer = Math.sign(c.steer) * L / STEER_RATIO;
     setWheels(c.model, c.spinW, c.steer, fr.t, c.speed, null);
     setSmear(c.model, smearOf(c.speed / Pf.RR, A.ctx.rate, jumped));
     // wings: the game's own DRS / active aero state (game data, not telemetry)
