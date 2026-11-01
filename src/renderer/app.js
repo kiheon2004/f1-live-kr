@@ -145,14 +145,16 @@
   // for the session (listSessions' path); info: that list entry. Each load is numbered: a newer one makes an older
   // one's answer and progress be ignored (the older download itself runs on in the main process – not cancelled).
   // at: a moment to open at instead of the session's start (이어보기). → { ok, job, error, superseded }
-  async function loadReplay(path, info, { at = null } = {}) {
+  // loader: where the session comes from instead of the archive – only the offline demo's (main/demo.js), asked for
+  // with npm run demo; never a stand-in for a session that couldn't be loaded
+  async function loadReplay(path, info, { at = null, loader = null } = {}) {
     if (!path) return { ok: false, error: "no session" };
     const job = ++loadJob;   // (what was picked, kept as it was at the click)
     if (replay && replayInfo && replayInfo.path !== path) rememberRecent(replayInfo, t);   // (where the last one was left)
     pause(); $("load").disabled = true;
     showLoad(0, "연결 중 ·");
     try {
-      const data = await window.api.loadSession(path, job);
+      const data = await (loader ? loader() : window.api.loadSession(path, job));
       if (job !== loadJob) return { ok: false, job, superseded: true };
       showLoad(95, "화면 준비 중 ·");
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));   // paint 95% before the rebuild
@@ -176,7 +178,7 @@
         seekTo(open);
       }
       rememberRecent(info, open);
-      syncPicker(path, info, job);
+      if (!info?.demo) syncPicker(path, info, job);
       dispatchEvent(new CustomEvent("f1kr-loaded", { detail: { path, job } }));
       showLoad(100, "준비 완료 ·");
       // (done: the bar and the word go – a "준비 완료" left beside the picker for the whole session says nothing)
@@ -458,6 +460,8 @@
     const tag = LiveStatus.sessionTag(mode, replayInfo?.path, live.state.SessionInfo?.Key);
     if (tag !== sessionTag) { sessionTag = tag; document.querySelectorAll("#radio audio").forEach((a) => a.pause()); }
     $("sbYear").textContent = "";
+    $("demoBadge").hidden = !(src && !src.isLive && src === replay && replayInfo?.demo);
+    document.body.classList.toggle("demo-on", !$("demoBadge").hidden);   // (the same words over the expanded 3D view: #demoMark)
     if (!src) { $("title").textContent = mode === "live" ? "실시간: 연결하면 지금 진행 중인 세션이 표시돼요" : "세션을 골라 불러오세요"; $("title").title = ""; return; }
     const si = src.state.SessionInfo || {};
     if (src.isLive && !si.Name) { $("title").textContent = "실시간: 세션 정보를 기다리는 중…"; return; }
@@ -1996,4 +2000,10 @@
   setMode(store.get("mode", "replay") === "live" ? "live" : "replay");
   setPanel("rc");
   paintHomeBtn();
+  // npm run demo: the offline demo's synthetic session, opened at start (main/demo.js – marked as such on screen)
+  window.api.demo?.requested().then((on) => {
+    if (!on) return;
+    setMode("replay"); setHome(false);
+    loadReplay("demo/synthetic", { path: "demo/synthetic", type: "Race", name: "합성 데이터", meeting: "오프라인 데모", demo: true }, { loader: () => window.api.demo.load() });
+  });
 })();

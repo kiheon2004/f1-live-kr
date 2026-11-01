@@ -120,8 +120,9 @@
 <!-- the session bar: season · Grand Prix · session, where the data comes from and how fresh it is (live: connection,
      delay, pause; replay: playing / paused), the flag (word + colour), the latest important race control message, lap,
      session clock, weather -->
+<div id="demoMark" class="demo-mark" aria-hidden="true">오프라인 데모 · 합성 데이터</div>
 <section class="status-bar" aria-label="세션 상태">
-  <div class="sb-id"><span id="sbYear" class="sb-year"></span><div id="title" class="title">세션을 골라 불러오세요</div><div id="part" class="pill" hidden></div></div>
+  <div class="sb-id"><span id="sbYear" class="sb-year"></span><div id="title" class="title">세션을 골라 불러오세요</div><span id="demoBadge" class="pill demo-badge" hidden title="npm run demo: 실제 경기 기록이 아니라 앱이 만든 합성 데이터입니다">오프라인 데모 · 합성 데이터</span><div id="part" class="pill" hidden></div></div>
   <div id="sbSource" class="sb-source" aria-live="polite"></div>
   <div id="trackStatus" class="pill">—</div>
   <div id="sessStatus" class="chip" hidden></div>

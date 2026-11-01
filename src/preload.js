@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld("api", {
   trackOutline: (location) => ipcRenderer.invoke("track:outline", location),
   trackCircuit: (key, year) => ipcRenderer.invoke("track:circuit", key, year),
   onProgress: listen("session:progress"),
+  // the offline demo (main/demo.js): asked for at start (npm run demo), and its synthetic session
+  demo: {
+    requested: () => ipcRenderer.invoke("demo:requested"),
+    load: () => ipcRenderer.invoke("demo:load"),
+  },
   live: {
     start: () => ipcRenderer.invoke("live:start"),
     stop: () => ipcRenderer.invoke("live:stop"),

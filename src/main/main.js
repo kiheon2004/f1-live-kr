@@ -11,6 +11,7 @@ const { GoogleTiles } = require("./google");
 const { Clouds } = require("./clouds");
 const { GameStore } = require("./gamestore");
 const { GamePrep } = require("./gameprep");
+const demo = require("./demo");
 const geo = require("./geo");
 const V = require("./validate");
 const { pathToFileURL } = require("node:url");
@@ -22,6 +23,9 @@ const { pathToFileURL } = require("node:url");
 const DEV_DATA = !app.isPackaged && process.env.F1KR_USERDATA;
 app.setPath("userData", DEV_DATA || path.join(app.getPath("appData"), "f1-live-kr"));
 app.setName("라이브 타이밍 KR");
+// npm run demo (`electron . --demo`): the page opens the offline demo – a synthetic session (main/demo.js) – at start.
+// Only asked for this way; a real session that can't be loaded is never replaced by it.
+const DEMO = process.argv.includes("--demo");
 
 let archive, auth, live, mainWin, scenes, google, schedules;
 const PAGE = path.join(__dirname, "..", "renderer", "index.html"), PAGE_URL = pathToFileURL(PAGE).href;
@@ -94,6 +98,8 @@ app.whenReady().then(() => {
   // the same list with where it came from (fresh / cached copy while offline or refused) – the home screen's states
   handle("sessions:listMeta", (_e, year, cacheOnly) => archive.listSessionsMeta(V.year(year), { cacheOnly: cacheOnly === true }));
   handle("sessions:cached", (_e, paths) => archive.cachedSessions(V.sessionPaths(paths)));
+  handle("demo:requested", () => DEMO);
+  handle("demo:load", () => demo.loadDemo());
   handle("session:probe", (_e, sessionPath) => archive.probeSession(V.sessionPath(sessionPath)));
   // (each progress message carries the page's number for that load: an earlier load still downloading never moves the
   // bar of a newer one)

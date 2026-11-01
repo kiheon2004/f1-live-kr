@@ -98,6 +98,9 @@ body.game-on .top .modes, body.game-on .top .right .cols-wrap, body.game-on .top
 .sb-year:empty { display: none; }
 .title { font-size: var(--fs-lg); font-weight: var(--fw-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .status-bar .pill { display: inline-flex; align-items: center; gap: var(--s-3); height: 22px; padding: 0 var(--s-4); border-radius: var(--r-1); font-size: var(--fs-sm); font-weight: var(--fw-bold); background: var(--bg-2); color: var(--text-2); white-space: nowrap; }
+.status-bar .pill.demo-badge { background: #b45309; color: #fff; }
+.demo-mark { display: none; position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 1000; padding: 3px 10px; border-radius: var(--r-1); background: #b45309; color: #fff; font-size: var(--fs-sm); font-weight: var(--fw-bold); pointer-events: none; }
+body.demo-on:has(#mapCard.expanded) .demo-mark { display: block; }
 #trackStatus::before { content: ""; width: 9px; height: 9px; border-radius: 1px; background: currentColor; }
 #trackStatus.green { background: var(--ok-soft); color: var(--ok); } #trackStatus.yellow { background: var(--warn-soft); color: var(--warn); }
 #trackStatus.sc, #trackStatus.vsc { background: var(--sc-soft); color: var(--sc); } #trackStatus.red { background: var(--bad-soft); color: #ff7a71; }

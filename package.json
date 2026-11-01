@@ -6,6 +6,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
+    "demo": "electron . --demo",
+    "verify:demo": "node tools/verify-demo.js",
     "test": "node --test test/*.test.js test/game/*.test.js",
     "dist": "electron-builder --mac dir",
     "share": "electron-builder --mac zip --arm64 --x64 && electron-builder --win zip --x64",
