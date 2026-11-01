@@ -3342,7 +3342,15 @@ function warmShaders() {
   if (!renderer?.compileAsync) return;
   const hidden = [];
   world?.group.traverse((o) => { if (!o.visible && (o.name === "garageInteriors" || o.name === "pitTeams" || o.name === "pitTeamsNear")) { hidden.push(o); o.visible = true; } });
-  try { renderer.compileAsync(scene, camera).catch(() => {}); } finally { for (const o of hidden) o.visible = false; }
+  let job;
+  try { job = renderer.compileAsync(scene, camera); } finally { for (const o of hidden) o.visible = false; }
+  // (three r186 deletes a program's two shader objects only on its first use – getUniforms; a program warmed here whose
+  // material is disposed before it is ever drawn – a world left again, the game's world – kept both for good: +38 per
+  // view switch cycle, v0.53 regress L1 – the warm-up's variant is often not the one drawn: the frames in between already
+  // switched the material to another program, so every program the material holds is "used" once ready: the shaders go.)
+  job?.then(() => { if (!renderer) return; const seen = new Set();
+    scene.traverse((o) => { for (const m of [].concat(o.material || [])) { if (!m || seen.has(m)) continue; seen.add(m); renderer.properties.get(m)?.programs?.forEach((p) => p.getUniforms?.()); } });
+  }).catch(() => {});
 }
 
 // ---------- loop ----------

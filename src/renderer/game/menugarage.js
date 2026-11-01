@@ -115,6 +115,22 @@ function lease(root) {
     for (const x of things) if (x?.userData?.shared && !MG.leases.has(x)) MG.leases.set(x, new Set(x._listeners?.dispose || []));
   });
 }
+// every 'dispose' listener three adds while THIS renderer draws or compiles: a renderer keeps one on each texture, material
+// and geometry it uploads, and on long-lived ones – module-level textures (three's own DFG look-up texture), shared
+// materials of other modules – it is never removed, so each garage renderer thrown away by hide() stayed reachable
+// through them with its scene's GPU bookkeeping: one lost WebGL context and ~0.5 MB of heap per visit (v0.53 regress L2,
+// heap snapshot: MenuGarage → MG → the lut DataTexture → TextureSource → the renderer's texture map → the context). They
+// are recorded here (JS runs one renderer call at a time: what is added during ours is ours) and taken off at hide().
+function asMine(fn) {
+  const P = THREE.EventDispatcher.prototype, add = P.addEventListener;
+  P.addEventListener = function (type, l) { if (type === "dispose") (MG.disposeL ||= []).push([this, l]); return add.call(this, type, l); };
+  try { return fn(); } finally { P.addEventListener = add; }
+}
+function releaseMine() {
+  let n = 0;
+  for (const [x, l] of MG.disposeL || []) if (x.hasEventListener?.("dispose", l)) { x.removeEventListener("dispose", l); n++; }
+  MG.disposeL = []; return n;
+}
 function releaseLeases() {
   let n = 0;
   for (const [x, before] of MG.leases) for (const f of [...(x._listeners?.dispose || [])]) if (!before.has(f)) { x.removeEventListener("dispose", f); n++; }
@@ -338,7 +354,7 @@ function mgFrame(t) {
     CAR_SKY.value = 0;
     if (MG.dirty) r.shadowMap.needsUpdate = true;
     const q = MG.gpu?.begin();
-    try { if (W.mirror) renderMirror(W, r); r.render(W.scene, W.camera); } finally { CAR_SKY.value = sky; MG.gpu?.end(q); }
+    try { asMine(() => { if (W.mirror) renderMirror(W, r); r.render(W.scene, W.camera); }); } finally { CAR_SKY.value = sky; MG.gpu?.end(q); }
     const ms = performance.now() - a; MG.ms.push(ms); if (MG.ms.length > 240) MG.ms.shift();
     if (W.firstFrameMs == null) W.firstFrameMs = Math.round(ms);   // (the first draw uploads textures and builds the shadow pass's programs)
     MG.frames++; MG.dirty = false; MG.last = t;
@@ -366,11 +382,11 @@ export function show(o = {}) {
   MG.on = true;
   const r = ensureRenderer(host);
   let W;
-  try { W = buildWorld(o, r); W.date = o.date || null; } catch (e) { MG.err = String(e?.message || e); return Promise.resolve(state()); }
+  try { W = asMine(() => buildWorld(o, r)); W.date = o.date || null; } catch (e) { MG.err = String(e?.message || e); return Promise.resolve(state()); }
   lease(W.scene);
   frameCamera(W.camera, r.domElement.width || 16, r.domElement.height || 9); aim(W, 0);
   const t0 = performance.now();
-  const compiled = r.compileAsync ? r.compileAsync(W.scene, W.camera).catch(() => null) : Promise.resolve();
+  const compiled = r.compileAsync ? asMine(() => r.compileAsync(W.scene, W.camera)).catch(() => null) : Promise.resolve();
   return compiled.then(() => {
     // a later show() or a hide() came in: this room is not attached – freed instead
     if (gen !== MG.gen || !MG.on || MG.renderer !== r) { MG.stale++; disposeWorld(W); return state(); }
@@ -438,6 +454,7 @@ export function hide() {
   if (r) {
     MG.ro?.disconnect(); MG.ro = null;
     r.renderLists.dispose(); r.dispose(); const freed = releaseLeases();
+    MG.lastReleaseMine = releaseMine();
     r.forceContextLoss(); MG.canvas?.remove();
     MG.renderer = null; MG.canvas = null; MG.lastRelease = freed;
   }

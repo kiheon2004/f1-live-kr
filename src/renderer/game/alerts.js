@@ -12,7 +12,7 @@
 //   damage    a car of mine: an incident (contact, mechanical, error with consequence), retired
 //   fuel      a car of mine: fuel left below what its own burn so far needs to the finish (+ 1 lap margin)
 //   tyre      a car of mine: tyre life under 15 %, or a tyre that doesn't suit the track's water (slick on ≥ 0.5 mm,
-//             intermediate on ≤ 0.03 mm, full wet on ≤ 0.5 mm – a player's plan is never changed by the AI, v0.52: the player is told)
+//             intermediate on ≤ 0.03 mm after 2 laps, full wet on ≤ 0.5 mm from its first lap – checked before the life; a player's plan is never changed by the AI, v0.52: the player is told)
 //   battery   a car of mine: battery store empty
 //   finish    the chequered flag
 export const ACTIONS = ["off", "note", "slow", "pause"];
@@ -59,13 +59,16 @@ export function checkAlerts(st, { events = [], snap = null, forecast = null, min
     if (ns && ns.toLap - c.lap === 1 && c.pit?.phase === "none" && st.lap[n] !== c.lap) fire("myPit", n, `계획한 피트까지 1랩 (${ns.toLap}랩)`, "myPit:win:" + n + ":" + ns.toLap);
     // tyre: nearly worn out, or wrong for the water now (the render-time picture's track water)
     const ty = c.tyre, w = snap.weather?.water;
-    if (ty && Number.isFinite(ty.life) && ty.life < 0.15) fire("tyre", n, `타이어 수명 ${Math.round(ty.life * 100)}% 남음`, "tyre:life:" + n);
-    else if (ty && Number.isFinite(w)) {
+    // (the wrong tyre first and on its own: a full wet on a damp line wears out in two or three laps – v0.53 regress: with
+    // the life rule first and two laps of age the "wrong tyre" message never came, only "worn". A full wet is told from
+    // its first lap, an intermediate after two – it may be the right call on a track still drying)
+    if (ty && Number.isFinite(w)) {
       // (the audit's own limits: a full wet is out of place below 0.5 mm, an intermediate on a dry line)
-      const wetT = ty.compound === "INTERMEDIATE" || ty.compound === "WET", dryFor = ty.compound === "WET" ? 0.5 : 0.03;
+      const wetT = ty.compound === "INTERMEDIATE" || ty.compound === "WET", dryFor = ty.compound === "WET" ? 0.5 : 0.03, minAge = ty.compound === "WET" ? 1 : 2;
       if (!wetT && w >= 0.5) fire("tyre", n, `젖은 노면(물 ${w.toFixed(1)} mm)에 슬릭`, "tyre:fit:" + n);
-      else if (wetT && w <= dryFor && (ty.age ?? 0) >= 2) fire("tyre", n, ty.compound === "WET" ? `물이 적은 노면(${w.toFixed(2)} mm)에 웨트` : "마른 노면에 인터미디어트", "tyre:fit:" + n);
+      else if (wetT && w <= dryFor && (ty.age ?? 0) >= minAge) fire("tyre", n, ty.compound === "WET" ? `물이 적은 노면(${w.toFixed(2)} mm)에 웨트` : "마른 노면에 인터미디어트", "tyre:fit:" + n);
     }
+    if (ty && Number.isFinite(ty.life) && ty.life < 0.15) fire("tyre", n, `타이어 수명 ${Math.round(ty.life * 100)}% 남음`, "tyre:life:" + n);
     // fuel: this car's own burn per lap so far
     const b = st.burn[n] || (st.burn[n] = []);
     if (st.lap[n] !== c.lap && Number.isFinite(c.fuel)) { b.push({ lap: c.lap, fuel: c.fuel }); if (b.length > 6) b.shift(); }

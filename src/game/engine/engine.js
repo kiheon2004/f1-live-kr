@@ -30,6 +30,7 @@ import { createTyre, tyreGrip, stepTyre, tyreLap, fitTemp, windowFactor, windowT
 import { createEnergy, iceCap, ersCap, splitPower, stepEnergy, energyLap, socFrac } from "./energy.js";
 import { createDriver, setPaceMode, stepDriver, utilisation, tyreHeatFactor } from "./driver.js";
 import { newPitState, newBoxes, pitCall, pitCancel, pitOnLap, pitStep, lapCapForPit, IN_LANE } from "./pit.js";
+import { PIT } from "../data/params/pit.js";
 import { weatherTruth, truthAt, forecastAt, newSurface, surfaceStep, waterAt, rubberAt, segOf, saveSurface, loadSurface } from "./weather.js";
 import { Streams } from "./rng.js";
 import { DT_MS, DT } from "./clock.js";
@@ -61,7 +62,10 @@ const TEAM_CARS = { 2025: CARS_2025_TABLE, 2026: CARS_2026_TABLE }, TRACK_TAU = 
 // state the race's motion never reads.
 // 0.52: the red-flag change through the set check, the wet-track learning state deterministic across save / load, three
 // tyre classes in the AI, one admissibility rule for every candidate, the rain price, the unsafe-release chance (0.51).
-export const ENGINE_VERSION = "0.52.0-engine.1";
+// 0.53: every car's lap clock starts at lights out (lap 1 of a car gridded past the timing line took in the start sequence);
+// a stop under an SC / VSC is measured against the field over the same stretch, a double stack's queue is its approach
+// beyond a free one – lap records and accounts only: the cars' motion, the orders and the draws are those of 0.52
+export const ENGINE_VERSION = "0.53.0-engine.1";
 // the coefficient / rule fingerprint (params/version.js) – saves and results carry both; see MODEL
 export { PARAMS_VERSION, PARAMS_HASH } from "../data/params/version.js";
 import { PARAMS_VERSION as PV } from "../data/params/version.js";
@@ -307,7 +311,10 @@ function controlEvents(race, flag0, phase0) {
   if (ctl.flag !== flag0) log(race, { type: ctl.flag === "green" ? "green" : ctl.flag, cause: ctl.msgs.at(-1)?.text || "race control", effect: `${flag0} → ${ctl.flag}` });
   S.flagLogged = ctl.flag;
   if (ctl.phase !== phase0) {
-    if (ctl.phase === "racing" && phase0 === "grid") { for (const c of S.cars) if (!c.armed) c.lapT0 = ctl.t0 ?? S.t; log(race, { type: "lightsOut", cause: "start", effect: "lights out" }); }
+    // (every car's lap clock starts at lights out – also a car gridded past the timing line, armed from the start: its lap
+    // 1 counted from the race's creation took in the start sequence, 5.7 s at Hungary – v0.53 regress F1; a car behind the
+    // line restarts it at its first crossing, lineCrossing)
+    if (ctl.phase === "racing" && phase0 === "grid") { for (const c of S.cars) c.lapT0 = ctl.t0 ?? S.t; log(race, { type: "lightsOut", cause: "start", effect: "lights out" }); }
     if (ctl.phase === "chequered") { S.chequeredAt = ctl.fin.flagT; log(race, { t: ctl.fin.flagT, type: "chequered", cause: ctl.fin.reason || "distance", effect: "chequered flag" }); }
   }
   for (const c of S.cars) if (c.status === "fin" && c.finT == null) { c.finT = c.fin?.t ?? S.t; c.v = 0; trafficEnd(race, c); }
@@ -407,6 +414,15 @@ function moveLap(race, car, t, cap = null) {
   const sg0 = segOf(C.surface, s0), sg1 = segOf(C.surface, car.s); if (sg0 !== sg1) C.surface.passes[sg1] += 1;
   // the pit: commit / entry
   const pev = pitOnLap(car, T, s0, car.s, t);
+  // the stretch the pit lane bypasses (branch → merge): every lap car's time over it, kept a while – the reference for a
+  // stop under an SC / VSC (stretchRef); accounting only, nothing that moves a car reads it
+  { const dd = T.ahead(s0, car.s), at = (x) => { const a = T.ahead(s0, x); return a > 0 && a <= dd ? Math.round(t - DT_MS + DT_MS * a / dd) : null; };
+    if (pev === "entry") car.stretch = null;
+    else if (dd > 0 && dd < T.L / 2) {
+      const tOut = car.stretch != null ? at(T.pit.sOut) : null;
+      if (tOut != null) { const L = (S.stretch ||= []); L.push([car.stretch, tOut - car.stretch, car.num]); if (L.length > 80) L.shift(); car.stretch = null; }
+      const tIn = at(T.pit.sIn); if (tIn != null) car.stretch = tIn;
+    } }
   if (pev === "entry") {
     car.where = "pit"; trafficEnd(race, car); car.pit.refS = pitReference(race, car);
     log(race, { t, car: car.num, type: "pitEntry", cause: car.pit.call?.by || "call", effect: `box for ${car.pit.call?.compound || "same"}` });
@@ -456,10 +472,33 @@ function ghostModels(E) {
   };
 }
 
+// a stop's reference under an SC / VSC: the median time of up to 3 cars that stayed out over the same stretch, entering it
+// nearest to this car's entry (within 30 s); null when none did (the free-lap reference then, marked refBy "free")
+function stretchRef(race, car, tEntry) {
+  const L = (race.state.stretch || []).filter((x) => x[2] !== car.num && Math.abs(x[0] - tEntry) <= 30000).sort((a, b) => Math.abs(a[0] - tEntry) - Math.abs(b[0] - tEntry) || (a[2] < b[2] ? -1 : 1)).slice(0, 3);
+  if (!L.length) return null;
+  const d = L.map((x) => x[1]).sort((a, b) => a - b);
+  return d[Math.floor((d.length - 1) / 2)] / 1000;
+}
+// the time a car takes from (u, v) to a stop in a free box: pit.js's own approach (the limiter speed, the box braking
+// cap, the launch rate, the last centimetres snapped) stepped the same way – a queued car's wait is its time beyond this
+export function freeApproach(T, boxU, u, v) {
+  const G = 9.81, aIn = PIT.boxApproach.v * G, aOut = PIT.launch.v * G, lim = T.pit.speedLimit;
+  let tt = 0;
+  for (let k = 0; k < 2400; k++) {
+    if (v < 0.3 && Math.abs(u - boxU) < 0.6) break;
+    const target = Math.min(lim, Math.sqrt(2 * aIn * Math.max(0, boxU - u)));
+    v = v < target ? Math.min(target, v + aOut * DT) : Math.max(target, v - aIn * DT);
+    if (u + v * DT > boxU) { u = boxU; v = 0; } else u += v * DT;
+    tt += DT;
+  }
+  return tt + DT;   // (the stop is stamped at the end of the step that finds the car at its marks)
+}
 function movePit(race, car, t, ctx = {}) {
   const S = race.state, C = race.cache, T = C.T, d0 = car.dist;
   const others = S.cars.filter((o) => o.where === "pit").map((o) => ({ num: o.num, team: o.teamKey, phase: o.pit.phase, u: o.pit.u, v: o.pit.v }));
   const sPrev = T.wrap(T.pit.sIn + Math.min(1, car.pit.u / T.pit.L) * T.ahead(T.pit.sIn, T.pit.sOut));
+  const ph0 = car.pit.phase, u0 = car.pit.u, v0 = car.pit.v;
   let ev = pitStep(car, T, { t, dt: DT, team: car.teamKey, boxes: S.boxes, rng: race.rng.get("pit:" + car.teamKey), wet: (C.w.rain || 0) > 0.1, others,
     penaltyS: ctx.penaltyS || 0, noBox: !!ctx.noBox, holdU: ctx.holdU ?? null, noWork: !!ctx.noWork,
     stack: S.cars.some((o) => o !== car && o.teamKey === car.teamKey && o.pit.times?.release && t - o.pit.times.release < 30000),
@@ -467,7 +506,13 @@ function movePit(race, car, t, ctx = {}) {
   // (a visit through a suspension: the time the race stood still – red flag – and the resumption behind the SC until the
   // car is out are the procedure's, not the stop's: kept apart as susp, every car in the lane pays it alike)
   { const tm = car.pit.times, ctl = S.control;
-    if (tm && tm.entry != null) { if (ctl.flag === "red") { tm.red = true; tm.susp = (tm.susp || 0) + DT_MS; } else if (tm.red && ctl.flag === "sc" && ctl.red?.phase === "run") tm.susp = (tm.susp || 0) + DT_MS; } }
+    if (tm && tm.entry != null) { if (ctl.flag === "red") { tm.red = true; tm.susp = (tm.susp || 0) + DT_MS; } else if (tm.red && ctl.flag === "sc" && ctl.red?.phase === "run") tm.susp = (tm.susp || 0) + DT_MS; }
+    // (a visit under an SC / VSC: its loss is measured against the field's time over the same stretch then, not a free
+    // lap's – v0.53 regress F2)
+    if (tm && tm.entry != null && !tm.red && (ctl.flag === "sc" || ctl.flag === "vsc")) tm.neut = tm.neut === "sc" || ctl.flag === "sc" ? "sc" : "vsc";
+    // (the box approach: where and how fast it began – a double stack's real wait is the approach's time beyond a free one,
+    // braking early behind the teammate and rolling in, not only the standstill – v0.53 regress F3)
+    if (tm && ph0 === "lane" && car.pit.phase === "approach" && tm.app0 == null) { tm.app0 = t - DT_MS; tm.appU = +u0.toFixed(3); tm.appV = +v0.toFixed(3); } }
   if (car.pit.phase === "laneOut" || car.pit.phase === "exit" || car.pit.phase === "none") INV.releaseStale(car);   // (a stop without a tyre change keeps no set reserved)
   // the merge: the car waits at the end of the exit road while joining would force a car on the lap to brake or move
   if (ev === "exit" && !mergeClear(race, car)) {
@@ -493,12 +538,18 @@ function movePit(race, car, t, ctx = {}) {
     // the stop's loss: time from the branch to the merge minus the time the car would have taken on the lap over the same
     // stretch at its free reference pace (forward pass of its envelope at entry) – the parts: queue, stationary (penalty +
     // work), the rest (braking to the limiter, the lane, the launch). Approximate: the reference is a free lap's pace.
-    const queue = tm.queue != null ? (tm.queueEnd - tm.queue) / 1000 : 0, susp = (tm.susp || 0) / 1000, ref = car.pit.refS ?? 0;
+    const susp = (tm.susp || 0) / 1000, fieldRef = tm.neut && !tm.red ? stretchRef(race, car, tm.entry) : null, ref = fieldRef ?? car.pit.refS ?? 0;
+    // the queue: the approach from where it began to the stop at the box against a free approach from the same place and
+    // speed (the limiter speed held, then the box braking) – only for a car that queued; the standstill alone otherwise
+    let queue = tm.queue != null ? (tm.queueEnd - tm.queue) / 1000 : 0;
+    if (tm.queue != null && tm.app0 != null && tm.stop != null) {
+      queue = Math.max(queue, (tm.stop - tm.app0) / 1000 - freeApproach(T, T.pit.boxes[car.teamKey], tm.appU, tm.appV));
+    }
     // (stationary: the box stop – under a red flag the car stops in the lane without one, and that wait is the suspension)
     const still = tm.release != null && tm.stop != null ? (tm.release - tm.stop) / 1000 : 0;
     const loss = tm.red ? Math.max(0, lane - susp - ref) : lane - ref;   // (into the lane BY the red flag: driven at the red's pace, never a gain)
-    car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2), ...(tm.red ? { red: true, susp: +susp.toFixed(1) } : {}) });
-    log(race, { t, car: car.num, type: "pitExit", cause: tm.red ? "red flag" : "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s${susp ? ` − suspension ${susp.toFixed(1)} s` : ""} − free ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
+    car.acct.pit += loss; (car.acct.pitParts ||= []).push({ lap: car.lap, loss: +loss.toFixed(2), queue: +queue.toFixed(2), stationary: +still.toFixed(2), rest: +(loss - queue - still).toFixed(2), ref: +ref.toFixed(2), ...(tm.red ? { red: true, susp: +susp.toFixed(1) } : {}), ...(tm.neut && !tm.red ? { under: tm.neut, refBy: fieldRef != null ? "field" : "free" } : {}) });
+    log(race, { t, car: car.num, type: "pitExit", cause: tm.red ? "red flag" : "stop", effect: `loss ${loss.toFixed(1)} s (lane ${lane.toFixed(1)} s${susp ? ` − suspension ${susp.toFixed(1)} s` : ""} − ${fieldRef != null ? `field under the ${tm.neut.toUpperCase()}` : "free"} ${ref.toFixed(1)} s; stationary ${still.toFixed(1)} s${queue ? `, queued ${queue.toFixed(1)} s` : ""})` });
     car.pit.times = {};
     }
   }
