@@ -12,6 +12,8 @@
 //
 // Each result carries its evidence: which of the inputs it rests on.
 
+import { q5, outLenFrom, inLenTo } from "./pitpath.js";
+
 export const PIT = {
   near: 30,      // m before its box where a car slowing from the limit starts across to it
   slow: [16, 21.5], // m/s: below the limit (80 km/h = 22.2 m/s) a car near its box is pulling in – at the limit, passing
@@ -23,7 +25,8 @@ export const PIT = {
   ends: 40,      // m past either end of the garages' run over which a car goes from / to the feed's line
   still: 0.8,    // m/s: standing
   garage: 20,    // s: standing this long at its own box outside a race – it is wheeled into its garage (practice)
-  garageIn: 4,   // s over which it goes in
+  garageIn: 12,  // s over which it goes in (v0.53: 4 s pushed a car 15–23 m – along the lane, then tail first in – at up
+                 // to 8.7 m/s: Hungary 2025, Bearman; 12 s ≈ 2–3 m/s at most, a crew pushing it)
 };
 
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -62,9 +65,20 @@ export function pitState(c, P = PIT) {
   // Williams stopped, the feed's position frozen there). Still moving: the fast lane, or its box if it is there.
   if (c.retired) {
     ev.push("retired / stopped (timing)");
-    if (standing) { ev.push("wheeled into the garage (estimate)"); return { state: "retired", lane: "garage", w: ss(0, P.garageIn, Math.min(c.retiredFor ?? Infinity, c.stillFor)), evidence: ev }; }
+    // (v0.53: once it has stood in this visit, the push goes on from when it first stood – the standstill as the feed shows
+    // it can flicker for minutes (Barcelona 2026: positions held and released, "standing" on and off for 500 s) and each
+    // flicker put the car back in the lane from inside its garage, 10 m in a frame)
+    const first = c.visit?.first || c.visit?.box, since = first && c.t != null && c.t >= first.t0 ? (c.t - first.t0) / 1000 : null;
+    if (standing || since != null) { ev.push("wheeled into the garage (estimate)"); return { state: "retired", lane: "garage", w: ss(0, P.garageIn, Math.min(c.retiredFor ?? Infinity, since ?? c.stillFor)), evidence: ev }; }
+    // (v0.53: moving, on this visit's own way – into its box and out – like any car: v0.52 put it straight in its box
+    // or the fast lane by the box's tolerance, a jump across)
+    if (c.visit?.ways && box) { const s = visitState(c, d, tol, standing, ev, P); s.state = "retired"; return s; }
     return { state: "retired", lane: box && Math.abs(d) <= tol ? "box" : "fast", w: 1, evidence: ev };
   }
+  // v0.53: this pit visit's own stops (c.visit – visitPlan: where it stood in the inner lane, where at its box, from its
+  // positions; the record's whole visit in a replay, up to now live) and the ways in and out at its box (pitpath.js
+  // boxWays: this circuit's distance across and room to the next boxes)
+  if (c.visit?.ways) return visitState(c, d, tol, standing, ev, P);
   if (standing) {
     // behind its box while a teammate is in it (a double stack): waits in the inner lane, where it stands – even within
     // the box's tolerance (the second car stops a car's length or two behind the first: never "in box" with it)
@@ -92,6 +106,97 @@ export function pitState(c, P = PIT) {
   return { state: "fast lane", lane: "fast", w: 0, evidence: ev };
 }
 
+// v0.53 (§8): the state from the visit's own stops – the way across a function of the place along the lane alone
+// (pitpath.js), so it is continuous in place, heading and curvature, and the same place gives the same pose:
+//   - before its first stand in the inner lane (its box, or a double stack's queue place behind it): the fast lane, then
+//     the way in, which ends where it will stand (the record) – live, where it isn't known yet, at the queue place,
+//     once it slows there (as before: no standstill makes a box, a car at the limit passes);
+//   - from that stand to the end of its stand at the box: the box lane (creeping up from the queue place too);
+//   - after its stand at the box: the way out from where it stood, back in the fast lane by the next team's box –
+//     never on along the other teams' working areas. A car standing again on its way out (a held release, the exit
+//     light) stands where its way out has it.
+// The way's shape is an ESTIMATE: the feed has every car on one line, no lateral position. Its times (when it stood,
+// how long, where along the lane) are the record's, untouched. → as pitState, plus path: { kind, … } (pathW: w at
+// another place on the same way – the heading)
+function visitState(c, d, tol, standing, ev, P) {
+  const V = c.visit, W = V.ways, t = c.t, box = V.box, first = V.first;
+  const left = box && !box.open && t >= box.t1;
+  const out = (state, extra = []) => { const len = outLenFrom(W, box.u), w = c.u <= box.u ? 1 : 1 - q5((c.u - box.u) / len); ev.push("left its box", ...extra, `way out ${len.toFixed(0)} m (estimate)`); return w > 0 ? { state, lane: "box", w, path: { kind: "out", from: box.u, len }, evidence: ev } : null; };
+  if (standing) {
+    if (left && Math.abs(d) > tol) { const o = out("queued", ["standing on its way out"]); if (o) return o; return { state: "queued", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev }; }
+    if (c.teammateInBox && d < -2 && d > -P.near - 10) { ev.push("teammate in the box"); return { state: "waiting (double stack)", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev }; }
+    // (at its box: within the box's tolerance, or where this visit's record has it stand at its box – which may be a
+    // little past the tolerance: Hungary 2025, Bearman 11 m past Haas' box, nearer it than any other team's)
+    if (Math.abs(d) <= tol || (box && Math.abs(c.u - box.u) < 3 && (!first || first === box || t >= box.t0 - 500))) {
+      if (!c.race && c.stillFor >= P.garage) { ev.push("standing long outside a race"); return { state: "garage", lane: "garage", w: ss(P.garage, P.garage + P.garageIn, c.stillFor), evidence: ev }; }
+      if (c.penalty === "stop-go") { ev.push("stop-and-go given by race control"); return { state: "stop-go", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev }; }
+      return { state: "in box", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev };
+    }
+    // (standing in the inner lane where this visit's record has it before its box: its queue place)
+    if (first && first !== box && t >= first.t0 && t <= (box ? box.t0 : Infinity) && Math.abs(c.u - first.u) < 3) { ev.push("its stand before its box (record)"); return { state: "waiting (double stack)", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev }; }
+    return { state: "queued", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
+  }
+  if (left) { const o = out("leaving box"); if (o) return o; return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev }; }
+  // between its first stand in the inner lane and its box: up from the queue place in the box lane
+  if (first && t >= first.t0) { ev.push(c.teammateInBox ? "teammate in the box" : "up to its box"); return { state: c.teammateInBox ? "waiting (double stack)" : "to box", lane: "box", w: 1, path: { kind: "const", w: 1 }, evidence: ev }; }
+  if (c.penalty === "drive-through") return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
+  // the way in: to where it will stand (the record), else the queue place
+  const end = first ? Math.min(W.queueU, first.u) : W.queueU, from = end - inLenTo(W, end);
+  // (the record's stand ahead: on along the way to it, even where it stands past the box's tolerance on the way – a car
+  // creeping up to a stand at the tolerance's edge flicked to the fast lane and back, 6 m, Hungary 2025 car 87)
+  // (the record with no stand at its box this visit: it doesn't stop – the fast lane throughout, never the live guess
+  // from its speed: Monaco 2025, Hamilton 4388 s, across 5.4 m and back as it slowed by its box without stopping)
+  if (c.u < from || (!first && (d > tol || !V.live))) return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
+  // (a car that runs on past where it will stand – and is pushed or reverses back to it, as the record has it: Monaco
+  // 2025, Gasly 22 m then 8 m along – stays in the box lane: not forced back onto the fast lane, 5 m across)
+  if (first) { ev.push("its stop ahead (record)", `way in ${(end - from).toFixed(0)} m (estimate)`); const w = c.u >= end ? 1 : q5((c.u - from) / (end - from)); return { state: "to box", lane: "box", w, path: { kind: "in", from, to: end }, evidence: ev }; }
+  // live: not known whether it stops – slowing under the limit on the way in (its slowest since the way began: never
+  // back out once across, never across while at the limit)
+  const k = 1 - ss(P.slow[0], P.slow[1], V.vMin ?? c.speed);
+  if (k <= 0) return { state: "fast lane", lane: "fast", w: 0, path: { kind: "const", w: 0 }, evidence: ev };
+  ev.push("slowing before its box", `way in ${(end - from).toFixed(0)} m (estimate)`);
+  return { state: "to box", lane: "box", w: (c.u >= end ? 1 : q5((c.u - from) / (end - from))) * k, path: { kind: "in", from, to: end, k }, evidence: ev };
+}
+// w on a state's way at another place u (the same way: the heading from its slope)
+export function pathW(path, u) {
+  if (!path) return null;
+  if (path.kind === "const") return path.w;
+  if (path.kind === "in") return (u >= path.to ? 1 : q5((u - path.from) / (path.to - path.from))) * (path.k ?? 1);
+  if (path.kind === "out") return u <= path.from ? 1 : 1 - q5((u - path.from) / path.len);
+  return null;
+}
+
+// A pit visit's standstills from the car's positions over [tA, tB] (ms): [{ t0 (it came to rest – the start of its first
+// still step), t1 (its last standing sample), u (where, by uOf(sample index)), i, open (still standing at tB) }] – the
+// same still steps as standingForPos (blips bridged)
+export function visitStands(c, tA, tB, uOf, still = 0.6) {
+  const n = c.n ?? c.t.length, out = [];
+  let i = Math.max(1, idxAt(c, tA)), a = -1;
+  const mk = (a, b, open) => { const u = uOf(b); if (u != null) out.push({ t0: c.t[a - 1], t1: c.t[b], u, i: b, open }); };
+  for (; i < n && c.t[i] <= tB; i++) {
+    const s = stepStill(c, i, still);
+    if (s && a < 0) a = i; else if (!s && a >= 0) { mk(a, i - 1, false); a = -1; }
+  }
+  if (a >= 0) mk(a, i - 1, i >= n || c.t[i] > tB);
+  return out;
+}
+// The visit's stand at its box (the last one within tol of boxU – a stop split by a creep forward ends at the last) and
+// its first stand in the inner lane (the earliest of the stands from P.near + 10 m behind the box up to it, just before the
+// box stand: a double stack's queue place) – or nulls
+export function visitPlan(stands, boxU, tol, P = PIT, minS = 0.8) {
+  if (boxU == null) return { first: null, box: null };
+  let bi = -1;
+  stands.forEach((s, i) => { if (Math.abs(s.u - boxU) <= tol && (s.open || s.t1 - s.t0 >= minS * 1000)) bi = i; });
+  if (bi < 0) {
+    // (live, still queueing behind it: that stand)
+    const q = stands[stands.length - 1];
+    return q && q.open && q.u - boxU < -2 && q.u - boxU > -P.near - 10 ? { first: q, box: null } : { first: null, box: null };
+  }
+  let fi = bi;
+  for (let i = bi - 1; i >= 0; i--) { const d = stands[i].u - boxU; if (d < -P.near - 10 || d > tol) break; fi = i; }
+  return { first: stands[fi], box: stands[bi] };
+}
+
 // How far across the lane a state puts a car (m out from the garages): the fast lane's centre, its box, between them
 // by w; "feed": the feed's own line. Towards the ends of the garages' run the lanes give way to the feed's line.
 //   cs: crossSection at the car's place; off: the feed's own offset there
@@ -101,9 +206,20 @@ export function laneOffsetOf(s, cs, off, u, gStart, gEnd, P = PIT) {
   if (s.lane === "feed") want = off;
   else if (s.lane === "garage") want = cs.boxC + (-2.5 - cs.boxC) * s.w;   // (into its garage, 2.5 m inside the front)
   else want = cs.fastC + ((cs.ok ? cs.boxC : cs.fastC) - cs.fastC) * (s.lane === "box" ? s.w : 0);
-  const inRun = Math.min(ss(gStart - P.ends, gStart, u), 1 - ss(gEnd, gEnd + P.ends, u));
-  return off + (want - off) * inRun;
+  return off + (want - off) * runBlend(u, gStart, gEnd, P, off, cs.wall);
 }
+
+// in the garages' run (1) – back to the feed's line over `ends` m past either end (0): a quintic (v0.53: the heading's
+// turn continuous there too). With the feed's offset there (off) and the lane's width (wall): also back to the feed's
+// line as that runs away from the lane – an entry or exit road coming in at an angle (v0.53: the run's blend by u alone
+// was near 1 where the feed's line was still 30–40 m out (faded over 20 m of offset from 2 m past the wall), and at 40 m out – where a car stops counting as in front of
+// the garages – the car was drawn 8 m across and 80° round in one frame: every game car at Hungary's pit entry)
+export const runBlend = (u, gStart, gEnd, P = PIT, off = null, wall = null) => {
+  const r = Math.min(q5((u - (gStart - P.ends)) / P.ends), 1 - q5((u - gEnd) / P.ends));
+  if (off == null) return r;
+  const w0 = (wall > 0 ? wall : 12) + 2;
+  return r * (1 - q5((off - w0) / 20));
+};
 
 // v0.49: a car going into its garage (lane "garage": retired and standing, or a long stay outside a race) – where it is at
 // w (0 → 1, pitState's), from where it stood in the lane to its own work space's car spot (garages.js garageZones), never

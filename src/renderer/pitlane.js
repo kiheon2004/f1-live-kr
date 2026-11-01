@@ -237,10 +237,32 @@ export function laneStationAt(us, u) {
 // one. The sections, a garage apart, interpolated across a step in the garages' fronts or a kink in the wall at the run's
 // end, had the wall up to 3 m further out than it is over half a garage – Sakhir 2025: the fast lane's cars drawn 1.7 m
 // into Kick Sauber's stand and the wall behind it (v0.47, run/stands).
+// v0.53: with the lane's directions there – along (+ to the exit) and inward (into the garages) – turned smoothly from one
+// garage's to the next one's (a curved pit building: the nearest garage's own had the heading and a car moved across
+// step at each garage's edge)
 export function laneSectionAt(st, us, u, wallFace = null) {
   const { i, t } = laneStationAt(us, u), a = st[Math.max(0, i)], b = st[Math.min(st.length - 1, Math.max(0, i) + 1)];
   const floor = a.floor + (b.floor - a.floor) * t, slot = t < 0.5 ? a.s : b.s, w = wallFace ? wallFace(u) : null;
-  if (w > 0) { const cs = crossSection({ wall: w }); return { ok: cs.ok, fastC: cs.fastC, boxC: cs.boxC, inner: cs.inner, wall: cs.wall, floor, slot }; }
+  const dir = (k) => { const x = a.s[k][0] + (b.s[k][0] - a.s[k][0]) * t, z = a.s[k][1] + (b.s[k][1] - a.s[k][1]) * t, l = Math.hypot(x, z) || 1; return [x / l, z / l]; };
+  const along = a.s.along && b.s.along ? dir("along") : slot.along, inward = a.s.inward && b.s.inward ? dir("inward") : slot.inward;
+  if (w > 0) { const cs = crossSection({ wall: w }); return { ok: cs.ok, fastC: cs.fastC, boxC: cs.boxC, inner: cs.inner, wall: cs.wall, floor, slot, along, inward }; }
   const L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
-  return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor, slot };
+  return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor, slot, along, inward };
+}
+
+// v0.53: the lines the cars drive along the lane – the fast lane's centre and the boxes' – as drawn: the cross sections
+// give them per garage and the facility's wall face every 3 m, and both step where the wall does (a gap in the pit wall,
+// a kink at a building's end: Silverstone 2025, 3.5 m at u −22 – every car in the fast lane moved 3.5 m across in one
+// frame and turned 117°). Here each line is taken no further out than it is anywhere within reach at a gentle slope (the
+// lower envelope at `k` m across per m along – so never nearer the wall than the raw line, a step towards the wall is
+// met before it), then averaged over ±`half` m (the envelope's corners rounded). rawAt(u) → a section (laneSectionAt);
+// → at(u): the same section with fastC / boxC from the smoothed lines.
+export function laneLines(rawAt, u0, u1, k = 0.12, half = 4, step = 0.5) {
+  const n = Math.max(2, Math.ceil((u1 - u0) / step) + 1), F = new Float64Array(n), B = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const c = rawAt(u0 + i * step); F[i] = c.fastC; B[i] = c.ok ? c.boxC : c.fastC; }
+  const env = (a) => { const d = k * step; for (let i = 1; i < n; i++) a[i] = Math.min(a[i], a[i - 1] + d); for (let i = n - 2; i >= 0; i--) a[i] = Math.min(a[i], a[i + 1] + d); return a; };
+  const avg = (a) => { const h = Math.round(half / step), o = new Float64Array(n); for (let i = 0; i < n; i++) { let s = 0, m = 0; for (let j = Math.max(0, i - h); j <= Math.min(n - 1, i + h); j++) { s += a[j]; m++; } o[i] = s / m; } return o; };
+  const fs = avg(env(F)), bs = avg(env(B));
+  const lerpAt = (a, u) => { const f = Math.max(0, Math.min(n - 1, (u - u0) / step)), i = Math.min(n - 2, Math.floor(f)), w = f - i; return a[i] + (a[i + 1] - a[i]) * w; };
+  return (u) => { const c = rawAt(u); return { ...c, fastC: lerpAt(fs, u), boxC: c.ok ? lerpAt(bs, u) : lerpAt(fs, u), rawFastC: c.fastC }; };
 }

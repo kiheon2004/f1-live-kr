@@ -7,12 +7,40 @@ import { setCompound, setAero, setWheels, setCockpit, setSmear, setFlagLights, w
 import { rollAngle, smearOf } from "../wheelspin.js";
 import { CHANGE } from "../crew.js";
 import { updateGameCrews } from "./pitcrew.js";
+import { boxWays, gameLaneW } from "../pitpath.js";
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 const ss = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
-// the phases in which the car is at (or pulling into / out of) its own box – drawn across the lane into it
-const AT_BOX = new Set(["approach", "penalty", "work", "release"]);
+// v0.53: where across the lane the engine's pit state is drawn – pitpath.js gameLaneW (the engine decides the phases, the
+// box, the queue and the release; this only draws them): the fast lane, the way in to the box (to the queue place, then
+// the box lane), the box lane while queued / held / worked on / released, the way out from the box after a release –
+// continuous in place, heading and curvature, its length this circuit's (the distance across at the box, the room to the
+// next boxes). v0.52 drew every phase but approach / penalty / work / release on the engine's path – the feed's one line,
+// 1–15 m from the garages by circuit: where it lies in the working lane the cars drove along the boxes – and at release →
+// laneOut put the car back on that line in one frame.
+// the ways at each team's box, in the ENGINE's pit-path u (its boxes P.boxes), the distance across from the building's
+// lane model at the box (per pit path and pit building)
+const waysMemo = { P: null, G: null, map: new Map() };
+function waysFor(K, P, team, c0) {
+  const G = K.pitG?.(); if (!G || !P?.boxes) return null;
+  if (waysMemo.P !== P || waysMemo.G !== G) Object.assign(waysMemo, { P, G, map: new Map() });
+  if (waysMemo.map.has(team)) return waysMemo.map.get(team);
+  const bu = P.boxes[team]; let w = null;
+  if (bu != null) { const q = pitPoint(P, bu, c0), d = K.pitAcrossAt?.(q.x, q.z); if (d != null) w = boxWays(bu, Object.values(P.boxes).filter((x) => x != null), d); }
+  waysMemo.map.set(team, w); return w;
+}
+// the engine's pit state at u drawn: { x, z, y, yaw, inRun, w } – the engine path's point moved across in the building's frame
+function pitPose(K, P, g, u, c0, out = {}) {
+  const q = pitPoint(P, u, c0), L = K.pitLane?.(q.x, q.z);
+  out.x = q.x; out.z = q.z; out.yaw = q.yaw; out.inRun = 0; out.w = 0; out.L = L; out.off = null;
+  if (!L) return out;
+  const ways = waysFor(K, P, g.teamKey, c0), lw = gameLaneW(g.pit, u, ways, P.boxes?.[g.teamKey] ?? null);
+  const want = L.fastC + (L.boxC - L.fastC) * lw.w, off = L.off + (want - L.off) * L.inRun, d = off - L.off;
+  out.x = q.x - L.inward[0] * d; out.z = q.z - L.inward[1] * d; out.inRun = L.inRun; out.w = lw.w; out.off = off;
+  return out;
+}
+const PA0 = {}, PA1 = {}, PA2 = {};
 const SC_DRIVER = { TeamName: "", TeamColour: "C8C8C8", Tla: "SC", LastName: "Safety Car" };
 
 // a point of the engine's pit path at u (m): scene x, z, the path's heading as a scene yaw, and the lap s it lies by
@@ -61,17 +89,19 @@ export function updateGameCars(K, A, dt) {
       c.sample = F.sampleAt(w.s);
       c.worldS = w.s;
     } else if (g.where === "pit" && P && g.u != null) {
-      const q = pitPoint(P, g.u, world.center);
-      let x = q.x, z = q.z, y = K.groundAt(x, z) + K.ROAD_LIFT - 0.02;
-      yaw = q.yaw;
-      // into the team's box while at it (the pit building's lane model: the box's offset from the garages), eased over the
-      // last / first metres; the engine's u is along its path, so the car stops where the engine stops it
-      const ph = g.pit?.phase, box = P.boxes?.[g.teamKey];
-      if (AT_BOX.has(ph) && box != null) {
-        const k = ph === "release" ? 1 - ss(0, 14, g.u - box) : ss(-22, -2, g.u - box);
-        const m = K.pitAcross(x, z, k);
-        if (m) { x = m.x; z = m.z; y = y + (m.y - y) * m.inRun; yaw = wrap(yaw + m.turn * (ph === "release" ? -1 : 1) * Math.min(k, 1 - k) * 2); }
-      } else { const m = K.pitAcross(x, z, 0); if (m) y = y + (m.y - y) * m.inRun; }
+      const p = pitPose(K, P, g, g.u, world.center, PA0);
+      let y = K.groundAt(p.x, p.z) + K.ROAD_LIFT - 0.02;
+      yaw = p.yaw;
+      if (p.L) {
+        // on the lane's floor in the garages' run; the heading the drawn way's own (a metre either side on the same state):
+        // along the lane, turned by the way across – eased to the engine path's heading over the run's ends
+        y = K.pitSurfaceY ? K.pitSurfaceY(p.x, p.z, y, p.L.floor - 0.004, p.inRun) : y + (p.L.floor - y) * p.inRun;
+        const a = pitPose(K, P, g, g.u - 0.5, world.center, PA1), b = pitPose(K, P, g, g.u + 0.5, world.center, PA2);
+        const [ax, az] = p.L.along, [ix, iz] = p.L.inward, sl = a.off != null && b.off != null ? b.off - a.off : 0;
+        const laneYaw = Math.atan2(ax - ix * sl, az - iz * sl);
+        yaw = wrap(p.yaw + wrap(laneYaw - p.yaw) * p.inRun);
+      }
+      const x = p.x, z = p.z;
       v.set(x, y, z);
       c.sample = null; c.worldS = null;
     } else { c.obj.visible = false; continue; }
