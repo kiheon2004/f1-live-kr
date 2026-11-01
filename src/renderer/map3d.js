@@ -52,6 +52,7 @@ import { createPitKit } from "./garagekit/pitkit.js";
 import { createSpecHud } from "./spectator/hud.js";
 import { pickTags, cameraCar } from "./spectator/layout.js";
 import { EYE_PITCH, cockpitFov as lensFov, HEAD, headYawFor, eyeTurned } from "./eyecam.js";
+import { rideStep } from "./ride.js";
 import { readMotionPrefs, vibrationAt, MOTION_KEYS } from "./motionprefs.js";
 
 const DM = 0.1;               // decimetres → metres
@@ -1877,7 +1878,7 @@ function updateCars(dt) {
       const pitchT = slope + Math.max(-0.006, Math.min(0.02, -aLong * 0.00032));     // −5 g: nose down ~0.9°
       const rollT = Math.max(-0.012, Math.min(0.012, -aLat * 0.0002));               // 5 g: ~0.55° out of the corner
       if (!c.has) { c.pitch = pitchT; c.roll = rollT; }
-      c.pitch += (pitchT - c.pitch) * kB; c.roll += (rollT - c.roll) * kB;
+      c.pitch += (pitchT - c.pitch) * kB; c.roll += (rollT - c.roll) * kB; c.slope = slope;
       c.speed = speed; c.acc = aLong;
       // on the tarmac (drawn 6 cm over the lap line), the tyres squashed a centimetre; the body drops with the downforce
       v.y += ROAD_LIFT - 0.01 - 0.012 * Math.min(1, (speed / 90) ** 2);
@@ -1925,6 +1926,7 @@ function updateCars(dt) {
       }
       c.pitch += (slope + Math.max(-0.006, Math.min(0.02, -c.acc * 0.00032)) - c.pitch) * kS;
       c.roll += (Math.max(-0.012, Math.min(0.012, -yawRate * c.speed * 0.0002)) - c.roll) * kS;
+      c.slope = slope;
     }
     c.prevYaw = c.yaw; c.onTrack = !!st;
     const yawRate = c.yawRate;
@@ -1975,13 +1977,13 @@ function updateCars(dt) {
     }
     c.pos.copy(v); c.has = true;
     c.obj.position.copy(v);
-    // The car the cockpit cameras ride in is steadied: its pitch and roll follow slowly (~0.4 s) and its height over
-    // the road too, kerb bumps left out – the camera is fixed to it, and the halo, helmet and nose in the frame with it,
-    // so what moves on screen is the world going by, not a shaking car (4 Hz positions and kerb ridges shook it).
+    // The car the cockpit cameras ride in is steadied (ride.js): the nose's dip and the lean follow slowly (~0.4 s), kerb
+    // bumps left out – the camera is fixed to it, and the halo, helmet and nose in the frame with it, so what moves on
+    // screen is the world going by, not a shaking car. (v0.54: its height and the road's slope as they are – eased, the
+    // car sank under the road on every climb: the ground through the cockpit floor, the camera bobbing with the grade)
     const ride = (camMode === "onboard" || camMode === "eye") && num === focusNum;
     if (ride) {
-      const k = c.stab ? 1 - Math.exp(-dt * 2.5) : 1, ky = c.stab ? 1 - Math.exp(-dt * 5) : 1, S = c.stab || (c.stab = { p: 0, r: 0, y: v.y });
-      S.p += (c.pitch - S.p) * k; S.r += (c.roll - S.r) * k; S.y += (v.y - (c.bump ? 0.008 + 0.01 * c.bump : 0) - S.y) * ky;
+      const S = (c.stab = rideStep(c.stab, { y: v.y - (c.bump ? 0.008 + 0.01 * c.bump : 0), pitch: c.pitch, roll: c.roll, slope: c.slope || 0, x: v.x, z: v.z }, dt));
       c.obj.position.y = S.y;
       c.model.rotation.set(S.p, c.yaw, S.r, "YXZ");
     } else {
@@ -4385,6 +4387,14 @@ window.Map3D = {
         r.t.push(now); r.dt.push(dt * 1000); r.yaw.push(e.y); r.pitch.push(e.x); r.roll.push(e.z); r.y.push(camera.position.y);
         r.side.push(camera.position.x * Math.cos(c.yaw) - camera.position.z * Math.sin(c.yaw));
         r.steer.push(c.steer || 0); r.wheel.push(c.model.userData.wheel?.rotation.z || 0); r.st.push(app().t); (r.sh || (r.sh = [])).push(devShadowDrawn ? 1 : 0);
+        // (v0.54: how far the drawn car sits under where its pose puts it – the cockpit's floor 0.16 m over the road: more
+        // and the road shows inside the cockpit; at the cockpit's back, the eye and the front of the tub (m))
+        { const p = c.model.rotation.x, y = c.obj.position.y; let sink = 0; for (const z of [-0.5, 0.3, 1.2]) sink = Math.max(sink, (c.pos.y - z * Math.sin(c.pitch)) - (y - z * Math.sin(p))); (r.sink || (r.sink = [])).push(sink); }
+        // (v0.54: each stage's part for the shake split – the car's pose (heading, drawn pitch, height, place) and the camera
+        // against the car (its offset in the car's frame, its turn over the car's))
+        { const q = (k, v) => (r[k] || (r[k] = [])).push(v), cp = camera.position;
+          q("cx", cp.x); q("cz", cp.z); q("bx", c.obj.position.x); q("bz", c.obj.position.z); q("by", c.obj.position.y); q("byaw", c.model.rotation.y); q("bp", c.model.rotation.x); q("br", c.model.rotation.z);
+          const dx = cp.x - c.obj.position.x, dz = cp.z - c.obj.position.z; q("ox", dx * Math.cos(c.yaw) - dz * Math.sin(c.yaw)); q("oy", cp.y - c.obj.position.y); q("oyaw", wrap(e.y - c.model.rotation.y)); }
         if (now - t0 > secs * 1000) {
           devRec = null;
           const un = (a) => { const o = a.slice(); for (let i = 1; i < o.length; i++) o[i] = o[i - 1] + wrap(a[i] - a[i - 1]); return o; };
@@ -4397,7 +4407,19 @@ window.Map3D = {
           const shadows = r.sh.reduce((a, b) => a + b, 0);
           done(JSON.stringify({ frames: r.t.length, dtMs: [q(0.5), q(0.95), q(0.99)], streamStill: back, shadowRedraws: shadows, slow: slow.slice(0, 60),
             camYawDeg: stat(un(r.yaw), D), camPitchDeg: stat(r.pitch, D), camRollDeg: stat(r.roll, D), camHeightCm: stat(r.y, 100), camSideCm: stat(r.side, 100),
-            steerDeg: stat(r.steer, D), wheelDeg: stat(r.wheel, D) }));
+            shake: (() => {
+              // the part of each motion faster than ~2 Hz: the residual from a quadratic fit over ±0.2 s of the wall's time
+              // (zero for any smooth motion, a bend's turning included), RMS over the run
+              const qr = (a) => a.map((v, i) => { let n = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, y0 = 0, y1 = 0, y2 = 0; for (let j = Math.max(0, i - 30); j < Math.min(a.length, i + 31); j++) { const x = (r.t[j] - r.t[i]) / 200; if (Math.abs(x) > 1) continue; n++; s1 += x; s2 += x * x; s3 += x ** 3; s4 += x ** 4; y0 += a[j]; y1 += x * a[j]; y2 += x * x * a[j]; }
+                const M = [[n, s1, s2], [s1, s2, s3], [s2, s3, s4]], Y = [y0, y1, y2], det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+                const d = det(M); if (Math.abs(d) < 1e-12) return 0; const M0 = M.map((row, k) => [Y[k], row[1], row[2]]); return v - det(M0) / d; });
+              const rm = (a, k) => { const x = a.slice(20, -20); return +(Math.sqrt(x.reduce((p, y) => p + y * y, 0) / Math.max(1, x.length)) * k).toFixed(3); };
+              const lat = (X, Z) => { const rx = qr(X), rz = qr(Z); return rx.map((x, i) => x * Math.cos(r.byaw[i]) - rz[i] * Math.sin(r.byaw[i])); };
+              return { cam: { yawDeg: rm(qr(un(r.yaw)), D), pitchDeg: rm(qr(r.pitch), D), heightCm: rm(qr(r.y), 100), sideCm: rm(lat(r.cx, r.cz), 100) },
+                car: { yawDeg: rm(qr(un(r.byaw)), D), pitchDeg: rm(qr(r.bp), D), rollDeg: rm(qr(r.br), D), heightCm: rm(qr(r.by), 100), sideCm: rm(lat(r.bx, r.bz), 100) },
+                camOnCar: { sideCm: rm(qr(r.ox), 100), heightCm: rm(qr(r.oy), 100), yawDeg: rm(qr(un(r.oyaw)), D) } };
+            })(),
+            steerDeg: stat(r.steer, D), wheelDeg: stat(r.wheel, D), sinkCm: (() => { const a = (r.sink || []).slice().sort((x, y) => x - y); return a.length ? { p50: +(a[Math.floor(a.length / 2)] * 100).toFixed(1), p95: +(a[Math.floor(a.length * 0.95)] * 100).toFixed(1), max: +(a[a.length - 1] * 100).toFixed(1) } : null; })() }));
         }
       };
     });

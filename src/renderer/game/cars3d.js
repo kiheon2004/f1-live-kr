@@ -9,6 +9,7 @@ import { CHANGE } from "../crew.js";
 import { updateGameCrews } from "./pitcrew.js";
 import { boxWays, gameLaneW } from "../pitpath.js";
 import { lapPose, lineOf, offsetAt, meanAt } from "./gamepose.js";
+import { rideStep } from "../ride.js";
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];   // (scratch points)
@@ -124,8 +125,9 @@ export function updateGameCars(K, A, dt) {
     c.obj.position.copy(v); c.has = true; c.obj.visible = true;
     const ride = (cam === "onboard" || cam === "eye") && g.num === focusNum;
     if (ride) {
-      const k = c.stab ? 1 - Math.exp(-dt * 2.5) : 1, ky = c.stab ? 1 - Math.exp(-dt * 5) : 1, S = c.stab || (c.stab = { p: 0, r: 0, y: v.y });
-      S.p += (c.pitch - S.p) * k; S.r += (c.roll - S.r) * k; S.y += (v.y - S.y) * ky;
+      // (ride.js, v0.54: the dip and the lean steadied, the height and the road's slope as they are – eased, the car sank
+      // under the road on a climb and the ground showed through the cockpit floor)
+      const S = (c.stab = rideStep(jumped ? null : c.stab, { y: v.y, pitch: c.pitch, roll: c.roll, slope, x: v.x, z: v.z }, dt));
       c.obj.position.y = S.y; c.model.rotation.set(S.p, c.yaw, S.r, "YXZ");
     } else { c.stab = null; c.model.rotation.set(c.pitch, c.yaw, c.roll, "YXZ"); }
     // wheels: rolled the engine's own distance over each axle's radius (wheelspin.js rollAngle) – a pause, any speed, a
