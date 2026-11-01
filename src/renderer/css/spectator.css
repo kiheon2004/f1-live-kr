@@ -185,7 +185,8 @@
 /* the small (not expanded) map: camera buttons and the selected driver only */
 #map3d .spec-hud.small .spec-strip, #map3d .spec-hud.small .spec-tower, #map3d .spec-hud.small .spec-pit, #map3d .spec-hud.small .spec-notes { display: none; }
 #map3d .spec-hud.small .spec-cam .ui-seg { flex-direction: column; }
-#map3d .spec-hud.small .spec-cam .spec-in { flex-direction: column; align-items: flex-start; background: none; border: 0; padding: 0; }
+#map3d .spec-hud.small .spec-cam .spec-in { display: grid; grid-template-columns: auto auto; justify-content: start; align-items: center; gap: var(--s-3); background: none; border: 0; padding: 0; }
+#map3d .spec-hud.small .spec-cam .ui-seg { grid-column: 1 / -1; justify-self: start; }   /* (◀ ▶ and 설정 share one row under the cameras: the short map keeps them on screen) */
 #map3d .spec-hud.small .spec-cam .ui-seg { background: var(--hud-bg); }
 #map3d .spec-hud.small .spec-cam .cam-who { display: none; }
 #map3d .spec-hud.small .spec-cam .spec-menu-wrap > .ui-btn { background: var(--hud-bg); border: var(--bw) solid var(--line); }
