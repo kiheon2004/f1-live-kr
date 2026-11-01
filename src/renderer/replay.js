@@ -694,6 +694,7 @@
   const SUPPORT_NUMS = new Set(["241", "242", "243"]);
   const isSupportNum = (n) => SUPPORT_NUMS.has(n) || (/^\d+$/.test(n) && +n >= 200);
   function splitSupport(tr) { const s = new CarTracks(); for (const n of Object.keys(tr.cars)) if (isSupportNum(n)) { s.cars[n] = tr.cars[n]; delete tr.cars[n]; } return s; }
+  const AT_M0 = [0, 0, 0], AT_M1 = [0, 0, 0], AT_CH = [0, 0, 0];   // (CarTracks.at's tangents and chord)
   class CarTracks {
     constructor() { this.cars = {}; }
     // (from per-car typed arrays as the archive makes them: used as they are)
@@ -757,12 +758,27 @@
       const d00 = (6 * s2 - 6 * s) / h, d10 = (3 * s2 - 4 * s + 1), d01 = (-6 * s2 + 6 * s) / h, d11 = (3 * s2 - 2 * s);
       // tangents from the neighbours (non-uniform Catmull-Rom); one-sided at gaps
       const okPrev = lo > 0 && t0 - T[lo - 1] < h * 3 + 400, okNext = hi < n - 1 && T[hi + 1] - t1 < h * 3 + 400;
+      const M0 = AT_M0, M1 = AT_M1, CH = AT_CH;
       for (let a = 0; a < 3; a++) {
-        const A = a === 0 ? c.x : a === 1 ? c.y : c.z, p0 = A[lo], p1 = A[hi], chord = (p1 - p0) / h;
-        const m0 = okPrev ? (p1 - A[lo - 1]) / (t1 - T[lo - 1]) : chord;
-        const m1 = okNext ? (A[hi + 1] - p0) / (T[hi + 1] - t0) : chord;
-        out[a] = h00 * p0 + h10 * h * m0 + h01 * p1 + h11 * h * m1;
-        if (vel) vel[a] = d00 * p0 + d10 * m0 + d01 * p1 + d11 * m1;
+        const A = a === 0 ? c.x : a === 1 ? c.y : c.z, p0 = A[lo], p1 = A[hi];
+        CH[a] = (p1 - p0) / h;
+        M0[a] = okPrev ? (p1 - A[lo - 1]) / (t1 - T[lo - 1]) : CH[a];
+        M1[a] = okNext ? (A[hi + 1] - p0) / (T[hi + 1] - t0) : CH[a];
+      }
+      // (v0.53: the tangents held to what keeps the curve going one way along the chord between the two samples
+      // (Fritsch–Carlson: their parts along the chord, as multiples of it, within a circle of radius 3). A neighbour
+      // across a leap of the feed – 2026 Miami's pit entry, 35–50 m in 0.18 s at 60 km/h, every car there – made the end
+      // tangent 9× the chord, and the curve ran 1–2 m BACK before going on: the car drawn reversing, its heading (the
+      // velocity's) turned 180° for a few frames. On ordinary samples the parts are near 1: nothing changes)
+      const cc = CH[0] * CH[0] + CH[1] * CH[1] + CH[2] * CH[2];
+      if (cc > 0) {
+        const al = (M0[0] * CH[0] + M0[1] * CH[1] + M0[2] * CH[2]) / cc, be = (M1[0] * CH[0] + M1[1] * CH[1] + M1[2] * CH[2]) / cc, r2 = al * al + be * be;
+        if (r2 > 9) { const k = 3 / Math.sqrt(r2); for (let a = 0; a < 3; a++) { M0[a] *= k; M1[a] *= k; } }
+      }
+      for (let a = 0; a < 3; a++) {
+        const A = a === 0 ? c.x : a === 1 ? c.y : c.z, p0 = A[lo], p1 = A[hi];
+        out[a] = h00 * p0 + h10 * h * M0[a] + h01 * p1 + h11 * h * M1[a];
+        if (vel) vel[a] = d00 * p0 + d10 * M0[a] + d01 * p1 + d11 * M1[a];
       }
       return true;
     }
