@@ -25,7 +25,8 @@ export const PIT = {
   ends: 40,      // m past either end of the garages' run over which a car goes from / to the feed's line
   still: 0.8,    // m/s: standing
   garage: 20,    // s: standing this long at its own box outside a race – it is wheeled into its garage (practice)
-  garageIn: 4,   // s over which it goes in
+  garageIn: 12,  // s over which it goes in (v0.53: 4 s pushed a car 15–23 m – along the lane, then tail first in – at up
+                 // to 8.7 m/s: Hungary 2025, Bearman; 12 s ≈ 2–3 m/s at most, a crew pushing it)
 };
 
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
