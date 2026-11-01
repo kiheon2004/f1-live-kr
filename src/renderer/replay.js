@@ -537,7 +537,10 @@
     if (tel?.t?.length) {
       const odo = telOdo(tel), dist = (t0, t1) => odo(t1) - odo(t0);
       let j0 = 0, mode = 0, p = 0;
-      const near = (k) => { for (let j = j0; j < k && c.t[k] - c.t[j] >= REWIND.min; j++) if (keep[j] && Math.hypot(c.x[k] - c.x[j], c.y[k] - c.y[j]) / 10 < REWIND.near && dist(c.t[j], c.t[k]) > REWIND.drove) return true; return false; };
+      // (onto the path it drove then: within REWIND.near m of a piece between two kept samples – at 260 km/h they are 15–22 m
+      // apart, and a replayed sample falls between them)
+      const segD = (k, a, b) => { const ax = c.x[a], ay = c.y[a], ex = c.x[b] - ax, ey = c.y[b] - ay, l2 = ex * ex + ey * ey, f = l2 > 0 ? Math.max(0, Math.min(1, ((c.x[k] - ax) * ex + (c.y[k] - ay) * ey) / l2)) : 0; return Math.hypot(c.x[k] - ax - ex * f, c.y[k] - ay - ey * f) / 10; };
+      const near = (k) => { let a = -1; for (let j = j0; j < k && c.t[k] - c.t[j] >= REWIND.min; j++) { if (!keep[j]) continue; if (a >= 0 && c.t[j] - c.t[a] < 2000 && segD(k, a, j) < REWIND.near && dist(c.t[j], c.t[k]) > REWIND.drove) return true; a = j; } return false; };
       for (let k = 1; k < n; k++) {
         if (!keep[k]) continue;
         while (j0 < k && c.t[k] - c.t[j0] > REWIND.max) j0++;

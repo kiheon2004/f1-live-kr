@@ -1395,7 +1395,7 @@ function groundFor(c, x, z, feedY) {
   return Number.isFinite(t) && Math.abs(feedY - t) > GROUND_TOL ? t + 0.02 : feedY;
 }
 
-const HAND_MAX = 8, READY_MS = 600;   // m (v0.53: an estimate → feed handover eased only up to this far); ms: raw → steadied when those come
+const HAND_MAX = 8, READY_MS = 600, ACROSS_MAX = Math.tan(0.35);   // m (v0.53: an estimate → feed handover eased only up to this far); ms: raw → steadied when those come
 const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 // x → target as a critically damped spring of rate w (1/s), the value and its rate kept on the object
 function spring(o, key, rateKey, target, w, dt) {
@@ -1748,10 +1748,17 @@ function updateCars(dt) {
       // steadied s can run backwards for a moment where its correction pulls it back (a stale or frozen stretch of data,
       // a car crawling on the grid), and v0.52 turned the car round with it: 2025 Hungary, 180° flips at 30–146 km/h)
       let pathYaw;
-      const tel = src.carAt?.(num, A.t), back = st.vs < -1.5 && (!tel || tel.speed < 20), vAl = back ? st.vs : Math.abs(st.vs);
-      if (Math.abs(st.vs) > 1.5) {
-        const ds = Math.max(3, Math.min(10, Math.abs(st.vs) * 0.1)), h = ds / Math.abs(st.vs);
-        F.at(sD - vAl * h, dTot - dRate * h, PA); F.at(sD + vAl * h, dTot + dRate * h, PB);
+      // (v0.53: the speed along the track for the heading is the telemetry's where there is some – the steadied s's own rate
+      // dips where its place is eased onto the raw positions at a stretch's end: 2025 Hungary's pit entry, where the feed's
+      // position steps 8.6 m across onto the pit lane's line and 4 m back, it fell to 2 m/s at 105 km/h and the heading went
+      // 40–80° across – and the part of the heading from moving across is held within ACROSS_MAX of the track's direction
+      // at speed: no car on the tarmac goes sideways at 100 km/h; a jump of the data does)
+      const tel = src.carAt?.(num, A.t), back = st.vs < -1.5 && (!tel || tel.speed < 20);
+      const vTel = tel && tel.speed > 5 && !est ? tel.speed / 3.6 : null, vAl = back ? st.vs : vTel ?? Math.abs(st.vs);
+      if (Math.abs(vAl) > 1.5) {
+        const ds = Math.max(3, Math.min(10, Math.abs(vAl) * 0.1)), h = ds / Math.abs(vAl);
+        const dR = Math.abs(vAl) > 15 ? Math.max(-ACROSS_MAX, Math.min(ACROSS_MAX, dRate / Math.abs(vAl))) * Math.abs(vAl) : dRate;
+        F.at(sD - vAl * h, dTot - dR * h, PA); F.at(sD + vAl * h, dTot + dR * h, PB);
         pathYaw = Math.atan2(PB[0] - PA[0], PB[2] - PA[2]);
       } else pathYaw = Math.atan2(DIR[0], DIR[1]);
       if (devMotion) c.dbg = [Math.atan2(DIR[0], DIR[1]), Math.atan2(dRate, st.vs || 1), st.s, dTot, st.vs, st.d, off, P0[0], P0[2]];
