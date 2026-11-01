@@ -490,10 +490,20 @@ function nearestOnPath(x, z) {
   for (let i = 1; i < P.length; i++) {
     const a = P[i - 1], b = P[i], ex = b.x - a.x, ez = b.z - a.z, l2 = ex * ex + ez * ez; if (!l2) continue;
     const f = Math.max(0, Math.min(1, ((x - a.x) * ex + (z - a.z) * ez) / l2)), px = a.x + ex * f, pz = a.z + ez * f, d = Math.hypot(x - px, z - pz);
-    if (!best || d < best.d) { const l = Math.sqrt(l2); best = { x: px, z: pz, d, tx: ex / l, tz: ez / l }; }
+    if (!best || d < best.d) { const l = Math.sqrt(l2); best = { x: px, z: pz, d, tx: ex / l, tz: ez / l, u: (world.pitLane.cum?.[i - 1] ?? 0) + f * l }; }
+  }
+  // (v0.53: the way along as the chord over ±CHORD m of the path – its own segment's direction turns round where the measured
+  // path folds back on itself (0.5–4 m at six venues), and a car crawling there was turned round with it: 100–180° on
+  // Hungary's entry and exit roads; the pit helper's measurement)
+  const C = world.pitLane.cum;
+  if (best && C?.length === P.length) {
+    const at = (u) => { u = Math.max(0, Math.min(C[C.length - 1], u)); let i = 1; while (i < C.length - 1 && C[i] < u) i++; const f = (u - C[i - 1]) / (C[i] - C[i - 1] || 1); return [P[i - 1].x + (P[i].x - P[i - 1].x) * f, P[i - 1].z + (P[i].z - P[i - 1].z) * f]; };
+    const [x0, z0] = at(best.u - CHORD), [x1, z1] = at(best.u + CHORD), l = Math.hypot(x1 - x0, z1 - z0);
+    if (l > 1) { best.tx = (x1 - x0) / l; best.tz = (z1 - z0) / l; }
   }
   return best;
 }
+const CHORD = 12;
 const ss01 = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 // Draws car c (at v, heading c.yaw) as its pit state says: across the lane, on the lane's surface, turned along it.
 // v0.53: the heading is the lane's own – along it to the pit exit (garages.js: a pit building's `along` points there), turned
@@ -1457,8 +1467,13 @@ function trackPointFor(c, x, z) {
 // within GROUND_TOL m – the feed's Z can be tens of metres off (2026 Hungary: cars 52 m under the ground in the run-off)
 const GROUND_TOL = 3;
 function groundFor(c, x, z, feedY) {
-  const g = trackPointFor(c, x, z); if (g != null) return g + ROAD_LIFT - 0.02;
-  const t = world.real?.groundAt?.(x, z);
+  const g = trackPointFor(c, x, z), t = world.real?.groundAt?.(x, z);
+  if (g != null) {
+    // (off the lap line's tarmac – a pit entry or exit road, a run-off – the ground under the car, not the lap line's height
+    // beside it: 0.3–0.9 m over the drawn road at Hungary's exit and Monaco's entry, the pit helper's measurement)
+    const s = c.sample, lat = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z, off = lat > (s.L ?? 7) + 2 || lat < (s.R ?? -7) - 2;
+    return off && Number.isFinite(t) && Math.abs(t - g) < 6 ? t + 0.02 : g + ROAD_LIFT - 0.02;
+  }
   return Number.isFinite(t) && Math.abs(feedY - t) > GROUND_TOL ? t + 0.02 : feedY;
 }
 
@@ -1746,7 +1761,11 @@ function rollWheels(c, st, est, F, t, v) {
   const odo = tel || trk ? odometerAt(tel, tw, trk) : null;
   let fa, ra;
   c.spinSrc = odo != null ? "odo" : "path"; c.spinD = odo;   // (development: recordSpin)
-  if (odo != null) { fa = W.f.a = wrapAngle(odo / P.FR); ra = W.r.a = wrapAngle(odo / P.RR); W.f.t = W.r.t = t; }
+  // (v0.53: a car standing in the pit lane – its positions still for 0.3 s or more – keeps its wheels where they are: on the
+  // jacks the telemetry's wheel speed runs on, and the odometer turned them at up to 245°/s – Monaco 2025, car 87 in its box)
+  const pitStill = !!c.pit && (c.pit.input?.stillFor ?? 0) > 0.3 && W.f.a != null;
+  if (pitStill) { fa = W.f.a; ra = W.r.a; W.f.t = W.r.t = t; }
+  else if (odo != null) { fa = W.f.a = wrapAngle(odo / P.FR); ra = W.r.a = wrapAngle(odo / P.RR); W.f.t = W.r.t = t; }
   else { fa = stepWheel(W.f, { t, r: P.FR, along, speed, moved }); ra = stepWheel(W.r, { t, r: P.RR, along, speed, moved }); }
   W.pos.copy(v); W.has = true; W.t = t;
   (c.spinW || (c.spinW = [0, 0]))[0] = fa; c.spinW[1] = ra;
