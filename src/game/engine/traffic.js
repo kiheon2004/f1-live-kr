@@ -213,11 +213,7 @@ export function trafficPre(race, t) {
     let nearA = null, nearGap = Infinity, wakeD = 0, slipD = 0, cap = Infinity, why = null;
     for (let k = 1; k < n; k++) {
       const o = L[(i + k) % n], x = T.ahead(c.s, o.s); if (x > 400) break;
-      // (the bodies' length on a bend – bodyLen – while they are close: faded out from 20 to 30 m of s)
-      // (and where they will be over the next second: the follower drops back before the bend tightens, not in it)
-      let bl = len;
-      if (x < 30) { const dm = (c.d + o.d) / 2, m = c.s + x / 2, la = Math.min(40, c.v); bl = Math.max(bodyLen(T, tc, m, dm), bodyLen(T, tc, m + la / 2, dm), bodyLen(T, tc, m + la, dm)); bl = len + (bl - len) * Math.min(1, (30 - x) / 10); }
-      const gap = x - bl, dd = o.d - c.d;
+      const gap = x - len, dd = o.d - c.d;
       if (gap > 0 && gap < nearGap) { nearGap = gap; nearA = o; }
       // every car ahead in my lane bounds my speed (Gipps); a car beside me (gap < 0) is the lateral rules' business
       // and a car that is not attacking it (nor passing a car letting it by) stays behind it whatever its line: only the
