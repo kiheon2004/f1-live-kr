@@ -12,6 +12,7 @@ import { buildStands } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
+import { vegGeometries, speciesMix, speciesAt, standHeight, treeTint, treeMaterial } from "./vegetation.js";
 import { padPlan, polyDist } from "./footing.js";
 import { buildLandmarks } from "./landmarks.js";
 import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./facilities.js";
@@ -298,74 +299,7 @@ const polyArea = (pts) => { let a = 0; for (let i = 0, j = pts.length - 1; i < p
 function rand(seed) { let a = seed | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 // ---------- vegetation and rocks ----------
-// Shared, merged geometries (built once): broadleaf crowns of several lobes, layered conifers, palms with
-// drooping fronds, shrubs, and lumpy rocks. Placed as instances with their own size, turn and colour.
-let VEG = null;
-function noisy(geo, amount, seed) {
-  const r = rand(seed), p = geo.attributes.position, seen = new Map();
-  for (let i = 0; i < p.count; i++) {
-    const key = `${p.getX(i).toFixed(3)},${p.getY(i).toFixed(3)},${p.getZ(i).toFixed(3)}`;   // keep shared corners shared
-    if (!seen.has(key)) seen.set(key, 1 + (r() - 0.5) * amount);
-    const k = seen.get(key); p.setXYZ(i, p.getX(i) * k, p.getY(i) * k, p.getZ(i) * k);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
-function vegGeometries() {
-  if (VEG) return VEG;
-  const merge = (list) => {   // [geometry, x, y, z, sx, sy, sz]
-    const meshes = list.map(([g, x, y, z, sx = 1, sy = sx, sz = sx]) => { const m = new THREE.Mesh(g.index ? g.toNonIndexed() : g); m.position.set(x, y, z); m.scale.set(sx, sy, sz); return m; });
-    const pos = [], nor = [], v = new THREE.Vector3(), nm = new THREE.Matrix3();
-    for (const m of meshes) { m.updateMatrix(); nm.getNormalMatrix(m.matrix); const P = m.geometry.attributes.position, N = m.geometry.attributes.normal;
-      for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i).applyMatrix4(m.matrix); pos.push(v.x, v.y, v.z); v.fromBufferAttribute(N, i).applyMatrix3(nm).normalize(); nor.push(v.x, v.y, v.z); } }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
-    return g;
-  };
-  const lobe = (seed) => noisy(new THREE.IcosahedronGeometry(1, 0), 0.3, seed);   // 20 faces each: thousands of trees stay cheap
-  const trunk = new THREE.CylinderGeometry(0.22, 0.38, 4, 5, 1, true); trunk.translate(0, 2, 0);
-  const broad = merge([[lobe(1), 0, 5.4, 0, 2.6, 2.2, 2.6], [lobe(2), 1.5, 4.6, 0.6, 1.8], [lobe(3), -1.3, 4.8, -0.7, 1.9], [lobe(4), 0.2, 6.6, -0.3, 1.6]]);
-  // (v0.52, request §11 – angular vegetation: the tiers' rims were regular 7-gons on one level, the crown read as three
-  // stacked cones; now 9 sides, each rim corner pulled in or out and dropped by its own amount – a ragged, drooping
-  // edge –, and the normals softened further below. +18 triangles a conifer (63 → 81; the caps kept: seen from below)
-  const tier = (r, h, n, seed) => { const g = new THREE.ConeGeometry(r, h, n), p = g.attributes.position, rr = rand(seed), k = new Map();
-    for (let i = 0; i < p.count; i++) { const y = p.getY(i); if (y > -h / 2 + 1e-4) continue; const key = p.getX(i).toFixed(3) + "," + p.getZ(i).toFixed(3);
-      if (!k.has(key)) k.set(key, [0.8 + rr() * 0.4, -rr() * 0.22 * h]); const [f, dy] = k.get(key); p.setXYZ(i, p.getX(i) * f, y + dy, p.getZ(i) * f); }
-    g.computeVertexNormals(); return g; };
-  const conifer = merge([[tier(2.6, 4.2, 9, 21), 0, 4.2, 0], [tier(2.0, 3.6, 9, 22), 0, 6.3, 0], [tier(1.3, 3.0, 7, 23), 0, 8.2, 0]]);
-  const conTrunk = new THREE.CylinderGeometry(0.18, 0.3, 3, 5); conTrunk.translate(0, 1.5, 0);
-  // palm: a gently leaning, ringed trunk and 9 fronds arching down from the top
-  const palmTrunk = new THREE.CylinderGeometry(0.17, 0.26, 9, 5, 4, true);
-  { const p = palmTrunk.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i) + 4.5; p.setX(i, p.getX(i) + 0.012 * y * y); } palmTrunk.translate(0, 4.5, 0); palmTrunk.computeVertexNormals(); }
-  const fronds = [];
-  for (let k = 0; k < 9; k++) {
-    const f = new THREE.PlaneGeometry(0.9, 3.4, 1, 3); f.rotateX(-Math.PI / 2); f.translate(0, 0, 1.7);
-    const p = f.attributes.position;
-    for (let i = 0; i < p.count; i++) { const zz = p.getZ(i); p.setY(i, -0.12 * zz * zz + 0.25 * zz); p.setX(i, p.getX(i) * (1 - zz / 4)); }
-    f.rotateY((k / 9) * Math.PI * 2 + (k % 2) * 0.2); f.computeVertexNormals();
-    fronds.push([f, 0.97, 9, 0]);
-  }
-  const palmTop = merge(fronds);
-  const shrub = merge([[lobe(7), 0, 0.7, 0, 1.3, 0.8, 1.3], [lobe(8), 0.7, 0.55, 0.3, 0.8]]);
-  // Foliage reads as soft masses, not facets: normals point out from the crown's middle, and colour runs
-  // from shadowed underneath to sunlit on top, with a little noise.
-  const soften = (g, cy, rad, k = 0.85) => {
-    const p = g.attributes.position, nrm = g.attributes.normal, col = [], v = new THREE.Vector3(), nn = new THREE.Vector3(), rr = rand(31);
-    for (let i = 0; i < p.count; i++) {
-      v.set(p.getX(i), p.getY(i) - cy, p.getZ(i)).normalize();
-      nn.fromBufferAttribute(nrm, i).lerp(v, k).normalize(); nrm.setXYZ(i, nn.x, nn.y, nn.z);
-      const h = Math.max(0, Math.min(1, (p.getY(i) - (cy - rad)) / (2 * rad)));
-      const b = 0.52 + 0.48 * Math.pow(h, 0.8) + (rr() - 0.5) * 0.08;
-      col.push(b, b, b);
-    }
-    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-  };
-  soften(broad, 5.4, 3.4); soften(conifer, 5.6, 4.6, 0.78); soften(shrub, 0.7, 1.1); soften(palmTop, 9, 2, 0.4);
-  const rock = noisy(new THREE.IcosahedronGeometry(1, 1), 0.55, 11); rock.scale(1, 0.62, 0.9); rock.translate(0, 0.25, 0);
-  VEG = { trunk, broad, conifer, conTrunk, palmTrunk, palmTop, shrub, rock };
-  return VEG;
-}
-
+// The shapes (seven crown forms, trunk and crown in one geometry), the species mix, stands and tints: vegetation.js (v0.53).
 // Spots for trees: mapped woods/parks/tree rows and single trees, plus tree canopy seen on the satellite
 // image (dark green). Everything is kept off the track corridor, roads and buildings.
 function treesMesh(scene, gf, groundAt, corridor, blocked, lat, ground, clear = 14) {
@@ -406,45 +340,34 @@ function treesMesh(scene, gf, groundAt, corridor, blocked, lat, ground, clear = 
   // run-off, gravel and fences come first on a permanent circuit; a street circuit has trees right behind the walls
   const keep = spots.filter(([x, z]) => !corridor.on(x, z, clear) && !blocked(x, z));
   if (!keep.length) return null;
-  const V = vegGeometries();
-  // the mix: palms near the tropics and in the desert, more conifers away from them
-  const a = Math.abs(lat), palmShare = a < 8 ? 0.22 : a < 27 ? 0.55 : a < 34 ? 0.12 : 0, coniferShare = a > 40 ? 0.4 : a > 30 ? 0.18 : 0.04;
-  const kinds = keep.map(([, , k]) => (k === 1 ? "shrub" : (() => { const u = r(); return u < palmShare ? "palm" : u < palmShare + coniferShare ? "conifer" : "broad"; })()));
-  const mat = (opts) => new THREE.MeshStandardMaterial({ roughness: 0.95, ...opts });
-  const leaf = (opts) => new THREE.MeshStandardMaterial({ roughness: 0.9, vertexColors: true, ...opts });
-  // Instances go into ~400 m chunks, one instanced mesh per kind and chunk: chunks off-screen (and outside
-  // the sun's shadow box) are skipped by three.js, which matters with tens of thousands of trees.
-  const mats = {
-    trunk: mat({ color: 0x5a4330 }), broad: leaf({ color: 0xffffff }), conTrunk: mat({ color: 0x4d3a2a }), conifer: leaf({ color: 0xffffff }),
-    palmTrunk: mat({ color: 0x8a7458 }), palmTop: leaf({ color: 0xffffff, side: THREE.DoubleSide }), shrub: leaf({ color: 0xffffff }),
-  };
-  const geos = { trunk: V.trunk, broad: V.broad, conTrunk: V.conTrunk, conifer: V.conifer, palmTrunk: V.palmTrunk, palmTop: V.palmTop, shrub: V.shrub };
-  const parts = { broad: ["trunk", "broad"], conifer: ["conTrunk", "conifer"], palm: ["palmTrunk", "palmTop"], shrub: ["shrub"] };
-  const buckets = new Map();   // chunk → part → [matrix, colour]
+  const V = vegGeometries(), mix = speciesMix(lat);
+  // (v0.53: the form by stand – vegetation.js speciesAt; a stand's trees of a similar age)
+  const kinds = keep.map(([x, z, k]) => (k === 1 ? "shrub" : speciesAt(x, z, mix, r(), r())));
+  // Instances go into ~400 m chunks, one instanced mesh per form and chunk: chunks off-screen (and outside the sun's
+  // shadow box) are skipped by three.js, which matters with tens of thousands of trees. (v0.53: trunk and crown one
+  // mesh – seven forms at the draw calls of the four before)
+  const mats = { tree: treeMaterial(), palm: treeMaterial({ side: THREE.DoubleSide }) };
+  const buckets = new Map();   // chunk → form → [matrix, colour]
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
   keep.forEach(([x, z, , size], i) => {
-    const k = kinds[i], s0 = (0.7 + r() * 0.6) * size * (k === "shrub" ? 0.9 : 1);
+    const k = kinds[i], s0 = (0.7 + r() * 0.6) * size * (k === "shrub" ? 0.9 : standHeight(x, z));
     q.setFromAxisAngle(Y, r() * Math.PI * 2); p.set(x, groundAt(x, z) - 0.15, z);
     sc.set(s0, s0 * (0.85 + r() * 0.35), s0); m.compose(p, q, sc);
-    const col = new THREE.Color();
     // (the crown's own shading darkens these towards the bottom)
-    if (k === "broad") col.setHSL(0.21 + r() * 0.09, 0.34 + r() * 0.22, 0.22 + r() * 0.12);
-    else if (k === "conifer") col.setHSL(0.29 + r() * 0.06, 0.3 + r() * 0.18, 0.17 + r() * 0.08);
-    else if (k === "palm") col.setHSL(0.23 + r() * 0.07, 0.42 + r() * 0.2, 0.26 + r() * 0.1);
-    else col.setHSL(0.2 + r() * 0.1, 0.28 + r() * 0.2, 0.24 + r() * 0.1);
+    const col = treeTint(k, r);
     const key = `${Math.floor(x / 400)},${Math.floor(z / 400)}`;
     let bk = buckets.get(key); if (!bk) buckets.set(key, (bk = {}));
-    for (const part of parts[k]) (bk[part] || (bk[part] = [])).push([m.clone(), /Trunk|^trunk/.test(part) ? null : col]);
+    (bk[k] || (bk[k] = [])).push([m.clone(), col]);
   });
   const g = new THREE.Group(); g.name = "trees";
   for (const bk of buckets.values()) {
-    // same random order for every part of a chunk (so trunks and crowns thin out together)
+    // same random order for every form of a chunk (so a far chunk thins out evenly across its forms)
     const n = Math.max(...Object.values(bk).map((l) => l.length)), order = Array.from({ length: n }, (_, i) => i);
     for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
     for (const [part, list0] of Object.entries(bk)) {
     const list = order.filter((i) => i < list0.length).map((i) => list0[i]);
-    const im = new THREE.InstancedMesh(geos[part], mats[part], list.length);
-    list.forEach(([mm, col], j) => { im.setMatrixAt(j, mm); if (col) im.setColorAt(j, col); });
+    const im = new THREE.InstancedMesh(V[part], part === "palm" ? mats.palm : mats.tree, list.length); im.name = "trees:" + part;
+    list.forEach(([mm, col], j) => { im.setMatrixAt(j, mm); im.setColorAt(j, col); });
     im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
     im.computeBoundingSphere(); im.castShadow = part !== "shrub"; im.receiveShadow = true;
     im.userData = { full: list.length, centre: im.boundingSphere.center.clone() };

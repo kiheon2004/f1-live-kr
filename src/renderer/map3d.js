@@ -49,6 +49,7 @@ import { createPitKit } from "./garagekit/pitkit.js";
 import { createSpecHud } from "./spectator/hud.js";
 import { pickTags, cameraCar } from "./spectator/layout.js";
 import { EYE_PITCH, cockpitFov as lensFov, HEAD, headYawFor, eyeTurned } from "./eyecam.js";
+import { readMotionPrefs, vibrationAt, MOTION_KEYS } from "./motionprefs.js";
 
 const DM = 0.1;               // decimetres → metres
 let TRACK_W = 14;             // road width (m), set per circuit in buildWorld
@@ -2638,7 +2639,7 @@ function updateCamera(dt) {
     c.model.updateWorldMatrix(true, true);
     const u = c.model.userData, eye = camMode === "eye";
     // (a game's car: from the engine's front-wheel angle – no path ahead here; game/cars3d.js sets c.steer)
-    const hy = !eye || !headTurn ? 0 : game ? headYawFor([Math.tan(c.steer || 0) / 3.4], c.speed || 0) : c.headYaw || 0;
+    const mo = motionNow(), hy = !eye || !headTurn || !mo.headGain ? 0 : mo.headGain * (game ? headYawFor([Math.tan(c.steer || 0) / 3.4], c.speed || 0) : c.headYaw || 0);
     if (hy) { eyeTurned([u.mounts.eye.x, u.mounts.eye.y, u.mounts.eye.z], hy, EYE_AT); camera.position.set(EYE_AT[0], EYE_AT[1], EYE_AT[2]).applyMatrix4(c.model.matrixWorld); }
     else camera.position.copy(eye ? u.mounts.eye : u.mounts.tcam).applyMatrix4(c.model.matrixWorld);
     c.model.getWorldQuaternion(qTmp);
@@ -2646,6 +2647,9 @@ function updateCamera(dt) {
     // a touch down)
     // (v0.52: the eyes turn with the driver's head into the bend – eyecam.js; the T-cam is bolted to the car)
     shakeE.set(eye ? EYE_PITCH : -((u.profile.tcamPitch ?? 15.5) * Math.PI) / 180, Math.PI + (eye ? hy : ((u.profile.tcamYaw || 0) * Math.PI) / 180), 0, "YXZ");
+    // (v0.53: kerb vibration only when the viewer asked for it – f1kr:camVibration, 0 by default; the camera alone)
+    const vib = mo.vibration ? vibrationAt(c.onKerb ? c.bump : 0, c.speed || 0, mo.vibration) : null;
+    if (vib) { shakeE.x += vib[1]; camera.position.y += vib[0]; }
     camera.quaternion.copy(qTmp).multiply(qShake.setFromEuler(shakeE));
     // free look: turn the head round the car's own up axis, then tilt
     if (look.yaw || look.pitch) camera.quaternion.multiply(qLook.setFromEuler(lookE.set(look.pitch, look.yaw, 0, "YXZ")));
@@ -2714,6 +2718,14 @@ const look = { yaw: 0, pitch: 0, dist: 10.5, fov: 0, dragged: false, down: null 
 // (v0.52: the eye camera turns with the driver's head into bends – on unless turned off: Map3D.headTurn(false), kept)
 const EYE_AT = [0, 0, 0];
 let headTurn = (() => { try { return localStorage.getItem("f1kr:eyeHead") !== "off"; } catch { return true; } })();
+// (v0.53: the cockpit cameras' motion settings – motionprefs.js: head turn 0–1, kerb vibration 0–1 (0 by default),
+// reduced motion on / off / auto; read again once a second – a setting written anywhere shows within a second)
+let motionCache = null, motionAt = -1e9;
+function motionNow() {
+  const now = performance.now(); if (motionCache && now - motionAt < 1000) return motionCache;
+  let sys = false; try { sys = matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.reduceMotion === "1" || !!game?.prefs?.reduceMotion; } catch {}
+  motionAt = now; return (motionCache = readMotionPrefs((k) => localStorage.getItem(k), sys));
+}
 function resetLook() { look.yaw = 0; look.pitch = 0; look.dist = 10.5; look.fov = 0; }
 // v0.42: the eyes' lens 80° wide (it was 95°: the steering wheel ~30 % of the picture's width against ~45 % in the
 // helmet camera's frames – research/cockpit.md: that camera ~75–85° wide, L) and looking down 8° (it was 3.4°) – the
@@ -5563,6 +5575,12 @@ window.Map3D = {
   },
   // (v0.52) the eye camera's turn with the driver's head into bends: on / off (kept in this computer's settings); no
   // argument: the state and the head's turn now (deg)
+  // (v0.53) the cockpit cameras' motion settings: { head: 0–1, vib: 0–1, reduce: "on" | "off" | "auto" } stored (null
+  // clears a key); no argument: the stored values and what applies now
+  motion(o) {
+    if (o) for (const [k, key] of [["head", MOTION_KEYS.head], ["vib", MOTION_KEYS.vib], ["reduce", MOTION_KEYS.reduce]]) if (k in o) { try { if (o[k] == null) localStorage.removeItem(key); else localStorage.setItem(key, String(o[k])); } catch {} }
+    motionCache = null; return JSON.stringify(motionNow());
+  },
   headTurn(on) { if (on != null) { headTurn = !!on; try { localStorage.setItem("f1kr:eyeHead", headTurn ? "on" : "off"); } catch {} } const c = cars.get(camNum()); return JSON.stringify({ on: headTurn, deg: c ? +((c.headYaw || 0) * 180 / Math.PI).toFixed(1) : null }); },
   armDiag(on = true) { if (!on && devArmDiag?.lines) { devArmDiag.lines.removeFromParent(); devArmDiag.lines.geometry.dispose(); devArmDiag.lines.material.dispose(); } devArmDiag = on ? devArmDiag || {} : null; return "ok"; },
   // development (v0.44): a car's wing state – its pose's source (measured DRS / estimated active aero), the mechanism, the zones
