@@ -9,6 +9,7 @@ import { OrbitControls } from "./vendor/OrbitControls.js";
 import { buildScenery } from "./scenery.js";
 import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } from "./smooth.js";
 import { pitLaneTest } from "./lanemember.js";
+import { rawYaw } from "./heading.js";
 import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
@@ -1898,9 +1899,11 @@ function updateCars(dt) {
       speed = Math.hypot(mx, mz);
       // (crawling, the velocity of 4 Hz positions points anywhere: below 6 m/s the heading is kept – in front of the
       // garages it lies along the pit lane, the way the car was already facing; first seen, the lap line's direction)
+      // (v0.53: and turned to face back only when the car really reverses – heading.js rawYaw: the feed's positions step
+      // back at fixed spots – Monaco 2025's pit exit, China 2025's pit entry – and the car turned 160–180° for a few frames)
       let yaw = c.yaw;
       if (pitYaw != null) yaw = pitYaw;
-      else if (speed > 6) yaw = Math.atan2(mx, mz);
+      else if (speed > 6) { const tR = c.has && !jumpT ? src.carAt?.(num, A.t) : null; yaw = rawYaw(c.has && !jumpT ? c.yaw : null, mx, mz, tR ? tR.speed : null); }
       else {
         const pl = pitLaneDir(v.x, v.z);
         if (pl) { const q = nearestOnPath(v.x, v.z), a = Math.atan2(pl[0], pl[1]); yaw = q && q.d < 25 ? a : Math.abs(wrap(a - c.yaw)) <= Math.PI / 2 ? a : wrap(a + Math.PI); }
@@ -4490,6 +4493,20 @@ window.Map3D = {
     const held = Object.values(fa).reduce((a, b) => a + b.samples, 0), rewound = Object.values(fa).reduce((a, b) => a + (b.rewound || 0), 0);
     const degradedCars = Object.keys(deg).filter((n) => deg[n].length), degradedNow = degradedCars.filter((n) => deg[n].some(([a, b]) => t >= a && t <= b));
     return { held, rewound, degradedCars, degradedNow, leapFrames: leapSrc === src ? leapHidden : 0 };
+  },
+  // development (v0.53 yaw): one car's pose per frame over [t0, t1] (stream ms) as updateCars draws it, with what it was
+  // posed from: its steadied state, the drawn tracks' velocity (velBuf), and the raw / steadied samples round it
+  yawTrace(num, t0, t1, o = {}) {
+    const src = app().src; if (!world || !src) return "no world"; const sm = smoothFor(src); if (!sm) return "pending";
+    num = String(num); const fps = o.fps ?? 30, dt = 1 / fps, real = window.F1KR, st0 = src.startTime?.() || 0; let fakeT = t0; const rows = [];
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try { for (fakeT = t0 - 2000; fakeT <= t1; fakeT += dt * 1000) { updateCars(dt); if (fakeT < t0) continue; const c = cars.get(num); if (!c) continue; const vb = velBuf[num];
+      rows.push([+((fakeT - st0) / 1000).toFixed(3), +(c.yaw * 57.3).toFixed(1), c.onTrack ? (c.pit ? "pit:" + (c.pit.state?.state || "") : "trk") : c.pit ? "pit:" + (c.pit.state?.state || "") : "raw", +c.obj.position.x.toFixed(2), +c.obj.position.z.toFixed(2), vb ? [+(vb[0] * 100).toFixed(1), +(-vb[1] * 100).toFixed(1)] : null, c.st && c.onTrack ? [+c.st.s.toFixed(1), +c.st.d.toFixed(2), +c.st.vs.toFixed(1), +c.st.vd.toFixed(2)] : null, Math.round(c.speed * 3.6)]); } }
+    finally { window.F1KR = real; }
+    const cw = world.center, xz = (x, y) => [+(x * DM - cw.x).toFixed(2), +(-(y * DM - cw.z)).toFixed(2)];
+    const pick = (c) => { const r = []; if (!c) return r; for (let k = 0; k < c.n; k++) if (c.t[k] >= t0 - (o.pad ?? 3000) && c.t[k] <= t1 + (o.pad ?? 3000)) r.push([+((c.t[k] - st0) / 1000).toFixed(3), ...xz(c.x[k], c.y[k])]); return r; };
+    const co = sm.coords(num), cs = []; if (co) for (let k = 0; k < co.t.length; k++) if (co.t[k] >= t0 - 3000 && co.t[k] <= t1 + 3000) cs.push([+((co.t[k] - st0) / 1000).toFixed(3), +co.s[k].toFixed(1), +co.d[k].toFixed(2), co.run[k], +co.vs[k].toFixed(1)]);
+    return JSON.stringify({ rows, raw: pick(src.tracks.cars[num]), coords: cs });
   },
   // development (v0.53 §4–5): every car's FINAL drawn pose (after separate()) driven through updateCars over [t0, t1]
   // (stream ms) at `fps`, and what in it no car can do: a step faster than its own telemetry speed allows (a jump), a
