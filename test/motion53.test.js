@@ -127,3 +127,29 @@ test("re-sent positions: a leap back onto ground covered seconds before, then ov
   for (let k = 0; k < M; k++) { t2[k] = k * 250; const s = 15 * k * 0.25; let px, py; if (s < 100) { px = s; py = 0; } else if (s < 100 + Math.PI * 10) { const a = (s - 100) / 10; px = 100 + 10 * Math.sin(a); py = 10 - 10 * Math.cos(a); } else { px = 100 - (s - 100 - Math.PI * 10); py = 20; } x2[k] = px * 10; y2[k] = py * 3; tel2.t.push(t2[k]); tel2.v.push(54); }
   assert.strictEqual(RK.dropHeld({ t: t2, x: x2, y: y2, z: new Float32Array(M), n: M }, tel2).rewound, 0, "hairpin kept");
 });
+
+test("steadied tracks: a feed that falls 10 s behind and catches up – drawn from the telemetry, no surge (2026 Hungary pattern)", async () => {
+  const { smoothedTracks } = await import("../src/renderer/smooth.js");
+  const R = 3000 / (2 * Math.PI), n = 3000, samples = [];
+  for (let i = 0; i < n; i++) { const a = (i / n) * 2 * Math.PI; samples.push({ i, p: { x: R * Math.cos(a), y: 0, z: R * Math.sin(a) }, tan: { x: -Math.sin(a), z: Math.cos(a) }, nor: { x: -Math.cos(a), z: -Math.sin(a) }, L: 6, R: -6 }); }
+  const world = { samples, center: { x: 0, y: 0, z: 0 }, grid: { nearest: (x, z) => { const a = Math.atan2(z, x), i = ((Math.round((a / (2 * Math.PI)) * n) % n) + n) % n, s = samples[i]; return [s, Math.hypot(x - s.p.x, z - s.p.z)]; } } };
+  // 50 m/s; from 20 s to 50 s the positions are those of 10 s earlier (500 m behind), 1 s apart; then on time again
+  const T = [], X = [], Y = [];
+  for (let tt = 0; tt <= 80000; tt += 250) {
+    const late = tt > 20000 && tt < 50000; if (late && tt % 1000) continue;
+    const s = 50 * (late ? tt - 10000 : tt) / 1000, a = (s / 3000) * 2 * Math.PI;
+    T.push(10000 + tt); X.push((R * Math.cos(a)) / 0.1); Y.push(-(R * Math.sin(a)) / 0.1);
+  }
+  const N = T.length, tel = { t: [], v: [], rpm: [], gear: [], thr: [], brk: [], drs: [] };
+  for (let q = 0; q < 400; q++) { tel.t.push(9000 + q * 250); tel.v.push(180); tel.rpm.push(0); tel.gear.push(7); tel.thr.push(100); tel.brk.push(0); tel.drs.push(0); }
+  const src = { isLive: false, car: { 1: tel }, tracks: { cars: { 1: { t: Float64Array.from(T), x: Float32Array.from(X), y: Float32Array.from(Y), z: new Float32Array(N), n: N } } } };
+  const sm = smoothedTracks(src, world, RK.CarTracks);
+  let worstErr = 0, worstV = 0;
+  for (let tt = 12000; tt < 88000; tt += 100) {
+    const st = sm.state("1", tt); if (!st) continue;
+    const truth = 50 * (tt - 10000) / 1000, err = Math.abs(((st.s - truth) % 3000 + 4500) % 3000 - 1500);
+    worstErr = Math.max(worstErr, err); worstV = Math.max(worstV, Math.abs(st.vs));
+  }
+  assert.ok(worstErr < 40, `the drawn place ${worstErr.toFixed(1)} m off the truth at worst`);
+  assert.ok(worstV < 50 * 1.3, `speed along up to ${worstV.toFixed(1)} m/s (the car does 50)`);
+});
