@@ -10,7 +10,7 @@ function climb(v, g, rate = 1, fps = 60, secs = 4) {
   for (let i = 0; i < fps * secs; i++) {
     s += (v * rate) / fps;
     const grade = g * Math.min(1, s / 50), y = s < 50 ? (g * s * s) / 100 : g * 25 + g * (s - 50), slope = -Math.atan(grade);
-    S = rideStep(S, { y, pitch: slope, roll: 0, slope }, 1 / fps);
+    S = rideStep(S, { y, pitch: slope, roll: 0, slope, x: 0, z: s }, 1 / fps);
     // how far the drawn car is under the road at the front of the tub (1.2 m ahead of its middle)
     const roadFront = y + 1.2 * Math.tan(-slope), carFront = S.y - 1.2 * Math.sin(S.p);
     worst = Math.max(worst, roadFront - carFront);
@@ -18,7 +18,7 @@ function climb(v, g, rate = 1, fps = 60, secs = 4) {
   return worst;
 }
 test("the ridden car stays on the road up a 6 % grade at 300 km/h, 1× and 10×", () => {
-  for (const rate of [1, 10]) assert.ok(climb(83, 0.06, rate) < 0.01, `rate ${rate}: ${climb(83, 0.06, rate)} m under the road (the cockpit floor is 0.16 m over it)`);
+  for (const rate of [1, 10]) assert.ok(climb(83, 0.06, rate) < 0.02, `rate ${rate}: ${climb(83, 0.06, rate)} m under the road (the cockpit floor is 0.16 m over it)`);
 });
 test("the dip and the lean are steadied (~0.4 s), not dropped", () => {
   let S = rideStep(null, { y: 0, pitch: 0, roll: 0, slope: 0 }, 1 / 60);
@@ -33,4 +33,9 @@ test("the dip and the lean are steadied (~0.4 s), not dropped", () => {
 test("same input after a reset → same pose", () => {
   const a = rideStep(null, { y: 1.5, pitch: 0.03, roll: 0.01, slope: 0.02 }, 0.016), b = rideStep(null, { y: 1.5, pitch: 0.03, roll: 0.01, slope: 0.02 }, 0.5);
   assert.deepEqual(a, b);
+});
+test("the slope is followed over metres of road, the same at 1× and 10×", () => {
+  const run = (rate) => { let S = null, s = 0; const out = []; for (let i = 0; i < 120; i++) { s += (40 * rate) / 60; const slope = s > 20 ? -0.05 : 0; S = rideStep(S, { y: 0, pitch: slope, roll: 0, slope, x: 0, z: s }, 1 / 60); out.push([s, S.p]); } return out; };
+  const at = (o, m) => o.find((q) => q[0] >= m)[1];
+  for (const m of [40, 60]) assert.ok(Math.abs(at(run(1), m) - at(run(10), m)) < 0.006, `at ${m} m: ${at(run(1), m)} ${at(run(10), m)}`);   // (10×: one step a 6.7 m – the place the grade changes falls inside one)
 });

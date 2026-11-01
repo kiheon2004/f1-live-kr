@@ -1983,7 +1983,7 @@ function updateCars(dt) {
     // car sank under the road on every climb: the ground through the cockpit floor, the camera bobbing with the grade)
     const ride = (camMode === "onboard" || camMode === "eye") && num === focusNum;
     if (ride) {
-      const S = (c.stab = rideStep(c.stab, { y: v.y - (c.bump ? 0.008 + 0.01 * c.bump : 0), pitch: c.pitch, roll: c.roll, slope: c.slope || 0 }, dt));
+      const S = (c.stab = rideStep(c.stab, { y: v.y - (c.bump ? 0.008 + 0.01 * c.bump : 0), pitch: c.pitch, roll: c.roll, slope: c.slope || 0, x: v.x, z: v.z }, dt));
       c.obj.position.y = S.y;
       c.model.rotation.set(S.p, c.yaw, S.r, "YXZ");
     } else {

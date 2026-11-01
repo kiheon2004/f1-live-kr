@@ -120,7 +120,7 @@ export function updateGameCars(K, A, dt) {
     if (ride) {
       // (ride.js, v0.54: the dip and the lean steadied, the height and the road's slope as they are – eased, the car sank
       // under the road on a climb and the ground showed through the cockpit floor)
-      const S = (c.stab = rideStep(jumped ? null : c.stab, { y: v.y, pitch: c.pitch, roll: c.roll, slope }, dt));
+      const S = (c.stab = rideStep(jumped ? null : c.stab, { y: v.y, pitch: c.pitch, roll: c.roll, slope, x: v.x, z: v.z }, dt));
       c.obj.position.y = S.y; c.model.rotation.set(S.p, c.yaw, S.r, "YXZ");
     } else { c.stab = null; c.model.rotation.set(c.pitch, c.yaw, c.roll, "YXZ"); }
     // wheels: rolled the engine's own distance over each axle's radius (wheelspin.js rollAngle) – a pause, any speed, a
