@@ -148,6 +148,19 @@ function safeV(race, f, l, gap) {
 const dirtyAt = (P, x) => { if (x <= 0) return P.dirtyMax; const p = Math.log(P.dirty10 / P.dirty20) / Math.LN2; return Math.min(P.dirtyMax, P.dirty10 * Math.pow(10 / x, p)); };
 const slipAt = (P, x) => (x <= 0 ? P.slipMax : Math.min(P.slipMax, P.slip10 * Math.pow(10 / x, P.slipP)));
 const fade = (P, dd, wid) => { const a = Math.abs(dd) / wid; return a <= P.wakeW0 ? 1 : a >= P.wakeW1 ? 0 : (P.wakeW1 - a) / (P.wakeW1 - P.wakeW0); };
+// v0.54: the lap-line distance (m of s) two bodies one behind the other need at s, both at lateral offset d (their mean):
+// on a bend the cars drawn at (s, d) are on an arc of radius R = (1 − κd)/|κ| (κ: the lap line's curvature, + left; d + left),
+// so a metre of s is (1 − κd) m of road there – on the inside of a hairpin 0.75 m – and two straight boxes on that arc
+// meet at their inside corners first: arc 2R·atan(len/2 / (R − w/2)) (the same rule as the replay's renderer/traffic.js
+// pairOf). Never less than the plain length (on the outside the plain length is kept: no car drawn closer than before).
+// v0.53 kept |Δs| ≥ len on the lap line only: drawn, cars nose to tail on the inside of Hungary's T1 went 0.9 m into
+// each other (21 episodes in a race, every one in a hairpin – reports/overlap.md)
+export function bodyLen(T, tc, s, d) {
+  const k = T.at(T.kappa, s), len = tc.len, f = 1 - k * d;
+  if (!(Math.abs(k) > 1 / 400) || f <= 0.2) return len;
+  const R = f / Math.abs(k), h = tc.wid / 2, arc = R > h + 1 ? 2 * R * Math.atan(len / 2 / (R - h)) : len;
+  return Math.max(len, arc / f);
+}
 function roadAt(T, s, wid) { return [-T.at(T.wR, s) + wid / 2, T.at(T.wL, s) - wid / 2]; }
 
 // race control's flags when control.js is wired (race.hooks.control); otherwise the season's plain rules
@@ -200,7 +213,11 @@ export function trafficPre(race, t) {
     let nearA = null, nearGap = Infinity, wakeD = 0, slipD = 0, cap = Infinity, why = null;
     for (let k = 1; k < n; k++) {
       const o = L[(i + k) % n], x = T.ahead(c.s, o.s); if (x > 400) break;
-      const gap = x - len, dd = o.d - c.d;
+      // (the bodies' length on a bend – bodyLen – while they are close: faded out from 20 to 30 m of s)
+      // (and where they will be over the next second: the follower drops back before the bend tightens, not in it)
+      let bl = len;
+      if (x < 30) { const dm = (c.d + o.d) / 2, m = c.s + x / 2, la = Math.min(40, c.v); bl = Math.max(bodyLen(T, tc, m, dm), bodyLen(T, tc, m + la / 2, dm), bodyLen(T, tc, m + la, dm)); bl = len + (bl - len) * Math.min(1, (30 - x) / 10); }
+      const gap = x - bl, dd = o.d - c.d;
       if (gap > 0 && gap < nearGap) { nearGap = gap; nearA = o; }
       // every car ahead in my lane bounds my speed (Gipps); a car beside me (gap < 0) is the lateral rules' business
       // and a car that is not attacking it (nor passing a car letting it by) stays behind it whatever its line: only the
@@ -609,13 +626,13 @@ export function trafficPost(race, t, s0of) {
     for (const o of L) {
       if (o === c) continue;
       const rel = T.delta(o.s, c.s); if (rel > 150 || rel < -150) continue;
-      const od = o.d, half = wid + P.mLat;
-      if (Math.abs(rel) < len + P.mLong) { forb.push([od, half, true]); continue; }
+      const od = o.d, half = wid + P.mLat, bl = Math.abs(rel) < 30 ? bodyLen(T, tc, c.s + rel / 2, (c.d + od) / 2) : len;
+      if (Math.abs(rel) < bl + P.mLong) { forb.push([od, half, true]); continue; }
       if (Math.abs(rel) > 150) continue;
       if (rel < 0) { // o ahead of c: entering its lane must leave c a safe following speed
-        if (c.v > safeV(race, c, o, -rel - len)) forb.push([od, half, false]);
+        if (c.v > safeV(race, c, o, -rel - bl)) forb.push([od, half, false]);
       } else {       // o behind: cutting in front of it must not make it brake harder than it can
-        if (o.v > safeV(race, o, c, rel - len)) forb.push([od, half, false]);
+        if (o.v > safeV(race, o, c, rel - bl)) forb.push([od, half, false]);
       }
     }
     let dN = clampLat(c.d, dW, dMin, dMax, forb);
@@ -680,11 +697,21 @@ export function trafficPost(race, t, s0of) {
   // slowed). That is a collision: resolved inelastically – the car behind ends a body length behind at the speed of the
   // car it hit – logged with its closing speed and handed to incidents (race.hooks.incidents.onContact) for consequences.
   // The bodies never overlap in the state.
-  for (let a = 0; a < n; a++) for (let k = 1; k < Math.min(n, 6); k++) {
+  // (v0.54: from the front of the queue back – a car held back is then checked against the one behind it after, not
+  // before: Monaco, a car pushed back by its own contact into the car that had just been resolved behind it)
+  for (let a = n - 1; a >= 0; a--) for (let k = 1; k < Math.min(n, 6); k++) {
     const x = sorted[a], y = sorted[(a + k) % n], rel = T.ahead(x.s, y.s);
-    if (rel >= len || Math.abs(x.d - y.d) >= wid) continue;
+    if (rel >= 2.5 * len || Math.abs(x.d - y.d) >= wid) continue;
+    const bl = bodyLen(T, tc, x.s + rel / 2, (x.d + y.d) / 2); if (rel >= bl) continue;
+    // (apart on the lap line but not on the road – the bend tightened faster than the follower dropped back: it is held
+    // back – at most 0.25 m a step – at the other's speed; no contact: the bodies did not touch on the lap line)
+    if (rel >= len) {
+      // (never into a car behind it: the push ends a body length ahead of any car in its lane behind)
+      let push = Math.min(0.25, bl - rel + 0.01);
+      for (let q = 1; q < Math.min(n, 6); q++) { const w = sorted[(a - q + n) % n]; if (w === y) break; const g = T.ahead(w.s, x.s); if (g > len + 1) break; if (Math.abs(w.d - x.d) < wid) push = Math.min(push, Math.max(0, g - len - 0.01)); }
+      if (push <= 0) continue; x.s = T.wrap(x.s - push); x.dist -= push; x.v = Math.min(x.v, y.v); S.tstats.bendHolds = (S.tstats.bendHolds || 0) + 1; continue; }
     if (race.debugOverlap) race.debugOverlap(x, y, rel);
-    const dv = x.v - y.v, push = len - rel + 0.01;
+    const dv = x.v - y.v, push = bl - rel + 0.01;
     x.s = T.wrap(x.s - push); x.dist -= push; x.v = Math.min(x.v, y.v);
     // one contact per pair per 3 s (a car still pressing on the next steps is the same contact, not a new one)
     const ck = x.num + ">" + y.num, last = (S.tcontact ||= {})[ck]; S.tcontact[ck] = t;
