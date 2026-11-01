@@ -1385,6 +1385,15 @@ function trackPointFor(c, x, z) {
   c.sample = s && d < 25 ? s : null;
   return c.sample ? c.sample.p.y : null;
 }
+// v0.53: the height for a car drawn from its raw position (off the steadied tracks, not in the pit lane): the lap line's
+// within 25 m (trackPointFor); further out the ground's (the real map's terrain) unless the feed's own height agrees with it
+// within GROUND_TOL m – the feed's Z can be tens of metres off (2026 Hungary: cars 52 m under the ground in the run-off)
+const GROUND_TOL = 3;
+function groundFor(c, x, z, feedY) {
+  const g = trackPointFor(c, x, z); if (g != null) return g + ROAD_LIFT - 0.02;
+  const t = world.real?.groundAt?.(x, z);
+  return Number.isFinite(t) && Math.abs(feedY - t) > GROUND_TOL ? t + 0.02 : feedY;
+}
 
 const HAND_MAX = 8, READY_MS = 600;   // m (v0.53: an estimate → feed handover eased only up to this far); ms: raw → steadied when those come
 const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
@@ -1780,8 +1789,7 @@ function updateCars(dt) {
         mx = Math.sin(q.yaw) * est.vs; mz = Math.cos(q.yaw) * est.vs;
       } else {
         v.set(p[0] * DM - world.center.x, (p[2] || 0) * DM - world.center.y, -(p[1] * DM - world.center.z));
-        const ground = trackPointFor(c, v.x, v.z);
-        if (ground != null) v.y = ground + ROAD_LIFT - 0.02;   // (the pit lane's tarmac is laid 4 cm over the ground)
+        v.y = groundFor(c, v.x, v.z, v.y);   // (the pit lane's tarmac is laid 4 cm over the ground)
         const vel = velBuf[num];                                               // dm/ms → m/s is ×100
         mx = vel ? vel[0] * 100 : 0; mz = vel ? -vel[1] * 100 : 0;
       }
@@ -2466,7 +2474,7 @@ function separate(dt, seen, snap = false) {
     // (on the track the height is right already; in the pit lane pitDraw put it on the lane's / the garage's floor – v0.49:
     // this set every pit-lane car off the steadied tracks to the NEAREST LAP-LINE point's height, the start straight beside
     // the lane: Monaco 2025's cars in their boxes 0.93 m under the lane's floor, Gasly's retired car 1.19 m over it)
-    if (!c.onTrack && !(c.pit?.at && c.pit.inRun > 0)) { const ground = trackPointFor(c, c.pos.x, c.pos.z); if (ground != null) c.pos.y = ground + ROAD_LIFT - 0.02; }
+    if (!c.onTrack && !(c.pit?.at && c.pit.inRun > 0)) c.pos.y = groundFor(c, c.pos.x, c.pos.z, c.pos.y);
     c.obj.position.copy(c.pos);
     // (v0.53: the car the cockpit cameras ride keeps its steadied height – updateCars' c.stab; v0.52 set it back to the
     // unsteadied one here, every frame, so the steadying of the height never reached the picture)
