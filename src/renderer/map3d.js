@@ -1480,7 +1480,8 @@ function groundFor(c, x, z, feedY) {
 // (v0.53) HAND_MAX m: an estimate → feed handover eased only up to this far; READY_MS: raw → steadied when those come;
 // ACROSS_MAX: the across part of an on-track heading; LEAP_V m/s: raw positions further apart than this are a leap
 const HAND_MAX = 8, READY_MS = 600, ACROSS_MAX = Math.tan(0.35), LEAP_V = 130, leapSt = {};
-let leapHidden = 0;   // (development: frames a car was left out for a leap of its raw positions)
+let leapHidden = 0, leapSrc = null;   // frames a car was left out for a leap of its raw positions – per source (the HUD's data note reads it: counted
+// over every session it said '크게 튄 위치' on Monaco after a visit to 2026 Hungary)
 const pitTmp = {}, posBuf = {}, velBuf = {}, vTmp = new THREE.Vector3(), P0 = [0, 0, 0], PA = [0, 0, 0], PB = [0, 0, 0], DIR = [0, 0];
 // x → target as a critically damped spring of rate w (1/s), the value and its rate kept on the object
 function spring(o, key, rateKey, target, w, dt) {
@@ -1773,6 +1774,7 @@ function rollWheels(c, st, est, F, t, v) {
 }
 function updateCars(dt) {
   const A = app(), src = A.src;
+  if (leapSrc !== src) { leapSrc = src; leapHidden = 0; }
   // position and velocity of every car from its smooth track (arrays reused frame to frame)
   // steadied tracks (smooth.js) once they're built for this source and circuit; the raw ones until then
   const sm = smoothFor(src);
@@ -2683,6 +2685,7 @@ const ray = new THREE.Raycaster(), qTmp = new THREE.Quaternion(), qShake = new T
 // (camFor: the car and world the cameras' history – the chase rig's swing and height, the steadied ride – belongs to;
 // another car or a new session starts it over)
 let camFor = { num: null, world: null }, camNote = "";
+const CAM_HOLD_MS = 10000;   // a followed car left out for up to this long (session time) holds the view; longer: the overview
 const heli = { follow: false, last: new THREE.Vector3(), at: new THREE.Vector3() };
 function camNoteSet(text) {
   if (text === camNote) return;
@@ -2728,6 +2731,11 @@ function updateCamera(dt) {
   }
   controls.enabled = false;
   if (!shown) {
+    // (v0.53: a car left out for a moment – a leap of its raw positions, 2026 Hungary: the leader 57 of 180 s in gaps of
+    // 2–8 s – keeps the camera where it was for up to CAM_HOLD_MS of session time: it cut to the overview and back each time)
+    if (c && camInit !== "overview" && !jumped && camFor.shownT != null && t - camFor.shownT < CAM_HOLD_MS) {
+      camFor.held = true; camNoteSet(`${A.src?.state.DriverList?.[num]?.Tla || num}: 위치 자료가 잠시 끊겨 화면을 멈춤`); return;
+    }
     // no car to ride: a view over the grid (or the circuit) instead of the road where it was, said so
     controls.enabled = true;
     if (camInit !== "overview") { overview(); camInit = "overview"; }
@@ -2735,6 +2743,9 @@ function updateCamera(dt) {
     camNoteSet(carNoteFor(num, c));
     return;
   }
+  camFor.shownT = t;
+  // (back from a hold: the car is where its data is now, metres on – the rig starts there, not swinging across)
+  if (camFor.held) { camFor.held = false; chase.init = false; for (const x of cars.values()) x.stab = null; }
   if (camInit === "overview") { camInit = false; chase.init = false; }
   camNoteSet(carNoteFor(num, c));
   if (camMode === "onboard" || camMode === "eye") {
@@ -4471,7 +4482,7 @@ window.Map3D = {
     const fa = src.feedAudit?.held || {}, sm = smooth.src === src ? smooth.tr : null, deg = sm?.degraded?.() || {}, t = app().t;
     const held = Object.values(fa).reduce((a, b) => a + b.samples, 0), rewound = Object.values(fa).reduce((a, b) => a + (b.rewound || 0), 0);
     const degradedCars = Object.keys(deg).filter((n) => deg[n].length), degradedNow = degradedCars.filter((n) => deg[n].some(([a, b]) => t >= a && t <= b));
-    return { held, rewound, degradedCars, degradedNow, leapFrames: leapHidden };
+    return { held, rewound, degradedCars, degradedNow, leapFrames: leapSrc === src ? leapHidden : 0 };
   },
   // development (v0.53 §4–5): every car's FINAL drawn pose (after separate()) driven through updateCars over [t0, t1]
   // (stream ms) at `fps`, and what in it no car can do: a step faster than its own telemetry speed allows (a jump), a
