@@ -228,3 +228,5 @@
 #map3d .spec-menu .sm-range output { text-align: right; color: var(--text-2); }
 #map3d .spec-menu .sm-range select { grid-column: 2 / 4; min-height: 26px; }
 #map3d .spec-menu .sm-note { margin: 0 var(--s-4) var(--s-2); font-size: var(--fs-xs); }
+#map3d .spec-menu { overflow-y: auto; }
+#map3d .spec-menu.down { top: calc(100% + 6px); bottom: auto; }

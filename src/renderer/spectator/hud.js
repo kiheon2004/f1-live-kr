@@ -434,7 +434,14 @@ export function createSpecHud(host, api) {
     const nt = menuEl.querySelector('[data-k="mnote"]'); setHid(nt, !u.note); setText(nt, u.note);
     hd.disabled = vb.disabled = !state;   // (no 3D view lent: nothing to set)
   }
-  window.UIKit?.menu?.(menuBtn, menuEl, { onOpen: () => paintMotion() });
+  // (opens upwards from the bottom-left camera tools; where the layout moved them to the top – the cockpit cameras keep
+  // the wheel clear – or there is no room above, downwards; never taller than the view, scrolling inside if need be)
+  function placeMenu() {
+    menuEl.classList.remove("down"); menuEl.style.maxHeight = `${Math.max(120, host.clientHeight - 16)}px`;
+    const hb = host.getBoundingClientRect(), mb = menuEl.getBoundingClientRect();
+    if (mb.top < hb.top + 4) menuEl.classList.add("down");
+  }
+  window.UIKit?.menu?.(menuBtn, menuEl, { onOpen: () => { paintMotion(); placeMenu(); } });
   menuEl.addEventListener("input", (e) => {
     const k = e.target.dataset?.motion; if (k !== "head" && k !== "vib") return;
     setText(menuEl.querySelector(`[data-k="m${k}"]`), `${e.target.value}%`);
