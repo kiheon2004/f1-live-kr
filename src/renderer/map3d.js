@@ -1714,8 +1714,12 @@ function gridCar(c, num, v, ctx) {
     if (cl) { v.x += cs.nor.x * cl; v.z += cs.nor.z * cl; }
   }
   // heading: the slot's (standing) or the path's turned by the sideways easing (arriving, leaving)
+  // (v0.55: the turn is for this frame's picture only – c.gridYaw keeps the path's own heading, taken up again next frame
+  // (updateCars). It was added to the heading the next frame is eased from: at 60 fps the lean came out 2.5 times the
+  // path's slope, at 20 fps 1.3 times, and during a pause – nothing eased back – it was added again every frame: a car
+  // paused in its first 120 m turned round at up to 7° a frame until it snapped back, Map3D.seekCheck "pause" 1.0–1.15 rad)
   if (w.state === "standing") c.yaw = sl.yaw;
-  else c.yaw = wrap(c.yaw + (w.state === "arriving" ? wrap(sl.yaw - c.yaw) * w.across : 0) - Math.atan(dc * w.dAcross));
+  else { const base = c.yaw; c.gridYaw = base; c.yaw = wrap(base + (w.state === "arriving" ? wrap(sl.yaw - base) * w.across : 0) - Math.atan(dc * w.dAcross)); }
   c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
@@ -1862,6 +1866,8 @@ function updateCars(dt) {
     if (!est && p && !(F && sm.state(num, A.t, leapSt))) { const vel = velBuf[num]; if (vel && Math.hypot(vel[0], vel[1]) * 100 > LEAP_V) { leapHidden++; continue; } }
     seen.add(num);
     const c = carFor(num, d);
+    // (v0.55: the heading without the grid's turn of the frame before – gridCar)
+    if (c.gridYaw != null) { c.yaw = c.gridYaw; c.gridYaw = null; }
     // (v0.45: a seek or a rewind – the moment shown jumping, as the steering's rule below – takes the heading as it is
     // then; eased from the heading before the seek it was up to 0.7 rad off on the first frames – Map3D.seekCheck)
     const jumpT = timeJump(c.yawT, A.t);
