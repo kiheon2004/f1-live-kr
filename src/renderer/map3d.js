@@ -11,7 +11,7 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { pitLaneTest } from "./lanemember.js";
 import { rawYaw } from "./heading.js";
 import { gridMemo } from "./armswap.js";
-import { GRID_RULES, ASSIGN_TOL, fitGrid, slotS, slotLat, gridWeight, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
+import { GRID_RULES, ASSIGN_TOL, BLEND, fitGrid, slotS, slotLat, gridWeight, leaveBase, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch, departsFromFeed } from "./startplan.js";
 import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
@@ -1504,10 +1504,24 @@ const smoothstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) /
 // position: the "future" was the latest data, every car standing still)
 const trafSt = {}, trafPk = {}, trafItems = new Map(), trafList = [], trafEdge = { L: 7, R: -7 }, KA2 = [0, 0, 0], KB2 = [0, 0, 0], KD1 = [0, 0], KD2 = [0, 0];
 const trafWarm = [], trafWS = {}, trafWI = new Map();
-// (cars still drawn in their grid columns – standing, or easing out of them after the start – are apart already)
-const trafHeld = (c) => { const g = c.grid; return !!g && g.state !== "free" && (g.across ?? 0) > 0.15; };
+// (cars standing in their grid slots, or rolling up to them before the start, are apart already: not moved here)
+// (v0.55: a car that has driven off its slot is no longer among them. It was, until its column's offset was down to 15 % –
+// 90 m from its slot, the two columns one line by then – and only then parted from the cars beside it, from nothing and
+// to the side traffic.js's own rule picked: 2025 Hungary +3.5–4.2 s, cars from neighbouring slots drawn nose into tail,
+// Ocon from the right column put on the LEFT of Gasly while going by. It is now given to traffic.js from the moment it
+// moves, at the place it is drawn at – its column, gridPlan below – so the side it is on is the side it stays on and the
+// room is kept while the columns come together.)
+const trafHeld = (P, c, ctx, num) => {
+  if (!P) return false;
+  if (P.state === "standing") return true;
+  if (P.state || !P.mayArrive) return false;
+  // (rolling up to its slot: as drawn a frame ago; in a warm-up – no frame to ask – by its telemetry speed)
+  if (c) { const g = c.grid; return !!g && g.state === "arriving" && (g.across ?? 0) > 0.15; }
+  const tel = ctx.src.carAt?.(num, ctx.t), w = gridWeight({ delta: P.a.delta, standing: false, preStart: true, speed: tel ? tel.speed / 3.6 : 0, driven: null });
+  return w.state === "arriving" && w.across > 0.15;
+};
 const traf = { S: makeTraffic(), sm: null, env: null, lastT: null }, trafCost = { ms: 0, frames: 0 };   // (development: its share of a frame)
-function traffic(sm, F, t, dt, pos) {
+function traffic(sm, F, t, dt, pos, grid = null) {
   if (traf.sm !== sm) { resetTraffic(traf.S); traf.sm = sm; }   // (another session or circuit: nothing carried over)
   const env = traf.env || (traf.env = {
     L: 0, live: false,
@@ -1519,14 +1533,14 @@ function traffic(sm, F, t, dt, pos) {
     // (where a car at (s, d) is and faces: the path at that offset over ±2 m – the boxes check)
     pose(s, d, o) { traf.F.at(s - 2, d, KA2); traf.F.at(s + 2, d, KB2); o.x = (KA2[0] + KB2[0]) / 2; o.z = (KA2[2] + KB2[2]) / 2; o.yaw = Math.atan2(KB2[0] - KA2[0], KB2[2] - KA2[2]); return o; },
     // (v0.45: the cars now shown, at an earlier moment – a seek plays the last seconds first, traffic.js WARM_MS)
-    warmAt(tt) { const L = trafWarm; L.length = 0; for (const num of Object.keys(traf.pos)) { const c = cars.get(num), st = c && traf.sm.state(num, tt, trafWS[num] || (trafWS[num] = {})); if (!st) continue; const D = carDims(c), it = trafWI.get(num) || {}; trafWI.set(num, it); it.num = num; it.s = st.s; it.d = st.d; it.vs = st.vs; it.y = traf.F.sampleAt(st.s).p.y; it.held = trafHeld(c); it.front = D.front; it.back = D.back; it.half = D.half; L.push(it); } return L; },
+    // (v0.55: each car's grid state as it was at that moment – gridPlan, from the data up to then – not as it is now)
+    warmAt(tt) { const L = trafWarm; L.length = 0; const G = traf.grid && world?.gridModel ? gridContext(traf.grid.src, tt, traf.sm) : null; for (const num of Object.keys(traf.pos)) { const c = cars.get(num), st = c && traf.sm.state(num, tt, trafWS[num] || (trafWS[num] = {})); if (!st) continue; const D = carDims(c), it = trafWI.get(num) || {}, P = G ? gridPlan(num, G, null, st) : null; trafWI.set(num, it); it.num = num; it.s = st.s + (P?.ds || 0); it.d = P?.state === "standing" ? P.sl.lat : st.d + (P?.dd || 0); it.vs = st.vs; it.y = traf.F.sampleAt(st.s).p.y; it.held = trafHeld(P, null, G, num); it.front = D.front; it.back = D.back; it.half = D.half; L.push(it); } return L; },
   });
-  traf.F = F; traf.pos = pos; env.L = F.L; env.live = !!app().src?.isLive;
-  // (the warm-up reads each car's grid state as it is now: right while the race runs on, stale on a seek from before the
-  // start – every car still "held" in its slot – so then none, as in v0.44: Monza 2025, a seek from the grid to lap 1
-  // warmed up with the pack held chose the other side for a pass, 1.8 m off a second later)
-  let gridHeld = false; for (const c of cars.values()) if (c.grid && c.grid.state !== "free") { gridHeld = true; break; }
-  env.listAt = gridHeld ? null : env.warmAt;
+  traf.F = F; traf.pos = pos; traf.grid = grid; env.L = F.L; env.live = !!app().src?.isLive;
+  // (no warm-up while a car is held in its slot now – before the start, the first moment of it: there is nothing on the
+  // track to choose sides for. v0.44–0.54 read every car's grid state as drawn a frame ago, stale on a seek; v0.55: from
+  // the data at the moment shown, and in the warm-up at each of its moments – gridPlan)
+  let gridHeld = false;
   // (v0.45: separate()'s sides are no longer forgotten on a seek. They are only asked for when the data has two cars on top
   // of each other – a queue standing in the pit lane – and a side chosen afresh after a rewind was often the other one:
   // parked cars 4.6–6.8 m off where playing draws them, Monza 2025 after the flag – Map3D.seekCheck)
@@ -1536,9 +1550,17 @@ function traffic(sm, F, t, dt, pos) {
     const c = cars.get(num), st = c && sm.state(num, t, trafSt[num] || (trafSt[num] = {}));
     if (!st) continue;
     const D = carDims(c), it = trafItems.get(num) || {}; trafItems.set(num, it);
-    it.num = num; it.s = st.s; it.d = st.d; it.vs = st.vs; it.y = F.sampleAt(st.s).p.y; it.held = trafHeld(c); it.front = D.front; it.back = D.back; it.half = D.half;
+    // (v0.55: on the grid – what the grid makes of it now; a car driving off its slot at the place it is drawn at)
+    const P = grid && world?.gridModel ? gridPlan(num, grid, c, st) : null;
+    c.gridPlan = P; c.gridPlanT = P ? t : null;
+    // (standing in its slot: the slot's place across – the car is drawn there whatever traffic.js makes of it, and an
+    // offset left from the feed's own place – 2025 Hungary's grid is 0.1 m outside the tarmac traffic.js keeps cars on –
+    // would be let go the moment the car moves: 0.1 m sideways at walking pace, the heading 16° round for a frame)
+    it.num = num; it.s = st.s + (P?.ds || 0); it.d = P?.state === "standing" ? P.sl.lat : st.d + (P?.dd || 0); it.vs = st.vs; it.y = F.sampleAt(st.s).p.y; it.held = trafHeld(P, c, grid, num); it.front = D.front; it.back = D.back; it.half = D.half;
+    if (it.held) gridHeld = true;
     list.push(it);
   }
+  env.listAt = gridHeld ? null : env.warmAt;
   const t0 = performance.now(), out = stepTraffic(traf.S, list, env, t); trafCost.ms += performance.now() - t0; trafCost.frames++;
   for (const [num, c] of cars) {
     const m = out.get(num);
@@ -1606,63 +1628,88 @@ function fieldAt(src, t) {
 }
 function gridContext(src, t, sm) { return { src, t, sm, field: fieldAt(src, t) }; }
 const gTmp = [0, 0, 0];
-// Car `num`, drawn at v (its place from the smoothed tracks) with heading c.yaw: moved into its slot as far as
-// gridWeight says. Standing or arriving: towards the slot itself. Leaving: the offset it had standing in the slot
-// (slot − where the tracks had it then), let go as it drives off – so it moves exactly when the data has it moving.
-function gridCar(c, num, v, ctx) {
+// (v0.55) What the grid makes of car `num` at ctx.t, from the data up to then only – so the same whatever was drawn
+// before (a seek, traffic()'s warm-up), and worked out once a frame, before traffic(), which is told the same thing the
+// car is then drawn by (gridCar):
+//   standing – in its slot (grid.js gridWeight)
+//   leaving  – it stood in its slot a moment ago and has driven off: the offset it had there (slot − where the steadied
+//              tracks had it, da along / dc across the slot) and how much of it is left for the distance driven since
+//              (grid.js leaveBase: ds, dd on the lap line's axes, kept on the tarmac)
+//   null     – neither (mayArrive: it may be rolling up to its slot before the start – gridCar's, by the speed drawn)
+// st: the car's steadied state at ctx.t ({ s, d }); memo: the car (its search for the moment it stood is kept from frame
+// to frame) or null (a warm-up moment).
+// (the distance driven is the steadied s now − then, continuous. v0.54 took it from the field's raw places, which are
+// worked out every 250 ms: the weights stood still for 250 ms and then stepped – a car in the far column moved up to
+// 1.4 m sideways in one frame, four times a second, all the way off the grid: 2025 Hungary, Map3D.startTrace)
+function gridPlan(num, ctx, memo, st) {
   const m = world.gridModel, F = world.frame, L = F.L, f = ctx.field, me = f.cars.get(num);
-  if (!me) return;
-  let a = f.assign.get(num), w = null, off = null;
+  if (!me || !m?.slots.get(1)) return null;
+  const a = f.assign.get(num), wrapL = (x) => ((x % L) + L * 1.5) % L - L / 2;
   if (a && me.onTrack && me.standing) {
-    w = gridWeight({ delta: a.delta, standing: true, preStart: f.preStart, speed: 0, driven: null });
-    if (w.state === "standing") { const sl = m.slots.get(a.g); if (sl) off = [sl.x - v.x, sl.z - v.z, sl]; }
+    const w = gridWeight({ delta: a.delta, standing: true, preStart: f.preStart, speed: 0, driven: null }), sl = m.slots.get(a.g);
+    if (w.state === "standing" && sl) return { state: "standing", a, w, sl, me };
   }
-  // (only near the grid: from the last slot to 130 m past pole's)
-  let u1 = me.s - m.slots.get(1).s; u1 = ((u1 % L) + L * 1.5) % L - L / 2;
-  const nearGrid = u1 < 130 && u1 > -(m.pitch * m.slots.size + 10);
-  if (!off && !me.standing && nearGrid) {
-    // did it stand in its slot a moment ago? (back over up to 25 s, until it is 120 m further back than now)
-    const memo = c.gridLeave;
-    let res = memo && Math.abs(memo.t - ctx.t) < 300 ? memo.res : undefined;
+  // (only near the grid: from the last slot to where the last of a slot's offset is let go past pole's)
+  const u1 = wrapL(me.s - m.slots.get(1).s), nearGrid = u1 < BLEND.leaveAcross + 10 && u1 > -(m.pitch * m.slots.size + 10);
+  if (!me.standing && nearGrid && st) {
+    // did it stand in its slot a moment ago? (back over up to 25 s, until it is further back than a slot's offset lasts)
+    let res = memo?.gridLeave && Math.abs(memo.gridLeave.t - ctx.t) < 300 ? memo.gridLeave.res : undefined;
     if (res === undefined) {
       res = null;
       for (let tau = ctx.t - 250; tau > ctx.t - 25000; tau -= 250) {
         const g = fieldAt(ctx.src, tau), was = g.cars.get(num);
         if (!was) break;
-        let dr = me.s - was.s; dr = ((dr % L) + L * 1.5) % L - L / 2;
-        if (dr > 125 || dr < -5) break;
+        const dr = wrapL(me.s - was.s);
+        if (dr > BLEND.leaveAcross + 5 || dr < -5) break;
         const at = g.assign.get(num);
         if (was.standing && at && Math.abs(at.delta) <= ASSIGN_TOL[at.by === "gridPos" ? "gridPos" : "order"]) {
           const sl = m.slots.get(at.g), st0 = ctx.sm?.state(num, g.t, {});
           if (!sl || !st0) break;
           F.at(st0.s, st0.d, gTmp);
-          res = { g: at.g, by: at.by, sStand: was.s, off: [sl.x - gTmp[0], sl.z - gTmp[2]], sl, tau: g.t };
+          const ox = sl.x - gTmp[0], oz = sl.z - gTmp[2];
+          res = { g: at.g, by: at.by, s0: st0.s, da: ox * sl.tx + oz * sl.tz, dc: ox * sl.nx + oz * sl.nz, sl, tau: g.t };
           break;
         }
       }
-      c.gridLeave = { t: ctx.t, res };
+      if (memo) memo.gridLeave = { t: ctx.t, res };
     }
     if (res) {
-      let driven = me.s - res.sStand; driven = ((driven % L) + L * 1.5) % L - L / 2;
-      const wl = gridWeight({ delta: NaN, standing: false, preStart: f.preStart, speed: c.speed, driven });
-      if (wl.state === "leaving") { w = wl; off = [res.off[0], res.off[1], res.sl]; a = { g: res.g, by: res.by, delta: driven }; }
+      const driven = Math.max(0, wrapL(st.s - res.s0)), q = F.sampleAt(st.s);
+      const w = leaveBase({ da: res.da, dc: res.dc, driven, d: st.d, lo: (q.R ?? -7) + 0.95, hi: (q.L ?? 7) - 0.95 });
+      if (w) return { state: "leaving", a: { g: res.g, by: res.by, delta: driven }, w, sl: res.sl, da: res.da, dc: res.dc, ds: w.ds, dd: w.dd, me };
     }
   }
-  if (!off && a && me.onTrack && f.preStart && nearGrid) {
+  return { state: null, a, me, mayArrive: !!(a && me.onTrack && f.preStart && nearGrid) };
+}
+// Car `num`, drawn at v (its place from the smoothed tracks) with heading c.yaw: moved into its slot as far as
+// gridWeight says. Standing or arriving: towards the slot itself. Leaving: the offset it had standing in the slot
+// (slot − where the tracks had it then), let go as it drives off – so it moves exactly when the data has it moving.
+function gridCar(c, num, v, ctx) {
+  const f = ctx.field;
+  // (this frame's plan, as traffic() was told it; a car first seen this frame: worked out here)
+  const P = c.gridPlan && c.gridPlanT === ctx.t ? c.gridPlan : gridPlan(num, ctx, c, c.st);
+  if (!P) return;
+  const me = P.me;
+  let a = P.a, w = null, sl = null, da = 0, dc = 0;
+  if (P.state === "standing") { w = P.w; sl = P.sl; const ox = sl.x - v.x, oz = sl.z - v.z; da = ox * sl.tx + oz * sl.tz; dc = ox * sl.nx + oz * sl.nz; }
+  else if (P.state === "leaving") { w = P.w; sl = P.sl; da = P.da; dc = P.dc; }
+  else if (P.mayArrive) {
     // rolling up to its slot before the start
-    w = gridWeight({ delta: a.delta, standing: false, preStart: true, speed: c.speed, driven: null });
-    if (w.state === "arriving") { const sl = m.slots.get(a.g); if (sl) off = [sl.x - v.x, sl.z - v.z, sl]; }
+    const wa = gridWeight({ delta: a.delta, standing: false, preStart: true, speed: c.speed, driven: null }), s1 = world.gridModel.slots.get(a.g);
+    if (wa.state === "arriving" && s1) { w = wa; sl = s1; const ox = sl.x - v.x, oz = sl.z - v.z; da = ox * sl.tx + oz * sl.tz; dc = ox * sl.nx + oz * sl.nz; }
   }
-  if (!off || !w || w.state === "free") { c.grid = a ? { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: "free" } : null; return; }
-  const sl = off[2], da = off[0] * sl.tx + off[1] * sl.tz, dc = off[0] * sl.nx + off[1] * sl.nz;
+  if (!sl || !w || w.state === "free") { c.grid = a ? { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: "free" } : null; return; }
   // standing: in the slot's own axes; arriving and leaving: along and across the track where the car is now (on a
   // curved grid – Monaco's – the slot's axes turn away from the road within metres), kept on the tarmac
   const cs = w.state === "standing" ? null : c.sample;
   const tx = cs ? cs.tan.x : sl.tx, tz = cs ? cs.tan.z : sl.tz, nx = cs ? cs.nor.x : sl.nx, nz = cs ? cs.nor.z : sl.nz;
+  const lat0 = cs ? (v.x - cs.p.x) * cs.nor.x + (v.z - cs.p.z) * cs.nor.z : 0;
   v.x += tx * da * w.along + nx * dc * w.across;
   v.z += tz * da * w.along + nz * dc * w.across;
   if (cs) {
-    const lat = (v.x - cs.p.x) * cs.nor.x + (v.z - cs.p.z) * cs.nor.z, lo = (cs.R ?? -7) + 0.95, hi = (cs.L ?? 7) - 0.95;
+    // (v0.55: never further than the car's own place without the offset – grid.js leaveBase – so nothing steps when the
+    // offset is gone: 2025 Hungary's feed has the grid 0.8 m from the right edge, inside this margin)
+    const lat = (v.x - cs.p.x) * cs.nor.x + (v.z - cs.p.z) * cs.nor.z, lo = Math.min((cs.R ?? -7) + 0.95, lat0), hi = Math.max((cs.L ?? 7) - 0.95, lat0);
     const cl = Math.max(lo, Math.min(hi, lat)) - lat;
     if (cl) { v.x += cs.nor.x * cl; v.z += cs.nor.z * cl; }
   }
@@ -1786,7 +1833,6 @@ function updateCars(dt) {
   const seen = new Set();
   const focusNum = camNum();
   const F = sm?.frame;   // (v0.53: the cars' easings by the session's time – sdt per car below)
-  if (F) traffic(sm, F, A.t, dt, pos);
   gridCost.frames++; { const f = gridCost.ms - gridCost.last; if (f > gridCost.worst) gridCost.worst = f; gridCost.last = gridCost.ms; }
   // (live: the grid is looked for again every 5 s until the field has been seen standing on it)
   // (the grid again when what it depends on has come in: the entrants (a live feed's driver list), or – live, before a
@@ -1797,6 +1843,8 @@ function updateCars(dt) {
     if (gridKeyNow() !== world.gridKey || (src.isLive && isRace && !own)) addGrid();
   }
   const g0 = performance.now(), gridNow = isRace && world?.gridModel && F ? gridContext(src, A.t, sm) : null;
+  // (v0.55: after the grid's context – traffic() is told where the cars driving off their slots are drawn)
+  if (F) traffic(sm, F, A.t, dt, pos, gridNow);
   // the cars in the pit lane: what each is doing, from the data (pitstate.js)
   const p0 = performance.now(), pitNow = world ? pitFrame(src, A.t, sm?.lag || 0, isRace) : null; pitCost.ms += performance.now() - p0; pitCost.frames++;
   // cars the feed has no position for now, placed from the start and their own telemetry where that can be done
@@ -2561,7 +2609,8 @@ function separate(dt, seen, snap = false) {
   const list = [];
   for (const num of seen) {
     const c = cars.get(num);
-    const track = c.onTrack && !c.est && !c.pit && !(c.grid && c.grid.state !== "free");
+    // (v0.55: a car driving off its slot is on the track – traffic()'s, as above; standing in it or rolling up to it: here)
+    const track = c.onTrack && !c.est && !c.pit && !(c.grid && c.grid.state !== "free" && c.grid.state !== "leaving");
     // (v0.54: a car standing off the steadied tracks – a queue in the pit lane, the field parked after the flag – may be
     // drawn up to SEP_STAND m off the feed's place, the others SEP_MAX: Hungary 2025's field after the flag, 8–10 cars within
     // a few metres in the pit lane, stood 2 m into each other for up to a minute)
@@ -4709,6 +4758,30 @@ window.Map3D = {
     res.byCause = summarise(eps, step);
     res.worst = eps.sort((x, y) => y.depth * (y.t1 - y.t0 + step) - x.depth * (x.t1 - x.t0 + step)).slice(0, o.top ?? 12).map((e) => ({ t: +((e.worstT - st0) / 1000).toFixed(1), pair: e.key, cause: e.cause, depth: +e.depth.toFixed(2), dur: +((e.t1 - e.t0 + step) / 1000).toFixed(1), ...e.at }));
     return JSON.stringify(res);
+  },
+  // development (v0.55): the launch as it is drawn, car by car over [t0, t1] (stream ms, every `step` ms, driven like
+  // overlapScan) – its slot and grid weights, its steadied place (s, d), the feed's own place and the place it is drawn at
+  // (after separate()), all on the lap line's axes: what the columns do while the field drives off the grid
+  startTrace(t0, t1, step = 50) {
+    const src = app().src, sm = smoothFor(src); if (!sm || !world) return "no tracks";
+    const F = sm.frame, real = window.F1KR, st0 = src.startTime?.() || 0, c0 = world.center, RAW = [0, 0, 0], rows = []; let fakeT = t0;
+    const r2 = (x) => (Number.isFinite(x) ? +x.toFixed(2) : null);
+    window.F1KR = new Proxy(real, { get: (x, k) => (k === "t" ? fakeT : Reflect.get(x, k)) });
+    try {
+      for (fakeT = t0; fakeT <= t1; fakeT += step) {
+        updateCars(step / 1000);
+        for (const [num, c] of cars) {
+          if (!c.has || !c.obj.visible) continue;
+          const pr = F.project(c.pos.x, c.pos.z), g = c.grid, smp = c.sample, on = c.onTrack && c.st && !c.est;
+          const rw = src.tracks.at(num, fakeT, RAW) ? F.project(RAW[0] * DM - c0.x, -(RAW[1] * DM - c0.z)) : null, tel = src.carAt?.(num, fakeT);
+          rows.push([Math.round(fakeT - st0), num, g ? g.g : 0, g ? String(g.state)[0] : "-", g?.along ?? 0, g?.across ?? 0, g ? g.delta : null,
+            on ? r2(c.st.s) : null, on ? r2(c.st.d) : null, r2(c.trafD || 0), r2(c.trafS || 0), c.trafMode || "", pr ? r2(pr.s) : null, pr ? r2(pr.d) : null, rw ? r2(rw.s) : null, rw ? r2(rw.d) : null,
+            r2(Math.hypot(c.sepX || 0, c.sepZ || 0)), r2(c.yaw), tel ? Math.round(tel.speed) : null, smp ? r2(smp.L ?? 7) : null, smp ? r2(smp.R ?? -7) : null, r2(c.pos.x), r2(c.pos.z), c.pit ? 1 : 0]);
+        }
+      }
+    } finally { window.F1KR = real; }
+    const m = world.gridModel;
+    return JSON.stringify({ L: F.L, cols: "t num g state along across delta s d trafD trafS mode ds dd fs fd sep yaw kmh L R x z pit", slots: m ? [...m.slots.values()].map((sl) => [sl.g, r2(sl.s), r2(sl.lat)]) : null, rows });
   },
   // development (v0.44): the traffic correction now (D) – per car its place (s, d: the steadied tracks), the offsets
   // across and along (drawn and target), the overlap left (res, m) and why (mode); the close pairs and what each
