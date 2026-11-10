@@ -1627,7 +1627,7 @@ function fieldAt(src, t) {
   return f;
 }
 function gridContext(src, t, sm) { return { src, t, sm, field: fieldAt(src, t) }; }
-const gTmp = [0, 0, 0];
+const gTmp = [0, 0, 0], gSt0 = {};
 // (v0.55) What the grid makes of car `num` at ctx.t, from the data up to then only – so the same whatever was drawn
 // before (a seek, traffic()'s warm-up), and worked out once a frame, before traffic(), which is told the same thing the
 // car is then drawn by (gridCar):
@@ -1642,29 +1642,37 @@ const gTmp = [0, 0, 0];
 // worked out every 250 ms: the weights stood still for 250 ms and then stepped – a car in the far column moved up to
 // 1.4 m sideways in one frame, four times a second, all the way off the grid: 2025 Hungary, Map3D.startTrace)
 function gridPlan(num, ctx, memo, st) {
-  const m = world.gridModel, F = world.frame, L = F.L, f = ctx.field, me = f.cars.get(num);
-  if (!me || !m?.slots.get(1)) return null;
+  // (me: the car in the field's raw places – missing where the feed has a hole at that moment; a car on its way off the
+  // grid is then still that: only "standing" and the slot it may be rolling up to need the raw place)
+  const m = world.gridModel, F = world.frame, L = F.L, f = ctx.field, me = f.cars.get(num) || null;
+  if ((!me && !st) || !m?.slots.get(1)) return null;
   const a = f.assign.get(num), wrapL = (x) => ((x % L) + L * 1.5) % L - L / 2;
-  if (a && me.onTrack && me.standing) {
+  if (me && a && me.onTrack && me.standing) {
     const w = gridWeight({ delta: a.delta, standing: true, preStart: f.preStart, speed: 0, driven: null }), sl = m.slots.get(a.g);
-    if (w.state === "standing" && sl) return { state: "standing", a, w, sl, me };
+    if (w.state === "standing" && sl) { if (memo) memo.gridLeave = null; return { state: "standing", a, w, sl, me }; }
   }
   // (only near the grid: from the last slot to where the last of a slot's offset is let go past pole's)
-  const u1 = wrapL(me.s - m.slots.get(1).s), nearGrid = u1 < BLEND.leaveAcross + 10 && u1 > -(m.pitch * m.slots.size + 10);
-  if (!me.standing && nearGrid && st) {
+  const u1 = wrapL((st ? st.s : me.s) - m.slots.get(1).s), nearGrid = u1 < BLEND.leaveAcross + 10 && u1 > -(m.pitch * m.slots.size + 10);
+  if (!me?.standing && nearGrid && st) {
     // did it stand in its slot a moment ago? (back over up to 25 s, until it is further back than a slot's offset lasts)
+    // (how far it has come since each earlier moment: by the steadied s, like the distance driven. v0.54 – and v0.55's
+    // first cut – asked the feed's raw places, and gave up at the first moment the car was missing from them or 5 m
+    // "ahead" of now: Monaco 2025, car 12's feed steps 12 m back for 0.4 s at +4.8 s – the search, run again every 0.3 s,
+    // found nothing, and the car was dropped out of its column onto the feed's line and put back 0.3 s later)
+    // (found once and kept while the frames follow one another – memo.t moves on; a seek, or the car standing again, asks afresh)
     let res = memo?.gridLeave && Math.abs(memo.gridLeave.t - ctx.t) < 300 ? memo.gridLeave.res : undefined;
-    if (res === undefined) {
+    if (res !== undefined) memo.gridLeave.t = ctx.t;
+    else {
       res = null;
       for (let tau = ctx.t - 250; tau > ctx.t - 25000; tau -= 250) {
-        const g = fieldAt(ctx.src, tau), was = g.cars.get(num);
-        if (!was) break;
-        const dr = wrapL(me.s - was.s);
+        const g = fieldAt(ctx.src, tau), st0 = ctx.sm?.state(num, g.t, gSt0);
+        if (!st0) continue;   // (no steadied place at that moment – between two stretches of its data: the moment before decides)
+        const dr = wrapL(st.s - st0.s);
         if (dr > BLEND.leaveAcross + 5 || dr < -5) break;
-        const at = g.assign.get(num);
-        if (was.standing && at && Math.abs(at.delta) <= ASSIGN_TOL[at.by === "gridPos" ? "gridPos" : "order"]) {
-          const sl = m.slots.get(at.g), st0 = ctx.sm?.state(num, g.t, {});
-          if (!sl || !st0) break;
+        const was = g.cars.get(num), at = g.assign.get(num);
+        if (was && was.standing && at && Math.abs(at.delta) <= ASSIGN_TOL[at.by === "gridPos" ? "gridPos" : "order"]) {
+          const sl = m.slots.get(at.g);
+          if (!sl) break;
           F.at(st0.s, st0.d, gTmp);
           const ox = sl.x - gTmp[0], oz = sl.z - gTmp[2];
           res = { g: at.g, by: at.by, s0: st0.s, da: ox * sl.tx + oz * sl.tz, dc: ox * sl.nx + oz * sl.nz, sl, tau: g.t };
@@ -1679,7 +1687,7 @@ function gridPlan(num, ctx, memo, st) {
       if (w) return { state: "leaving", a: { g: res.g, by: res.by, delta: driven }, w, sl: res.sl, da: res.da, dc: res.dc, ds: w.ds, dd: w.dd, me };
     }
   }
-  return { state: null, a, me, mayArrive: !!(a && me.onTrack && f.preStart && nearGrid) };
+  return { state: null, a, me, mayArrive: !!(me && a && me.onTrack && f.preStart && nearGrid) };
 }
 // Car `num`, drawn at v (its place from the smoothed tracks) with heading c.yaw: moved into its slot as far as
 // gridWeight says. Standing or arriving: towards the slot itself. Leaving: the offset it had standing in the slot
@@ -1698,7 +1706,7 @@ function gridCar(c, num, v, ctx) {
     const wa = gridWeight({ delta: a.delta, standing: false, preStart: true, speed: c.speed, driven: null }), s1 = world.gridModel.slots.get(a.g);
     if (wa.state === "arriving" && s1) { w = wa; sl = s1; const ox = sl.x - v.x, oz = sl.z - v.z; da = ox * sl.tx + oz * sl.tz; dc = ox * sl.nx + oz * sl.nz; }
   }
-  if (!sl || !w || w.state === "free") { c.grid = a ? { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: "free" } : null; return; }
+  if (!sl || !w || w.state === "free") { c.grid = a ? { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: !!me?.standing, state: "free" } : null; return; }
   // standing: in the slot's own axes; arriving and leaving: along and across the track where the car is now (on a
   // curved grid – Monaco's – the slot's axes turn away from the road within metres), kept on the tarmac
   const cs = w.state === "standing" ? null : c.sample;
@@ -1720,7 +1728,7 @@ function gridCar(c, num, v, ctx) {
   // paused in its first 120 m turned round at up to 7° a frame until it snapped back, Map3D.seekCheck "pause" 1.0–1.15 rad)
   if (w.state === "standing") c.yaw = sl.yaw;
   else { const base = c.yaw; c.gridYaw = base; c.yaw = wrap(base + (w.state === "arriving" ? wrap(sl.yaw - base) * w.across : 0) - Math.atan(dc * w.dAcross)); }
-  c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: me.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
+  c.grid = { g: a.g, by: a.by, delta: +a.delta.toFixed(1), standing: !!me?.standing, state: w.state, along: +w.along.toFixed(2), across: +w.across.toFixed(2) };
 }
 const gridCost = { ms: 0, frames: 0, worst: 0, last: 0 };   // (development: the grid's own share of a frame)
 let devSpin = null;   // (development, v0.43: the focused car's wheels rolled at this many turns a second – Map3D.spinWheels)
