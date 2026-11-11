@@ -87,10 +87,13 @@ const smoothD = (e0, e1, x) => { if (x <= Math.min(e0, e1) || x >= Math.max(e0, 
 //   standing   – stopped (telemetry speed, or the positions not moving) in its slot (assignSlots: within 1–1.5 slots): 1
 //   arriving   – before the start, rolling slowly (< 15 m/s) up to its slot from behind: eased in over the last 40 m
 //   leaving    – it stood in its slot (at τ) and has moved off: the offset it had there is let go with the distance it
-//                has driven since – along the track over 40 m, across over 120 m (a car keeps to its side to the first
+//                has driven since – along the track over 40 m, across over 300 m (a car keeps to its side to the first
 //                corner and drifts across) – so it starts moving the very moment the data has it moving
+//                (v0.55: across over 300 m, it was 120 – measured, 2025 Hungary: the two columns were one line 90–120 m
+//                from the slots, 3.5–4.2 s after lights out, while 8 of the field's 18 gaps along the track were still
+//                under a car's length – and stay so to the first corner: the cars drawn nose into tail, leaveBase below)
 // Returns { along, across, dAcross (d across-weight / d metre driven), state }.
-export const BLEND = { tol: 12, arrive: 40, arriveFull: 4, leaveAlong: 40, leaveAcross: 120, slow: 15 };
+export const BLEND = { tol: 12, arrive: 40, arriveFull: 4, leaveAlong: 40, leaveAcross: 300, slow: 15 };
 export function gridWeight({ delta, standing, preStart, speed, driven }) {
   if (standing && Math.abs(delta) <= BLEND.tol) return { along: 1, across: 1, dAcross: 0, state: "standing" };
   if (driven != null && driven >= 0 && driven < BLEND.leaveAcross) {
@@ -102,6 +105,26 @@ export function gridWeight({ delta, standing, preStart, speed, driven }) {
     if (w > 0) return { along: w, across: w, dAcross: smoothD(-BLEND.arrive, -BLEND.arriveFull, delta), state: "arriving" };
   }
   return { along: 0, across: 0, dAcross: 0, state: "free" };
+}
+
+// v0.55 – a car that has driven off its slot, on the lap line's axes: how far from where the steadied tracks have it now
+// it is drawn, and so where traffic.js is told it is. The feed has the whole field on one line (above) and its gaps
+// along the track stay under a car's length for many pairs all the way to the first corner, so the columns are the only
+// thing between two such cars: while one is in the grid's hands traffic.js has to know the place it is DRAWN at – its
+// column – or it parts the pair from scratch when the grid lets go, late, and to whichever side its own rule picks
+// (v0.54: the car from the right column put on the left of its neighbour, through it).
+//   da, dc – the offset the car had standing in its slot (slot − tracks), m along / across the track
+//   driven – m along the track since (≥ 0: a car that rolls back a little is still at its slot's offset)
+//   d      – the tracks' place across now (m, + left); lo, hi – the tarmac the drawn car is kept on (m across)
+// Returns { state: "leaving", along, across, dAcross, ds, dd } – ds, dd: m along / across added to the tracks' place –
+// or null once all of it is let go (BLEND.leaveAcross m).
+export function leaveBase({ da, dc, driven, d = 0, lo = -Infinity, hi = Infinity }) {
+  const w = gridWeight({ delta: NaN, standing: false, preStart: false, speed: 0, driven: Math.max(0, driven) });
+  if (w.state !== "leaving") return null;
+  // (a car the tracks themselves have outside that tarmac keeps their place: the limit never moves it further than the
+  // offset does, so nothing is left to step when the last of the offset is gone)
+  const lat = Math.max(Math.min(lo, d), Math.min(Math.max(hi, d), d + dc * w.across));
+  return { state: w.state, along: w.along, across: w.across, dAcross: w.dAcross, ds: da * w.along, dd: lat - d };
 }
 
 // Which slot each standing car is in. Before the start: the published grid position (TimingAppData GridPos) – the

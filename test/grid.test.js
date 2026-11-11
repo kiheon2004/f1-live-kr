@@ -69,9 +69,11 @@ test("grid weight: standing in its slot – drawn there; leaving – let go with
   const W = (o) => G.gridWeight({ delta: 0, standing: false, preStart: true, speed: 0, driven: null, ...o });
   assert.strictEqual(W({ standing: true, delta: 3 }).state, "standing");
   assert.strictEqual(W({ standing: true, delta: 3 }).along, 1);
-  // leaving: the slot offset fades along over 40 m and across over 120 m, starting with zero slope – the car is drawn at
-  // (its place now + the offset it had standing × weight), so it moves the moment its data does
-  const Lv = (driven) => W({ driven, delta: NaN }), l0 = Lv(0), l1 = Lv(1), l20 = Lv(20), l40 = Lv(40), l119 = Lv(119), l121 = Lv(121);
+  // leaving: the slot offset fades along over 40 m and across over 300 m (v0.55; it was 120), starting with zero slope –
+  // the car is drawn at (its place now + the offset it had standing × weight), so it moves the moment its data does
+  const Lv = (driven) => W({ driven, delta: NaN }), l0 = Lv(0), l1 = Lv(1), l20 = Lv(20), l40 = Lv(40), l119 = Lv(G.BLEND.leaveAcross - 1), l121 = Lv(G.BLEND.leaveAcross + 1);
+  assert.strictEqual(G.BLEND.leaveAcross, 300);
+  assert.ok(Lv(120).across > 0.6, "120 m from its slot a car is still most of the way out in its column");
   assert.strictEqual(l0.state, "leaving");
   assert.ok(l0.along === 1 && l0.across === 1);
   assert.ok(l1.along > 0.99 && l1.along < 1, "smoothly from 1");
