@@ -69,7 +69,7 @@ const TEAM_CARS = { 2025: CARS_2025_TABLE, 2026: CARS_2026_TABLE }, TRACK_TAU = 
 // bend a metre of the lap line is less road, and cars nose to tail there were drawn up to 0.9 m into each other – a car short
 // of that is held back (<= 0.25 m a step, at the other's speed – no contact), the room check of a lateral move uses it, and
 // contacts are resolved from the front of the queue back
-export const ENGINE_VERSION = "0.54.0-engine.1";
+export const ENGINE_VERSION = "0.55.0-engine.1";
 // the coefficient / rule fingerprint (params/version.js) – saves and results carry both; see MODEL
 export { PARAMS_VERSION, PARAMS_HASH } from "../data/params/version.js";
 import { PARAMS_VERSION as PV } from "../data/params/version.js";
@@ -362,6 +362,15 @@ function carOf(race, car) {
   if (!m[car.num] || m[car.num].key !== key) m[car.num] = { key, cp: { ...cp, ClA: cp.ClA * (1 - d.aero), P_ice: cp.P_ice * d.power } };
   return m[car.num].cp;
 }
+// (v0.55) the damage an envelope was built with, kept with its inputs (car.profIn.dk, the ghost's gh.pin.dk): null = none,
+// else carOf's key. A restored race rebuilds each envelope with THAT damage, not the car's present one – between a contact
+// and the car's next move the cached envelope is still the one from before it (carOf marks it stale; moveLap rebuilds it)
+const dmgKeyOf = (car) => { const d = car.dmg; return d && (d.aero || d.power !== 1) ? `${d.aero}|${d.power}` : null; };
+function cpForKey(race, car, key) {
+  const cp = race.cache.cars[car.num]; if (!key) return cp;
+  const [aero, power] = key.split("|").map(Number);
+  return { ...cp, ClA: cp.ClA * (1 - aero), P_ice: cp.P_ice * power };
+}
 
 // tv: traffic's energy scene (mode incl. ":scene", 2026 Overtake active) – the free reference power (P0) is the team mode's
 function envFor(race, car, tv = null) {
@@ -384,7 +393,7 @@ function moveLap(race, car, t, cap = null) {
   // the envelope when its inputs moved (μ 0.3 %, mass 5 kg) – at most every 0.5 s – or every 2 s
   const pr = C.profiles[car.num], mu = cp.mu_mech * E.muTyre * E.rubber * E.util;
   if ((t - pr.at >= 500 && needsReprofile(pr.prof, mu, E.m)) || t - pr.at >= REPROFILE.everyMs) {
-    car.profIn = { muTyre: E.muTyre, muTrack: E.rubber, util: E.util, m: E.m, rho: E.rho };   // (saved: a restored race rebuilds the same envelope)
+    car.profIn = { muTyre: E.muTyre, muTrack: E.rubber, util: E.util, m: E.m, rho: E.rho, dk: dmgKeyOf(car) };   // (saved: a restored race rebuilds the same envelope)
     computeProfile(C.PT, cp, { ...car.profIn, forward: false }, pr.prof);
     // (the 2 s refreshes staggered over the cars – not all 20 envelopes on one step: the frame-time spikes ui3d measured)
     pr.at = pr.at < -1e8 ? t - pr.phase : t;
@@ -458,10 +467,10 @@ function ghostModels(E) {
       const C = race.cache, T = C.T, cp = carOf(race, car), gp = C.ghostProf[car.num] || (C.ghostProf[car.num] = { prof: makeProfile(T.n), pat: null });
       const muTyre = tyreGrip(gh.tyre, E.water), m = cp.m_min + gh.energy.fuel;
       // (rebuild the cached envelope if it isn't this ghost's – a restored race – then the car's own refresh rule)
-      if (gh.pin && (gp.pat !== gh.pat || gp.num !== car.num)) { computeProfile(C.PT, cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = gh.pat; gp.num = car.num; }
+      if (gh.pin && (gp.pat !== gh.pat || gp.num !== car.num)) { computeProfile(C.PT, gh.pin.dk !== undefined ? cpForKey(race, car, gh.pin.dk) : cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = gh.pat; gp.num = car.num; }
       const mu = cp.mu_mech * muTyre * E.rubber * E.util;
       if (!gh.pin || (t - gh.pat >= 500 && needsReprofile(gp.prof, mu, m)) || t - gh.pat >= REPROFILE.everyMs) {
-        gh.pin = { muTyre, muTrack: E.rubber, util: E.util, m, rho: E.rho }; gh.pat = t;
+        gh.pin = { muTyre, muTrack: E.rubber, util: E.util, m, rho: E.rho, dk: dmgKeyOf(car) }; gh.pat = t;
         computeProfile(C.PT, cp, { ...gh.pin, forward: false }, gp.prof); gp.pat = t; gp.num = car.num;
       }
       const pIce = iceCap(gh.energy, cp.P_ice, C.ep), pErs = ersCap(gh.energy, C.ep, car.mode.energy, gh.v, false);
@@ -868,11 +877,14 @@ export function loadRace(json, scenario, opts = {}) {
   const lastM = S.models[S.models.length - 1];
   if (lastM.engine !== ENGINE_VERSION || lastM.params !== PV) S.models.push({ t: S.t, engine: ENGINE_VERSION, params: PV });
   // the envelopes as they were: recompute each at the same inputs, with the same last-computed time
+  // (v0.55: EVERY car's that has one, with the time it had – also a car in the pit lane, and one marked stale (a new set
+  // of tyres, a contact). Until v0.54 only the cars on the lap got theirs back and the others started with an empty one,
+  // marked stale: the engine rebuilds it at the car's first move on the lap, but the traffic rules read it one step
+  // BEFORE that move – the never-saved race had the last stint's envelope there, the restored one nothing. With the
+  // longer look-ahead of v0.55 that step set a cap in one race and none in the other (test/game/det52, British 2025: a
+  // car in the pit exit at the save, its traffic account 5 ms apart 3 s later))
   Object.assign(race.cache.w, o.cacheMeta.w);
-  for (const car of race.state.cars) {
-    const at = o.cacheMeta.profilesAt[car.num]; race.cache.profiles[car.num].at = -1e9;
-    if (at > -1e8 && car.where === "lap" && car.status === "run") { const saveT = race.state.t; reprofileAt(race, car, at); race.state.t = saveT; }
-  }
+  for (const car of race.state.cars) reprofileAt(race, car, o.cacheMeta.profilesAt[car.num] ?? -1e9);
   CTL.refreshControlCache(race, race.cache.T);
   return race;
 }
@@ -896,7 +908,8 @@ function migrate(race) {
 // recompute a car's envelope for its present inputs and mark it computed at `at` (load: the same envelope the saved run
 // had, since its inputs then are its stored state now – the profile depends only on state saved with the car)
 function reprofileAt(race, car, at) {
-  const C = race.cache, cp = carOf(race, car), pr = C.profiles[car.num];
-  const st = car.profIn; if (!st) return;
-  computeProfile(C.PT, cp, { ...st, forward: false }, pr.prof); pr.at = at;
+  const C = race.cache, pr = C.profiles[car.num], st = car.profIn;
+  pr.at = at; if (!st) return;
+  // (a save from before v0.55 has no damage key with the inputs: the car's present damage, as it was then)
+  computeProfile(C.PT, st.dk !== undefined ? cpForKey(race, car, st.dk) : carOf(race, car), { ...st, forward: false }, pr.prof); pr.at = at;
 }

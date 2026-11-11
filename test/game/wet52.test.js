@@ -95,15 +95,20 @@ test("rain likely soon and the PRESENT plan has a slick stop within 3 laps: the 
   const out = {};
   for (const rain of [0, 6]) {
     const r = E.createRace({ scenario: SC, seed: 2, ai: true }), c = r.state.cars.find((x) => x.num === "4");
-    while (!(c.plan && c.lap >= c.plan.stints[0].toLap - 3)) E.step(r);
-    const T = r.cache.truth, m0 = Math.floor(r.state.t / 60000);
+    // (v0.55: a PLANNED stop two to three laps away, the race green. In this seed a safety car now comes out on lap 11 and
+    // the AI stops the car under it at once – a stop called for the lap it is decided on leaves no lap decision for the
+    // rain price to act at; the test then takes the car's next planned stop. Stops are counted from this moment)
+    const near = () => c.plan && c.plan.stints.length > 1 && c.lap >= c.plan.stints[0].toLap - 3 && c.lap <= c.plan.stints[0].toLap - 2 && r.state.control.flag === "green" && c.where === "lap" && c.pit.phase === "none";
+    while (!near() && !r.state.finished) E.step(r);
+    assert.ok(near(), "a planned stop 2–3 laps away under green was found");
+    const T = r.cache.truth, m0 = Math.floor(r.state.t / 60000), n0 = c.pit.stops;
     for (let j = m0 + 14; j < Math.min(T.rain.length, m0 + 60); j++) T.rain[j] = rain;   // (rain in ~15 min: the forecast's second block)
     const lap0 = c.lap, stop0 = c.plan.stints[0].toLap;
     while (c.lap < lap0 + 3) E.step(r);
-    out[rain] = { stops: c.pit.stops, stop0, lap0, firstStop: c.plan.stints[0].toLap, p: Math.max(...E.forecast(r).blocks.slice(0, 2).map((b) => b.pRain)) };
-    let stopLap = c.pit.stops ? c.lap : null;
-    while (c.lap < lap0 + 8) { E.step(r); if (stopLap == null && c.pit.stops > 0) stopLap = c.lap; }
-    out[rain].stopLap = stopLap; out[rain].stops8 = c.pit.stops;
+    out[rain] = { stops: c.pit.stops - n0, stop0, lap0, firstStop: c.plan.stints[0].toLap, p: Math.max(...E.forecast(r).blocks.slice(0, 2).map((b) => b.pRain)) };
+    let stopLap = c.pit.stops > n0 ? c.lap : null;
+    while (c.lap < lap0 + 8) { E.step(r); if (stopLap == null && c.pit.stops > n0) stopLap = c.lap; }
+    out[rain].stopLap = stopLap; out[rain].stops8 = c.pit.stops - n0;
   }
   // (v0.54: the dry run is the same race without the rain – the AI's own replanning may move its stop a few laps, as the
   // engine's traffic now does in this seed (24 → 27); what the rain price must not do is keep a dry car from stopping)
