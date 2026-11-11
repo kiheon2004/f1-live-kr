@@ -24,7 +24,7 @@ import R2024 from "../rules/2024.js";
 import R2025 from "../rules/2025.js";
 import R2026 from "../rules/2026.js";
 
-export const PARAMS_LABEL = "0.52.0-params.1";   // (raised by hand with a deliberate tuning round; the hash is the check)
+export const PARAMS_LABEL = "0.55.0-params.1";   // (raised by hand with a deliberate tuning round; the hash is the check)
 const MODS = { ai: AIp, cars2025: CARS25, cars2026: CARS26, carsBase: CARSB, control: CTLp, drivers: DRV, energy: ENG, incidents: INC, physics: PHY, pit: PITp, stewards: STW, traffic: TRF, tyres: TYR, weather: WTH, rules2024: R2024, rules2025: R2025, rules2026: R2026 };
 const stable = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : typeof x === "function" ? undefined : x));
 function fnv(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, "0"); }

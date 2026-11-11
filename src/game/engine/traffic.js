@@ -31,6 +31,17 @@
 //     lane ahead of / behind another car only where the follower would still be safe without braking harder than it
 //     can – so a move never forces another car off or into a crash; the edges of the road bound d.
 // test/game/traffic.test.js checks the body rectangles never overlap and |d| stays on the road, every step.
+//
+// v0.55 – no car is put anywhere in one step. Until v0.54 two cars nose to tail in one lane that came within a length +
+// clearance counted as "beside" each other and one of them was set a width + clearance aside at once (2.3 m in 50 ms,
+// 13–121 times a race). That jump was doing five jobs, each now done where it belongs (reports/hop.md, test/game/hop55):
+//   following into a corner – headway(): the look-ahead plan behind the car ahead (one time gap is fewer metres at
+//     low speed, so the follower brakes earlier), with the wake it WILL be in (tr.dirtyPlan) and window()'s braking pass on
+//     the same samples as the envelope's;  a car in the way (spun, crashed, limping, stopped) – gone round at once, by
+//     every car coming on it, on the side with the room, and safeV's third rule (the braking really there on the way);
+//   letting a car by (blue flags, team order) – slower than it only once it can go by, never under yieldMin, by lifting;
+//     a team-order swap between the two cars it was given to;  a lane that is unsafe to enter – "already in it" means the
+//     bodies overlap across the road;  and what is left when a follower still reaches the car ahead is a logged contact.
 import { TRAFFIC } from "../data/params/traffic.js";
 import { computeProfile, makeProfile, comb, vlimAt } from "./profile.js";
 import { PHYS } from "../data/params/physics.js";
@@ -46,7 +57,7 @@ export const STATES = ["free", "follow", "prepare", "alongside", "complete", "ab
 
 export function newTraffic() {
   return { state: "free", ahead: null, gap: null, gapT: null, e: 0, role: null, with: null, ph: null, side: 0, corner: -1, keep: null, since: 0,
-    close: 0, lastGap: null, cool: -1, defC: -1, dirty: 0, slip: 0, inf: false, quiet: 0, kind: null, mergeS: 0,
+    close: 0, lastGap: null, cool: -1, defC: -1, dirty: 0, dirtyPlan: 0, wkGap: 0, wkK: 0, slip: 0, inf: false, quiet: 0, kind: null, mergeS: 0,
     drs: { elig: -1, open: false, closed: -1 }, aero: { open: 0, front: 0, closed: -1 }, ot: { elig: false, active: false, lapStart: false }, det: {}, otDetT: null, obey: {} };
 }
 
@@ -71,7 +82,10 @@ export function trafficSetup(race) {
   // constrained window is skipped on stretches that are flat out for longer than it
   const slowV = 85, nextSlow = new Int32Array(n), big = 1 << 30;
   { let last = big; for (let k = 2 * n - 1; k >= 0; k--) { const i = k % n; if (ref.vc[i] < slowV) last = k; nextSlow[i] = last === big ? big : last - k; } }
-  const tc = { P, rules, season, len, wid, corners, nextC, inC, nextSlow, refVf: ref.vf, caps: {}, capWin: {}, dec: {}, prev: {}, onLap: [], otOn: false };
+  // the lowest reference speed over the look-ahead (for the wake a follower will be in at the corner – trafficPre)
+  const NWs = Math.ceil(P.window / T.ds), slowAhead = new Float64Array(n);
+  { const dq = []; for (let k = 2 * n + NWs; k >= 0; k--) { const v = ref.vb[k % n]; while (dq.length && ref.vb[dq[dq.length - 1] % n] >= v) dq.pop(); dq.push(k); while (dq[0] > k + NWs) dq.shift(); if (k < n) slowAhead[k] = ref.vb[dq[0] % n]; } }
+  const tc = { P, rules, season, len, wid, corners, nextC, inC, nextSlow, slowAhead, refVf: ref.vf, caps: {}, capWin: {}, dec: {}, prev: {}, onLap: [], otOn: false };
   // the pit lane's sides: where the pit path lies relative to the lap line just after the branch / just before the merge
   if (T.pit) {
     const side = (u) => { const p = T.pit.posAt(u); const q = T.project(p.x, p.y, 80); return q && Math.abs(q.d) > 0.5 ? Math.sign(q.d) : 1; };
@@ -142,7 +156,34 @@ function safeV(race, f, l, gap) {
   const P = race.cache.tc.P, vl = l.traffic ? l.v / pathFactor(race, l) : l.v;
   const v1 = gipps(vl, gap - P.gMin, P.bFol * bCap(race, f, f.v), P.bLead * bCap(race, f, vl), P.tau);
   const v2 = vl + Math.max(0, gap - P.gMin) / P.closeT;
-  return v1 < v2 ? v1 : v2;
+  let v = v1 < v2 ? v1 : v2;
+  // (v0.55) … and a third: no faster than it can still lose before it is there, v_f ≤ v_l + √(2·b·(gap − gMin)), with the
+  // braking it really has on the way – the least along the stretch between the two, at the lateral load its own envelope
+  // puts on it (in a corner: little more than lifting). The two rules above plan with straight-line brakes; behind a
+  // car at racing speed that is right (both are in the same corner), but coming on a car that has spun, or crawls, in or
+  // after a corner they allow 20 m/s of closing at 20 m – Hungary lap 26: three cars into a spun one. Looked at only
+  // when the closing speed could be too much even for a lift (so never in ordinary following).
+  const g = gap - P.gMin, dv = f.v - vl;
+  if (f.traffic && g < 200 && dv > 3 && dv * dv > 2 * P.aLift * (g > 0 ? g : 0)) {
+    const v3 = vl + Math.sqrt(2 * bWay(race, f, gap) * (g > 0 ? g : 0));
+    if (v3 < v) v = v3;
+  }
+  return v;
+}
+// the least braking (m/s², with drag) the car has over the next `dist` m, driving no faster than its envelope: the
+// friction ellipse at each sample's lateral load, never less than a lift (aLift)
+function bWay(race, car, dist) {
+  const C = race.cache, T = C.T, P = C.tc.P, cp = C.cars[car.num], pr = C.profiles[car.num].prof, kap = T.kappaLine || T.kappa;
+  const m = pr.m > 0 ? pr.m : cp.m_min + 50, mu = pr.mu > 0 ? pr.mu : cp.mu_mech, kl = 0.5 * 1.18 * cp.ClA * (1 - (car.traffic.dirty || 0)) / m, kd = 0.5 * 1.18 * cp.CdA / m;
+  const i0 = T.idx(car.s), nS = Math.max(1, Math.min(100, Math.ceil(dist / T.ds)));
+  let b = Infinity;
+  for (let x = 0; x <= nS; x++) {
+    const j = (i0 + x) % T.n, v = Math.min(car.v, pr.vb[j] > 0 ? pr.vb[j] : car.v), v2 = v * v;
+    const aTot = mu * (G + kl * v2), f = comb(v2 * Math.abs(kap[j]) / aTot, cp.f_comb ?? 0);
+    let a = Math.min(cp.a_brake_max, cp.k_brake * aTot * f); if (a < P.aLift) a = P.aLift;
+    a += kd * v2; if (a < b) b = a;
+  }
+  return b;
 }
 // the wake's share at distance x (m) behind: power law through two reference points, capped
 const dirtyAt = (P, x) => { if (x <= 0) return P.dirtyMax; const p = Math.log(P.dirty10 / P.dirty20) / Math.LN2; return Math.min(P.dirtyMax, P.dirty10 * Math.pow(10 / x, p)); };
@@ -206,38 +247,65 @@ export function trafficPre(race, t) {
   const prev = tc.prev; for (const c of L) { const tr = c.traffic; prev[c.num] = { role: tr.role, with: tr.with, ph: tr.ph, keep: tr.keep, corner: tr.corner, side: tr.side }; }
   const byNum = new Map(L.map((c) => [c.num, c]));
   const teamOrders = S.teamOrders || {};
+  const Q = new Array(n);
   for (let i = 0; i < n; i++) {
     const c = L[i], tr = c.traffic, cp = C.cars[c.num], prof = C.profiles[c.num].prof;
     const vLatStep = Math.min(P.vLat, P.vLatFrac * Math.max(c.v, 5)) * DT;
     // neighbours ahead (to 400 m) and behind (to 200 m)
-    let nearA = null, nearGap = Infinity, wakeD = 0, slipD = 0, cap = Infinity, why = null;
+    let nearA = null, nearGap = Infinity, wakeD = 0, wakeP = 0, wkGap = 0, wkK = 0, slipD = 0, cap = Infinity, why = null, lead = null, obstA = null, obstGap = Infinity;
+    const slowR = Math.min(1, tc.slowAhead[T.idx(c.s)] / Math.max(c.v, 10));
     for (let k = 1; k < n; k++) {
       const o = L[(i + k) % n], x = T.ahead(c.s, o.s); if (x > 400) break;
       const gap = x - len, dd = o.d - c.d;
       if (gap > 0 && gap < nearGap) { nearGap = gap; nearA = o; }
+      // (v0.55: the nearest car IN THE WAY ahead – stopped, or with an obvious problem – on this car's own path: where it
+      // stands relative to the racing line, against this car's offset from it. Not only the car directly ahead: the
+      // second and third car of a train have to go round it too, and start while they still have the speed to)
+      if (obstA === null && gap > 0 && (o.v < P.stopV || o.inc?.problem) && Math.abs(o.traffic.e - tr.e) < wid + P.mLat + 0.5) { obstA = o; obstGap = gap; }
       // every car ahead in my lane bounds my speed (Gipps); a car beside me (gap < 0) is the lateral rules' business
       // and a car that is not attacking it (nor passing a car letting it by) stays behind it whatever its line: only the
       // overtaking state machine brings a car alongside another – no drifting past in a different lane
       const po = prev[o.num], passing = (tr.role === "att" || tr.role === "done") && tr.with === o.num, letsBy = po && po.role === "yield" && po.with === c.num;
       const inLane = Math.abs(dd) < (gap > P.mLong && !passing ? wid + P.mLat + 2 * vLatStep : wid);
-      if (gap > -0.5 * len && gap < 250 && (inLane || (gap > P.mLong && !passing && !letsBy))) { const v = safeV(race, c, o, gap); if (v < cap) { cap = v; why = "follow"; tr.capBy = o.num; } }
+      if (gap > -0.5 * len && gap < 250 && (inLane || (gap > P.mLong && !passing && !letsBy))) {
+        const v = safeV(race, c, o, gap); if (v < cap) { cap = v; why = "follow"; tr.capBy = o.num; }
+        if (lead === null && gap > 0 && x < P.headway && gap < P.headwayS * Math.max(c.v, 15)) lead = o;   // (the nearest one: window() plans behind it)
+      }
       const gT = gap / Math.max(c.v, 10), f = fade(P, dd, wid);
       if (f > 0 && gT < P.dirtyGapS) wakeD = Math.max(wakeD, dirtyAt(P, gap) * f * Math.min(1, (P.dirtyGapS - gT) / 0.5));
-      if (f > 0 && gT < P.slipGapS) slipD = Math.max(slipD, slipAt(P, gap) * f * Math.min(1, (P.slipGapS - gT) / 0.3));
+      // (v0.55: the wake the car will be in further on – for window()'s plan. Two things differ from the wake of this
+      // moment: (1) at one time gap the cars are closer where the field is slower, centre to centre in proportion to the
+      // speed – gapSlow is the gap at the slowest point of the look-ahead; (2) it does not depend on where the two are
+      // across the road now. A car behind another is taken to be in its wake at the corner – they take it on one line –
+      // unless it has pulled out to pass it (then by its offset from that car's path). By the distance across the road
+      // at this moment the plan came and went: two cars on one racing line are 4 m apart across the road where the line
+      // sweeps over to the other side (Hungary's last corner, 25 m apart) and in line again at turn-in; a car ahead
+      // that moved over and came back took the follower's plan up and down with it – each time down under a car already
+      // braking at its limit, which then could not get back under it)
+      if (gap > 0 && gT < P.dirtyGapS) {
+        const out = tr.role === "att" && tr.with === o.num && (tr.ph === "out" || tr.ph === "along");
+        const fp = out ? Math.max(f, fade(P, o.traffic.e - tr.e, wid)) : 1;
+        if (fp > 0) {
+          const gapSlow = Math.max(P.gMin, Math.min(gap, (gap + len) * slowR - len)), k = fp * Math.min(1, (P.dirtyGapS - gT) / 0.5), wp = dirtyAt(P, gapSlow) * k;
+          if (wp > wakeP) { wakeP = wp; wkGap = gap; wkK = k; }
+        }
+      }
     }
     tr.ahead = nearA ? nearA.num : null; tr.gap = nearA ? nearGap : null; tr.gapT = nearA ? nearGap / Math.max(c.v, 10) : null;
-    tr.dirty = wakeD; tr.slip = slipD;
+    tr.dirty = wakeD; tr.dirtyPlan = wakeP; tr.wkGap = wkGap; tr.wkK = wkK; tr.slip = slipD;
     // closing rate on the car ahead (EMA of −d gap/dt), for "am I faster"
     if (nearA && tr.lastGap != null && tr.lastAhead === nearA.num) { const r = (tr.lastGap - nearGap) / DT, a = DT / P.closeTau; tr.close += a * (r - tr.close); } else tr.close = 0;
     tr.lastGap = nearA ? nearGap : null; tr.lastAhead = nearA ? nearA.num : null;
     // ----- the state machine -----
-    decide(race, c, tr, { L, i, byNum, prev, nearA, nearGap, teamOrders, t });
+    decide(race, c, tr, { L, i, byNum, prev, nearA, nearGap, obstA, obstGap, teamOrders, t });
     // ----- the speed caps -----
     const w = tr.with != null ? byNum.get(tr.with) : null;
     if (w && (tr.role === "abort" || (tr.role === "yield" && tr.kind === "corner"))) {
       // giving way: drop back to a length + clearance behind it within ≈ yieldT
       const rel = T.delta(w.s, c.s), need = rel + len + P.mLong;
-      if (need > 0) { const v = w.v - Math.min(Math.max(P.yieldDv, need / P.yieldT), 0.12 * w.v);   /* (gradual: a sudden drop collects the cars behind) */ if (v < cap) { cap = Math.max(0, v); why = "give way"; } }
+      // (v0.55: … and by lifting, not by braking – this step's cap never more than a lift below the car's own speed: the
+      // car behind it in its lane, in the same corner, has no more than a lift either – Suzuka lap 1, 5 m/s into it)
+      if (need > 0) { const v = Math.max(w.v - Math.min(Math.max(P.yieldDv, need / P.yieldT), 0.12 * w.v), c.v - 1.2 * P.aLift * DT);   /* (gradual: a sudden drop collects the cars behind) */ if (v < cap) { cap = Math.max(0, v); why = "give way"; } }
     }
     if (w && tr.role === "yield" && (tr.kind === "blue" || tr.kind === "team")) {
       // lift on the straights while the faster car is close behind or beside (not in corners: that would be erratic)
@@ -245,20 +313,45 @@ export function trafficPre(race, t) {
       if (rel > -(len + P.mLong) && rel < 1.5 * Math.max(w.v, 20) && k < 1 / 400) {
         // lift; and once it is close behind or alongside, run a little slower than it, so it does get by on this straight
         let v = P.liftFrac * vfAt(prof, T, c.s, tc);
-        if (rel < 3 * len + 10 && w.v >= P.stopV) v = Math.min(v, w.v - P.yieldDv);
+        // (v0.55: … and only then: when it IS alongside or clear of this car's lane, and is not itself giving way to
+        // this car. Slower than a car still BEHIND it in its lane, that car – held behind it by the follow cap – slowed
+        // too, and this one again: down to walking pace in the middle of a straight (British 2026 lap 30: two cars at
+        // 3 m/s, the field arriving at 76); the same with a car that had just lost the corner to it and was dropping
+        // back (Monza team-order swap). Until v0.54 the sideways jump of the lateral rule ended both)
+        const pw = prev[w.num], wGives = !!(pw && (pw.role === "yield" || pw.role === "abort") && pw.with === c.num);
+        const canPass = rel < len || Math.abs(w.d - c.d) >= wid + P.mLat;
+        if (rel < 3 * len + 10 && w.v >= P.stopV && canPass && !wGives) v = Math.min(v, w.v - P.yieldDv);
+        // (v0.55: … and never below yieldMin of its own free speed there. "Slower than the car it lets by" follows that
+        // car's speed down when it is itself held up – by a third car, by another car letting it by: British 2026 lap
+        // 38, a group lapping a group, one of them at 5 m/s in the middle of the straight and five cars into it)
+        v = Math.max(v, P.yieldMin * vfAt(prof, T, c.s, tc), c.v - 1.2 * P.aLift * DT);   // (… and it gets there by lifting)
         if (v < cap) { cap = Math.max(P.stopV, v); why = "let by"; }
       }
     }
     tr.cap = cap; tr.capWhy = why;
     // ----- wings: DRS (≤2025) and Straight Mode (2026) – separate systems, separate states -----
     wings(race, c, tr, prof);
-    // ----- the constrained envelope window: dirty air (ClA), lane share (alongside in a corner), the defender's line -----
-    window(race, c, tr, prof, cp, L, i);
-    // influence on the time account
-    const eff = (why && cap < vlimAt(prof, C.PT, c.s + c.v * DT) + 0.5 && cap < c.v + 2) || wakeD > 0.003 || slipD > 0.003 || tr.drs.open || tc.capWin[c.num] || (tr.role === "yield");
-    if (eff) { tr.inf = true; tr.quiet = 0; } else if (tr.inf) { tr.quiet += DT; if (tr.quiet >= 5) { tr.inf = false; tr.quiet = 0; } }
-    tr.state = stateName(tr, why);
+    Q[i] = { lead, why, cap, wakeD, slipD, prof, cp };
   }
+  // ----- the constrained envelope window: dirty air (ClA), lane share (alongside in a corner), the defender's line, and
+  // (v0.55) the plan behind the car ahead – which reads THAT car's window, so each car's is worked out after the one it is
+  // planned behind (this step's, never one left in the cache by the step before: a restored race has none, and it must
+  // run exactly like the one never saved – test/game/det52). A ring of cars each planned behind the next cannot be on a
+  // real circuit (≤ 26 cars, each within headway of the next); if there were one, one link plans without the other's.
+  const idxOf = new Map(L.map((c, i) => [c.num, i])), st = new Uint8Array(n);       // 0 to do, 1 being worked out, 2 done
+  const plan = (i) => {
+    if (st[i]) return; st[i] = 1;
+    const c = L[i], tr = c.traffic, q = Q[i], j = q.lead ? idxOf.get(q.lead.num) : -1;
+    let leadWin = true;
+    if (j >= 0) { if (st[j] === 1) leadWin = false; else plan(j); }
+    window(race, c, tr, q.prof, q.cp, L, i, q.lead, leadWin);
+    // influence on the time account
+    const eff = (q.why && q.cap < vlimAt(q.prof, C.PT, c.s + c.v * DT) + 0.5 && q.cap < c.v + 2) || q.wakeD > 0.003 || q.slipD > 0.003 || tr.drs.open || tc.capWin[c.num] || (tr.role === "yield");
+    if (eff) { tr.inf = true; tr.quiet = 0; } else if (tr.inf) { tr.quiet += DT; if (tr.quiet >= 5) { tr.inf = false; tr.quiet = 0; } }
+    tr.state = stateName(tr, q.why);
+    st[i] = 2;
+  };
+  for (let i = 0; i < n; i++) plan(i);
 }
 const vfAt = (prof, T, s, tc) => { const v = prof.vf && prof.vf[T.idx(s)] > 0 ? T.at(prof.vf, s) : T.at(tc.refVf, s); return v; };
 
@@ -285,6 +378,24 @@ function decide(race, c, tr, ctx) {
   if (tr.role === "merge") {
     const vf = vfAt(C.profiles[c.num].prof, T, c.s, tc);
     if (T.ahead(tr.mergeS, c.s) > P.mergeDist && c.v >= 0.9 * vf) setRole(null, null); else return;
+  }
+  // ----- (v0.55) a car in the way ahead: round it, on the side with the room, before anything else -----
+  // (a car that has spun, crashed or limps – incidents.js car.inc.problem – or is below stopV, on this car's path within
+  // obstS: it was gone round only by the car directly behind it, only within prepGapS, and only once it was below stopV –
+  // the last metres of a spin. Three cars into a spun one, Hungary lap 26; until v0.54 the sideways jump took them past)
+  const oa = ctx.obstA;
+  if (oa && ctx.obstGap / Math.max(c.v, 10) <= P.obstS && ctlMay(race, T, c, oa)) {
+    if (!(tr.role === "att" && tr.with === oa.num)) { tr.corner = nc; setRole("att", oa.num, "out"); tr.easy = true; tr.side = chooseSide(T, c, oa, cor, prev[oa.num], tc, true); }
+    else if (tr.ph === "out") {
+      // (… and the side is looked at again while this car is still behind it: a spinning car keeps following its line
+      // while it stops, and the line may take it to the edge this car chose – Suzuka's Esses: spun in the middle of the
+      // road, room on the right; 4 s later stopped at the right-hand apex, the car behind against the same edge, 15 m/s.
+      // Changed only when the chosen side has no room for a car any more and the other side has more)
+      const left = T.at(T.wL, oa.s) - (oa.d + wid / 2), right = (oa.d - wid / 2) + T.at(T.wR, oa.s), mine = tr.side > 0 ? left : right, other = tr.side > 0 ? right : left;
+      if (mine < wid + 2 * P.mLat && other > mine) tr.side = -tr.side;
+    }
+    if (tr.ph !== "along" && Math.abs(c.d - oa.d) >= wid + P.mLat - 0.05 && ctx.obstGap < P.mLong) tr.ph = "along";
+    return;
   }
   const w = tr.with != null ? byNum.get(tr.with) : null;
   const rel = w ? T.delta(w.s, c.s) : 0;   // + : c ahead of w
@@ -341,8 +452,13 @@ function decide(race, c, tr, ctx) {
   for (const o of ctx.L) {
     if (o === c || o.teamKey !== c.teamKey) continue;
     const ord = teamOrders[c.teamKey]; if (!ord || ord.policy !== "swap" || ord.done) continue;
+    // (v0.55: who lets whom by is settled when the order first applies. It was "the car ahead", read again every step: the
+    // moment the team-mate's nose was in front it was the car ahead and gave the place back – the two side by side,
+    // each letting the other by in turn)
+    if (ord.from != null && (ord.from !== c.num || ord.to !== o.num)) continue;
     const x = T.ahead(o.s, c.s) - len; if (x < -len || x > 120 || x / Math.max(o.v, 10) > 1.0 || o.dist > c.dist + T.L / 2) continue;
     if (ord.t0 == null) ord.t0 = t;
+    if (ord.from == null) { ord.from = c.num; ord.to = o.num; }
     const key = `${c.teamKey}:${ord.t0}`;
     if (tr.obey[key] == null) { tr.obey[key] = race.rng.get("traffic:" + c.num).chance(c.driver?.p?.compliance ?? 0.8); log(race, { t, car: c.num, type: "teamOrder", cause: "swap", effect: tr.obey[key] ? `lets ${o.tla} by` : "ignores the order" }); }
     if (tr.obey[key]) { setRole("yield", o.num, null, "team"); return; }
@@ -355,6 +471,7 @@ function decide(race, c, tr, ctx) {
     else if (rel >= len + P.mLong) { setRole("done", w.num); }
     else {
       const k = tc.corners[tr.corner];
+      if (tr.ph === "prep" && (w.v < P.stopV || w.inc?.problem)) { tr.ph = "out"; tr.easy = true; tr.side = chooseSide(T, c, w, k, p, tc, true); }
       if (tr.ph === "prep") {
         const dist = k ? T.ahead(c.s, k.brake0) : Infinity;
         if (nearA !== w || nearGap / Math.max(c.v, 10) > P.prepGapS * 1.3 || (k && dist > T.L / 2)) { tr.cool = tr.corner; setRole(null, null); }
@@ -417,14 +534,15 @@ function decide(race, c, tr, ctx) {
   }
   // ----- start an attack on the car ahead -----
   setRole(null, null);
-  const a = nearA; if (!a || nearGap / Math.max(c.v, 10) > P.prepGapS) return;
+  const a = nearA, obst = !!a && (a.v < P.stopV || !!a.inc?.problem);
+  if (!a || nearGap / Math.max(c.v, 10) > P.prepGapS) return;
   if (a.teamKey === c.teamKey && teamOrders[c.teamKey]?.policy === "hold") return;
   if (a.dist > c.dist + T.L / 2) { /* a lap ahead: unlapping is allowed – a normal attack */ }
   if (!ctlMay(race, T, c, a)) return;
   // an easy pass (anywhere there is room): the car ahead is letting me by, merging from the pits, or going into them
   // (…or stopped: a car standing in my lane is gone round where there is room – never queued behind at v = 0)
-  const pa = prev[a.num], easy = !!(pa && ((pa.role === "yield" && pa.with === c.num) || pa.role === "merge" || pa.role === "pitIn")) || a.v < P.stopV;
-  if (tr.cool === nc && a.v >= P.stopV) return;               // (tried and gave up for this corner – not for a stopped car)
+  const pa = prev[a.num], easy = !!(pa && ((pa.role === "yield" && pa.with === c.num) || pa.role === "merge" || pa.role === "pitIn")) || obst;
+  if (tr.cool === nc && !obst) return;                        // (tried and gave up for this corner – not for a stopped car)
   tr.easy = false;
   if (easy) { tr.corner = nc; setRole("att", a.num, "out"); tr.easy = true; tr.side = chooseSide(T, c, a, cor, pa, tc, true); return; }
   if (!cor || !cor.pass) return;
@@ -442,6 +560,13 @@ function abort(race, c, tr, w, t, why) {
 // the side to pass on: the inside of the coming corner unless the defender already covers it (then the outside);
 // for an easy pass (a car letting it by, merging, much slower): the side away from that car
 function chooseSide(T, c, w, k, pw, tc, easy = false) {
+  // (v0.55: round a car that is in the way – stopped, spun, limping – on the side that has the room: it was "the side away
+  // from it" judged by which side of the racing line it stood on, and a car spun ON the line near the right-hand edge was
+  // gone round on the right, where there was no room – Hungary's last corner: stopped behind it against the edge)
+  if (easy && (w.v < tc.P.stopV || w.inc?.problem)) {
+    const wid = tc.wid, left = T.at(T.wL, w.s) - (w.d + wid / 2), right = (w.d - wid / 2) + T.at(T.wR, w.s);
+    return left >= right ? 1 : -1;
+  }
   if (easy || !k) return w.d >= T.at(T.line, w.s) ? -1 : 1;
   // the inside unless the defender leaves no room there (less than a car width + clearance to the inside edge)
   const wid = tc.wid, room = k.side > 0 ? T.at(T.wL, w.s) - (w.d + wid / 2) : (w.d - wid / 2) + T.at(T.wR, w.s);
@@ -481,11 +606,15 @@ function wings(race, c, tr, prof) {
 //   the defender who moved inside takes the corner on the inside half of the road (its cost for the move).
 // The corner limit is the car's own v_c scaled by the closed-form ratio v_c(κ_eff, ClA′)/v_c(κ_line, ClA) (so the
 // envelope's band factors carry over), then a backward braking pass with the same friction-ellipse formula as profile.js.
-function window(race, c, tr, prof, cp, L, i) {
+function window(race, c, tr, prof, cp, L, i, lead = null, leadWin = true) {
   const C = race.cache, T = C.T, tc = C.tc, P = tc.P, wid = tc.wid, len = tc.len, cap = tc.caps[c.num];
   // clear the last window
   const old = tc.capWin[c.num]; if (old) { for (let x = 0; x < old[1]; x++) cap[(old[0] + x) % T.n] = Infinity; tc.capWin[c.num] = null; }
-  const dirty = tr.dirty > 0.003 ? tr.dirty : 0;
+  // (v0.55: planned with the wake the car will be in once the field has slowed for the corner – tr.dirtyPlan – not the
+  // wake of this moment: braking into a corner at one time gap the cars close up, the downforce loss grew step by step
+  // (25 % at 9 m → 30 % under 7.6 m) and with it this window sank under a car already braking at its limit; once above
+  // it the car could not get back – 5–6 m/s over its own grip at the apex of Hungary's last corner, into the car ahead)
+  const dirty0 = tr.dirty > 0.003 ? tr.dirty : 0, dirty = Math.max(dirty0, (tr.dirtyPlan || 0) > 0.003 ? tr.dirtyPlan : 0);
   // the car's lateral path over the look-ahead: from where it is toward the racing line at vLat, inside any lane bound
   // (a car beside it up to this corner's apex; the defender's inside half up to the apex)
   let lane = null, laneTo = -1;
@@ -501,15 +630,23 @@ function window(race, c, tr, prof, cp, L, i) {
     if (beside || def) { lane = { lo: Math.min(lo, c.d), hi: Math.max(hi, c.d) }; laneTo = Math.round(T.ahead(c.s, k.apex) / ds); }
   }
   const off = Math.abs(tr.e) > 0.3;
-  if (!dirty && !lane && !off) return;
+  if (!dirty && !lane && !off && !lead) return;
   const NW = Math.ceil(P.window / ds);
   if (tc.nextSlow[i0] > NW) return;                               // (flat out beyond the look-ahead: nothing to change)
-  const N = Math.min(NW, tc.nextSlow[i0] + 40), eRate = Math.min(P.vLat, P.vLatFrac * Math.max(c.v, 5)) * ds / Math.max(c.v, 10);
+  // (v0.55: … and never shorter than the car's own braking distance from its present speed, ≈ v²/50 + 60 m: in a slow
+  // section – every sample under slowV, Monaco – the look-ahead was 40 samples, 80 m, whatever the speed)
+  const N = Math.min(NW, Math.max(tc.nextSlow[i0] + 40, Math.ceil((c.v * c.v / 50 + 60) / ds))), eRate = Math.min(P.vLat, P.vLatFrac * Math.max(c.v, 5)) * ds / Math.max(c.v, 10);
+  // (v0.55) behind a car: no point of the look-ahead reached sooner than that car has cleared it – headway() below
+  let vt = null;
+  // (scratch: N samples + those of one body and its clearance beyond the window)
+  if (lead) { const hw = (tc.hw ||= { vL: new Float64Array(NW + Math.ceil(12 / ds) + 8), tL: new Float64Array(NW + Math.ceil(12 / ds) + 8), vt: new Float64Array(NW + 8) }); if (headway(race, c, lead, prof, cp, N, i0, hw, leadWin)) vt = hw.vt; }
+  if (!dirty && !lane && !off && !vt) return;
+  const wk = tr.wkK > 0 ? tr.wkK : 0, vNow = Math.max(c.v, 10), dP = Math.log(P.dirty10 / P.dirty20) / Math.LN2;
   const m = prof.m > 0 ? prof.m : cp.m_min + 50, mu = prof.mu > 0 ? prof.mu : cp.mu_mech, rho = c.profIn?.rho ?? 1.18;
-  const kl0 = 0.5 * rho * cp.ClA / m, kl = kl0 * (1 - dirty), kd = 0.5 * rho * cp.CdA / m, kap = T.kappaLine || T.kappa;
+  const kl0 = 0.5 * rho * cp.ClA / m, kl = kl0 * (1 - dirty0), kd = 0.5 * rho * cp.CdA / m, kap = T.kappaLine || T.kappa;
   const vMax = PHYS.vMax, kB = cp.k_brake, aBmax = cp.a_brake_max, fMin = cp.f_comb ?? 0, Crr = PHYS.Crr;
   const vcf = (k_, kl_) => { const den = k_ - mu * kl_; return den > 1e-9 ? Math.min(vMax, Math.sqrt(mu * G / den)) : vMax; };
-  let vNext = 0, any = false;
+  let vNext = 0, keN = 0, klN = kl0, any = false;
   for (let x = N - 1; x >= 0; x--) {
     const j = (i0 + x) % n, kl_ = Math.abs(kap[j]);
     // where the car can be at that sample: toward the racing line from its present d at vLat, inside its lane; its path
@@ -522,20 +659,99 @@ function window(race, c, tr, prof, cp, L, i) {
       const e = dx - ln;
       if (Math.abs(e) > 0.05) { const kk = kap[j], f = 1 - kk * e; ke = Math.abs(kk / (f > 0.5 ? f : 0.5)); }
     }
+    // (v0.55: the wake AT THIS SAMPLE – at one time gap the cars are closer where the field is slower, centre to centre in
+    // proportion to the speed: the downforce the car will have there, not the downforce of this moment)
+    let klj = kl;
+    if (wk) {
+      const r = prof.vb[j] / vNow, g = r < 1 ? Math.max(P.gMin, (tr.wkGap + len) * r - len) : tr.wkGap;
+      const dj = Math.min(P.dirtyMax, P.dirty10 * Math.pow(10 / g, dP)) * wk;
+      if (dj > dirty0) klj = kl0 * (1 - dj);
+    }
     let vc = prof.vc[j];
-    if (ke !== kl_ || dirty) { const r = vcf(ke, kl) / vcf(kl_, kl0); vc = Math.min(vMax, vc * r); }
+    if (ke !== kl_ || klj !== kl0) { const r = vcf(ke, klj) / vcf(kl_, kl0); vc = Math.min(vMax, vc * r); }
+    if (vt !== null && vt[x] < vc) vc = vt[x];
     let v;
     if (x === N - 1) v = Math.min(vc, prof.vb[j]);
     else {
-      const v2 = vNext * vNext, aTot = mu * (G + kl * v2), aLat = v2 * ke, f = comb(aLat / aTot, fMin);
+      // (v0.55: grip and lateral load of the sample the speed belongs to – the next one – exactly as profile.js's braking
+      // pass has them. It took this sample's: on the way into a corner, where the curvature grows, that is less lateral
+      // load and more braking than the car's own envelope allows itself, so with the wake's few per cent less grip at low
+      // speed this pass still came out ABOVE the envelope and no cap was set – in the braking zone of a hairpin a
+      // follower had no look-ahead at all, and its real brakes, with less downforce, did not hold the envelope's line:
+      // Monaco's hairpin, 5 m/s over its grip at the apex and into the car ahead)
+      const v2 = vNext * vNext, aTot = mu * (G + klN * v2), aLat = v2 * keN, f = comb(aLat / aTot, fMin);
       let aB = kB * aTot * f; if (aB > aBmax) aB = aBmax;
       let dec = aB + kd * v2 + Crr * G + G * T.grade[j]; if (dec < 0) dec = 0;
       v = Math.min(vc, Math.sqrt(v2 + 2 * ds * dec));
     }
-    vNext = v;
+    vNext = v; keN = ke; klN = klj;
     if (v < prof.vb[j] - 1e-6) { cap[j] = v; any = true; }
   }
   if (any) tc.capWin[c.num] = [i0, N]; else for (let x = 0; x < N; x++) cap[(i0 + x) % n] = Infinity;
+}
+
+// v0.55 – following with a look-ahead. The follow cap (safeV) looks at this moment only: the gap and the two speeds. Into a
+// slow corner that is too late. Cars 0.3 s apart at 55 m/s are 16 m apart centre to centre; at the 15 m/s of a hairpin
+// the same 0.3 s is 4.5 m – less than a car. The follower has to lose time to the car ahead BEFORE the corner, and it
+// brakes at the same limit as that car, so it has to start earlier: it needs the car ahead's plan, not only its place.
+// The plan of the car ahead: its own envelope (and its own look-ahead window, which holds ITS plan behind the car ahead
+// of it – so a queue plans as a queue), reached from its present speed at full acceleration → when it will be where.
+// The rule: this car reaches no point x sooner than τ after the car ahead has reached x + D(x), D = the bodies' length
+// on the road there (bodyLen: more on the inside of a bend) + gMin – at steady speed the same gap as the follow cap's
+// (gMin + v·τ). Walking forward along the look-ahead: where this car, driving as fast as it can, would be too early, its
+// speed is capped at the speed the car ahead will have D further on (vt[x]); window()'s backward braking pass then makes
+// that reachable. Estimates (the car ahead may do something else – slower: the follow cap still holds this moment's gap).
+// Returns whether any sample is capped. Speeds along the lap line (a car off the racing line: within pathFactor – ignored).
+function headway(race, c, o, prof, cp, N, i0, hw, leadWin = true) {
+  const C = race.cache, T = C.T, tc = C.tc, P = tc.P, n = T.n, ds = T.ds, len = tc.len, vL = hw.vL, tL = hw.tL, vt = hw.vt;
+  const X = T.ahead(c.s, o.s);                                    // centre to centre
+  let u0 = i0 * ds - c.s; if (u0 <= 0) u0 += T.L;                 // to this car's first sample ahead
+  const Dmax = len + 3.5 + P.gMin, M = N + Math.ceil(Dmax / ds) + 2;
+  const xL = Math.max(0, Math.ceil((X - u0) / ds));               // the first sample at or ahead of the car ahead
+  if (xL >= N) return false;
+  const po = C.profiles[o.num].prof, co = C.cars[o.num], capO = leadWin && tc.capWin[o.num] ? tc.caps[o.num] : null;
+  // full acceleration at v (power or traction, minus drag and rolling resistance) – for the times only
+  const acc = (cq, pq, v) => {
+    const m = pq.m > 0 ? pq.m : cq.m_min + 50, mu = pq.mu > 0 ? pq.mu : cq.mu_mech, v2 = v * v;
+    const aP = (cq.P_ice + 100e3) / (m * (v > 5 ? v : 5)), aT = cq.k_trac * mu * (G + 0.5 * 1.18 * cq.ClA * v2 / m), a = (aP < aT ? aP : aT) - 0.5 * 1.18 * cq.CdA * v2 / m - PHYS.Crr * G;
+    return a > 0 ? a : 0;
+  };
+  // (metres of lap line per metre driven at offset e from the racing line – pathFactor's rule, at sample j)
+  const kapL = T.kappaLine || T.kappa, eo = o.traffic.e, ec = c.traffic.e;
+  const pf = (j, e) => { if (e < 0.05 && e > -0.05) return 1; const f = 1 - kapL[j] * e; return f < 0.7 ? 0.7 : f > 1.3 ? 1.3 : f; };
+  // the car ahead: vL[x] its speed ALONG THE LAP LINE at sample x, tL[x] when it is there
+  const vL0 = o.v / pf(T.idx(o.s), eo);
+  { let v = o.v, vs = vL0, t = 0, uP = X;
+    for (let x = xL; x < M; x++) {
+      const j = (i0 + x) % n, u = u0 + x * ds, seg = u - uP; uP = u;
+      let lim = po.vb[j]; if (capO !== null && capO[j] < lim) lim = capO[j];
+      let v1 = Math.sqrt(v * v + 2 * acc(co, po, v) * seg); if (v1 > lim) v1 = lim;
+      const vs1 = v1 / pf(j, eo);
+      if (seg > 0) t += 2 * seg / Math.max(1, vs + vs1);
+      vL[x] = vs1; tL[x] = t; v = v1; vs = vs1;
+    } }
+  const eMid = (ec + eo) / 2, v0L = Math.max(1, 0.5 * (vL0 + vL[xL]));
+  let tF = 0, vp = c.v, vsp = c.v / pf(T.idx(c.s), ec), uP = 0, any = false;
+  for (let x = 0; x < N; x++) {
+    const j = (i0 + x) % n, u = u0 + x * ds, seg = u - uP, pfc = pf(j, ec); uP = u;
+    let vFree = Math.sqrt(vp * vp + 2 * acc(cp, prof, vp) * seg); if (vFree > prof.vb[j]) vFree = prof.vb[j];
+    // (the bodies' length on the road only where it can matter: not while even the longest leaves the point behind the car ahead)
+    let tReq = -Infinity, vSh = Infinity, w = u + (len + 3.5) + P.gMin;
+    if (w > X) { const kj = T.kappa[j], bl = kj > 1 / 400 || kj < -1 / 400 ? bodyLen(T, tc, j * ds, T.line[j] + eMid) : len; w = u + (bl < len + 3.5 ? bl : len + 3.5) + P.gMin; }
+    if (w > X) {
+      const f = (w - u0) / ds;
+      if (f <= xL) { tReq = (w - X) / v0L; vSh = vL[xL]; }
+      else { const k = Math.floor(f), fr = f - k; tReq = tL[k] + (tL[k + 1] - tL[k]) * fr; vSh = vL[k] + (vL[k + 1] - vL[k]) * fr; }
+      tReq += P.tau; vSh *= pfc;                                    // (the cap is this car's own speed, on its own path)
+    }
+    const tFree = tF + 2 * seg / Math.max(1, vsp + vFree / pfc);
+    if (tFree < tReq) {
+      const vx = vSh < vFree ? vSh : vFree, tA = tF + 2 * seg / Math.max(1, vsp + vx / pfc);
+      vt[x] = vSh < vFree ? vSh : Infinity; if (vSh < vFree) any = true;
+      tF = tA > tReq ? tA : tReq; vp = vx; vsp = vx / pfc;
+    } else { vt[x] = Infinity; tF = tFree; vp = vFree; vsp = vFree / pfc; }
+  }
+  return any;
 }
 
 // ---------- what the car model gets ----------
@@ -610,7 +826,7 @@ export function trafficPost(race, t, s0of) {
   //    present place of those not yet moved – staying where it is is always possible, so the order never forces an overlap
   const ord = L.slice().sort((a, b) => b.dist - a.dist || (a.num < b.num ? -1 : 1));
   // a car not yet moved is respected where it IS (its d at the step start): keeping that d is always open to it
-  const done = new Set();
+  const done = new Set(), d0 = new Map(L.map((c) => [c.num, c.d]));
   for (const c of ord) {
     const tr = c.traffic, line = T.at(T.line, c.s), [dMin, dMax] = roadAt(T, c.s, wid);
     const step = Math.min(P.vLat, P.vLatFrac * Math.max(c.v, 5)) * DT;
@@ -623,7 +839,14 @@ export function trafficPost(race, t, s0of) {
       if (o === c) continue;
       const rel = T.delta(o.s, c.s); if (rel > 150 || rel < -150) continue;
       const od = o.d, half = wid + P.mLat, bl = Math.abs(rel) < 30 ? bodyLen(T, tc, c.s + rel / 2, (c.d + od) / 2) : len;
-      if (Math.abs(rel) < bl + P.mLong) { forb.push([od, half, true]); continue; }
+      if (Math.abs(rel) < bl + P.mLong) {
+        // (v0.55: one behind the other in ONE lane at the step start – the bodies overlapping across the road, so apart
+        // along it – is nose to tail, not "beside": no sideways rule for the pair. The follow cap keeps them apart along
+        // the track, and a follower that still reaches the car ahead is a contact (4. below). It was a hard bound:
+        // whichever of the two was looked at first was put a width + clearance to the side in ONE step – 2.3 m in 50 ms,
+        // 63 times in a Hungary race – which stood in for the contact)
+        if (Math.abs(c.d - (d0.get(o.num) ?? od)) < wid) continue;
+        forb.push([od, half, true]); continue; }
       if (Math.abs(rel) > 150) continue;
       if (rel < 0) { // o ahead of c: entering its lane must leave c a safe following speed
         if (c.v > safeV(race, c, o, -rel - bl)) forb.push([od, half, false]);
@@ -631,9 +854,9 @@ export function trafficPost(race, t, s0of) {
         if (o.v > safeV(race, o, c, rel - bl)) forb.push([od, half, false]);
       }
     }
-    let dN = clampLat(c.d, dW, dMin, dMax, forb);
+    let dN = clampLat(c.d, dW, dMin, dMax, forb, wid, step);
     if (dN == null) {   // no room from the line-following place: keep the lateral it had (the cars beside respected it)
-      dN = clampLat(c.d, c.d, Math.min(dMin, c.d), Math.max(dMax, c.d), forb.filter((f) => f[2]));
+      dN = clampLat(c.d, c.d, Math.min(dMin, c.d), Math.max(dMax, c.d), forb.filter((f) => f[2]), wid, step);
       if (dN == null) { dN = c.d; if (race.debugSqueeze) race.debugSqueeze(c, forb, dMin, dMax); contact(race, { t, a: c.num, b: null, s: c.s, kind: "squeeze", why: "no room either side" }); }
     }
     c.d = dN; tr.e = dN - line; done.add(c.num);
@@ -751,11 +974,18 @@ function targetD(race, c, tr, line, dMin, dMax) {
 // ahead/behind that would be unsafe to enter (soft: ignored when the car is already in it – the follow cap handles that).
 // dPrev: where the car was (its side of each other car, and whether it was already in that lane, are judged from there –
 // the racing line's shape must not carry a car into a lane it could not have entered by moving)
-function clampLat(dPrev, dW, dMin, dMax, forb) {
+function clampLat(dPrev, dW, dMin, dMax, forb, wid = 0, step = Infinity) {
   let lo = dMin, hi = dMax;
   for (const [od, half, hard] of forb) {
-    if (!hard && Math.abs(dPrev - od) < half) continue;
-    if (dPrev >= od) lo = Math.max(lo, od + half); else hi = Math.min(hi, od - half);
+    const a = Math.abs(dPrev - od);
+    // (v0.55: "already in the lane" = the bodies overlap across the road – it was "within a width + clearance": a car a
+    // width + 10 cm from the path of a car coming past it counted as in its lane and could move over into it, while the
+    // passing car, clear of it by its width, was not held behind it – British 2026 lap 30: 40 m/s into its tail)
+    if (!hard && a < wid) continue;
+    // (v0.55: clear of the body but inside its clearance – the line's shape squeezed them, or a lane became unsafe: out
+    // of it at the lateral rate, never closer; it was put at the clearance's edge at once, up to 0.3 m in a step)
+    const out = a >= wid && a < half ? Math.min(half, a + step) : half;
+    if (dPrev >= od) lo = Math.max(lo, od + out); else hi = Math.min(hi, od - out);
   }
   if (lo > hi + 1e-9) return null;
   return Math.max(lo, Math.min(hi, dW));
