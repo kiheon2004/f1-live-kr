@@ -331,10 +331,15 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // is the map's, its distance from the tarmac the usual one (off, m).
   const cornerAt = (n) => { const k = corners.find((c) => c.n === n); if (!k) return null; const [s] = world.grid.nearest(k.x, k.z, 3); return s || nearestSample(k.x, k.z)[0]; };
   const list = [];
-  for (const L of scene.stands?.list || []) {
+  for (let L of scene.stands?.list || []) {
     if (!inYear(L)) { skipped.push(`${L.n}: not in ${year}`); continue; }
     if (L.poly) continue;   // (built from its outline above)
-    if (NOT_BUILT.has(L.type)) { skipped.push(`${L.n}: ${NOT_BUILT.get(L.type)}`); continue; }
+    // (v0.58: a hospitality building or a standing area the entry asks for – `build` – is built: a plain glazed block of
+    // `levels` storeys `depth` m deep, or a low deck; one inside an existing building – `existing` – and every entry
+    // without `build` stay unbuilt as before)
+    const other = (L.type === "hosp" || L.type === "ga") && L.build && !L.existing ? L.type : null;
+    if (NOT_BUILT.has(L.type) && !other) { skipped.push(`${L.n}: ${NOT_BUILT.get(L.type)}`); continue; }
+    if (other) L = { ...L, other, rows: Math.max(2, Math.round(((L.depth || (other === "ga" ? 6 : 12)) - WALK) / ROW_D)), roof: 0, perm: 0 };
     if (L.at) {
       const s0 = cornerAt(L.at.turn); if (!s0) { skipped.push(`${L.n}: no corner ${L.at.turn}`); continue; }
       const side = sideSign(L.at.side);
@@ -354,7 +359,9 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const [sm0] = nearestSample(mid[0], mid[1]), lm = lateral(sm0, mid[0], mid[1]);
     const sameSide = (m) => { const q = (m.outline || m.curvedFrom).reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]).map((v) => v / (m.outline || m.curvedFrom).length); return Math.sign(lateral(sm0, q[0], q[1])) === Math.sign(lm); };
     const twin = stands.find((m) => (m.kind === "mapped" || m.curvedFrom) && (inPoly(mid[0], mid[1], m.outline || m.curvedFrom) || ((edgeDist(mid[0], mid[1], m.outline || m.curvedFrom) < 25 || segDist(m.front, A, B) < 18) && sameSide(m))));
-    if (twin && !L.outline) { skipped.push(`${L.n}: built as the map outline ${twin.name || "(unnamed)"}`); twin.name = twin.name || L.n; if (L.roof) twin.roof = L.roof === "upper" ? "upper" : true; twin.listed = true; continue; }
+    // (apart: a listed stand known to be another structure than the outline next to it – Las Vegas' KZ1 beside the
+    // traced Turn 3 stand, 17 m on – is not taken for that outline's listing)
+    if (twin && !L.outline && !L.apart) { skipped.push(`${L.n}: built as the map outline ${twin.name || "(unnamed)"}`); twin.name = twin.name || L.n; if (L.roof) twin.roof = L.roof === "upper" ? "upper" : true; twin.listed = true; continue; }
     let [sa] = nearestSample(A[0], A[1]), [sb] = nearestSample(B[0], B[1]);
     const la = lateral(sa, A[0], A[1]), lb = lateral(sb, B[0], B[1]);
     const side = L.side ? sideSign(L.side) : Math.sign(la + lb) || 1;
@@ -406,7 +413,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // outline itself, Sepang's K1 530 m for 170 (over 0.6 of its perimeter; Yas Marina's U round the hairpin is not): then
     // it's built as its box)
     if (L.maxLen && L.fallback) { let fl = 0; for (let i = 1; i < front.length; i++) fl += Math.hypot(front[i].x - front[i - 1].x, front[i].z - front[i - 1].z); if (fl > L.maxLen) { stands.push(L.fallback); continue; } }
-    stands.push({ kind: "listed", name: L.n, model: L.fallback ? L.fallback.model || null : L.model && !(L.model.from && year && year < L.model.from) ? L.model : null, traced: L.traced || (L.outline ? "map outline" : null), front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
+    stands.push({ kind: "listed", name: L.n, other: L.other || null, levels: L.levels || 2, model: L.fallback ? L.fallback.model || null : L.model && !(L.model.from && year && year < L.model.from) ? L.model : null, traced: L.traced || (L.outline ? "map outline" : null), front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
   }
   if (!stands.length) return null;
 
@@ -475,12 +482,12 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // (what's left of an outline after the track and its neighbours had their room: under 12 m is no stand)
   for (const st of stands) if (!st.dead && frontLen(st) < 12) st.dead = `too short (${frontLen(st).toFixed(0)} m)`;
   const alive = stands.filter((s) => !s.dead);
-  const seatsOf = (st, rows) => Math.floor((frontLen(st) * (1 - AISLE_W / AISLE_EVERY)) / SEAT_W) * rows;
+  const seatsOf = (st, rows) => (st.other ? 0 : Math.floor((frontLen(st) * (1 - AISLE_W / AISLE_EVERY)) / SEAT_W) * rows);
   // ---- the circuit's grandstand capacity: listed stands get the seats the mapped ones don't have ----
   const target = scene.stands?.seats || 0;
   if (target) {
     const mapped = alive.filter((s) => s.kind === "mapped").reduce((a, s) => a + seatsOf(s, s.rows), 0);
-    const listed = alive.filter((s) => s.kind === "listed" && !s.traced);
+    const listed = alive.filter((s) => s.kind === "listed" && !s.traced && !s.other);
     // a few passes: stands that can't grow (obstacles behind) leave the rest to the others
     // outlines mapped deeper than the circuit's seats allow (a stand drawn with its concourse) lose rows
     if (mapped > target * 1.1) {
@@ -572,6 +579,39 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const nA = Math.max(0, Math.floor(len / AISLE_EVERY));
     const aisles = Array.from({ length: nA }, (_, k) => (k + 0.5) / nA);
     const cum = [0]; for (let i = 1; i < F.length; i++) cum.push(cum[i - 1] + Math.hypot(F[i].x - F[i - 1].x, F[i].z - F[i - 1].z));
+    if (st.other) {
+      // A hospitality building: `levels` storeys of 3.6 m, each a band of dark glass between white slab edges towards the
+      // track, a terrace rail on its roof, plain panels behind and at its ends. A standing area: a deck 0.5 m up with a
+      // rail front and back. No seats, no roof record; its place and depth are the stand's (front line, rows → depth).
+      const white = C("#e6e9ec"), glass = C("#26323c"), panel = C("#c3c8cd"), deck = C("#8f959b"), D = depth, hosp = st.other === "hosp", H = hosp ? st.levels * 3.6 : 0.5;
+      const y0 = (i) => gy[i], yt = (i) => gy[i] + H;
+      for (let i = 0; i < F.length - 1; i++) {
+        const j = i + 1, out = [-F[i].nx, 0, -F[i].nz], back = [F[i].nx, 0, F[i].nz];
+        if (hosp) {
+          for (let k = 0; k < st.levels; k++) {
+            const a = k * 3.6, q = (h0, h1, c) => face([P(i, 0, y0(i) + a + h0), P(j, 0, y0(j) + a + h0), P(j, 0, y0(j) + a + h1), P(i, 0, y0(i) + a + h1)], c, out);
+            q(0, 0.45, white); q(0.45, 3.25, glass); q(3.25, 3.6, white);
+          }
+          face([P(i, D, y0(i) - 0.5), P(j, D, y0(j) - 0.5), P(j, D, yt(j)), P(i, D, yt(i))], panel, back);
+        } else {
+          face([P(i, 0, y0(i)), P(j, 0, y0(j)), P(j, 0, yt(j)), P(i, 0, yt(i))], concrete, out);
+          face([P(i, D, y0(i) - 0.5), P(j, D, y0(j) - 0.5), P(j, D, yt(j)), P(i, D, yt(i))], concrete, back);
+          face([P(i, D - 0.05, yt(i) + 1.0), P(j, D - 0.05, yt(j) + 1.0), P(j, D - 0.05, yt(j) + 1.08), P(i, D - 0.05, yt(i) + 1.08)], rail, back);
+        }
+        face([P(i, 0, yt(i)), P(j, 0, yt(j)), P(j, D, yt(j)), P(i, D, yt(i))], hosp ? white : deck, [0, 1, 0]);
+        face([P(i, 0.05, yt(i) + 1.0), P(j, 0.05, yt(j) + 1.0), P(j, 0.05, yt(j) + 1.08), P(i, 0.05, yt(i) + 1.08)], rail, out);
+        face([P(i, 0.05, yt(i)), P(i, 0.05, yt(i) + 1.0), P(i, 0.11, yt(i) + 1.0), P(i, 0.11, yt(i))], rail, out);
+      }
+      for (const [i, sgn] of [[0, -1], [F.length - 1, 1]]) {
+        const j = sgn < 0 ? 1 : F.length - 2, ax = F[i].x - F[j].x, az = F[i].z - F[j].z, al = Math.hypot(ax, az) || 1;
+        face([P(i, 0, y0(i) - 0.5), P(i, D, y0(i) - 0.5), P(i, D, yt(i)), P(i, 0, yt(i))], hosp ? panel : concrete, [ax / al, 0, az / al]);
+      }
+      const mi = Math.floor(F.length / 2);
+      report.push({ n: st.name, kind: st.other, rows: 0, max: 0, seats: 0, len: Math.round(len), roof: false, depth: +D.toFixed(1), levels: hosp ? st.levels : 0,
+        outline: [...F.map((p) => [+p.x.toFixed(1), +p.z.toFixed(1)]), ...F.slice().reverse().map((p) => [+(p.x + p.nx * D).toFixed(1), +(p.z + p.nz * D).toFixed(1)])].filter((_, i, a) => a.length < 40 || i % Math.ceil(a.length / 40) === 0),
+        c: [+F[mi].x.toFixed(1), +(gy[mi] + H).toFixed(1), +F[mi].z.toFixed(1)], nrm: [+F[mi].nx.toFixed(3), +F[mi].nz.toFixed(3)] });
+      continue;
+    }
     // board colours along the front wall, one per ~10 m
     for (let i = 0; i < F.length - 1; i++) {
       const out = [-F[i].nx, 0, -F[i].nz], j = i + 1;

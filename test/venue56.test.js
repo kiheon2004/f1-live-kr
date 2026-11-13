@@ -133,3 +133,32 @@ test("upper storeys with their own ground-floor ends (fill: false) get no fill w
   const up = F.addUpper(new THREE.Group(), r, root, { file: "t.glb", garageTop: 4.8, front: 13, length: 140, depth: 26, backTo: 20, fill: false });
   assert.ok(Math.abs(Math.max(...up.footprint.map((p) => p[1])) - (23 + 20)) < 1e-6);
 });
+
+// v0.58: hospitality buildings and standing areas an entry asks for (`build`) are built – plain blocks and decks, no
+// seats, no share of the circuit's capacity; the others stay unbuilt. `apart`: not merged into the outline next to it.
+test("hospitality and standing entries: built only when asked, without seats; `apart` keeps a stand beside an outline its own", async () => {
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const w = world(), groundAt = () => 0;
+  const list = [
+    { n: "Seated", a: [-150, 20], b: [-60, 20], side: "R", rows: 10 },
+    { n: "Club", a: [60, 20], b: [120, 20], side: "R", type: "hosp", levels: 3, depth: 14, build: 1 },
+    { n: "Deck", a: [160, 20], b: [220, 20], side: "R", type: "ga", build: 1 },
+    { n: "Old club", a: [240, 20], b: [300, 20], side: "R", type: "hosp" },
+    { n: "In a hotel", a: [-300, 20], b: [-240, 20], side: "R", type: "hosp", levels: 2, depth: 10, build: 1, existing: 1 },
+  ];
+  const r = buildStands({ scene: { areas: [], lines: [], buildings: [], stands: { seats: 5000, list } }, gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
+  const by = Object.fromEntries(r.info.list.map((s) => [s.n, s]));
+  assert.deepStrictEqual(Object.keys(by).sort(), ["Club", "Deck", "Seated"]);
+  assert.strictEqual(by.Club.kind, "hosp"); assert.strictEqual(by.Club.seats, 0); assert.strictEqual(by.Club.levels, 3); assert.ok(Math.abs(by.Club.depth - 14) < 0.5, String(by.Club.depth));
+  assert.strictEqual(by.Deck.kind, "ga"); assert.strictEqual(by.Deck.seats, 0); assert.ok(Math.abs(by.Deck.depth - 6) < 0.5, String(by.Deck.depth));
+  assert.strictEqual(r.info.seats, by.Seated.seats, "only the seated stand has seats");
+  assert.ok(r.info.skipped.some((t) => /Old club: hospitality/.test(t)) && r.info.skipped.some((t) => /In a hotel: hospitality/.test(t)));
+  assert.strictEqual(r.footprints.length, 3);
+  // a mapped outline with a listed stand 15 m beside it: merged into it by default, its own with `apart`
+  const sc = (apart) => ({ areas: [], lines: [], buildings: [{ kind: "grandstand", name: "Traced", standOf: "Traced", h: 12, min: 0, pts: box(-40, 20, 40, 45) }],
+    stands: { list: [{ n: "Traced", osmAt: [0, 30] }, { n: "Beside", a: [55, 20], b: [115, 20], side: "R", rows: 12, ...(apart ? { apart: 1 } : {}) }] } });
+  const merged = buildStands({ scene: sc(false), gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
+  const own = buildStands({ scene: sc(true), gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
+  assert.ok(merged.info.skipped.some((t) => /Beside: built as the map outline/.test(t)));
+  assert.deepStrictEqual(own.info.list.map((s) => s.n).sort(), ["Beside", "Traced"]);
+});

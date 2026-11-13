@@ -592,7 +592,8 @@ function aeroZones() {
 }
 // A car's wing pose at t: { open 0..1, measured | estimated, why }
 let devAeroHold = null;
-let devNoModels = false;   // development (Map3D.tune({ models: false })): a world built after this is built without model files (a session reloaded on the same circuit keeps its world)
+let devYear = null;   // development (Map3D.tune({ year })): worlds built from now on take this season's stands and facilities (a season whose sessions are not there yet)
+let devNoModels = false;   // development (Map3D.tune({ models: false })): a world built after this is built without model files (a session reloaded on the same circuit keeps its world: change a map setting to rebuild)
 // what every car's pose needs from the session, worked out once a frame (the setting, the venue's zones, lights out, race
 // control's word) – not per car: the setting is read from storage and the start found in the event list
 const AERO_CTX = { src: null, t: NaN, nMsg: -1, allowed: false, Z: null, t0: null, mode: "normal", isRace: false };
@@ -3193,7 +3194,7 @@ async function loadGeo(w) {
     if (job !== geoJob || world !== w) return;
     const corners = (circ?.corners || []).map((k) => ({ n: k.n, x: k.x * DM - w.center.x, z: -(k.y * DM - w.center.z) }));
     const built = await buildScenery(window.api, data, w, { provider, buildings: opts.buildings, trees: opts.trees, night: evening, street: w.street, trackW: w.width, corners, groundOld: devGroundOld, roadJoin: devRoadJoin,
-      facilities: opts.facilities, models: !devNoModels, year: A.sessionYear?.() || null, venue: venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
+      facilities: opts.facilities, models: !devNoModels, year: devYear || A.sessionYear?.() || null, venue: venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() }), isCurrent: () => job === geoJob && world === w }, (step) => job === geoJob && geoStatus(`실제 지도 · ${step}…`));
     if (job !== geoJob || world !== w) { disposeReal(built); return; }
     // swap the generic surroundings for the real ones
     w.group.remove(w.syn.terrain, w.syn.trees);
@@ -5880,6 +5881,7 @@ window.Map3D = {
     if ("carNear" in o) for (const c of cars.values()) c.model.userData.near.visible = o.carNear;
     if ("carMaps" in o) for (const c of cars.values()) c.model.traverse((m) => { const x = m.material; if (!x?.isMeshStandardMaterial) return; if (!o.carMaps) { x.userData.devMaps ??= [x.normalMap, x.roughnessMap]; x.normalMap = null; x.roughnessMap = null; } else if (x.userData.devMaps) { [x.normalMap, x.roughnessMap] = x.userData.devMaps; } x.needsUpdate = true; });
     if ("models" in o) devNoModels = !o.models;   // (for worlds built from now on)
+    if ("year" in o) devYear = o.year || null;
     if ("ratio" in o) { perf.lockRatio = o.ratio; renderer.setPixelRatio(o.ratio); resize(); }
     if ("cap" in o) perf.cap = o.cap;
     if (o.hide) for (const [n, v] of Object.entries(o.hide)) { if (n === "cars") { for (const c of cars.values()) c.model.visible = !v; continue; } if (n === "road") { for (const m of [world.road, world.kerb, world.lines]) m.visible = !v; continue; } world.group.traverse((x) => { if (x.name === n) x.visible = !v; }); }
