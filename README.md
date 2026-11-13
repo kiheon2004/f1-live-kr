@@ -60,7 +60,7 @@ Claude Code와 회차별로 증상 재현 → 원인 찾기 → 보정 및 수�
 
 > 2026 Miami pit entry: a 35–50 m leap of the feed … the curve ran 1.9 m back at 60 km/h and the velocity's heading turned 180° (8 cars). … test/yaw53.test.js (fails on the old code).
 
-## 검증 (v0.53–v0.55)
+## 검증 (v0.53–v0.56)
 
 자동 측정 기록이며, 화면 확인은 따로 했습니다. 측정 조건과 근거는 [docs/VERIFICATION.md](docs/VERIFICATION.md)에 있습니다.
 
@@ -70,7 +70,7 @@ Claude Code와 회차별로 증상 재현 → 원인 찾기 → 보정 및 수�
 | 게임 차의 한 걸음 옆 이동(1 m 이상) | 614 → 0회 | v0.54 대 v0.55, AI 6경기 |
 | 온보드 차체가 도로 아래로 가라앉음 | 10배속 최대 5.1–10.1 m → 2.7 cm 이하 | 10초 기록, 수정 전후 각각 실행 |
 | 게임 뒷바퀴 미끄러짐 각 | p95 12.4° → 1.4° | 2025 헝가리 게임, 수정 전후 각각 실행 |
-| 자동 테스트 | 1000/1000 통과 | 태그 소스 압축본에서 다시 실행(2026-11-11) |
+| 자동 테스트 | 1004/1004 통과 | 출시 브랜치에서 실행(2026-11-13) |
 
 ## 효과적이었던 점
 
