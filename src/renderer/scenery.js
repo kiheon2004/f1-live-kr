@@ -15,7 +15,7 @@ import { buildingsMesh } from "./buildings.js";
 import { vegGeometries, speciesMix, speciesAt, standHeight, treeTint, treeMaterial, nearTreeLayer } from "./vegetation.js";
 import { padPlan, polyDist } from "./footing.js";
 import { buildLandmarks } from "./landmarks.js";
-import { buildFacilities, combine, genericPitSpec, FACILITIES } from "./facilities.js";
+import { buildFacilities, combine, genericPitSpec, FACILITIES, modelAt } from "./facilities.js";
 import { START_DATA } from "./startdata.js";
 import { PIT_BOXES, STANDINGS, teamKey } from "./pitorder.js";
 import { layoutFor } from "./garageplans.js";
@@ -927,7 +927,28 @@ async function buildReal(api, scene, world, opts, onStep, own) {
       return best <= max ? best : Infinity;
     };
     const fac = await buildFacilities({ scene, gf, groundAt, surfaceAt, trackEdge, barrierRay, location: scene.location, venue: opts.venue, year: opts.year, toTrack, alongTrack, trial: opts.facilities !== false, registry: generic ? [...FACILITIES, generic] : FACILITIES, bays,
-      readModel: api.geo.model ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
+      readModel: api.geo.model && opts.models !== false ? (f) => api.geo.model(f) : null, isCurrent: opts.isCurrent || (() => true) });
+    // A listed grandstand with a model of its own (grandstands.json `model` – a stand made to its real shape): the model
+    // takes the built stand's place once it has loaded; a file that is missing or does not load leaves the built stand.
+    // Where: along the stand's front line, its middle at the line's middle; across, the model's front wall
+    // (model.frontAt m from its origin, towards the track) either on the built stand's front line or – frontFromEdge –
+    // that many metres from the track's edge (a stand whose map outline is not its real front).
+    if (stands?.swaps?.length && api.geo.model && opts.models !== false) {
+      for (const sw of stands.swaps) {
+        try {
+          const M = sw.model; let back = 0;
+          if (Number.isFinite(M.frontFromEdge)) {
+            let best = null, bd = Infinity; for (const q of world.samples) { const d = Math.hypot(q.p.x - sw.x, q.p.z - sw.z); if (d < bd) { bd = d; best = q; } }
+            if (best) { const lat = (sw.x - best.p.x) * best.nor.x + (sw.z - best.p.z) * best.nor.z, half = lat > 0 ? (best.L ?? 7) : -(best.R ?? -7); back = M.frontFromEdge - (Math.abs(lat) - half); }
+          }
+          const off = (M.frontAt || 0) + back, at = { x: sw.x + sw.n[0] * off, z: sw.z + sw.n[1] * off, y: sw.y + (M.lift || 0), dir: [-sw.n[0], -sw.n[1]] };
+          const obj = await modelAt(M.file, (f) => api.geo.model(f), at);
+          if (opts.isCurrent && !opts.isCurrent()) { obj.userData.onDispose?.(); break; }   // (this build's world is gone)
+          obj.name = "standModel:" + sw.name; stands.group.add(obj); sw.replace();
+          (stands.info.models ||= []).push({ n: sw.name, file: M.file, back: +back.toFixed(1), at: [+at.x.toFixed(1), +at.y.toFixed(1), +at.z.toFixed(1)] });
+        } catch (e) { (stands.info.models ||= []).push({ n: sw.name, file: sw.model.file, error: String(e.message || e).slice(0, 160) }); }
+      }
+    }
     // (null: this build's world is gone – its facility models were freed; loadGeo frees the rest of the build)
     // The terrain under the pit building's garages and its pit lane laid under their floor: the elevation grid (~10 m
     // cells) knows nothing of a level pit complex cut into a slope, and where the ground rises behind the lane (Monaco:

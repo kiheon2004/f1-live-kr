@@ -308,7 +308,9 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // (roof and permanence: the listed stand's where it says – for its traced outline or its map outline –, else a guess)
     const lst = b.standOf ? listedBy.get(b.standOf) : null, rf = b.standRoof ?? lst?.roof, pm = b.standPerm ?? lst?.perm;
     const roofOf = rf != null ? (rf === "upper" ? "upper" : !!rf) : b.traced ? false : depth > 14 && area > 1500, permOf = pm != null ? !!pm : true;
-    const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s };
+    // (model: the listed stand's own model file, if it has one – it is still built here as every stand, apart from the
+    // others' shared mesh, so the model can take its place once it has loaded; see `swaps` below)
+    const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s, model: lst?.model && !(lst.model.from && year && year < lst.model.from) ? lst.model : null };
     // (a curved outline follows the track; the data can say so (curve) or keep a traced one a box (box) – Montréal's
     // 34, between the hairpin's two legs, came out twisted round the curved route)
     if (lst?.box ? false : lst?.curve || (area / (len * depth) < 0.72 && len > 30)) {
@@ -546,8 +548,12 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
   let seatTotal = 0;
   const report = [];
+  // A stand with a model of its own (grandstands.json `model`): where its part of the shared buffers and seat groups
+  // begins and ends, so it becomes meshes of its own that the model can replace.
+  const swapMarks = [];
   for (const st of alive) {
     const F = st.front, rows = st.rows, rise = st.rise;
+    const mark = st.model ? { st, p0: pos.length, s0: spos.length, g0: seatGroups.length } : null;
     const seed = hash(st.name || `${F[0].x | 0},${F[0].z | 0}`), rr = rand(seed);
     const seatC = C(SEAT_COLOURS[seed % SEAT_COLOURS.length]);
     const concrete = st.perm ? C("#bdb9b1") : C("#9aa0a6"), tread = st.perm ? C("#c9c5bd") : C("#8d949b");
@@ -669,6 +675,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     flush();
     seatTotal += nSeats;
     const mi = Math.floor(F.length / 2);
+    if (mark) swapMarks.push({ ...mark, p1: pos.length, s1: spos.length, g1: seatGroups.length, gy: gy.reduce((a, v) => a + v, 0) / gy.length });
     report.push({ n: st.name, kind: st.kind, rows, max: st.maxRows, seats: nSeats, len: Math.round(len), roof: st.roof || false, depth: +depth.toFixed(1),
       outline: [...F.map((p) => [+p.x.toFixed(1), +p.z.toFixed(1)]), ...F.slice().reverse().map((p) => [+(p.x + p.nx * depth).toFixed(1), +(p.z + p.nz * depth).toFixed(1)])].filter((_, i, a) => a.length < 40 || i % Math.ceil(a.length / 40) === 0),
       c: [+F[mi].x.toFixed(1), +(gy[mi] + FRONT_H).toFixed(1), +F[mi].z.toFixed(1)], nrm: [+F[mi].nx.toFixed(3), +F[mi].nz.toFixed(3)] });
@@ -676,20 +683,38 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
 
   const group = new THREE.Group();
   group.name = "grandstands";
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-  g.setAttribute("seatTint", new THREE.Float32BufferAttribute(tint, 4));
-  g.computeBoundingSphere();
-  const structure = new THREE.Mesh(g, standMaterial({ side: THREE.DoubleSide }));
+  // (the stands with a model of their own cut out of the shared buffers: [from, to) in vertices × 3)
+  const cut = (arr, per, ranges, inside) => {
+    const out = []; let at = 0;
+    for (const [a, b] of ranges) { if (!inside) for (let i = (at / 3) * per; i < (a / 3) * per; i++) out.push(arr[i]); else for (let i = (a / 3) * per; i < (b / 3) * per; i++) out.push(arr[i]); at = b; }
+    if (!inside) for (let i = (at / 3) * per; i < arr.length; i++) out.push(arr[i]);
+    return out;
+  };
+  const standGeo = (ranges, inside) => {
+    const g = new THREE.BufferGeometry(), all = !ranges.length;
+    g.setAttribute("position", new THREE.Float32BufferAttribute(all ? pos : cut(pos, 3, ranges, inside), 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(all ? nor : cut(nor, 3, ranges, inside), 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(all ? col : cut(col, 3, ranges, inside), 3));
+    g.setAttribute("seatTint", new THREE.Float32BufferAttribute(all ? tint : cut(tint, 4, ranges, inside), 4));
+    g.computeBoundingSphere();
+    return g;
+  };
+  const structure = new THREE.Mesh(standGeo(swapMarks.map((m) => [m.p0, m.p1]), false), standMaterial({ side: THREE.DoubleSide }));
   structure.castShadow = true; structure.receiveShadow = true;
   group.add(structure);
+  const swapParts = swapMarks.map((m) => {
+    const own = new THREE.Mesh(standGeo([[m.p0, m.p1]], true), structure.material);
+    own.castShadow = true; own.receiveShadow = true; own.name = "stand:" + (m.st.name || ""); group.add(own);
+    return [own];
+  });
+  const sRanges = swapMarks.map((m) => [m.s0, m.s1]).filter(([a, b]) => b > a);
   if (spos.length) {
     const sg = new THREE.BufferGeometry();
-    sg.setAttribute("position", new THREE.Float32BufferAttribute(spos, 3));
-    sg.setAttribute("normal", new THREE.Float32BufferAttribute(snor, 3));
-    sg.setAttribute("uv", new THREE.Float32BufferAttribute(suv, 2));
+    // (a stand with a model of its own has no scaffold left in the shared mesh: its own stays out – the model replaces a
+    // permanent building, and until it loads the stand shows without its scaffold lattice)
+    sg.setAttribute("position", new THREE.Float32BufferAttribute(sRanges.length ? cut(spos, 3, sRanges, false) : spos, 3));
+    sg.setAttribute("normal", new THREE.Float32BufferAttribute(sRanges.length ? cut(snor, 3, sRanges, false) : snor, 3));
+    sg.setAttribute("uv", new THREE.Float32BufferAttribute(sRanges.length ? cut(suv, 2, sRanges, false) : suv, 2));
     sg.computeBoundingSphere();
     const scaffold = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ color: 0x9aa1a8, map: latticeTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.5, metalness: 0.6 }));
     scaffold.castShadow = true; scaffold.receiveShadow = true;
@@ -697,8 +722,9 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   }
   const seatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.02 });
   const seats = new THREE.Group(); seats.name = "seats";
-  for (const s of seatGroups) {
+  seatGroups.forEach((s, gi) => {
     const im = new THREE.InstancedMesh(seatGeometry(), seatMat, s.m.length);
+    const sw = swapMarks.findIndex((m) => gi >= m.g0 && gi < m.g1); if (sw >= 0) swapParts[sw].push(im);
     s.m.forEach((m, k) => { im.setMatrixAt(k, m); im.setColorAt(k, s.c[k]); });
     im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true;
     im.computeBoundingSphere();
@@ -706,21 +732,30 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     im.userData.centre = new THREE.Vector3(s.cx / s.m.length, s.cy / s.m.length, s.cz / s.m.length);
     im.visible = false;
     seats.add(im);
-  }
+  });
   group.add(seats);
+  // The stands a model can replace: where the stand is (its front line's middle in scene x, z; the ground there; the
+  // unit normal from the track into the stand; its length) and replace(): hides the built stand's own parts – they stay
+  // in the world (freed with it; the hidden structure still shades line-of-sight checks) – once the model stands.
+  const swaps = swapMarks.map((m, k) => {
+    const F = m.st.front, a = F[0], b = F[F.length - 1], mid = F[Math.floor(F.length / 2)];
+    let nx = 0, nz = 0; for (const p of F) { nx += p.nx; nz += p.nz; } const nl = Math.hypot(nx, nz) || 1;
+    return { name: m.st.name, model: m.st.model, x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, y: m.gy, n: [nx / nl, nz / nl], len: Math.hypot(b.x - a.x, b.z - a.z), mid: [mid.x, mid.z], replaced: false,
+      replace() { for (const o of swapParts[k]) { o.visible = false; o.userData.off = true; } this.replaced = true; } };
+  });
   // footprints, so trees and rocks keep off the stands and buildings don't stand in them
   const footprints = alive.map((st) => {
     const d = WALK + st.rows * ROW_D + 0.6;
     return st.front.map((p) => [p.x - p.nx * 0.5, p.z - p.nz * 0.5]).concat(st.front.slice().reverse().map((p) => [p.x + p.nx * d, p.z + p.nz * d]));
   });
   return {
-    group, footprints, structure, roofs,
+    group, footprints, structure, roofs, swaps,
     // per frame: seats only near the camera (beyond that the treads carry their colour)
     update(cam, near = SEATS_NEAR) {
       structure.material.userData.seatFar.set(near * 0.55, near * 1.05);
       for (const im of seats.children) {
         const c = im.userData.centre;
-        im.visible = Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) < near;
+        im.visible = !im.userData.off && Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) < near;
       }
     },
     info: { skipped, dropped, between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },

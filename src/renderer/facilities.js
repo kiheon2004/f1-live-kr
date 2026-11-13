@@ -178,11 +178,18 @@ export const FACILITIES = [
       plate: 0.9, overhang: { pit: 2.5, paddock: 1.2, end: 1.5 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#dfe2e4", fascia: "fasciaWhite",
     },
+    // the storeys over the garages as a model of their own (made for this app from the published figures and the
+    // builder's photos compared by eye – f1kr-work/carpilot/venue, 2026-11-12; nothing copied): 345 × 26 m, the real
+    // building's published length, on the garages this entry's builder lays along the map's (older, 311.5 m) outline –
+    // the model's ends and back reach past them over plain ground-floor walls. garageTop: the height in the model of
+    // the first slab's underside; front: its garage front, metres from the origin towards the track.
+    upper: { file: "hun_pit_upper.glb", garageTop: 5.0, front: 13, length: 345, depth: 26 },
     sources: [
       "https://www.dvmgroup.com/en/references/projects/hungaroring – 'Hungaroring Renewal (Paddock and Main Grandstand)': paddock 25,000 m², more than 340 m, five storeys, pit boxes and technical garages; handed over June 2025; DVM Group Kft. and S.A.M.O. Építésziroda Kft.",
       "Photos on that page ('Photos: Hungaroring Media', © 2026 DVM, all rights reserved) – compared only, nothing shipped",
+      "src/data/models/hun_pit_upper.glb – the upper storeys, made for this app (2026-11-12) from the figures above and those photos compared by eye: no outside asset, no logo or lettering",
     ],
-    checked: "2026-10-14: trial (length, floors and use published; height, band depth and garage pitch estimated from photos)",
+    checked: "2026-10-14: trial (length, floors and use published; height, band depth and garage pitch estimated from photos); 2026-11-13: the upper storeys from the model file (v0.56)",
     evidence: {
       confirmed: ["five storeys, more than 340 m, 25,000 m², pit boxes and technical garages; handed over June 2025 (DVM Group)"],
       photo: ["~19 m to the roof; the cantilevered white band over the garages; the set-back upper floor; the garages' pitch ~10 m (estimates)"],
@@ -1371,6 +1378,60 @@ function holdModel(file, read) {
   let held = true;
   return { job: e.job, release() { if (!held) return; held = false; e.refs--; evictModels(); } };
 }
+// A pit building's upper storeys from a model file over the builder's own garage level (an entry's `upper`): the
+// garages, their insides, the pit wall and everything the pit stops use stay the builder's; the model stands on them.
+// The model's axes: +Z into the building from the garage fronts (the paddock side), +X along the building, the origin on
+// the ground at its plan's middle. Where: its garage front (upper.front m towards the track from the origin) on the
+// built garages' front line; along, its middle at the built footprint's middle; its first slab's underside
+// (upper.garageTop) on the garages' top – tilted along the building as the garages' floors rise or fall (a straight
+// fit: the builder's floor follows the ground, a model is rigid). What the model covers beyond the built garage level –
+// its ends, its back – gets plain ground-floor walls.
+export function addUpper(g, r, root, U) {
+  const G = r.garages, S = G?.slots || [];
+  if (S.length < 2) throw new Error("upper model: no garages to stand on");
+  const iw = S[0].inward, yaw = Math.atan2(iw[0], iw[1]), ax = [iw[1], -iw[0]];
+  const sOf = ([x, z]) => x * ax[0] + z * ax[1], dOf = ([x, z]) => x * iw[0] + z * iw[1];
+  let s0 = Infinity, s1 = -Infinity, dBack = -Infinity; for (const q of r.footprint) { const sv = sOf(q); s0 = Math.min(s0, sv); s1 = Math.max(s1, sv); dBack = Math.max(dBack, dOf(q)); }
+  const sc = (s0 + s1) / 2, f0 = S[Math.floor(S.length / 2)].front, dFront = dOf(f0);
+  // (the floors along the building: a least-squares line through the garages' floors)
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (const sl of S) { const x = sOf(sl.front) - sc; n++; sx += x; sy += sl.floor; sxx += x * x; sxy += x * sl.floor; }
+  const m = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1), a = (sy - m * sx) / n;
+  const ox = f0[0] + ax[0] * (sc - sOf(f0)) + iw[0] * U.front, oz = f0[1] + ax[1] * (sc - sOf(f0)) + iw[1] * U.front, oy = a + G.top - U.garageTop;
+  const holder = new THREE.Group(), tilt = new THREE.Group();
+  holder.position.set(ox, oy, oz); holder.rotation.y = yaw; tilt.rotation.z = Math.atan(m); holder.add(tilt); tilt.add(root.clone(true));
+  // the ground floor the model stands over where the builder built none (model axes)
+  const HL = U.length / 2, HD = U.depth / 2, xs = [s0 - sc, s1 - sc];
+  for (const sl of S) { const x = sOf(sl.front) - sc; xs[0] = Math.min(xs[0], x - sl.width / 2); xs[1] = Math.max(xs[1], x + sl.width / 2); }
+  const zb = dBack - dFront - U.front, boxes = [];
+  if (HD - zb > 0.3) boxes.push([xs[0], xs[1], zb - 0.05, HD]);
+  if (xs[0] + HL > 0.3) boxes.push([-HL, xs[0], -HD, HD]);
+  if (HL - xs[1] > 0.3) boxes.push([xs[1], HL, -HD, HD]);
+  if (boxes.length) {
+    const wall = new THREE.MeshStandardMaterial({ color: 0x3b3f45, roughness: 0.85, metalness: 0.05 }), y0 = -3, y1 = U.garageTop;
+    for (const [xa, xb, za, zc] of boxes) { const bx = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, y1 - y0, zc - za), wall); bx.position.set((xa + xb) / 2, (y0 + y1) / 2, (za + zc) / 2); bx.name = "upperFill"; tilt.add(bx); }
+  }
+  holder.updateMatrixWorld(true);
+  holder.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  holder.name = "upperModel"; g.add(holder);
+  const corner = (x, z) => [ox + ax[0] * x + iw[0] * z, oz + ax[1] * x + iw[1] * z];
+  const box = new THREE.Box3().setFromObject(holder);
+  return { footprint: [corner(-HL, -HD), corner(HL, -HD), corner(HL, HD), corner(-HL, HD)], top: box.max.y, info: { upper: U.file, upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] } };
+}
+// A model file stood at a place given in scene coordinates (a listed grandstand's own model – stands.js `swaps`): the
+// model's origin at (x, y, z), its +Z turned to the scene direction dir ([dx, dz]). Held as the facilities' models are
+// (the same cache); given back when its world is disposed (dispose.js onDispose).
+export async function modelAt(file, read, at) {
+  const hold = holdModel(file, read);
+  try {
+    const root = await hold.job, holder = new THREE.Group();
+    holder.add(root.clone(true));
+    holder.position.set(at.x, at.y, at.z); holder.rotation.y = Math.atan2(at.dir[0], at.dir[1]);
+    holder.updateMatrixWorld(true);
+    holder.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    holder.userData.onDispose = () => hold.release();
+    return holder;
+  } catch (e) { hold.release(); throw e; }
+}
 function markShared(root) {
   root.traverse((o) => {
     if (o.geometry) o.geometry.userData.shared = true;
@@ -1635,6 +1696,13 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     if (year && spec.years && (year < spec.years[0] || (spec.years[1] != null && year > spec.years[1]))) { info.push({ id: spec.id, how: "skipped", reason: "year" }); continue; }
     if (spec.status !== "permanent" && !trial) { info.push({ id: spec.id, how: "off" }); continue; }
     let made = null, how = null, reason = null;
+    // (the upper storeys' own model over the builder's garages – `upper`: read first; without it the builder builds the
+    // whole building as before)
+    let upperRoot = null, upperHold = null;
+    if (spec.upper?.file && spec.builder && readModel) {
+      const hold = holdModel(spec.upper.file, readModel); own.holds.add(hold);
+      try { upperRoot = await hold.job; if (!isCurrent()) return null; upperHold = hold; } catch (e) { reason = e.message; own.holds.delete(hold); hold.release(); }
+    }
     // a model file first, the builder as its fallback
     if (spec.model?.file && readModel) {
       const hold = holdModel(spec.model.file, readModel);
@@ -1657,6 +1725,8 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         let params = spec.kind === "pit-building" && !spec.params?.pitWall ? { ...(spec.params || {}), pitWall: PLAIN_PIT_WALL, pitWallFrom: "estimate (plain wall)" } : spec.params || {};
         // (the FIA drawing's garages for this event, placed along the pit lane – garageplans.js: the pit building's bays)
         if (spec.kind === "pit-building" && bays?.list?.length) params = { ...params, bays };
+        // (under an upper model the builder stops at the garages' top: no storeys, balconies or eaves of its own)
+        if (upperRoot) params = { ...params, height: (GARAGE_TOP[params.facade?.pit] || 4.8) + 0.25, plate: 0.25, overhang: { pit: 0.05, paddock: 0.05, end: 0.05 }, balconies: [], roofRail: 0, tents: null };
         // (an entry with its own side of the lane – a venue's layout, genericPitSpec – builds its garages facing that way: the
         // nearest track is not always the lane's side – Monaco, the straight behind the garages had them face away from the
         // lane, every car 22 m in front of them and never "in box", v0.35)
@@ -1664,7 +1734,13 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         const g = new THREE.Group(); for (const m of r.meshes) g.add(m);
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
         made = { object: g, footprint: r.footprint, occupancy: r.occupancy, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
+        if (upperRoot) {
+          const up = addUpper(g, r, upperRoot, spec.upper);
+          made.footprint = up.footprint; made.top = up.top; made.info = { ...made.info, ...up.info }; how = "builder+model";
+          own.holds.delete(upperHold); const hold = upperHold; upperHold = null; g.userData.onDispose = () => hold.release();
+        }
       } catch (e) { reason = (reason ? reason + "; " : "") + e.message; }
+      if (upperHold) { own.holds.delete(upperHold); upperHold.release(); upperHold = null; }   // (not used after all)
     }
     if (!made) { info.push({ id: spec.id, how: "fallback", reason, ...(spec.found ? { found: spec.found } : {}) }); continue; }   // the map's buildings stay
     made.object.name = spec.id; made.object.userData.facility = spec.id;
