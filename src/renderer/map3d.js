@@ -3381,7 +3381,8 @@ function applyLighting() {
   if (real) real.material.color.set(0xffffff);
   for (const bm of world.real?.group.getObjectByName("buildings")?.userData.materials || []) { bm.emissive.set(night ? 0xffffff : 0); bm.emissiveIntensity = night ? 1 : 0; }
   // landmarks with lights of their own (the Sphere's LEDs, the Flame Towers, W hotel's gridshell, lit glass)
-  world.real?.group.getObjectByName("landmarks")?.traverse((o) => { const m = o.material; if (m?.userData?.nightE) m.emissiveIntensity = m.userData.nightE[night ? 1 : 0]; });
+  // (the landmarks and facilities, and the grandstands' own models: lit parts by night only)
+  for (const part of ["landmarks", "grandstands"]) world.real?.group.getObjectByName(part)?.traverse((o) => { for (const m of [].concat(o.material || [])) if (m?.userData?.nightE) m.emissiveIntensity = m.userData.nightE[night ? 1 : 0]; });
   const sea = world.real?.group.getObjectByName("sea"), water = world.real?.group.getObjectByName("water");
   for (const w of [sea, water]) if (w) { w.material.emissive = new THREE.Color(night ? 0x02060a : 0); }
   world.far.material.color.copy(world.farBase).multiplyScalar(night ? 0.5 : 1);

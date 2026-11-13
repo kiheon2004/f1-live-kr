@@ -65,7 +65,8 @@ test("the shipped model files: listed, present, and passing the app's own model 
   const files = [];
   for (const c of Object.values(stands.circuits || stands)) for (const s of c?.stands || []) if (s.model) { assert.ok(s.model.file && Number.isFinite(s.model.frontAt), s.n); assert.ok(s.model.src, s.n + ": its source is recorded"); files.push(s.model.file); }
   for (const f of F.FACILITIES) if (f.upper) { assert.strictEqual(f.builder, "pitBuilding", f.id); for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(f.upper[k] > 0, f.id + " " + k); assert.ok(f.sources.some((x) => x.includes(f.upper.file)), f.id + ": the model's source is recorded"); files.push(f.upper.file); }
-  assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper.glb"));
+  for (const [key, u] of Object.entries(F.PIT_UPPERS)) { for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(u[k] > 0, key + " " + k); assert.ok(u.src && u.src.includes(u.file), key + ": the model's source is recorded"); files.push(u.file); }
+  assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper_v2.glb") && files.includes("lv_stand_c.glb") && files.includes("lv_pit_upper.glb"));
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });
@@ -89,4 +90,46 @@ test("upper storeys on the builder's garages: on their front line, their slab on
   const xs = up.footprint.map((p) => p[0]), zs = up.footprint.map((p) => p[1]);
   assert.ok(Math.abs(Math.min(...xs) + 70) < 1e-6 && Math.abs(Math.max(...xs) - 70) < 1e-6 && Math.abs(Math.min(...zs) - 10) < 1e-6 && Math.abs(Math.max(...zs) - 36) < 1e-6);
   assert.throws(() => F.addUpper(new THREE.Group(), { garages: { slots: [], top: 4.8 }, footprint: r.footprint }, root, { garageTop: 5, front: 13, length: 140, depth: 26 }), /no garages/);
+});
+
+// v0.57: Las Vegas – a stand built from its listed ends (or a curved outline) takes a model too; a pit building without
+// an entry of its own gets its upper storeys by venue; a model's "…_lit" materials glow at night only.
+test("a stand listed by its two ends takes a model as a mapped one does", async () => {
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const w = world(), groundAt = () => 0;
+  const sc = (model, year) => buildStands({ scene: { areas: [], lines: [], buildings: [], stands: { list: [{ n: "Ends", a: [-150, 20], b: [-60, 20], side: "R", rows: 10, ...(model ? { model } : {}) }, { n: "Other", a: [60, -20], b: [150, -20], side: "L", rows: 10 }] } }, gf, world: w, groundAt, corridor: corridor(w), street: false, year });
+  const r = sc({ file: "x.glb", from: 2025, frontAt: 10 }, 2026);
+  assert.deepStrictEqual(r.swaps.map((s) => s.name), ["Ends"]);
+  assert.ok(r.swaps[0].n[1] > 0.99 && r.swaps[0].z > 7, "on the cars' right running east: +z, its rows going back along +z");
+  assert.strictEqual(sc({ file: "x.glb", from: 2025, frontAt: 10 }, 2024).swaps.length, 0);
+  assert.strictEqual(sc(null, 2026).swaps.length, 0);
+});
+
+test("a model's lit parts: materials named …_lit are dark by day; at night 1, or a lamp's own strength above 1", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const F = await import("../src/renderer/facilities.js");
+  const mat = (name, extras = {}) => { const m = new THREE.MeshStandardMaterial({ emissive: 0xffffff }); m.name = name; Object.assign(m.userData, extras); return m; };
+  const glass = mat("lv_glass_lit", { nightStrength: 0.35 }), lamp = mat("lamp_lit"), strong = mat("flood_lit", { nightStrength: 6 }), wall = mat("wall");
+  const root = new THREE.Group(); for (const m of [glass, lamp, strong, wall]) root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), m));
+  F.nightParts(root);
+  assert.deepStrictEqual(glass.userData.nightE, [0, 1], "a strength up to 1 is already in the file's emissive colour"); assert.strictEqual(glass.emissiveIntensity, 0);
+  assert.deepStrictEqual(strong.userData.nightE, [0, 6]);
+  assert.deepStrictEqual(lamp.userData.nightE, [0, 1]);
+  assert.strictEqual(wall.userData.nightE, undefined); assert.strictEqual(wall.emissiveIntensity, 1);
+});
+
+test("upper storeys with their own ground-floor ends (fill: false) get no fill walls; Las Vegas' are listed by venue from 2023", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const F = await import("../src/renderer/facilities.js");
+  const slots = []; for (let k = 0; k < 10; k++) slots.push({ front: [-45 + k * 10, 10], floor: 5, width: 10, inward: [0, 1], along: [1, 0] });
+  const r = { garages: { slots, top: 4.8 }, footprint: [[-50, 10], [50, 10], [50, 28], [-50, 28]] };
+  const root = new THREE.Group(); root.add(new THREE.Mesh(new THREE.BoxGeometry(140, 14, 26).translate(0, 13, 0), new THREE.MeshStandardMaterial()));
+  const g = new THREE.Group(); F.addUpper(g, r, root, { file: "t.glb", garageTop: 6, front: 13, length: 140, depth: 26, fill: false });
+  let fills = 0; g.traverse((o) => { if (o.name === "upperFill") fills++; });
+  assert.strictEqual(fills, 0);
+  assert.ok(Math.abs(g.getObjectByName("upperModel").position.y - (5 + 4.8 - 6)) < 1e-9, "lowered so its first slab sits on the garages' top");
+  const lv = F.PIT_UPPERS[152]; assert.strictEqual(lv.file, "lv_pit_upper.glb"); assert.strictEqual(lv.fill, false); assert.strictEqual(lv.from, 2023);
+  // (a terrace behind the body: the facility's footprint reaches as far back as the model – backTo)
+  const up = F.addUpper(new THREE.Group(), r, root, { file: "t.glb", garageTop: 4.8, front: 13, length: 140, depth: 26, backTo: 20, fill: false });
+  assert.ok(Math.abs(Math.max(...up.footprint.map((p) => p[1])) - (23 + 20)) < 1e-6);
 });

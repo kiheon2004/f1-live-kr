@@ -183,11 +183,13 @@ export const FACILITIES = [
     // building's published length, on the garages this entry's builder lays along the map's (older, 311.5 m) outline –
     // the model's ends and back reach past them over plain ground-floor walls. garageTop: the height in the model of
     // the first slab's underside; front: its garage front, metres from the origin towards the track.
-    upper: { file: "hun_pit_upper.glb", garageTop: 5.0, front: 13, length: 345, depth: 26 },
+    // (v0.57: the model's second version has the closed ground-floor walls – doors, windows – where the built garages end:
+    // its ends, 17.3 m each, and the strip behind them; no fill walls of the app's own any more)
+    upper: { file: "hun_pit_upper_v2.glb", garageTop: 5.0, front: 13, length: 345, depth: 26, fill: false },
     sources: [
       "https://www.dvmgroup.com/en/references/projects/hungaroring – 'Hungaroring Renewal (Paddock and Main Grandstand)': paddock 25,000 m², more than 340 m, five storeys, pit boxes and technical garages; handed over June 2025; DVM Group Kft. and S.A.M.O. Építésziroda Kft.",
       "Photos on that page ('Photos: Hungaroring Media', © 2026 DVM, all rights reserved) – compared only, nothing shipped",
-      "src/data/models/hun_pit_upper.glb – the upper storeys, made for this app (2026-11-12) from the figures above and those photos compared by eye: no outside asset, no logo or lettering",
+      "src/data/models/hun_pit_upper_v2.glb – the upper storeys and the ground floor's closed ends, made for this app (2026-11-12 / 13) from the figures above and those photos compared by eye: no outside asset, no logo or lettering",
     ],
     checked: "2026-10-14: trial (length, floors and use published; height, band depth and garage pitch estimated from photos); 2026-11-13: the upper storeys from the model file (v0.56)",
     evidence: {
@@ -1406,6 +1408,7 @@ export function addUpper(g, r, root, U) {
   if (HD - zb > 0.3) boxes.push([xs[0], xs[1], zb - 0.05, HD]);
   if (xs[0] + HL > 0.3) boxes.push([-HL, xs[0], -HD, HD]);
   if (HL - xs[1] > 0.3) boxes.push([xs[1], HL, -HD, HD]);
+  if (U.fill === false) boxes.length = 0;   // (the model has its own ground floor there)
   if (boxes.length) {
     const wall = new THREE.MeshStandardMaterial({ color: 0x3b3f45, roughness: 0.85, metalness: 0.05 }), y0 = -3, y1 = U.garageTop;
     for (const [xa, xb, za, zc] of boxes) { const bx = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, y1 - y0, zc - za), wall); bx.position.set((xa + xb) / 2, (y0 + y1) / 2, (za + zc) / 2); bx.name = "upperFill"; tilt.add(bx); }
@@ -1415,7 +1418,8 @@ export function addUpper(g, r, root, U) {
   holder.name = "upperModel"; g.add(holder);
   const corner = (x, z) => [ox + ax[0] * x + iw[0] * z, oz + ax[1] * x + iw[1] * z];
   const box = new THREE.Box3().setFromObject(holder);
-  return { footprint: [corner(-HL, -HD), corner(HL, -HD), corner(HL, HD), corner(-HL, HD)], top: box.max.y, info: { upper: U.file, upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] } };
+  const zBack = Number.isFinite(U.backTo) ? U.backTo : HD;
+  return { footprint: [corner(-HL, -HD), corner(HL, -HD), corner(HL, zBack), corner(-HL, zBack)], top: box.max.y, info: { upper: U.file, upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] } };
 }
 // A model file stood at a place given in scene coordinates (a listed grandstand's own model – stands.js `swaps`): the
 // model's origin at (x, y, z), its +Z turned to the scene direction dir ([dx, dz]). Held as the facilities' models are
@@ -1454,6 +1458,16 @@ async function parseModel(file, read) {
   let skinned = false; root.traverse((o) => { if (o.isSkinnedMesh) skinned = true; });
   if (skinned) { freeModel(root); throw new Error(`model ${file}: skinned model: static models only`); }
   markShared(root);
+  // (a model's lit parts – windows with light behind them, lamps, screens, seats in a stand's coloured light: materials
+  // named "…_lit" glow at night only, as the builders' own lit materials do (userData.nightE, switched in map3d
+  // applyLighting))
+  nightParts(root);
+  return root;
+}
+export function nightParts(root) {
+  // (the file's emissive colour is already multiplied by a strength up to 1 – the models' convention: only what is
+  // brighter than that, lamps, takes its extras.nightStrength; everything else is lit at 1)
+  root.traverse((o) => { for (const m of [].concat(o.material || [])) if (/_lit$/.test(m.name || "") && !m.userData.nightE) lit(m, 0, Math.max(1, Number.isFinite(m.userData.nightStrength) ? m.userData.nightStrength : 1)); });
   return root;
 }
 
@@ -1581,6 +1595,12 @@ export const PIT_LOOKS = {
   39: { heightOverMap: true, roofRail: 1.1, tents: { spacing: 11.5, peak: 3.8, lift: 1.4, cover: 0.86 },
     src: "Monza: 2 storeys + roof terrace (Il Giorno 2026-02-09), GP-weekend canopies on it (Commons photos) – heights estimated" },
 };
+// The upper storeys' own model for a venue whose pit building has no entry of its own (genericPitSpec) – as an entry's
+// `upper` (addUpper). fill: false – the model brings its own ground-floor ends (stair towers down to the ground).
+export const PIT_UPPERS = {
+  152: { file: "lv_pit_upper.glb", garageTop: 4.8, front: 16.6, length: 302.6, depth: 33.2, backTo: 22.2, fill: false, from: 2023,
+    src: "src/data/models/lv_pit_upper.glb – Las Vegas Grand Prix Plaza pit building, the storeys over the garages: made for this app (2026-11-13) from published figures (1,000 × 100 ft, four levels, the 28,000 sq ft roof screen) and Wikimedia Commons photos of the 2025 race compared by eye, sized to the building as this app builds it (302.6 × 33.2 m, 40 garages, their top at 4.8 m) with a terrace behind – no outside asset, no logo or lettering" },
+};
 export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, boxes = null, layout = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
   const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
@@ -1658,6 +1678,7 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       ...(venue && PIT_LOOKS[venue.key] ? { ...PIT_LOOKS[venue.key], lookFrom: PIT_LOOKS[venue.key].src } : {}),
     },
     ...(lay ? { layout: lay.src, toTrack } : {}),
+    ...(venue && PIT_UPPERS[venue.key] && !(year && PIT_UPPERS[venue.key].from && year < PIT_UPPERS[venue.key].from) ? { upper: PIT_UPPERS[venue.key] } : {}),
   };
 }
 // the nearest point of a path frame (its normal there)
