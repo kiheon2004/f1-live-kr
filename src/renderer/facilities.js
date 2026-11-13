@@ -1406,6 +1406,7 @@ export function addUpper(g, r, root, U) {
   if (HD - zb > 0.3) boxes.push([xs[0], xs[1], zb - 0.05, HD]);
   if (xs[0] + HL > 0.3) boxes.push([-HL, xs[0], -HD, HD]);
   if (HL - xs[1] > 0.3) boxes.push([xs[1], HL, -HD, HD]);
+  if (U.fill === false) boxes.length = 0;   // (the model has its own ground floor there)
   if (boxes.length) {
     const wall = new THREE.MeshStandardMaterial({ color: 0x3b3f45, roughness: 0.85, metalness: 0.05 }), y0 = -3, y1 = U.garageTop;
     for (const [xa, xb, za, zc] of boxes) { const bx = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, y1 - y0, zc - za), wall); bx.position.set((xa + xb) / 2, (y0 + y1) / 2, (za + zc) / 2); bx.name = "upperFill"; tilt.add(bx); }
@@ -1454,6 +1455,14 @@ async function parseModel(file, read) {
   let skinned = false; root.traverse((o) => { if (o.isSkinnedMesh) skinned = true; });
   if (skinned) { freeModel(root); throw new Error(`model ${file}: skinned model: static models only`); }
   markShared(root);
+  // (a model's lit parts – windows with light behind them, lamps, screens: materials named "…_lit" glow at night only,
+  // as the builders' own lit materials do (userData.nightE, switched in map3d applyLighting); extras.nightStrength, if
+  // the file gives one, is the night's emissive strength)
+  nightParts(root);
+  return root;
+}
+export function nightParts(root) {
+  root.traverse((o) => { for (const m of [].concat(o.material || [])) if (/_lit$/.test(m.name || "") && !m.userData.nightE) lit(m, 0, Number.isFinite(m.userData.nightStrength) ? m.userData.nightStrength : 1); });
   return root;
 }
 
@@ -1581,6 +1590,12 @@ export const PIT_LOOKS = {
   39: { heightOverMap: true, roofRail: 1.1, tents: { spacing: 11.5, peak: 3.8, lift: 1.4, cover: 0.86 },
     src: "Monza: 2 storeys + roof terrace (Il Giorno 2026-02-09), GP-weekend canopies on it (Commons photos) – heights estimated" },
 };
+// The upper storeys' own model for a venue whose pit building has no entry of its own (genericPitSpec) – as an entry's
+// `upper` (addUpper). fill: false – the model brings its own ground-floor ends (stair towers down to the ground).
+export const PIT_UPPERS = {
+  152: { file: "lv_pit_upper.glb", garageTop: 6.0, front: 15.25, length: 305, depth: 30.5, fill: false, from: 2023,
+    src: "src/data/models/lv_pit_upper.glb – Las Vegas Grand Prix Plaza pit building, the storeys over the garages: made for this app (2026-11-13) from published figures (1,000 × 100 ft, four levels, the 28,000 sq ft roof screen) and Wikimedia Commons photos of the 2025 race compared by eye – no outside asset, no logo or lettering" },
+};
 export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, trackEdge = null, boxes = null, layout = null, registry = FACILITIES }) {
   if (!pit?.path?.length) return null;
   const yearOk = (s) => !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])));
@@ -1658,6 +1673,7 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       ...(venue && PIT_LOOKS[venue.key] ? { ...PIT_LOOKS[venue.key], lookFrom: PIT_LOOKS[venue.key].src } : {}),
     },
     ...(lay ? { layout: lay.src, toTrack } : {}),
+    ...(venue && PIT_UPPERS[venue.key] && !(year && PIT_UPPERS[venue.key].from && year < PIT_UPPERS[venue.key].from) ? { upper: PIT_UPPERS[venue.key] } : {}),
   };
 }
 // the nearest point of a path frame (its normal there)

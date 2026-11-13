@@ -13,6 +13,8 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 - A listed grandstand's own model: `"model": { "file", "from", "frontAt", "frontFromEdge" }` on its entry in
   `src/data/grandstands.json` (model axes: +Z towards the track, origin on the ground at the plan's middle).
 - Record each file's source and licence in the entry (`sources` / `src`) and below.
+- A venue without a pit building entry of its own: `PIT_UPPERS[venue key]` in facilities.js.
+- Materials named `…_lit` glow at night only (`extras.nightStrength` = the night's emissive strength).
 - A model that is missing or fails to load leaves what the app builds itself in place.
 
 ## Files
@@ -21,3 +23,5 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 |---|---|---|
 | `hun_stand_b.glb` (3.0 MB, 70,508 triangles) | Hungaroring main grandstand (2025) | made for this app, 2026-11-12: published figures (10,296 seats, 9,600 m² roof) and the builder's published photos compared by eye – nothing copied, no outside asset, no logo or lettering |
 | `hun_pit_upper.glb` (0.4 MB, 8,936 triangles) | Hungaroring paddock building (2025), the storeys over the garages | the same |
+| `lv_stand_c.glb` (3.7 MB, 89,126 triangles) | Las Vegas main grandstand (2025) with its lighting truss | made for this app, 2026-11-13: published figures (1,066 ft long, 78 ft high) and Wikimedia Commons photos of the 2025 race compared by eye – nothing copied, no outside asset, no logo or lettering |
+| `lv_pit_upper.glb` (0.1 MB, 2,552 triangles) | Las Vegas Grand Prix Plaza pit building, the storeys over the garages | the same (1,000 × 100 ft, four levels, the roof screen) |

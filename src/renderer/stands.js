@@ -406,7 +406,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // outline itself, Sepang's K1 530 m for 170 (over 0.6 of its perimeter; Yas Marina's U round the hairpin is not): then
     // it's built as its box)
     if (L.maxLen && L.fallback) { let fl = 0; for (let i = 1; i < front.length; i++) fl += Math.hypot(front[i].x - front[i - 1].x, front[i].z - front[i - 1].z); if (fl > L.maxLen) { stands.push(L.fallback); continue; } }
-    stands.push({ kind: "listed", name: L.n, traced: L.traced || (L.outline ? "map outline" : null), front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
+    stands.push({ kind: "listed", name: L.n, model: L.fallback ? L.fallback.model || null : L.model && !(L.model.from && year && year < L.model.from) ? L.model : null, traced: L.traced || (L.outline ? "map outline" : null), front, rows: L.rows || 20, rise: L.roof || L.perm ? 0.5 : 0.44, roof: L.roof === "upper" ? "upper" : !!L.roof, perm: L.perm != null ? !!L.perm : !!L.roof, own, s: sa, alt, curvedFrom: L.outline || null, fallback: L.fallback || null });
   }
   if (!stands.length) return null;
 
