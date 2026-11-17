@@ -66,7 +66,10 @@ test("the shipped model files: listed, present, and passing the app's own model 
   for (const c of Object.values(stands.circuits || stands)) for (const s of c?.stands || []) if (s.model) { assert.ok(s.model.file && Number.isFinite(s.model.frontAt), s.n); assert.ok(s.model.src, s.n + ": its source is recorded"); files.push(s.model.file); }
   for (const f of F.FACILITIES) if (f.upper) { assert.strictEqual(f.builder, "pitBuilding", f.id); for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(f.upper[k] > 0, f.id + " " + k); assert.ok(f.sources.some((x) => x.includes(f.upper.file)), f.id + ": the model's source is recorded"); files.push(f.upper.file); }
   for (const [key, u] of Object.entries(F.PIT_UPPERS)) { for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(u[k] > 0, key + " " + k); assert.ok(u.src && u.src.includes(u.file), key + ": the model's source is recorded"); files.push(u.file); }
+  // (a facility that is a model of its own – a tower, the team villas: v0.60)
+  for (const f of F.FACILITIES) if (f.model?.file) { assert.ok(f.sources.some((x) => x.includes(f.model.file)), f.id + ": the model's source is recorded"); files.push(f.model.file); }
   assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper_v2.glb") && files.includes("lv_stand_c.glb") && files.includes("lv_pit_upper.glb") && files.includes("lus_stand_c.glb") && files.includes("lus_pit_upper.glb"));
+  assert.ok(["yas_stand_c.glb", "yas_pit_upper.glb", "yas_tower.glb", "lus_villas.glb"].every((f) => files.includes(f)), "v0.60: Yas Marina and the Lusail villas");
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });
@@ -176,3 +179,4 @@ test("a hospitality building given by an outline: built from it, facing the trac
   assert.ok(Math.abs(club.c[2] - 30) < 1.2 && club.nrm[1] > 0.99, JSON.stringify([club.c, club.nrm]) + ": its front is the outline's side nearer the track (z = 30), the building behind it – where the outline is, not at the usual distance from the track");
   assert.ok(Math.min(...club.outline.map((q) => q[0])) < 42 && Math.max(...club.outline.map((q) => q[0])) > 93, "along the outline's whole length");
 });
+
