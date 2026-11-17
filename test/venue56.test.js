@@ -66,7 +66,7 @@ test("the shipped model files: listed, present, and passing the app's own model 
   for (const c of Object.values(stands.circuits || stands)) for (const s of c?.stands || []) if (s.model) { assert.ok(s.model.file && Number.isFinite(s.model.frontAt), s.n); assert.ok(s.model.src, s.n + ": its source is recorded"); files.push(s.model.file); }
   for (const f of F.FACILITIES) if (f.upper) { assert.strictEqual(f.builder, "pitBuilding", f.id); for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(f.upper[k] > 0, f.id + " " + k); assert.ok(f.sources.some((x) => x.includes(f.upper.file)), f.id + ": the model's source is recorded"); files.push(f.upper.file); }
   for (const [key, u] of Object.entries(F.PIT_UPPERS)) { for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(u[k] > 0, key + " " + k); assert.ok(u.src && u.src.includes(u.file), key + ": the model's source is recorded"); files.push(u.file); }
-  assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper_v2.glb") && files.includes("lv_stand_c.glb") && files.includes("lv_pit_upper.glb"));
+  assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper_v2.glb") && files.includes("lv_stand_c.glb") && files.includes("lv_pit_upper.glb") && files.includes("lus_stand_c.glb") && files.includes("lus_pit_upper.glb"));
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });
@@ -161,4 +161,18 @@ test("hospitality and standing entries: built only when asked, without seats; `a
   const own = buildStands({ scene: sc(true), gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
   assert.ok(merged.info.skipped.some((t) => /Beside: built as the map outline/.test(t)));
   assert.deepStrictEqual(own.info.list.map((s) => s.n).sort(), ["Beside", "Traced"]);
+});
+
+// v0.59: a hospitality entry given by its outline (a building on the map) – its long side nearer the track is its front
+test("a hospitality building given by an outline: built from it, facing the track, as deep as the outline", async () => {
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const w = world(), groundAt = () => 0;
+  const list = [{ n: "Seated", a: [-150, 20], b: [-60, 20], side: "R", rows: 10 }, { n: "Club", type: "hosp", poly: box(40, 30, 95, 56), levels: 2, build: 1 }];
+  const r = buildStands({ scene: { areas: [], lines: [], buildings: [], stands: { list } }, gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
+  const club = r.info.list.find((s) => s.n === "Club");
+  assert.ok(club, JSON.stringify(r.info.skipped));
+  assert.strictEqual(club.kind, "hosp"); assert.strictEqual(club.levels, 2);
+  assert.ok(Math.abs(club.len - 55) <= 2 && Math.abs(club.depth - 26) < 1.5, JSON.stringify([club.len, club.depth]) + " (the depth in whole rows of 0.8 m)");
+  assert.ok(Math.abs(club.c[2] - 30) < 1.2 && club.nrm[1] > 0.99, JSON.stringify([club.c, club.nrm]) + ": its front is the outline's side nearer the track (z = 30), the building behind it – where the outline is, not at the usual distance from the track");
+  assert.ok(Math.min(...club.outline.map((q) => q[0])) < 42 && Math.max(...club.outline.map((q) => q[0])) > 93, "along the outline's whole length");
 });

@@ -233,8 +233,11 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const skipped = [];   // (listed stands not built, and why)
   const dropped = [];   // (map outlines not built, and why)
   const inYear = (L) => !(L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1])));
-  const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && !NOT_BUILT.has(L.type))
-    .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced" }));
+  // (v0.59: an outline of a hospitality building or a standing area that asks to be built – `build`, not `existing` – is
+  // built where it stands, as deep as it is: a block or a deck instead of rows of seats)
+  const builds = (L) => (L.type === "hosp" || L.type === "ga") && !!L.build && !L.existing;
+  const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && (!NOT_BUILT.has(L.type) || builds(L)))
+    .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced", other: builds(L) ? L.type : null, levels: L.levels || 2 }));
   const seen = [], listedBy = new Map((scene.stands?.list || []).map((L) => [L.n, L]));
   // (largest first: an outline mostly inside one already taken – the west part of Spielberg's main stand mapped
   // again on its own, Shanghai's B2 twice – is that stand, not another one)
@@ -253,7 +256,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     if (b.kind !== "grandstand" || b.asPitBuilding || b.underTraced) continue;
     if (b.standOf && listedBy.get(b.standOf) && !inYear(listedBy.get(b.standOf))) { skipped.push(`${b.standOf}: not in ${year}`); continue; }
     const lt = b.standOf ? listedBy.get(b.standOf)?.type : null;
-    if (NOT_BUILT.has(lt)) { skipped.push(`${b.standOf}: ${NOT_BUILT.get(lt)}`); continue; }
+    if (NOT_BUILT.has(lt) && !b.other) { skipped.push(`${b.standOf}: ${NOT_BUILT.get(lt)}`); continue; }
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
     if (pts.length < 3) { drop(b, "outline under 3 points"); continue; }
@@ -310,10 +313,10 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const roofOf = rf != null ? (rf === "upper" ? "upper" : !!rf) : b.traced ? false : depth > 14 && area > 1500, permOf = pm != null ? !!pm : true;
     // (model: the listed stand's own model file, if it has one – it is still built here as every stand, apart from the
     // others' shared mesh, so the model can take its place once it has loaded; see `swaps` below)
-    const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s, model: lst?.model && !(lst.model.from && year && year < lst.model.from) ? lst.model : null };
+    const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, other: b.other || null, levels: b.levels || 2, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s, model: lst?.model && !(lst.model.from && year && year < lst.model.from) ? lst.model : null };
     // (a curved outline follows the track; the data can say so (curve) or keep a traced one a box (box) – Montréal's
     // 34, between the hairpin's two legs, came out twisted round the curved route)
-    if (lst?.box ? false : lst?.curve || (area / (len * depth) < 0.72 && len > 30)) {
+    if (b.other || lst?.box ? false : lst?.curve || (area / (len * depth) < 0.72 && len > 30)) {
       const ends = [0, 1].map((e) => pts.reduce((best, p) => { const a = (p[0] - o.c[0]) * du[0] + (p[1] - o.c[1]) * du[1]; return (e ? a > best[0] : a < best[0]) ? [a, p] : best; }, [e ? -Infinity : Infinity, null])[1]);
       let off = Infinity, side = 0;
       for (const [x, z] of pts) { const [q] = nearestSample(x, z); const l = lateral(q, x, z); side += Math.sign(l); off = Math.min(off, l > 0 ? l - (q.L ?? 7) : (q.R ?? -7) - l); }
@@ -333,11 +336,11 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const list = [];
   for (let L of scene.stands?.list || []) {
     if (!inYear(L)) { skipped.push(`${L.n}: not in ${year}`); continue; }
-    if (L.poly) continue;   // (built from its outline above)
     // (v0.58: a hospitality building or a standing area the entry asks for – `build` – is built: a plain glazed block of
     // `levels` storeys `depth` m deep, or a low deck; one inside an existing building – `existing` – and every entry
     // without `build` stay unbuilt as before)
     const other = (L.type === "hosp" || L.type === "ga") && L.build && !L.existing ? L.type : null;
+    if (L.poly) continue;   // (built from its outline above – a hospitality building or standing area that asks to be built too)
     if (NOT_BUILT.has(L.type) && !other) { skipped.push(`${L.n}: ${NOT_BUILT.get(L.type)}`); continue; }
     if (other) L = { ...L, other, rows: Math.max(2, Math.round(((L.depth || (other === "ga" ? 6 : 12)) - WALK) / ROW_D)), roof: 0, perm: 0 };
     if (L.at) {
@@ -492,7 +495,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // outlines mapped deeper than the circuit's seats allow (a stand drawn with its concourse) lose rows
     if (mapped > target * 1.1) {
       const f = (target * (listed.length ? 0.85 : 1)) / mapped;
-      for (const s of alive) if (s.kind === "mapped" && !s.traced) s.rows = Math.max(6, Math.round(s.rows * f));
+      for (const s of alive) if (s.kind === "mapped" && !s.traced && !s.other) s.rows = Math.max(6, Math.round(s.rows * f));
     }
     const mappedNow = alive.filter((s) => s.kind === "mapped" || s.traced).reduce((a, s) => a + seatsOf(s, s.rows), 0);
     let need = target - mappedNow;
@@ -509,7 +512,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // still short: mapped stands grow into the room behind them
     const total = () => alive.reduce((a, s) => a + seatsOf(s, s.rows), 0);
     const short = target - total();
-    const grow = alive.filter((s) => s.kind === "mapped" && s.rows < s.maxRows);
+    const grow = alive.filter((s) => s.kind === "mapped" && s.rows < s.maxRows && !s.other);
     const growSeats = grow.reduce((a, s) => a + seatsOf(s, s.rows), 0);
     if (short > target * 0.03 && growSeats) {
       const f = Math.min(1.6, 1 + short / growSeats);
