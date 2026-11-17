@@ -139,18 +139,42 @@ export const FACILITIES = [
       plate: 0.7, overhang: { pit: 1, paddock: 1, end: 1 },
       facade: { pit: "pitGlass", paddock: "yasPaddock" }, roofTop: "#c9c6bf", fascia: "fasciaWhite",
     },
+    // (v0.60: the storeys over the garages as a model of their own – 374 × 36 m, a 12 m block down to the ground at each
+    // end: no fill walls)
+    upper: { file: "yas_pit_upper.glb", garageTop: 4.8, front: 18, length: 374, depth: 36, fill: false },
     sources: [
+      "src/data/models/yas_pit_upper.glb – the storeys over the garages, made for this app (2026-11-17) from the figures below and the photos listed compared by eye: glazed floors over a canopy on the pit lane, an open terrace over the garages, stone-coloured walls, white peaked fabric canopies on the roof; no outside asset, no logo or lettering",
       "https://www.formula1.com/en/racing/2017/United_Arab_Emirates.html – 'the state-of-the-art pit building boasts 40 air-conditioned garages'",
       "https://en.wikipedia.org/wiki/Yas_Marina_Circuit – 'a team building behind the pit building, Media Center, Dragster Track and VIP Tower'",
       "https://www.cebarco.com.bh/project/yas-marina-circuit/ – pit building and paddock club, Tilke & Partners, December 2008",
       "Photos (for comparison only): Alexander Yee, Flickr 4531657341 / 4532275554 (CC BY-NC-ND 2.0, 2010); 'Asian Le Mans Series 2021 – Race 4 – Pitlane exit before start' (Wikimedia Commons, CC BY-SA 2.0)",
     ],
-    checked: "2026-10-09: trial (height and the roof canopies estimated from photos)",
+    checked: "2026-10-09: trial (height and the roof canopies estimated from photos); 2026-11-17: the upper storeys from the model file (v0.60)",
     evidence: {
       confirmed: ["40 air-conditioned garages (formula1.com)"],
       photo: ["~14 m to the roof; the roof canopies' size and spacing (2010 photos CC BY-NC-ND 2.0, compared only; 2021 photo CC BY-SA 2.0)"],
       map: ["the footprint: the pit building record at its position (375 × 30 m)"],
       inferred: [],
+    },
+  },
+  {
+    id: "yas-marina-tower", name: "Yas Marina Circuit – Shams control tower", kind: "tower",
+    venue: [70], loc: ["Yas Island", "Yas Marina", "Abu Dhabi"], years: [2009, null],
+    status: "trial",
+    // the map's "Control Tower" (man_made = tower, 33 × 24 m) – its record at this point
+    replaces: { near: [24.470409, 54.608769], within: 5 },
+    // a white octagonal shaft under a glazed disc (photos); 63 m to the top – estimated
+    model: { file: "yas_tower.glb", anchor: [24.470409, 54.608769], heading: 0 },
+    sources: [
+      "src/data/models/yas_tower.glb – made for this app (2026-11-17): a white octagonal shaft and a glazed disc, 63 m high (estimated), from Wikimedia Commons photos compared by eye; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building 'Control Tower' (man_made = tower) at its position",
+    ],
+    checked: "2026-11-17: trial (place from the map; the height and the disc's size estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the white shaft and the glazed disc (Wikimedia Commons, compared only)"],
+      map: ["the place: the map's 'Control Tower' building"],
+      inferred: ["the height (63 m)"],
     },
   },
   {
@@ -213,6 +237,9 @@ export const FACILITIES = [
       // cladding, white ceiling edges over the ground and first floors as horizontal bands, glass balustrades.
       // estimated (photos): ~15 m to the roof (ground floor and two upper levels), the bands' depth
       garages: 50, height: 15,
+      // (v0.60: the map's outline has a 14 m wide wing reaching 62 m back from the body's middle into the paddock – the
+      // team villas stand there, a model each (lusail-villas-*): the building no deeper than its body, 27.8 … 32.8 m)
+      maxDepth: 33,
       balconies: [{ y: 6.0, depth: 2.4, rail: true }, { y: 10.6, depth: 1.6, rail: true }],
       plate: 0.8, overhang: { pit: 1.6, paddock: 1.6, end: 1 },
       facade: { pit: "pitGlass", paddock: "yasPaddock" }, roofTop: "#d9d2c4", fascia: "fasciaWhite",
@@ -234,6 +261,28 @@ export const FACILITIES = [
       inferred: [],
     },
   },
+  // The team villas behind Lusail's pit building: sixteen in four groups of four (Tilke), the map's four unnamed buildings
+  // of about 71 × 25 m 14–18 m behind the pit building – the same model at each, its round fronts to the paddock street
+  // and the pit building (heading: the pit building's axis, 150.9°, turned to face it)
+  ...[[25.489684, 51.450264], [25.489069, 51.45064], [25.488325, 51.451118], [25.487689, 51.451501]].map((at, k) => ({
+    id: `lusail-villas-${k + 1}`, name: `Lusail International Circuit – team villas, group ${k + 1} of 4`, kind: "paddock",
+    venue: [150], loc: ["Lusail"], years: [2023, null],
+    status: "trial",
+    replaces: { near: at, within: 5 },
+    model: { file: "lus_villas.glb", anchor: at, heading: 240.9 },
+    sources: [
+      "src/data/models/lus_villas.glb – made for this app (2026-11-17): four villas with round fronts and a plain screen over the ground floor, two tree-shaped canopies in front, from Tilke's published text and photos compared by eye; no outside asset, no logo or lettering",
+      "https://tilke.de/portfolio/lusail-race-track-qatar/ – sixteen team hospitality villas in four groups, round fronts, LED screens, tree-shaped metal canopies",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the four unnamed buildings behind the pit building",
+    ],
+    checked: "2026-11-17: trial (places from the map; heights and the fronts' depth estimated)",
+    evidence: {
+      confirmed: ["sixteen villas in four groups (Tilke)"],
+      photo: ["round fronts, screens, tree-shaped canopies (Tilke's photos, compared only)"],
+      map: ["the four buildings' places and sizes"],
+      inferred: ["the height (9.5 m)"],
+    },
+  })),
   {
     id: "silverstone-wing", name: "Silverstone Wing", kind: "pit-building",
     venue: [2], loc: ["Silverstone"], years: [2011, null],
@@ -605,6 +654,8 @@ function pitBuilding(ctx, p) {
     spans.sort((a, b) => a[0] - b[0]);
     let cur = [...spans[0]], best = [...cur];
     for (const sp of spans.slice(1)) { if (sp[0] <= cur[1] + 1) { cur[1] = Math.max(cur[1], sp[1]); cur[2] = cur[2] || sp[2]; } else cur = [...sp]; if (cur[1] - cur[0] > best[1] - best[0]) best = [...cur]; }
+    // (p.maxDepth: no deeper than that from its pit-lane side – an outline drawn together with a wing behind it, Lusail)
+    if (p.maxDepth && best[1] - best[0] > p.maxDepth) { if (vTrack > 0) best[0] = best[1] - p.maxDepth; else best[1] = best[0] + p.maxDepth; }
     const t = tops.reduce((a, q) => (!a || q.h > a.h ? q : a), null);
     // the ground: the lowest of a few points across the span
     let g = Infinity; for (let k = 0; k <= 4; k++) { const [x, z] = P(s, best[0] + ((best[1] - best[0]) * k) / 4); g = Math.min(g, ctx.groundAt(x, z)); }

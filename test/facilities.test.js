@@ -506,3 +506,26 @@ test("generic pit building: the venue's researched height where the map gives no
   assert.ok(sh.params.heightFrom == null, "Shanghai: nothing found – the generic estimate");
   assert.strictEqual(F.genericPitSpec(args(22)).params.height, 11, "Monaco: its own layout");
 });
+
+// v0.60: a pit building whose map outline has a wing reaching back into the paddock (Lusail) is built no deeper than
+// maxDepth from its pit-lane side; the wing's place is left to the team villas (models of their own).
+test("pit builder: maxDepth cuts an outline's wing behind the body, measured from the pit-lane side", async () => {
+  const F = await load();
+  // the body 350 × 30 m (scene z −30 … 0, the pit lane towards −z), a 20 m wide wing reaching 60 m back (z 0 … 60)
+  const scene = { location: "Wing", buildings: [{ name: "Pits", kind: "block", cls: "yes", part: 0, est: 0, pts: rect(-175, 0, 175, 30), min: 0, h: 15 }, { name: "Pits", kind: "block", cls: "yes", part: 0, est: 0, pts: rect(-10, -60, 10, 0), min: 0, h: 15 }] };
+  const build = async (maxDepth) => {
+    const spec = { id: "wing-pits", loc: ["Wing"], status: "trial", replaces: { names: /^Pits$/ }, builder: "pitBuilding",
+      params: { garages: 35, height: 15, balconies: [], plate: 0.5, overhang: { pit: 1, paddock: 1, end: 1 }, facade: { pit: "pitGlass", paddock: "paddockPanels" }, ...(maxDepth ? { maxDepth } : {}) } };
+    const r = await F.buildFacilities({ scene, gf, groundAt: () => 0, location: "Wing", toTrack: () => [0, -1], alongTrack: () => [1, 0], registry: [spec] });
+    const zs = r.group.getObjectByName("wing-pits").userData.cover.pts.map((p) => p[1]);
+    return [Math.min(...zs), Math.max(...zs)];
+  };
+  const [w0, w1] = await build(null), [c0, c1] = await build(33);
+  assert.ok(Math.abs(w0 + 30) < 0.5 && w1 > 55, "without it: the wing is built " + JSON.stringify([w0, w1]));
+  assert.ok(Math.abs(c0 + 30) < 0.5 && Math.abs(c1 - 3) < 0.5, "with 33 m: front kept, back at 33 m from it " + JSON.stringify([c0, c1]));
+  const lus = F.FACILITIES.find((f) => f.id === "lusail-pit-building");
+  assert.strictEqual(lus.params.maxDepth, 33);
+  const villas = F.FACILITIES.filter((f) => /^lusail-villas-/.test(f.id));
+  assert.strictEqual(villas.length, 4); assert.ok(villas.every((v) => v.model.file === "lus_villas.glb" && v.replaces.within <= 5 && v.venue[0] === 150));
+  assert.strictEqual(F.FACILITIES.find((f) => f.id === "yas-marina-pits").upper.file, "yas_pit_upper.glb");
+});
