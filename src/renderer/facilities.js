@@ -217,7 +217,11 @@ export const FACILITIES = [
       plate: 0.8, overhang: { pit: 1.6, paddock: 1.6, end: 1 },
       facade: { pit: "pitGlass", paddock: "yasPaddock" }, roofTop: "#d9d2c4", fascia: "fasciaWhite",
     },
+    // (v0.59: the storeys over the garages as a model of their own – 402 × 27.6 m, the race control tower at its southern
+    // end and the Paddock Club's terrace at its northern one down to the ground: no fill walls)
+    upper: { file: "lus_pit_upper.glb", garageTop: 5.2, front: 13.8, length: 402, depth: 27.6, fill: false },
     sources: [
+      "src/data/models/lus_pit_upper.glb – the storeys over the garages, made for this app (2026-11-13) from the figures below and Tilke's published text and photos compared by eye: no outside asset, no logo or lettering",
       "https://tilke.de/portfolio/lusail-race-track-qatar/ – pit building 402 m (Guinness World Record), fifty team garages on the ground floor, race control tower at the southern end, Paddock Club at the northern end; white ceiling edges as horizontal bands; 2022–2023",
       "https://marhaba.qa/lusail-international-circuit-sets-new-guinness-world-records-for-longest-motorsport-pitlane-building/ – 402.1 m",
       "Photos on Tilke's page – compared only (no licence stated), nothing shipped",
