@@ -180,3 +180,32 @@ test("a hospitality building given by an outline: built from it, facing the trac
   assert.ok(Math.min(...club.outline.map((q) => q[0])) < 42 && Math.max(...club.outline.map((q) => q[0])) > 93, "along the outline's whole length");
 });
 
+
+// v0.61: a stand's own published seat count (its entry's `seats`) sets its rows; the circuit's total is shared among
+// the stands without one. One factor for every outline had halved the stands whose outlines match their seats.
+test("a stand's own seat count sets its rows, no deeper than its outline; the circuit's total goes to the others", async () => {
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const w = world(), groundAt = () => 0;
+  // "Deep": an outline 200 × 40 m (drawn with its concourse); "Fit": 80 × 18 m, its outline as deep as its seats
+  const sc = (deep, fit, total) => ({ areas: [], lines: [],
+    buildings: [{ kind: "grandstand", name: "Deep", standOf: "Deep", h: 14, min: 0, pts: box(-300, 20, -100, 60) }, { kind: "grandstand", name: "Fit", standOf: "Fit", h: 10, min: 0, pts: box(100, 20, 180, 38) }],
+    stands: { seats: total, list: [{ n: "Deep", osmAt: [-200, 40], ...(deep ? { seats: deep } : {}) }, { n: "Fit", osmAt: [140, 29], ...(fit ? { seats: fit } : {}) }] } });
+  const build = (deep, fit, total) => Object.fromEntries(buildStands({ scene: sc(deep, fit, total), gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 }).info.list.map((s) => [s.n, s]));
+  const full = build(0, 0, 0), perRowDeep = full.Deep.seats / full.Deep.rows, perRowFit = full.Fit.seats / full.Fit.rows;
+  // without counts: one factor – both lose the same share of their rows
+  const old = build(0, 0, Math.round((full.Deep.seats + full.Fit.seats) * 0.5));
+  assert.ok(old.Fit.rows < full.Fit.rows * 0.75 && old.Deep.rows < full.Deep.rows * 0.75, JSON.stringify([old.Deep.rows, old.Fit.rows, full.Deep.rows, full.Fit.rows]));
+  // with counts: Deep half its outline, Fit a little more than its outline holds (kept at the outline's depth)
+  const deepSeats = Math.round(perRowDeep * full.Deep.rows * 0.5), fitSeats = Math.round(perRowFit * (full.Fit.rows + 3));
+  const r = build(deepSeats, fitSeats, deepSeats + fitSeats);
+  assert.ok(Math.abs(r.Deep.rows - full.Deep.rows * 0.5) <= 1, `Deep ${r.Deep.rows} of ${full.Deep.rows}`);
+  assert.ok(Math.abs(r.Deep.seats - deepSeats) <= perRowDeep / 2 + 1, "its seats within half a row of the count");
+  assert.strictEqual(r.Fit.rows, full.Fit.rows, "no deeper than its outline");
+  assert.strictEqual(r.Deep.given, deepSeats);
+  // one stand with a count, the other without: the rest of the total is the other's
+  const mix = build(deepSeats, 0, deepSeats + Math.round(perRowFit * 10));
+  assert.ok(Math.abs(mix.Deep.rows - r.Deep.rows) <= 0 && Math.abs(mix.Fit.rows - 10) <= 1, JSON.stringify([mix.Deep.rows, mix.Fit.rows]));
+  // the shipped data: Sakhir's eight stands carry BIC's counts and they add up to the circuit's seats
+  const data = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Sakhir;
+  assert.strictEqual(data.stands.reduce((a, s) => a + (s.seats || 0), 0), data.seats); assert.strictEqual(data.seats, 34563);
+});
