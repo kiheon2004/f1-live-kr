@@ -236,8 +236,18 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // (v0.59: an outline of a hospitality building or a standing area that asks to be built – `build`, not `existing` – is
   // built where it stands, as deep as it is: a block or a deck instead of rows of seats)
   const builds = (L) => (L.type === "hosp" || L.type === "ga") && !!L.build && !L.existing;
-  const traced = (scene.stands?.list || []).filter((L) => L.poly && inYear(L) && (!NOT_BUILT.has(L.type) || builds(L)))
-    .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced", other: builds(L) ? L.type : null, levels: L.levels || 2 }));
+  // (v0.62: a standing area that is a grass hill – `shape: "mound"` on a `ga` outline that asks to be built, Yas Marina's
+  // Abu Dhabi Hill – is no deck and faces no one stretch of track: it is raised over its whole outline, see `mounds`)
+  const isMound = (L) => L.type === "ga" && builds(L) && L.shape === "mound" && L.poly?.length > 2;
+  const mounds = [];
+  for (const L of scene.stands?.list || []) {
+    if (!isMound(L) || !inYear(L)) continue;
+    const pts = corridor.clearPolygon(L.poly.map(gf.xz));
+    if (!pts || Math.abs(polyArea(pts)) < 200) { dropped.push(`${L.n}: ${pts ? "under 200 m²" : "on the track (can't be kept clear of it)"}`); continue; }
+    mounds.push({ name: L.n, pts, h: Math.max(1, Math.min(25, L.h || 6)) });
+  }
+  const traced = (scene.stands?.list || []).filter((L) => L.poly && !isMound(L) && inYear(L) && (!NOT_BUILT.has(L.type) || builds(L)))
+    .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced", other: builds(L) ? L.type : null, levels: L.levels || 2, shape: builds(L) && L.shape === "dome" ? "dome" : null, domeH: L.h || 0 }));
   const seen = [], listedBy = new Map((scene.stands?.list || []).map((L) => [L.n, L]));
   // (largest first: an outline mostly inside one already taken – the west part of Spielberg's main stand mapped
   // again on its own, Shanghai's B2 twice – is that stand, not another one)
@@ -313,7 +323,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const roofOf = rf != null ? (rf === "upper" ? "upper" : !!rf) : b.traced ? false : depth > 14 && area > 1500, permOf = pm != null ? !!pm : true;
     // (model: the listed stand's own model file, if it has one – it is still built here as every stand, apart from the
     // others' shared mesh, so the model can take its place once it has loaded; see `swaps` below)
-    const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, other: b.other || null, levels: b.levels || 2, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s, given: lst?.seats || 0, model: lst?.model && !(lst.model.from && year && year < lst.model.from) ? lst.model : null };
+    const boxStand = { kind: "mapped", name: b.name || null, standOf: b.standOf || null, other: b.other || null, levels: b.levels || 2, shape: b.shape || null, domeH: b.domeH || 0, traced: b.traced || null, front, rows, rise, maxRows: rows, roof: roofOf, perm: permOf, outline: pts, s, given: lst?.seats || 0, model: lst?.model && !(lst.model.from && year && year < lst.model.from) ? lst.model : null };
     // (a curved outline follows the track; the data can say so (curve) or keep a traced one a box (box) – Montréal's
     // 34, between the hairpin's two legs, came out twisted round the curved route)
     if (b.other || lst?.box ? false : lst?.curve || (area / (len * depth) < 0.72 && len > 30)) {
@@ -429,6 +439,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // is (growing into the room behind it to reach an estimated seat total made stands deeper than the real ones).
   for (const st of stands) if (st.kind === "mapped") st.maxRows = st.rows;
   for (const st of stands) if (st.kind === "mapped") polyBlocker(st.outline, "s");
+  for (const m of mounds) polyBlocker(m.pts, "s");
   const fitListed = (st) => {
     // how deep each column of the stand can go before it meets something (in rows; -1 = the front itself is blocked)
     const cap = st.perm ? 40 : 32;   // temporary stands rarely go past ~32 rows, permanent ones ~40
@@ -599,6 +610,32 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     const nA = Math.max(0, Math.floor(len / AISLE_EVERY));
     const aisles = Array.from({ length: nA }, (_, k) => (k + 0.5) / nA);
     const cum = [0]; for (let i = 1; i < F.length; i++) cum.push(cum[i - 1] + Math.hypot(F[i].x - F[i - 1].x, F[i].z - F[i - 1].z));
+    if (st.other && st.shape === "dome" && st.outline) {
+      // A dome (v0.62; `shape: "dome"` on a hospitality entry given by its outline – Sakhir's two): a white membrane cap
+      // over the outline's circle – its centre and mean radius –, `h` m high (not given: a third of its width), smooth
+      // from every side, on a low plinth that follows the ground. No storeys, no terrace, no seats. With a `model` of its
+      // own, that takes its place as a stand's does – its origin on the circle's centre.
+      const O = st.outline, cx = O.reduce((s, p) => s + p[0], 0) / O.length, cz = O.reduce((s, p) => s + p[1], 0) / O.length;
+      const rad = O.reduce((s, p) => s + Math.hypot(p[0] - cx, p[1] - cz), 0) / O.length, H = Math.min(rad, st.domeH || (rad * 2) / 3);
+      const R = (rad * rad + H * H) / (2 * H), top = Math.asin(Math.min(1, rad / R)), M = 32, N = 8, skin = C("#eef0f1"), foot = C("#b9bec3");
+      const g0 = Number.isFinite(groundAt(cx, cz)) ? groundAt(cx, cz) : gy[Math.floor(F.length / 2)];
+      const at = (m, k) => { const th = top * (1 - k / N), ph = (m / M) * Math.PI * 2, s = Math.sin(th), c = Math.cos(th); return { v: [cx + R * s * Math.cos(ph), g0 + R * c - (R - H), cz + R * s * Math.sin(ph)], n: [s * Math.cos(ph), c, s * Math.sin(ph)] }; };
+      const put = (q, colour) => { pos.push(...q.v); nor.push(...q.n); col.push(colour.r, colour.g, colour.b); tint.push(...NOTINT); };
+      for (let m = 0; m < M; m++) {
+        for (let k = 0; k < N; k++) {
+          const a = at(m, k), b = at(m + 1, k), c = at(m + 1, k + 1), d = at(m, k + 1);
+          for (const q of k === N - 1 ? [a, b, c] : [a, b, c, a, c, d]) put(q, skin);
+        }
+        const a = at(m, 0), b = at(m + 1, 0), low = (q) => [q.v[0], g0 - 1.5, q.v[2]];
+        face([low(a), low(b), b.v, a.v], foot, [a.n[0], 0, a.n[2]]);
+      }
+      report.push({ n: st.name, kind: st.other, shape: "dome", rows: 0, max: 0, seats: 0, len: Math.round(rad * 2), roof: false, depth: +(rad * 2).toFixed(1), levels: 0, h: +H.toFixed(1),
+        outline: Array.from({ length: 16 }, (_, m) => [+(cx + rad * Math.cos((m / 16) * Math.PI * 2)).toFixed(1), +(cz + rad * Math.sin((m / 16) * Math.PI * 2)).toFixed(1)]),
+        c: [+cx.toFixed(1), +(g0 + H).toFixed(1), +cz.toFixed(1)], nrm: [+F[Math.floor(F.length / 2)].nx.toFixed(3), +F[Math.floor(F.length / 2)].nz.toFixed(3)] });
+      // (a dome with a model of its own: the model stands on the circle's centre, in the built dome's place)
+      if (mark) swapMarks.push({ ...mark, p1: pos.length, s1: spos.length, g1: seatGroups.length, gy: g0, at: [cx, cz] });
+      continue;
+    }
     if (st.other) {
       // A hospitality building: `levels` storeys of 3.6 m, each a band of dark glass between white slab edges towards the
       // track, a terrace rail on its roof, plain panels behind and at its ends. A standing area: a deck 0.5 m up with a
@@ -741,6 +778,34 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
       c: [+F[mi].x.toFixed(1), +(gy[mi] + FRONT_H).toFixed(1), +F[mi].z.toFixed(1)], nrm: [+F[mi].nx.toFixed(3), +F[mi].nz.toFixed(3)] });
   }
 
+  // A grass hill (`mounds` above): its outline's rim just under the ground, the grass rising over the outer half of the
+  // way to its middle to `h` m above the ground there (not given: 6 m) and level from there in – every point on the
+  // ground under it, so it follows a slope. Rings towards the outline's centroid: an outline that bends round its
+  // middle would spill over its own edge and is reported (`star: false`).
+  for (const m of mounds) {
+    const A = polyArea(m.pts), O = [];
+    let cx = 0, cz = 0;
+    for (let i = 0, j = m.pts.length - 1; i < m.pts.length; j = i++) {
+      const w = m.pts[j][0] * m.pts[i][1] - m.pts[i][0] * m.pts[j][1]; cx += (m.pts[j][0] + m.pts[i][0]) * w; cz += (m.pts[j][1] + m.pts[i][1]) * w;
+      const n = Math.max(1, Math.ceil(Math.hypot(m.pts[i][0] - m.pts[j][0], m.pts[i][1] - m.pts[j][1]) / 12));
+      for (let k = 0; k < n; k++) O.push([m.pts[j][0] + ((m.pts[i][0] - m.pts[j][0]) * k) / n, m.pts[j][1] + ((m.pts[i][1] - m.pts[j][1]) * k) / n]);
+    }
+    cx /= -6 * A; cz /= -6 * A;
+    if (!inPoly(cx, cz, m.pts)) { cx = O.reduce((s, q) => s + q[0], 0) / O.length; cz = O.reduce((s, q) => s + q[1], 0) / O.length; }
+    const star = O.every((q) => inPoly(cx + (q[0] - cx) * 0.5, cz + (q[1] - cz) * 0.5, m.pts) && inPoly(cx + (q[0] - cx) * 0.95, cz + (q[1] - cz) * 0.95, m.pts));
+    const N = 6, g0 = groundAt(cx, cz), grass = C("#5b8a45");
+    const at = (i, k) => {
+      const q = O[(i + O.length) % O.length], t = k / N, x = cx + (q[0] - cx) * (1 - t), z = cz + (q[1] - cz) * (1 - t), g = groundAt(x, z), u = Math.min(1, t / 0.5);
+      return [x, (Number.isFinite(g) ? g : g0) + (k ? m.h * u * u * (3 - 2 * u) : -0.4), z];
+    };
+    for (let i = 0; i < O.length; i++) for (let k = 0; k < N; k++) face(k === N - 1 ? [at(i, k), at(i + 1, k), at(i, N)] : [at(i, k), at(i + 1, k), at(i + 1, k + 1), at(i, k + 1)], grass, [0, 1, 0]);
+    const [s] = nearestSample(cx, cz), tl = Math.hypot(cx - s.p.x, cz - s.p.z) || 1;
+    let far = 0; for (const a of m.pts) for (const b of m.pts) far = Math.max(far, Math.hypot(a[0] - b[0], a[1] - b[1]));
+    report.push({ n: m.name, kind: "ga", shape: "mound", rows: 0, max: 0, seats: 0, len: Math.round(far), roof: false, depth: +(Math.abs(A) / far).toFixed(1), levels: 0, h: +m.h.toFixed(1), area: Math.round(Math.abs(A)), ...(star ? {} : { star: false }),
+      outline: m.pts.map((q) => [+q[0].toFixed(1), +q[1].toFixed(1)]).filter((_, i, a) => a.length < 40 || i % Math.ceil(a.length / 40) === 0),
+      c: [+cx.toFixed(1), +(g0 + m.h).toFixed(1), +cz.toFixed(1)], nrm: [+((cx - s.p.x) / tl).toFixed(3), +((cz - s.p.z) / tl).toFixed(3)] });
+  }
+
   const group = new THREE.Group();
   group.name = "grandstands";
   // (the stands with a model of their own cut out of the shared buffers: [from, to) in vertices × 3)
@@ -800,14 +865,14 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const swaps = swapMarks.map((m, k) => {
     const F = m.st.front, a = F[0], b = F[F.length - 1], mid = F[Math.floor(F.length / 2)];
     let nx = 0, nz = 0; for (const p of F) { nx += p.nx; nz += p.nz; } const nl = Math.hypot(nx, nz) || 1;
-    return { name: m.st.name, model: m.st.model, x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, y: m.gy, n: [nx / nl, nz / nl], len: Math.hypot(b.x - a.x, b.z - a.z), mid: [mid.x, mid.z], replaced: false,
+    return { name: m.st.name, model: m.st.model, x: m.at ? m.at[0] : (a.x + b.x) / 2, z: m.at ? m.at[1] : (a.z + b.z) / 2, y: m.gy, n: [nx / nl, nz / nl], len: Math.hypot(b.x - a.x, b.z - a.z), mid: [mid.x, mid.z], replaced: false,
       replace() { for (const o of swapParts[k]) { o.visible = false; o.userData.off = true; } this.replaced = true; } };
   });
   // footprints, so trees and rocks keep off the stands and buildings don't stand in them
   const footprints = alive.map((st) => {
     const d = WALK + st.rows * ROW_D + 0.6;
     return st.front.map((p) => [p.x - p.nx * 0.5, p.z - p.nz * 0.5]).concat(st.front.slice().reverse().map((p) => [p.x + p.nx * d, p.z + p.nz * d]));
-  });
+  }).concat(mounds.map((m) => m.pts));
   return {
     group, footprints, structure, roofs, swaps,
     // per frame: seats only near the camera (beyond that the treads carry their colour)
@@ -818,7 +883,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
         im.visible = !im.userData.off && Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) < near;
       }
     },
-    info: { skipped, dropped, between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },
+    info: { skipped, dropped, between: between.length, dead: stands.filter((s) => s.dead).map((s) => `${s.name}: ${s.dead}`), stands: alive.length + mounds.length, mapped: alive.filter((s) => s.kind === "mapped").length, seats: seatTotal, target: scene.stands?.seats || null, capacity: scene.stands?.total || null, est: !!scene.stands?.est, list: report },
   };
 }
 
