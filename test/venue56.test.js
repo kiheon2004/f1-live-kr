@@ -70,6 +70,7 @@ test("the shipped model files: listed, present, and passing the app's own model 
   for (const f of F.FACILITIES) if (f.model?.file) { assert.ok(f.sources.some((x) => x.includes(f.model.file)), f.id + ": the model's source is recorded"); files.push(f.model.file); }
   assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper_v2.glb") && files.includes("lv_stand_c.glb") && files.includes("lv_pit_upper.glb") && files.includes("lus_stand_c.glb") && files.includes("lus_pit_upper.glb"));
   assert.ok(["yas_stand_c.glb", "yas_pit_upper.glb", "yas_tower.glb", "lus_villas.glb"].every((f) => files.includes(f)), "v0.60: Yas Marina and the Lusail villas");
+  assert.ok(["bh_dome_big.glb", "bh_dome_small.glb"].every((f) => files.includes(f)), "v0.62: Sakhir's two domes");
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });
@@ -216,7 +217,7 @@ test("a hospitality outline with shape: dome is built as a dome over its circle,
   const w = world(), groundAt = () => 2;
   const ring = (cx, cz, r, n = 16) => Array.from({ length: n }, (_, k) => [cx + r * Math.cos((k / n) * Math.PI * 2), cz + r * Math.sin((k / n) * Math.PI * 2)]);
   const list = [{ n: "Seated", a: [-150, 20], b: [-60, 20], side: "R", rows: 10 },
-    { n: "Dome", type: "hosp", poly: ring(80, 60, 30), shape: "dome", build: 1 }, { n: "Low dome", type: "hosp", poly: ring(250, 45, 15, 12), shape: "dome", h: 6, build: 1 },
+    { n: "Dome", type: "hosp", poly: ring(80, 60, 30), shape: "dome", build: 1, model: { file: "dome.glb", frontAt: 0 } }, { n: "Low dome", type: "hosp", poly: ring(250, 45, 15, 12), shape: "dome", h: 6, build: 1 },
     { n: "Drum", type: "hosp", poly: ring(-250, 45, 15, 12), levels: 2, build: 1 }];
   const r = buildStands({ scene: { areas: [], lines: [], buildings: [], stands: { list } }, gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
   const by = Object.fromEntries(r.info.list.map((s) => [s.n, s]));
@@ -226,12 +227,48 @@ test("a hospitality outline with shape: dome is built as a dome over its circle,
   assert.ok(Math.abs(by.Dome.c[0] - 80) < 0.5 && Math.abs(by.Dome.c[2] - 60) < 0.5 && Math.abs(by.Dome.c[1] - 22) < 0.5, JSON.stringify(by.Dome.c) + ": its top over the outline's centre, on the ground there (2 m)");
   assert.ok(Math.abs(by["Low dome"].h - 6) < 0.01, "its own height where it gives one");
   assert.ok(!by.Drum.shape && by.Drum.levels === 2, "an outline without the shape stays a block of storeys");
+  // a dome with a model of its own: the model's place is the circle's centre on the ground there; the built dome is a
+  // mesh of its own (the model replaces it), out of the shared one
+  assert.strictEqual(r.swaps.length, 1);
+  assert.ok(r.swaps[0].name === "Dome" && Math.abs(r.swaps[0].x - 80) < 0.5 && Math.abs(r.swaps[0].z - 60) < 0.5 && Math.abs(r.swaps[0].y - 2) < 0.01, JSON.stringify([r.swaps[0].x, r.swaps[0].y, r.swaps[0].z]));
+  const own = r.group.children.find((o) => o.name === "stand:Dome");
+  assert.ok(own && own.visible, "built until the model stands"); r.swaps[0].replace(); assert.ok(!own.visible, "then hidden");
   // the geometry: every vertex of the big dome within its circle, none above its top, the top reached
-  const P = r.group.children[0].geometry.attributes.position, near = [];
+  const P = own.geometry.attributes.position, near = [];
   for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), z = P.getZ(i); if (Math.hypot(x - 80, z - 60) < 40 && z > 28) near.push([Math.hypot(x - 80, z - 60), y]); }
   assert.ok(near.length > 500, String(near.length));
   assert.ok(Math.max(...near.map((q) => q[0])) < 30.05 && Math.max(...near.map((q) => q[1])) < 22.05 && Math.max(...near.map((q) => q[1])) > 21.9, JSON.stringify([Math.max(...near.map((q) => q[0])), Math.max(...near.map((q) => q[1]))]));
   // a cap, not a drum: halfway out from the centre it is still well above half its height
   const mid = near.filter((q) => Math.abs(q[0] - 15) < 2.5).map((q) => q[1] - 2);
   assert.ok(mid.length && Math.min(...mid) > 13 && Math.max(...mid) < 19, JSON.stringify([Math.min(...mid), Math.max(...mid)]));
+});
+
+// v0.62: a standing area that is a grass hill (Yas Marina's Abu Dhabi Hill) – raised over its own outline, wherever the
+// track runs round it; not a deck along one stretch
+test("a standing-area outline with shape: mound is a grass hill over its outline: rim at the ground, level top, nothing else built on it", async () => {
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const w = world(), groundAt = (x, z) => 1 + z * 0.01;   // (a slight slope: the hill follows it)
+  const hill = [[-60, 40], [40, 40], [80, 90], [40, 150], [-60, 150], [-90, 95]];
+  const list = [{ n: "Seated", a: [-250, 20], b: [-160, 20], side: "R", rows: 10 }, { n: "Hill", type: "ga", poly: hill, shape: "mound", h: 5, build: 1 },
+    { n: "Towards the hill", a: [-40, 20], b: [30, 20], side: "R", rows: 30 }, { n: "Flat bank", type: "ga", poly: box(150, 30, 230, 50), build: 1 }, { n: "Not asked", type: "ga", poly: box(300, 30, 360, 50), shape: "mound" }];
+  const r = buildStands({ scene: { areas: [], lines: [], buildings: [], stands: { list } }, gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
+  const by = Object.fromEntries(r.info.list.map((s) => [s.n, s]));
+  assert.ok(by.Hill, JSON.stringify([r.info.skipped, r.info.dropped]));
+  assert.strictEqual(by.Hill.kind, "ga"); assert.strictEqual(by.Hill.shape, "mound"); assert.strictEqual(by.Hill.seats, 0); assert.strictEqual(by.Hill.h, 5);
+  assert.ok(Math.abs(by.Hill.area - 14850) < 5 && by.Hill.star !== false, JSON.stringify(by.Hill));
+  const tw = by["Towards the hill"];
+  assert.ok(tw && tw.rows < 30 && Math.max(...tw.outline.map((q) => q[1])) <= 40.5, "a stand in front of the hill stops at its rim (30 rows would reach z = 46): " + JSON.stringify(tw && [tw.rows, Math.max(...tw.outline.map((q) => q[1]))]));
+  assert.ok(by["Flat bank"] && !by["Flat bank"].shape, "an outline without the shape stays a deck");
+  assert.ok(!by["Not asked"], "one that does not ask to be built stays unbuilt");
+  assert.ok(r.footprints.some((f) => f.length === hill.length && f.every((q, i) => q[0] === hill[i][0] && q[1] === hill[i][1])), "its outline keeps trees and buildings off");
+  // the geometry: inside the outline, from just under the ground at the rim to 5 m over the ground in the middle
+  // (the grass-coloured vertices behind the stands' front boards and away from the flat bank)
+  const P = r.group.children[0].geometry.attributes.position, C = r.group.children[0].geometry.attributes.color, on = [];
+  for (let i = 0; i < P.count; i++) if (P.getZ(i) > 35 && P.getX(i) < 120 && C.getY(i) > C.getX(i) * 1.3 && C.getY(i) > C.getZ(i) * 1.3) on.push([P.getX(i), P.getY(i) - groundAt(P.getX(i), P.getZ(i)), P.getZ(i)]);
+  assert.ok(on.length > 300, String(on.length));
+  assert.ok(on.every((q) => q[0] > -90.1 && q[0] < 80.1 && q[2] > 39.9 && q[2] < 150.1), "within the outline's box");
+  const hs = on.map((q) => q[1]);
+  assert.ok(Math.abs(Math.min(...hs) + 0.4) < 0.01 && Math.abs(Math.max(...hs) - 5) < 0.01, JSON.stringify([Math.min(...hs), Math.max(...hs)]));
+  const mid = on.filter((q) => Math.hypot(q[0] - by.Hill.c[0], q[2] - by.Hill.c[2]) < 15).map((q) => q[1]);
+  assert.ok(mid.length && Math.min(...mid) > 4.99, "level over its middle: " + Math.min(...mid));
 });
