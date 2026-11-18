@@ -209,3 +209,29 @@ test("a stand's own seat count sets its rows, no deeper than its outline; the ci
   const data = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Sakhir;
   assert.strictEqual(data.stands.reduce((a, s) => a + (s.seats || 0), 0), data.seats); assert.strictEqual(data.seats, 34563);
 });
+
+// v0.62: a hospitality outline that says it is a dome (Sakhir's two) – a cap over its circle, not a block of storeys
+test("a hospitality outline with shape: dome is built as a dome over its circle, a third as high as wide unless it says", async () => {
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const w = world(), groundAt = () => 2;
+  const ring = (cx, cz, r, n = 16) => Array.from({ length: n }, (_, k) => [cx + r * Math.cos((k / n) * Math.PI * 2), cz + r * Math.sin((k / n) * Math.PI * 2)]);
+  const list = [{ n: "Seated", a: [-150, 20], b: [-60, 20], side: "R", rows: 10 },
+    { n: "Dome", type: "hosp", poly: ring(80, 60, 30), shape: "dome", build: 1 }, { n: "Low dome", type: "hosp", poly: ring(250, 45, 15, 12), shape: "dome", h: 6, build: 1 },
+    { n: "Drum", type: "hosp", poly: ring(-250, 45, 15, 12), levels: 2, build: 1 }];
+  const r = buildStands({ scene: { areas: [], lines: [], buildings: [], stands: { list } }, gf, world: w, groundAt, corridor: corridor(w), street: false, year: 2026 });
+  const by = Object.fromEntries(r.info.list.map((s) => [s.n, s]));
+  assert.ok(by.Dome && by["Low dome"] && by.Drum, JSON.stringify(r.info.skipped));
+  assert.strictEqual(by.Dome.shape, "dome"); assert.strictEqual(by.Dome.seats, 0); assert.strictEqual(by.Dome.levels, 0);
+  assert.ok(Math.abs(by.Dome.len - 60) <= 1 && Math.abs(by.Dome.h - 20) < 0.5, JSON.stringify([by.Dome.len, by.Dome.h]) + ": 60 m across, a third as high");
+  assert.ok(Math.abs(by.Dome.c[0] - 80) < 0.5 && Math.abs(by.Dome.c[2] - 60) < 0.5 && Math.abs(by.Dome.c[1] - 22) < 0.5, JSON.stringify(by.Dome.c) + ": its top over the outline's centre, on the ground there (2 m)");
+  assert.ok(Math.abs(by["Low dome"].h - 6) < 0.01, "its own height where it gives one");
+  assert.ok(!by.Drum.shape && by.Drum.levels === 2, "an outline without the shape stays a block of storeys");
+  // the geometry: every vertex of the big dome within its circle, none above its top, the top reached
+  const P = r.group.children[0].geometry.attributes.position, near = [];
+  for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), z = P.getZ(i); if (Math.hypot(x - 80, z - 60) < 40 && z > 28) near.push([Math.hypot(x - 80, z - 60), y]); }
+  assert.ok(near.length > 500, String(near.length));
+  assert.ok(Math.max(...near.map((q) => q[0])) < 30.05 && Math.max(...near.map((q) => q[1])) < 22.05 && Math.max(...near.map((q) => q[1])) > 21.9, JSON.stringify([Math.max(...near.map((q) => q[0])), Math.max(...near.map((q) => q[1]))]));
+  // a cap, not a drum: halfway out from the centre it is still well above half its height
+  const mid = near.filter((q) => Math.abs(q[0] - 15) < 2.5).map((q) => q[1] - 2);
+  assert.ok(mid.length && Math.min(...mid) > 13 && Math.max(...mid) < 19, JSON.stringify([Math.min(...mid), Math.max(...mid)]));
+});
