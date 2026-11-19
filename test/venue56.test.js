@@ -73,6 +73,7 @@ test("the shipped model files: listed, present, and passing the app's own model 
   assert.ok(["bh_dome_big.glb", "bh_dome_small.glb"].every((f) => files.includes(f)), "v0.62: Sakhir's two domes");
   assert.ok(["bh_stand_c.glb", "bh_pit_upper.glb", "bh_tower.glb"].every((f) => files.includes(f)), "Sakhir's main straight");
   assert.ok(files.includes("mel_pit_upper.glb") && F.PIT_UPPERS[10].from === 2028, "Albert Park's new pit building: from 2028");
+  assert.ok(["jed_stand_c.glb", "jed_pit_upper.glb", "suz_stand_c.glb", "suz_wheel.glb"].every((f) => files.includes(f)), "Jeddah's main straight, Suzuka's main stand and wheel");
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });
@@ -273,4 +274,19 @@ test("a standing-area outline with shape: mound is a grass hill over its outline
   assert.ok(Math.abs(Math.min(...hs) + 0.4) < 0.01 && Math.abs(Math.max(...hs) - 5) < 0.01, JSON.stringify([Math.min(...hs), Math.max(...hs)]));
   const mid = on.filter((q) => Math.hypot(q[0] - by.Hill.c[0], q[2] - by.Hill.c[2]) < 15).map((q) => q[1]);
   assert.ok(mid.length && Math.min(...mid) > 4.99, "level over its middle: " + Math.min(...mid));
+});
+
+test("a listed stand mapped as several outlines: the model stands on the outline it names, the others make way with it", async () => {
+  const { swapRoles } = await import("../src/renderer/stands.js");
+  const M = { file: "main.glb", on: "V2", covers: ["Front"], frontAt: -3.6 }, other = { file: "other.glb", frontAt: 10 };
+  const swaps = [{ name: "V1", model: M }, { name: "V2", model: M }, { name: "Front", model: null }, { name: "Solo", model: other }];
+  const roles = swapRoles(swaps);
+  assert.deepStrictEqual(roles.map((r) => r.sw.name), ["V2", "Solo"], "V1 places no model of its own, Front has none");
+  assert.deepStrictEqual(roles[0].follow.map((o) => o.name), ["V1", "Front"], "the same model's other outline and the covered stand are hidden once the model stands");
+  assert.deepStrictEqual(roles[1].follow, [], "a model without `on` or `covers` is its stand's alone");
+  assert.deepStrictEqual(swapRoles([{ name: "V1", model: M }, { name: "Front", model: null }]), [], "the named outline is not built: no model, the built stands stay");
+  assert.deepStrictEqual(swapRoles(null), []);
+  const data = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8"));
+  const v = data.circuits.Suzuka.stands.find((s) => s.n === "V1/V2 Main");
+  assert.strictEqual(v.model.file, "suz_stand_c.glb"); assert.strictEqual(v.model.on, "V2"); assert.deepStrictEqual(v.model.covers, ["V1"]);
 });

@@ -8,7 +8,7 @@
 // Everything is in the scene frame of map3d.js: x = F1 east (m) − centre, z = −(F1 north − centre), y = up.
 import * as THREE from "./vendor/three.module.js";
 import { auxRuns, ribbonEdges, blendHeight, onJoiningRun } from "./auxroads.js";
-import { buildStands } from "./stands.js";
+import { buildStands, swapRoles } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
@@ -933,8 +933,11 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // Where: along the stand's front line, its middle at the line's middle; across, the model's front wall
     // (model.frontAt m from its origin, towards the track) either on the built stand's front line or – frontFromEdge –
     // that many metres from the track's edge (a stand whose map outline is not its real front).
+    // (frontAt may be negative: the model's front wall in front of the outline it stands on – Suzuka's lower tier before V2)
     if (stands?.swaps?.length && api.geo.model && opts.models !== false) {
-      for (const sw of stands.swaps) {
+      // (model.on / model.covers: a listed stand mapped as several outlines – the model stands on the one `on` names, the
+      // outlines `covers` names make way with it; stands.js swapRoles)
+      for (const { sw, follow } of swapRoles(stands.swaps)) {
         try {
           const M = sw.model; let back = 0;
           if (Number.isFinite(M.frontFromEdge)) {
@@ -944,8 +947,8 @@ async function buildReal(api, scene, world, opts, onStep, own) {
           const off = (M.frontAt || 0) + back, at = { x: sw.x + sw.n[0] * off, z: sw.z + sw.n[1] * off, y: sw.y + (M.lift || 0), dir: [-sw.n[0], -sw.n[1]] };
           const obj = await modelAt(M.file, (f) => api.geo.model(f), at);
           if (opts.isCurrent && !opts.isCurrent()) { obj.userData.onDispose?.(); break; }   // (this build's world is gone)
-          obj.name = "standModel:" + sw.name; stands.group.add(obj); sw.replace();
-          (stands.info.models ||= []).push({ n: sw.name, file: M.file, back: +back.toFixed(1), at: [+at.x.toFixed(1), +at.y.toFixed(1), +at.z.toFixed(1)] });
+          obj.name = "standModel:" + sw.name; stands.group.add(obj); sw.replace(); for (const o of follow) o.replace();
+          (stands.info.models ||= []).push({ n: sw.name, file: M.file, back: +back.toFixed(1), at: [+at.x.toFixed(1), +at.y.toFixed(1), +at.z.toFixed(1)], ...(follow.length ? { with: follow.map((o) => o.name) } : {}) });
         } catch (e) { (stands.info.models ||= []).push({ n: sw.name, file: sw.model.file, error: String(e.message || e).slice(0, 160) }); }
       }
     }

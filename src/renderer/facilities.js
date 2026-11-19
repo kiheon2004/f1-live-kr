@@ -198,6 +198,27 @@ export const FACILITIES = [
     },
   },
   {
+    id: "suzuka-wheel", name: "Suzuka Circuit – the amusement park's Ferris wheel by the final corner", kind: "tower",
+    venue: [46], loc: ["Suzuka"], years: [2018, null],
+    status: "trial",
+    // The map has one outline tagged attraction = big_wheel – but also grandstand = yes, name "S": a 64 × 17 m strip
+    // 30 m from the track, which this app builds as the S stand. The wheel is put 30 m behind that outline's middle
+    // (away from the track), its axle along the track so the circle is seen from the main straight – both estimates.
+    replaces: { near: [34.846059, 136.538476], within: 3 },
+    model: { file: "suz_wheel.glb", anchor: [34.846059, 136.538476], heading: 139 },
+    sources: [
+      "src/data/models/suz_wheel.glb – made for this app (2026-11-19, first pass): a 50 m wheel, its axle 29 m up, 32 gondolas (their colours not checked), a rim lit at night – sizes estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the outline tagged attraction = big_wheel (and grandstand, name S) beside the final corner: the wheel's neighbourhood, not its exact place",
+    ],
+    checked: "2026-11-19: trial (the place 30 m behind the map's outline, which way it faces and its size are estimates)",
+    evidence: {
+      confirmed: [],
+      photo: [],
+      map: ["the neighbourhood: the map's big_wheel outline beside the final corner"],
+      inferred: ["the exact place", "which way the wheel faces", "its size (50 m across)"],
+    },
+  },
+  {
     id: "hungaroring-paddock-2025", name: "Hungaroring – paddock building (2025)", kind: "pit-building",
     venue: [4], loc: ["Budapest"], years: [2025, null],
     status: "trial",
@@ -1682,6 +1703,8 @@ export const PIT_UPPERS = {
     src: "src/data/models/mel_pit_upper.glb – Albert Park's new pit building (Woods Bagot, due 2028), the storeys over the garages: two timber-framed floors under a timber roof, a taller glazed box at the turn-1 end – made for this app (2026-11-18, first pass) from the published facts (14 garages, a timber structure: development.vic.gov.au, sport.vic.gov.au, woodsbagot.com, austadiums.com) and the published renderings compared by eye; 270 m long after the old building's map outline, every dimension an estimate; no outside asset, no logo or lettering" },
   63: { file: "bh_pit_upper.glb", garageTop: 5.0, front: 12.5, length: 318, depth: 25, along: 32,
     src: "src/data/models/bh_pit_upper.glb – Bahrain International Circuit pit building, the storeys over the garages (the Paddock Club's glazed lounge under twelve membrane tents, six sand-coloured blocks between them): made for this app (2026-11-18, first pass) from tensinet.com's project text (PTFE membrane roofs), pre-opening figures and Wikimedia Commons photos and aerial imagery compared by eye – 318 × 25 m, the map outline's main body (its northern 318 m: `along`), every height estimated; no outside asset, no logo or lettering" },
+  149: { file: "jed_pit_upper.glb", garageTop: 5.2, front: 16, length: 280, depth: 32,
+    src: "src/data/models/jed_pit_upper.glb – Jeddah Corniche Circuit pit building, the storeys over the garages: seven blocks of three and two storeys in turn, each floor's terrace stepped back, a green light strip along the terrace edges at night – made for this app (2026-11-19, first pass) from the published wording only (formula1.com 2021-06: 280 m long, four storeys, 'multi-storey staggered buildings'); NOT compared with photos: the number of blocks, the terraces and every height are estimates; no outside asset, no logo or lettering" },
   152: { file: "lv_pit_upper.glb", garageTop: 4.8, front: 16.6, length: 302.6, depth: 33.2, backTo: 22.2, fill: false, from: 2023,
     src: "src/data/models/lv_pit_upper.glb – Las Vegas Grand Prix Plaza pit building, the storeys over the garages: made for this app (2026-11-13) from published figures (1,000 × 100 ft, four levels, the 28,000 sq ft roof screen) and Wikimedia Commons photos of the 2025 race compared by eye, sized to the building as this app builds it (302.6 × 33.2 m, 40 garages, their top at 4.8 m) with a terrace behind – no outside asset, no logo or lettering" },
 };
