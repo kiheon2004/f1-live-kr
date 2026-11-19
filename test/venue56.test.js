@@ -76,7 +76,10 @@ test("the shipped model files: listed, present, and passing the app's own model 
   assert.ok(["jed_stand_c.glb", "jed_pit_upper.glb", "suz_stand_c.glb", "suz_wheel.glb"].every((f) => files.includes(f)), "Jeddah's main straight, Suzuka's main stand and wheel");
   assert.ok(files.includes("mia_pit_upper.glb") && files.includes("mia_pit_ext.glb") && F.PIT_UPPERS[151].from === 2023, "Miami's Paddock Club from 2023"); assert.deepStrictEqual(F.FACILITIES.find((f) => f.id === "miami-paddock-club-extension").years, [2027, null], "its extension from 2027");
   assert.ok(["mtl_pit_upper.glb", "mtl_stand_c.glb", "mtl_biosphere.glb"].every((f) => files.includes(f)), "Montréal: the Espace Paddock, Grandstand 1, the Biosphère");
-  assert.ok(files.includes("mon_stand_k_c.glb"), "Monaco: Grandstand K");
+  assert.ok(["mon_stand_k_c.glb", "mon_pool.glb", "mon_casino.glb", "mon_hotel_paris.glb"].every((f) => files.includes(f)), "Monaco: Grandstand K, the pool, the casino, the Hôtel de Paris");
+  assert.ok(["mtl_casino.glb", "cat_pit_upper.glb", "cat_stand_c.glb", "cat_rooftop.glb"].every((f) => files.includes(f)), "Montréal's casino; Barcelona: the pit building, the main grandstand, the Rooftop");
+  assert.strictEqual(F.PIT_UPPERS[23].front, 15, "Montréal: the second-pass Espace Paddock, its origin 15 m behind the garage fronts"); assert.deepStrictEqual(F.FACILITIES.find((f) => f.id === "barcelona-rooftop").years, [2024, null]);
+  assert.ok(!F.FACILITIES.find((f) => f.id === "monaco-hotel-de-paris").replaces.names.test(""), "the hotel's block stays: its model takes no map building away – above all not the unnamed ones");
   assert.ok(files.includes("jed_team.glb"), "Jeddah's team building"); assert.strictEqual(F.PIT_UPPERS[149].fillBack, 8, "Jeddah: the ground floor is filled under the long body only – the rear blocks stand from the ground");
   assert.ok(["sha_stand_c.glb", "sha_pit_upper.glb", "sha_wing.glb", "sha_pavilion.glb", "sha_lotus_row.glb"].every((f) => files.includes(f)), "Shanghai's main straight and the canopy rows over H and K");
   assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-pavilion-\d+$/.test(f.id)).length, 26, "26 team pavilions"); assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-wing-/.test(f.id)).length, 2);

@@ -198,6 +198,110 @@ export const FACILITIES = [
     },
   },
   {
+    id: "monaco-pool", name: "Monaco – the Stade Nautique Rainier III (the pool the swimming-pool chicane runs round)", kind: "paddock",
+    venue: [22], loc: ["Monte Carlo", "Monaco"], years: [2004, null],
+    status: "trial",
+    // Where: the middle of the water as read off aerial imagery (± 8 m) – the map's diving tower ('Plongeoir') stands at the
+    // model's own tower, which bears the place out. The deck is cut back on the track side: 3.3 m clear of the track's
+    // edge, the water 7.3 m (measured against this app's track, v0.64).
+    replaces: { near: [43.734607, 7.422036], within: 30 },
+    model: { file: "mon_pool.glb", anchor: [43.734607, 7.422036], heading: 261 },
+    sources: [
+      "src/data/models/mon_pool.glb – made for this app (2026-11-19, second pass): the 50 × 21 m pool, its deck (cut back on the track side), sun-bed rows, a white building across the north end, the diving tower at the deep south end – aerial imagery compared by eye, nothing copied; the deck's size from the imagery, heights estimated; no outside asset, no logo or lettering",
+      "the place: read by the chat-side session off Esri World Imagery (looked at only), ± 8 m; OpenStreetMap (© OpenStreetMap contributors, ODbL) – the 'Plongeoir' at the deep end",
+    ],
+    checked: "2026-11-19: trial (place ± 8 m from aerial imagery, confirmed by the map's diving tower; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the pool, its deck and the white building (aerial imagery, looked at only)"],
+      map: ["the diving tower's place (the map's 'Plongeoir')"],
+      inferred: ["every height", "the deck's exact edge on the track side (cut to keep clear of the track)"],
+    },
+  },
+  {
+    id: "monaco-casino", name: "Monaco – the Casino de Monte-Carlo with the opera", kind: "tower",
+    venue: [22], loc: ["Monte Carlo", "Monaco"], years: [2004, null],
+    status: "trial",
+    // Where: on the map's two unnamed blocks that make up the casino and the opera – together 163 × 60 m, their long
+    // sides at bearing 37° (the square side faces 307°). Both blocks make way. The corner towards the square at the
+    // south-west end is cut off in the model: the track passes there, 2.3 m from the wall (measured, v0.64).
+    replaces: { near: [43.739358, 7.428595], within: 8 },
+    model: { file: "mon_casino.glb", anchor: [43.739358, 7.428595], heading: 307 },
+    sources: [
+      "src/data/models/mon_casino.glb – made for this app (2026-11-19, second pass): one block 163 × 46 m – the entrance front with its two square towers, clock and iron-and-glass canopy on the square side, tall windows and pilasters, four verdigris hipped roofs, a sea front with two smaller towers – from Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; every height, the window spacing and the sea front's towers are estimates; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the two blocks' outlines at this place (the model's place, direction and length)",
+    ],
+    checked: "2026-11-19: trial (place, direction and length from the map's outlines; where the entrance is along the front and every height estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the entrance front, towers, canopy, roofs (Wikimedia Commons, compared only)"],
+      map: ["the place, the direction and the size: two blocks, together 163 × 60 m"],
+      inferred: ["every height", "the entrance's place along the square front", "the sea front's towers"],
+    },
+  },
+  {
+    id: "monaco-hotel-de-paris", name: "Monaco – the Hôtel de Paris, its front range on the casino square", kind: "tower",
+    venue: [22], loc: ["Monte Carlo", "Monaco"], years: [2004, null],
+    status: "trial",
+    // Where: along the square front of the map's block of the hotel (111 × 75 m, unnamed – it stays: the wings and the
+    // courtyard behind are not modelled, so nothing makes way). The block's front faces 36°; the model's front wall stands
+    // 4 m behind it, because this app's track edge runs obliquely within 1.2 m of that front – set back, the model's wall
+    // is 2 m and more from the track's edge (measured, v0.64).
+    replaces: { names: /^\(no map record makes way\)$/ },   // (nothing: no map building carries that name)
+    model: { file: "mon_hotel_paris.glb", anchor: [43.739129, 7.427126], heading: 36 },
+    sources: [
+      "src/data/models/mon_hotel_paris.glb – made for this app (2026-11-19, second pass): the front range only, 52 × 20 m with a round corner set back at its south-east end – four storeys of windows over a tall ground floor, two bands of iron balconies, a dark slate roof with dormers, taller roofs over the middle and the ends, a short white entrance awning – from Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; heights and the depth estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the hotel block's outline at this place (the direction and length of its front)",
+    ],
+    checked: "2026-11-19: trial (direction and length of the front from the map's outline, set 4 m back from it; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the front on the square: balconies, slate roof, the round corner (Wikimedia Commons, compared only)"],
+      map: ["the direction and length of the front (the block's front edge)"],
+      inferred: ["every height", "the range's depth (20 m)", "the 4 m it stands back from the mapped front"],
+    },
+  },
+  {
+    id: "montreal-casino", name: "Montréal – the Casino de Montréal, its main pavilion", kind: "tower",
+    venue: [23], loc: ["Montréal", "Montreal"], years: [2004, null],
+    status: "trial",
+    // Where: the middle of the round main pavilion (the former French pavilion) as read off aerial imagery – the map's
+    // building there makes way
+    replaces: { near: [45.505538, -73.525898], within: 3 },
+    model: { file: "mtl_casino.glb", anchor: [45.505538, -73.525898], heading: 0 },
+    sources: [
+      "src/data/models/mtl_casino.glb – made for this app (2026-11-19): the main pavilion only – a bowl widening upwards (40 to 72 m across, 30 m high), forty white fins, a crown and a mast – from one Wikimedia Commons photo compared by eye, nothing copied; its sizes are estimates (the roof ring is about 78 m across in aerial imagery); no outside asset, no logo or lettering",
+      "the place: read by the chat-side session off Esri World Imagery (looked at only)",
+    ],
+    checked: "2026-11-19: trial (place from aerial imagery; shape from one photo, sizes estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the bowl shape and its white fins (Wikimedia Commons, compared only)"],
+      map: ["the place (aerial imagery)"],
+      inferred: ["every size (72 m across, 30 m high)"],
+    },
+  },
+  {
+    id: "barcelona-rooftop", name: "Circuit de Barcelona-Catalunya – the Circuit Rooftop (2024)", kind: "tower",
+    venue: [15], loc: ["Barcelona"], years: [2024, null],
+    status: "trial",
+    // Where: read off aerial imagery (its red frame, 75 × 14 m) – a bridge building over the track between the stadium
+    // section and the paddock; the track passes under it between its piers
+    replaces: { names: /^VIP Rooftop$/ },   // (the map's own block of it, drawn across the track)
+    model: { file: "cat_rooftop.glb", anchor: [41.57226, 2.260705], heading: 239 },
+    sources: [
+      "src/data/models/cat_rooftop.glb – made for this app (2026-11-19): a red steel truss bridge 75 × 14 m with a glazed hall in it (floor 8 m up), a terrace under a white canopy on top, a pier at the north end and a 30 m tower at the south end – from the published facts (circuitcat.com: opened June 2024, 600 t of steel, 900 m², a 30 m South Tower) and its plan in aerial imagery; its side view is an estimate (no photo from the side found); no outside asset, no logo or lettering",
+      "the place: read by the chat-side session off Esri World Imagery (looked at only)",
+    ],
+    checked: "2026-11-19: trial (place and plan from aerial imagery; the side view estimated)",
+    evidence: {
+      confirmed: ["opened June 2024, a 30 m South Tower, 900 m² (circuitcat.com)"],
+      photo: [],
+      map: ["its plan: 75 × 14 m, the red frame (aerial imagery)"],
+      inferred: ["its whole side view: the truss, the hall, the canopy"],
+    },
+  },
+  {
     id: "montreal-biosphere", name: "Montréal – the Biosphère on Île Sainte-Hélène", kind: "tower",
     venue: [23], loc: ["Montréal", "Montreal"], years: [2004, null],
     status: "trial",
@@ -1848,8 +1952,10 @@ export const PIT_UPPERS = {
     src: "src/data/models/mel_pit_upper.glb – Albert Park's new pit building (Woods Bagot, due 2028), the storeys over the garages: two timber-framed floors under a roof of light grey metal sheets on a deep timber grid, a taller glazed box at the turn-1 end – made for this app (2026-11-19, second pass: the roof) from the published facts (14 garages, a timber structure: development.vic.gov.au, sport.vic.gov.au, woodsbagot.com, austadiums.com) and the published renderings compared by eye; 270 m long after the old building's map outline, every dimension an estimate; no outside asset, no logo or lettering" },
   63: { file: "bh_pit_upper.glb", garageTop: 5.0, front: 12.5, length: 318, depth: 25, along: 32,
     src: "src/data/models/bh_pit_upper.glb – Bahrain International Circuit pit building, the storeys over the garages (the Paddock Club's glazed lounge under twelve membrane tents, six sand-coloured blocks between them): made for this app (2026-11-18, first pass) from tensinet.com's project text (PTFE membrane roofs), pre-opening figures and Wikimedia Commons photos and aerial imagery compared by eye – 318 × 25 m, the map outline's main body (its northern 318 m: `along`), every height estimated; no outside asset, no logo or lettering" },
-  23: { file: "mtl_pit_upper.glb", garageTop: 6.0, front: 18.5, length: 340, depth: 37, fillBack: 12.5, backTo: 23.5,
-    src: "src/data/models/mtl_pit_upper.glb – Circuit Gilles Villeneuve, the Espace Paddock (FABG, 2019) over the garages: a loge level open to the pit lane, a third level of terrace and glazed loges, 21 white roof modules on timber beams and V-shaped white columns, a podium at the middle, a timber terrace strip on the Olympic Basin side – made for this app (2026-11-19) from the published facts (docs/research/pitbuildings.md) and Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; 340 m long (the map outline 331 m, the roof strip in aerial imagery 354 m), every height estimated; no outside asset, no logo or lettering" },
+  23: { file: "mtl_pit_upper.glb", garageTop: 6.0, front: 15, length: 330, depth: 30,
+    src: "src/data/models/mtl_pit_upper.glb – Circuit Gilles Villeneuve, the Espace Paddock (FABG, 2019) over the garages: a loge level open to the pit lane, a third level of terrace and glazed loges, white roof modules on timber beams and V-shaped white columns, a podium at the middle – made for this app (2026-11-19, second pass: 330 × 30 m as the building's one light-grey roof in aerial imagery and the map outline, 329.7 × 27 m – the first pass had read a row of hospitality tents beside it as its roof) from the published facts (docs/research/pitbuildings.md) and Wikimedia Commons photos compared by eye, nothing copied; every height estimated; no outside asset, no logo or lettering" },
+  15: { file: "cat_pit_upper.glb", garageTop: 5.0, front: 13, length: 331.4, depth: 26, backTo: 25, maxDepth: 26, along: -12.4,
+    src: "src/data/models/cat_pit_upper.glb – Circuit de Barcelona-Catalunya pit building, the storeys over the garages: a set-back glazed floor behind dark columns, the top terrace under its 2024 roof of six modules carrying solar panels, five stair towers on the paddock side, and – standing from the ground – the control tower (white with a red top) at the pit-entry end and a block at the other end – made for this app (2026-11-19) from the published facts (a large roof over the 6,000 m² terrace, 1,080 panels on the pit building's roof) and Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; the garage row 293.4 m as the six roof modules in aerial imagery, every height and the control tower's size estimated; no outside asset, no logo or lettering" },
   49: { file: "sha_pit_upper.glb", garageTop: 5.6, front: 15, length: 337, depth: 30,
     src: "src/data/models/sha_pit_upper.glb – Shanghai International Circuit pit building, the storeys over the garages: one glazed floor (the Paddock Club) behind a balcony, a roof terrace with six planted squares – made for this app (2026-11-19, first pass) from the published wording (garages below, VIP suites above) and a 2018 satellite picture and Wikimedia Commons photos compared by eye; 337 m long between the two end towers, every height an estimate; no outside asset, no logo or lettering" },
   149: { file: "jed_pit_upper.glb", garageTop: 5.2, front: 16, length: 280, depth: 32, fillBack: 8, backTo: 24,
@@ -1931,6 +2037,9 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       // estimates (no source for any one circuit): garages 8.5 m wide, 8 m high where the map has no height
       height: lay?.height ?? (venue && PIT_HEIGHTS[venue.key]?.h) ?? GENERIC.height, ...(!lay && venue && PIT_HEIGHTS[venue.key] ? { heightFrom: (PIT_HEIGHTS[venue.key].est ? "estimate: " : "") + PIT_HEIGHTS[venue.key].src } : {}), garagePitch: lay?.pitch ?? GENERIC.pitch, plate: 0.6, overhang: { pit: 0.5, paddock: 0.5, end: 0.5 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#8e9196", fascia: "fasciaWhite",
+      // (an upper-storey model no deeper than the map's outline – one drawn together with what stands behind it, Barcelona's
+      // 86 m – limits the building to its own depth: upper.maxDepth)
+      ...(venue && PIT_UPPERS[venue.key]?.maxDepth && !(year && PIT_UPPERS[venue.key].from && year < PIT_UPPERS[venue.key].from) ? { maxDepth: PIT_UPPERS[venue.key].maxDepth } : {}),
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
       pitWall: lay?.pitWall || PLAIN_PIT_WALL, ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : {}),
       ...(venue && PIT_LOOKS[venue.key] ? { ...PIT_LOOKS[venue.key], lookFrom: PIT_LOOKS[venue.key].src } : {}),
