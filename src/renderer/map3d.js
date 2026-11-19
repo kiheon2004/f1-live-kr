@@ -4924,11 +4924,11 @@ window.Map3D = {
   },
   // development: the pit lane across – every 20 m between the limiter lines: the track's side and how far its edge is
   // from the measured pit path (the feed's line, the fast lane), and (with a pit building) how far its garage fronts are
-  pitAcross() {
+  pitAcross(whole = false) {   // (whole: the lane from end to end, each row with its path point's lat / lon)
     const P = world?.pitLane, F = world?.frame; if (!P) return JSON.stringify({ ok: false, info: world?.pitInfo });
     let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
     const o = {}, rows = [];
-    for (let u = Math.max(20, P.limitOn); u <= Math.min(P.len - 20, P.limitOff); u += 20) {
+    for (let u = whole ? 20 : Math.max(20, P.limitOn); u <= (whole ? P.len - 20 : Math.min(P.len - 20, P.limitOff)); u += 20) {
       pitLaneAt(u, o); const fx = Math.sin(o.yaw), fz = Math.cos(o.yaw), nx = -fz, nz = fx;
       const pr = F.project(o.x, o.z); if (!pr) continue;
       const smp = pr.sample, side = pr.d >= 0 ? -1 : 1;   // (+1: the track lies in −n direction from the lane… sign of n towards the track)
@@ -4942,7 +4942,7 @@ window.Map3D = {
       const rc = new THREE.Raycaster(new THREE.Vector3(o.x, o.y + 1.5, o.z), new THREE.Vector3(-nx * nTrack, 0, -nz * nTrack), 0.5, 45); rc.camera = camera;
       const hit = world.real ? rc.intersectObject(world.real.group, true).find((h) => h.object.visible !== false && !h.object.isSprite) : null;
       const nm = hit ? (() => { let x = hit.object; while (x && !x.name) x = x.parent; return x?.name || hit.object.type; })() : null;
-      rows.push([Math.round(u), +toEdge.toFixed(1), +Math.abs(pr.d).toFixed(1), garage, hit ? +hit.distance.toFixed(1) : null, nm]);
+      rows.push([Math.round(u), +toEdge.toFixed(1), +Math.abs(pr.d).toFixed(1), garage, hit ? +hit.distance.toFixed(1) : null, nm, ...(whole && world.real ? [world.real.geo.toLL(o.x, o.z).map((v) => +v.toFixed(6))] : [])]);
     }
     return JSON.stringify({ ok: true, loc: app().location(), facility: G?.facility || null, len: Math.round(P.len), rows });
   },
@@ -5010,6 +5010,31 @@ window.Map3D = {
   // development: the grandstands as built – each with the nearest corner (F1's corner numbers for this circuit and
   // season), which side of the track it is on (L/R in the race's direction), how far along from that corner (m), its
   // front's ends (lat, lon), rows, seats, roof – and the listed ones that couldn't be built, with why
+  // development: the map's buildings whose name matches (a regular expression's source) – each one's middle and box in
+  // lat / lon and metres, for placing a model at a named building
+  buildingsNamed(src) {
+    const R = world?.real; if (!R) return JSON.stringify({ real: false });
+    const re = new RegExp(src, "i");
+    return JSON.stringify((R.scene?.buildings || []).filter((b) => re.test(b.name || "")).map((b) => {
+      const pts = b.pts.map(R.geo.xz); let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+      return { name: b.name, kind: b.kind, h: b.h, n: pts.length, mid: R.geo.toLL((x0 + x1) / 2, (z0 + z1) / 2).map((v) => +v.toFixed(6)), box: [Math.round(x1 - x0), Math.round(z1 - z0)], ll: pts.map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) };
+    }));
+  },
+  // development: the map's buildings at a place – those whose outline holds the point or comes within r metres of it
+  buildingsAt(lat, lon, r = 0) {
+    const R = world?.real; if (!R) return JSON.stringify({ real: false });
+    const [px, pz] = R.geo.fromLL(lat, lon), out = [];
+    for (const b of R.scene?.buildings || []) {
+      const pts = b.pts.map(R.geo.xz); let inside = false, d = Infinity;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [ax, az] = pts[i], [bx, bz] = pts[j];
+        if ((az > pz) !== (bz > pz) && px < ((bx - ax) * (pz - az)) / (bz - az) + ax) inside = !inside;
+        const l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1, k = Math.max(0, Math.min(1, ((px - ax) * (bx - ax) + (pz - az) * (bz - az)) / l2)); d = Math.min(d, Math.hypot(px - ax - k * (bx - ax), pz - az - k * (bz - az)));
+      }
+      if (inside || d <= r) out.push({ name: b.name || null, kind: b.kind, h: b.h, min: b.min || 0, inside, d: +d.toFixed(1), ll: pts.map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) });
+    }
+    return JSON.stringify(out);
+  },
   async standsReport() {
     const R = world?.real, L = R?.stands?.info?.list || []; if (!R) return JSON.stringify({ real: false });
     const corners = await standCorners();

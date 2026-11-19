@@ -74,6 +74,12 @@ test("the shipped model files: listed, present, and passing the app's own model 
   assert.ok(["bh_stand_c.glb", "bh_pit_upper.glb", "bh_tower.glb"].every((f) => files.includes(f)), "Sakhir's main straight");
   assert.ok(files.includes("mel_pit_upper.glb") && F.PIT_UPPERS[10].from === 2028, "Albert Park's new pit building: from 2028");
   assert.ok(["jed_stand_c.glb", "jed_pit_upper.glb", "suz_stand_c.glb", "suz_wheel.glb"].every((f) => files.includes(f)), "Jeddah's main straight, Suzuka's main stand and wheel");
+  assert.ok(files.includes("mia_pit_upper.glb") && files.includes("mia_pit_ext.glb") && F.PIT_UPPERS[151].from === 2023, "Miami's Paddock Club from 2023"); assert.deepStrictEqual(F.FACILITIES.find((f) => f.id === "miami-paddock-club-extension").years, [2027, null], "its extension from 2027");
+  assert.ok(["mtl_pit_upper.glb", "mtl_stand_c.glb", "mtl_biosphere.glb"].every((f) => files.includes(f)), "Montréal: the Espace Paddock, Grandstand 1, the Biosphère");
+  assert.ok(files.includes("mon_stand_k_c.glb"), "Monaco: Grandstand K");
+  assert.ok(files.includes("jed_team.glb"), "Jeddah's team building"); assert.strictEqual(F.PIT_UPPERS[149].fillBack, 8, "Jeddah: the ground floor is filled under the long body only – the rear blocks stand from the ground");
+  assert.ok(["sha_stand_c.glb", "sha_pit_upper.glb", "sha_wing.glb", "sha_pavilion.glb", "sha_lotus_row.glb"].every((f) => files.includes(f)), "Shanghai's main straight and the canopy rows over H and K");
+  assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-pavilion-\d+$/.test(f.id)).length, 26, "26 team pavilions"); assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-wing-/.test(f.id)).length, 2);
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });
@@ -289,4 +295,22 @@ test("a listed stand mapped as several outlines: the model stands on the outline
   const data = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8"));
   const v = data.circuits.Suzuka.stands.find((s) => s.n === "V1/V2 Main");
   assert.strictEqual(v.model.file, "suz_stand_c.glb"); assert.strictEqual(v.model.on, "V2"); assert.deepStrictEqual(v.model.covers, ["V1"]);
+});
+
+test("the smallest box round a nearly square outline keeps its sides' direction and size (Hard Rock Stadium's grounds)", async () => {
+  const { minBox, hull } = await import("../src/renderer/landmarks.js");
+  // the map's outline of the stadium grounds (scene metres): about 261 × 275 m, its sides at 58° / 148°, corners crowding two sides
+  const S = [[58, -197], [85, -152], [94, -138], [98, -131], [116, -103], [119, -98], [120, -96], [126, -86], [128, -83], [130, -79], [148, -50], [152, -44], [161, -30], [164, -24], [168, -19], [188, 14], [118, 57], [102, 72], [81, 88], [59, 101], [35, 112], [9, 122], [-46, 156], [-143, -1], [-147, -8], [-175, -54], [-149, -70], [-145, -72], [-131, -81], [-114, -91], [-111, -93], [-108, -96], [-92, -109], [-77, -121], [-58, -133], [-39, -143], [-10, -155], [-6, -158], [31, -180]];
+  const o = minBox(S), L = o.u1 - o.u0, W = o.v1 - o.v0;
+  assert.ok(L >= W && L > 268 && L < 282 && W > 255 && W < 268, `${L.toFixed(0)} × ${W.toFixed(0)} m (the corner-point method gave 369 × 366)`);
+  assert.ok(Math.hypot(o.c[0] - 6, o.c[1] + 20) < 6, "its middle is the box's, by the pitch – not the corner points' mean 40 m off");
+  // towards the pit building (its stadium-side wall 122 m along this normal from the scene's origin, the garage fronts at 149 m)
+  const n = [0.527, 0.852], reach = Math.sqrt((L * 0.42 * (n[0] * o.u[0] + n[1] * o.u[1])) ** 2 + (W * 0.44 * (n[0] * o.v[0] + n[1] * o.v[1])) ** 2);
+  assert.ok(o.c[0] * n[0] + o.c[1] * n[1] + reach * 1.04 < 122 - 10, "the bowl and its canopy stay at least 10 m short of the pit building");
+  // the map data has the outline in two halves: taken together (their hull) they give the same box; one half alone does not
+  const cut = (keep) => S.filter(([x, z]) => keep(x * 0.527 + z * 0.852)), north = cut((d) => d > -14), south = cut((d) => d <= -14);
+  const whole = minBox(hull(north.concat(south)));
+  assert.ok(Math.abs(whole.u1 - whole.u0 - L) < 1 && Math.abs(whole.v1 - whole.v0 - W) < 1 && Math.hypot(whole.c[0] - o.c[0], whole.c[1] - o.c[1]) < 1, "two pieces → the same box");
+  const half = minBox(hull(north));
+  assert.ok(half.c[0] * n[0] + half.c[1] * n[1] > o.c[0] * n[0] + o.c[1] * n[1] + 40, "(one half alone sits 40 m and more towards the pit building – what v0.62 built a second stadium on)");
 });
