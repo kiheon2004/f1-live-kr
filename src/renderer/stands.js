@@ -135,6 +135,20 @@ function standMaterial(opts = {}) {
 const sideSign = (s) => (s === "R" ? 1 : -1);
 const NOT_BUILT = new Map([["ga", "standing / grass"], ["hosp", "hospitality"], ["other", "not a circuit grandstand"]]);
 
+// Which built stands a model file stands on. One listed stand can be several map outlines (Suzuka's main stand: the
+// lower tier "V1" and the upper tier "V2" are mapped apart): `model.on` names the outline the model is placed on –
+// another outline carrying the same model places none –, `model.covers` names the built stands that make way with it
+// (they are swaps without a model of their own). Without `on` every swap with a model places its own.
+// → [{ sw, follow: [swaps hidden with it] }]
+export function swapRoles(swaps) {
+  const out = [];
+  for (const sw of swaps || []) {
+    const M = sw.model; if (!M) continue;
+    if (M.on && sw.name !== M.on) continue;
+    out.push({ sw, follow: swaps.filter((o) => o !== sw && ((M.on && o.model === M) || (M.covers || []).includes(o.name))) });
+  }
+  return out;
+}
 export function buildStands({ scene, gf, world, groundAt, corridor, street, year = null, corners = [] }) {
   const samples = world.samples, n = samples.length;
   const step = n > 1 ? samples[0].p.distanceTo(samples[1].p) : 2;
@@ -233,6 +247,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const skipped = [];   // (listed stands not built, and why)
   const dropped = [];   // (map outlines not built, and why)
   const inYear = (L) => !(L.yr && year && (year < L.yr[0] || (L.yr[1] != null && year > L.yr[1])));
+  const covered = new Set((scene.stands?.list || []).filter((L) => inYear(L) && L.model?.covers && !(L.model.from && year && year < L.model.from)).flatMap((L) => L.model.covers));
   // (v0.59: an outline of a hospitality building or a standing area that asks to be built – `build`, not `existing` – is
   // built where it stands, as deep as it is: a block or a deck instead of rows of seats)
   const builds = (L) => (L.type === "hosp" || L.type === "ga") && !!L.build && !L.existing;
@@ -591,7 +606,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   const swapMarks = [];
   for (const st of alive) {
     const F = st.front, rows = st.rows, rise = st.rise;
-    const mark = st.model ? { st, p0: pos.length, s0: spos.length, g0: seatGroups.length } : null;
+    // (a stand another stand's model covers – `model.covers` – is kept apart too, to be hidden with it)
+    const mark = st.model || covered.has(st.name) ? { st, p0: pos.length, s0: spos.length, g0: seatGroups.length } : null;
     const seed = hash(st.name || `${F[0].x | 0},${F[0].z | 0}`), rr = rand(seed);
     const seatC = C(SEAT_COLOURS[seed % SEAT_COLOURS.length]);
     const concrete = st.perm ? C("#bdb9b1") : C("#9aa0a6"), tread = st.perm ? C("#c9c5bd") : C("#8d949b");

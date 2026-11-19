@@ -3,7 +3,7 @@
 //   Las Vegas: Sphere (157 m across, 112 m high, LED skin)      Singapore: Marina Bay Sands SkyPark (340 m),
 //   Singapore Flyer (150 m wheel, 165 m high)                    Baku: Flame Towers (182 / 165 / 161 m)
 //   Abu Dhabi: W hotel's LED gridshell over the track, Ferrari World's red roof
-//   Bahrain: Sakhir Tower (VIP tower with its flared top)       Austin: COTA observation tower (77 m, red veil)
+//   (Bahrain's Sakhir Tower: a model, facilities.js)             Austin: COTA observation tower (77 m, red veil)
 //   Miami: Hard Rock Stadium (bowl, canopy, four masts)
 // (Circuit facilities – Silverstone's Wing, Suzuka's pit building – are in facilities.js.)
 import * as THREE from "./vendor/three.module.js";
@@ -29,6 +29,32 @@ function obb(pts) {
   let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
   for (const [x, z] of pts) { const a = (x - cx) * u[0] + (z - cz) * u[1], b = (x - cx) * v[0] + (z - cz) * v[1]; u0 = Math.min(u0, a); u1 = Math.max(u1, a); v0 = Math.min(v0, b); v1 = Math.max(v1, b); }
   return u1 - u0 >= v1 - v0 ? { c: [cx, cz], u, v, u0, u1, v0, v1 } : { c: [cx, cz], u: v, v: [-u[0], -u[1]], u0: v0, u1: v1, v0: -u1, v1: -u0 };
+}
+// The convex outline round a set of points (monotone chain) – several pieces of one mapped outline taken as one.
+export function hull(points) {
+  const P = points.map(([x, z]) => [x, z]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (P.length < 4) return P;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (pts) => { const h = []; for (const p of pts) { while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], p) <= 0) h.pop(); h.push(p); } h.pop(); return h; };
+  return half(P).concat(half(P.slice().reverse()));
+}
+// The smallest box round an outline (the best of its edges' directions) in obb()'s form, its centre the box's own
+// middle. obb() takes the outline's main direction from its corner points: a nearly square outline whose corners
+// crowd two of its sides (Hard Rock Stadium's grounds, 261 × 275 m) came out turned 46° and 369 × 366 m, its middle
+// 40 m off – and the stadium built from it stood through the pit building into the pit lane (v0.63).
+export function minBox(pts) {
+  let best = null;
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[(i + 1) % pts.length], l = Math.hypot(bx - ax, bz - az); if (l < 1) continue;
+    const u = [(bx - ax) / l, (bz - az) / l], v = [-u[1], u[0]];
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [x, z] of pts) { const a = x * u[0] + z * u[1], b = x * v[0] + z * v[1]; u0 = Math.min(u0, a); u1 = Math.max(u1, a); v0 = Math.min(v0, b); v1 = Math.max(v1, b); }
+    const area = (u1 - u0) * (v1 - v0);
+    if (!best || area < best.area) best = { area, u, v, u0, u1, v0, v1 };
+  }
+  if (!best) return obb(pts);
+  const { u, v, u0, u1, v0, v1 } = best, mu = (u0 + u1) / 2, mv = (v0 + v1) / 2, c = [u[0] * mu + v[0] * mv, u[1] * mu + v[1] * mv], hu = (u1 - u0) / 2, hv = (v1 - v0) / 2;
+  return hu >= hv ? { c, u, v, u0: -hu, u1: hu, v0: -hv, v1: hv } : { c, u: v, v: [-u[0], -u[1]], u0: -hv, u1: hv, v0: -hu, v1: hu };
 }
 // vertical wall strips along an outline, h high from y0, as one mesh
 function wallStrip(pts, y0, h, mat) {
@@ -173,14 +199,8 @@ const SPECS = [
     const funnel = new THREE.Mesh(new THREE.CylinderGeometry(42, 8, 34, 32, 1, true), std({ color: 0x9fc3d8, roughness: 0.1, metalness: 0.6, side: THREE.DoubleSide }));
     funnel.position.set(cx, base + 48 - 15, cz); add(funnel);
   } },
-  // Sakhir Tower: the VIP tower at the start line – a slim stem with a much wider glazed top
-  { loc: ["Sakhir", "Bahrain"], match: (b) => /Sakhir Tower/i.test(b.name || ""), build({ pts, base, add }) {
-    const [cx, cz] = centroid(pts), o = obb(pts), w = Math.max(14, o.u1 - o.u0), d = Math.max(12, o.v1 - o.v0), ang = Math.atan2(o.u[1], o.u[0]);
-    const stem = new THREE.Mesh(new THREE.BoxGeometry(w * 0.55, 34, d * 0.55), std({ color: 0xe8e2d4, roughness: 0.7 })); stem.position.set(cx, base + 17, cz); stem.rotation.y = -ang; add(stem);
-    const glass = lit(std({ color: 0x5b7184, roughness: 0.12, metalness: 0.5, emissive: 0xffe2b0 }), 0, 0.6);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.95, w * 0.62, 14, 8, 1), glass); cap.position.set(cx, base + 41, cz); cap.rotation.y = -ang + Math.PI / 8; add(cap);
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(w * 1.05, w * 0.95, 2.5, 8, 1), std({ color: 0xf2f0ea })); lid.position.set(cx, base + 49, cz); lid.rotation.y = -ang + Math.PI / 8; add(lid);
-  } },
+  // (Sakhir Tower: since v0.63 a model of its own – facilities.js `sakhir-tower`; the stem-and-cap drawn here until then
+  // was unlike the real tower, a drum of ringed storeys from the ground up)
   // COTA observation tower: 77 m, a lift core inside a red "veil" of 18 steel tubes over the amphitheatre stage
   { loc: ["Austin"], match: (b) => /amphit/i.test(b.name || ""), keep: true, build({ pts, base, add, scene, gf, skipB }) {
     let [cx, cz] = centroid(pts);
@@ -199,8 +219,13 @@ const SPECS = [
     const deck = new THREE.Mesh(new THREE.CylinderGeometry(7.5, 6, 4, 16), lit(std({ color: 0x6e8494, roughness: 0.15, metalness: 0.5, emissive: 0xfff0d0 }), 0, 0.7)); deck.position.set(cx, base + 69, cz); add(deck);
   } },
   // Hard Rock Stadium: the seating bowl inside a 14-acre canopy held by four corner masts
-  { loc: ["Miami", "Miami Gardens"], match: (b) => /Hard Rock Stadium/i.test(b.name || ""), build({ pts, base, add }) {
-    const o = obb(pts), [cx, cz] = o.c, ang = Math.atan2(o.u[1], o.u[0]), L = o.u1 - o.u0, W = o.v1 - o.v0;
+  // (v0.63: ONE stadium from every piece of the grounds' outline – the map data has it in two halves, and one stadium
+  // was built per half: the northern one stood through the pit building into the pit lane. And minBox, not obb: the
+  // whole outline is nearly square – see minBox.)
+  { loc: ["Miami", "Miami Gardens"], group: (bs) => bs.filter((b) => /Hard Rock Stadium/i.test(b.name || "")), build({ items, groundAt, add }) {
+    const pts = hull(items.flatMap((it) => it.pts)), base = Math.min(...pts.map(([x, z]) => groundAt(x, z)));
+    if (!Number.isFinite(base)) return;
+    const o = minBox(pts), [cx, cz] = o.c, ang = Math.atan2(o.u[1], o.u[0]), L = o.u1 - o.u0, W = o.v1 - o.v0;
     // the bowl is an oval inside the mapped outline (which takes in the concourse and plaza)
     const ring = (k) => Array.from({ length: 48 }, (_, i) => { const a = (i / 48) * Math.PI * 2, ex = Math.cos(a) * L * 0.42 * k, ey = Math.sin(a) * W * 0.44 * k; return [cx + o.u[0] * ex + o.v[0] * ey, cz + o.u[1] * ex + o.v[1] * ey]; });
     const outer = ring(1), inner = ring(0.6);

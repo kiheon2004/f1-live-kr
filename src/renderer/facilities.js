@@ -178,6 +178,190 @@ export const FACILITIES = [
     },
   },
   {
+    id: "sakhir-tower", name: "Bahrain International Circuit – Sakhir Tower", kind: "tower",
+    venue: [63], loc: ["Sakhir", "Bahrain"], years: [2004, null],
+    status: "trial",
+    // the map's "Sakhir Tower" (man_made = tower, about 38 m across) – its record at this point
+    replaces: { near: [26.035443, 50.511542], within: 6 },
+    // a drum of eight ringed storeys from the ground up, a roof terrace under a tent (photos); every height estimated
+    model: { file: "bh_tower.glb", anchor: [26.035443, 50.511542], heading: 0 },
+    sources: [
+      "src/data/models/bh_tower.glb – made for this app (2026-11-18, first pass): a drum of eight storeys with ring balconies, a roof terrace at 33 m under a membrane tent, a mast to 53 m – from pre-opening figures (a nine-storey VIP tower) and Wikimedia Commons photos compared by eye; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building 'Sakhir Tower' (man_made = tower) at its position",
+    ],
+    checked: "2026-11-18: trial (place from the map; the heights and which way its entrance faces are estimates)",
+    evidence: {
+      confirmed: [],
+      photo: ["the drum of ringed storeys and the tent on its roof (Wikimedia Commons, compared only)"],
+      map: ["the place: the map's 'Sakhir Tower' building"],
+      inferred: ["the heights (terrace 33 m, mast 53 m)", "the entrance's side"],
+    },
+  },
+  {
+    id: "montreal-biosphere", name: "Montréal – the Biosphère on Île Sainte-Hélène", kind: "tower",
+    venue: [23], loc: ["Montréal", "Montreal"], years: [2004, null],
+    status: "trial",
+    // the map's building "Biosphère" (76 × 76 m) – its record at this point makes way for the sphere
+    replaces: { near: [45.514093, -73.531427], within: 5 },
+    model: { file: "mtl_biosphere.glb", anchor: [45.514093, -73.531427], heading: 0 },
+    sources: [
+      "src/data/models/mtl_biosphere.glb – made for this app (2026-11-19): a faceted sphere 76 m across and 62 m high (published figures) – the real one is an open lattice, here an opaque shell; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building 'Biosphère' at its position",
+    ],
+    checked: "2026-11-19: trial (place from the map, size published; drawn as an opaque shell)",
+    evidence: {
+      confirmed: ["76 m across, 62 m high (published)"],
+      photo: [],
+      map: ["the place: the map's 'Biosphère' building"],
+      inferred: ["an opaque shell instead of the open lattice"],
+    },
+  },
+  {
+    id: "miami-paddock-club-extension", name: "Miami International Autodrome – the Paddock Club extension towards turn 1 (2027)", kind: "paddock",
+    venue: [151], loc: ["Miami", "Miami Gardens"], years: [2027, null],
+    status: "trial",
+    // Where: at the Paddock Club's turn-1 end on the garage front line (the club's roof strip in aerial imagery ± 4 m) –
+    // announced for the 2027 race; its place, length and width are estimates (the published floor area over three floors)
+    replaces: { near: [25.958632, -80.23696], within: 3 },
+    model: { file: "mia_pit_ext.glb", anchor: [25.958632, -80.23696], heading: 210.9 },
+    sources: [
+      "src/data/models/mia_pit_ext.glb – made for this app (2026-11-19): a white building 107 m long with a round end towards turn 1, a ground-floor terrace, two glazed floors behind deep curved balconies, a roof terrace under an oval roof slab – from hok.com's project page ('115,000-sq.-ft. expansion overlooking Turn 1, opening for the 2027 race') and its two renderings compared by eye, nothing copied; length, width and every height estimated; no outside asset, no logo or lettering",
+      "the place: the Paddock Club's turn-1 end read by the chat-side session off Esri World Imagery (looked at only), ± 4 m",
+    ],
+    checked: "2026-11-19: trial (announced building; place and size estimated – confidence low)",
+    evidence: {
+      confirmed: ["an extension of the Paddock Club overlooking turn 1, opening for the 2027 race, 115,000 sq ft (hok.com)"],
+      photo: ["a white building, three tiers of deep balconies, a round end, an oval roof (the architect's renderings, looked at only)"],
+      map: ["the club's end it joins (aerial imagery)"],
+      inferred: ["its length (107 m) and width (36 m)", "every height", "what becomes of the footbridge that lands there today"],
+    },
+  },
+  {
+    id: "jeddah-team-building", name: "Jeddah Corniche Circuit – the team building across the paddock street", kind: "paddock",
+    venue: [149], loc: ["Jeddah"], years: [2021, null],
+    status: "trial",
+    // Where: by the pit building as this app builds it (its upper storeys' origin at 21.631716, 39.104456, its paddock
+    // side facing 250.9°): the middle 70 m behind the garage fronts and 16 m towards turn 1 along the building, turned
+    // half round – its box blocks to the street and the pit building, its balconies to the sea (aerial imagery ± 5 m;
+    // the mirrored arrangement read off one rendering)
+    replaces: { near: [21.631693, 39.103912], within: 3 },
+    model: { file: "jed_team.glb", anchor: [21.631693, 39.103912], heading: 70.9 },
+    sources: [
+      "src/data/models/jed_team.glb – made for this app (2026-11-19): a 217 × 27 m building like the pit building – three storeys, a glazed ground floor without garages, five pergolas on the roof terrace, six cream box blocks – from the promoter's 2021 renderings (formula1.com, looked at only) and aerial imagery compared by eye, nothing copied; every height estimated; no outside asset, no logo or lettering",
+      "the place: worked out from the chat-side session's reading of aerial imagery (70 m behind the pit building's garage fronts, 16 m towards turn 1, ± 5 m) and this app's own pit building",
+    ],
+    checked: "2026-11-19: trial (place ± 5 m from aerial imagery; that it mirrors the pit building is read off one rendering; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a second long building behind the pit building, cream blocks, green squares on its roof (aerial imagery and the 2021 renderings, looked at only)"],
+      map: [],
+      inferred: ["its place to ± 5 m", "that it is the pit building's mirror image", "every height"],
+    },
+  },
+  {
+    id: "suzuka-wheel", name: "Suzuka Circuit – the amusement park's Ferris wheel by the final corner", kind: "tower",
+    venue: [46], loc: ["Suzuka"], years: [2018, null],
+    status: "trial",
+    // Where: the white lattice wheel seen in aerial imagery (± 15 m – a tall structure leans in the picture), about 85 m
+    // behind the main stand's final-corner end. It shows there as a strip running north-west – south-east (about 148°):
+    // the wheel's plane lies almost along the main straight, so its circle is seen from across the track and its edge
+    // along the straight (heading: the axle, 148 − 90). The map's outline tagged attraction = big_wheel (also
+    // grandstand = yes, name "S", 40 m to the west) is the S stand – the tag sits on the wrong outline.
+    replaces: { near: [34.846, 136.53889], within: 3 },
+    model: { file: "suz_wheel.glb", anchor: [34.846, 136.53889], heading: 58 },
+    sources: [
+      "src/data/models/suz_wheel.glb – made for this app (2026-11-19, first pass): a 50 m wheel, its axle 29 m up, 32 gondolas (their colours not checked), a rim lit at night – sizes estimated (the 50 m agree with the strip seen from above); no outside asset, no logo or lettering",
+      "the place and the way it faces: read by the chat-side session off Esri World Imagery (about 0.5 m per pixel, looked at only) – one blurred picture, confidence medium at best",
+    ],
+    checked: "2026-11-19: trial (place ± 15 m and facing from one aerial picture; size estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the white lattice wheel's place and its strip-like footprint (aerial imagery, looked at only)"],
+      map: [],
+      inferred: ["its size (50 m across)", "the gondolas' colours"],
+    },
+  },
+  {
+    id: "shanghai-wing-east", name: "Shanghai International Circuit – the east wing over the main straight (the press centre, turn 16 end)", kind: "tower",
+    venue: [49], loc: ["Shanghai"], years: [2004, null],
+    status: "trial",
+    // (the wing's own origin is on the grandstand's front line; what makes way is a map building where its round tower stands)
+    replaces: { near: [31.338023, 121.22241], within: 14 },
+    model: { file: "sha_wing.glb", anchor: [31.337537, 121.222531], heading: 347.9 },
+    sources: [
+      "src/data/models/sha_wing.glb – made for this app (2026-11-19, first pass): a 140 × 38 m lens-shaped wing across the straight, its axis 38.4 m up (published), a round glass tower of eight storeys under it on the pit side, two red drums behind the grandstand – from the published figures (docs/research/pitbuildings.md) and Wikimedia Commons photos and a 2018 satellite picture compared by eye, nothing copied; the wing's thickness, the tower's radius and storeys are estimates; no logo or lettering",
+      "the place: worked out by the chat-side session from this app's traced outline of Grandstand A (20 m beyond the stand's end), ± a few metres",
+    ],
+    checked: "2026-11-19: trial (place from the grandstand's outline; one height published, the rest estimated)",
+    evidence: {
+      confirmed: ["the wing's axis 38.4 m up; a nine-storey tower at each end of the main grandstand (published figures)"],
+      photo: ["the lens shape seen from the side, the round glass tower, the glazed band, the red drums (Wikimedia Commons, compared only)"],
+      map: [],
+      inferred: ["the wing's thickness (13.3 m at its middle)", "the tower's radius and storey height", "two red drums (one is seen in the photo)"],
+    },
+  },
+  {
+    id: "shanghai-wing-west", name: "Shanghai International Circuit – the west wing over the main straight (the sky restaurant, turn 1 end)", kind: "tower",
+    venue: [49], loc: ["Shanghai"], years: [2004, null],
+    status: "trial",
+    // (the wing's own origin is on the grandstand's front line; what makes way is a map building where its round tower stands)
+    replaces: { near: [31.337325, 121.218636], within: 14 },
+    model: { file: "sha_wing.glb", anchor: [31.336839, 121.218758], heading: 347.9 },
+    sources: [
+      "src/data/models/sha_wing.glb – made for this app (2026-11-19, first pass): a 140 × 38 m lens-shaped wing across the straight, its axis 38.4 m up (published), a round glass tower of eight storeys under it on the pit side, two red drums behind the grandstand – from the published figures (docs/research/pitbuildings.md) and Wikimedia Commons photos and a 2018 satellite picture compared by eye, nothing copied; the wing's thickness, the tower's radius and storeys are estimates; no logo or lettering",
+      "the place: worked out by the chat-side session from this app's traced outline of Grandstand A (20 m beyond the stand's end), ± a few metres",
+    ],
+    checked: "2026-11-19: trial (place from the grandstand's outline; one height published, the rest estimated)",
+    evidence: {
+      confirmed: ["the wing's axis 38.4 m up; a nine-storey tower at each end of the main grandstand (published figures)"],
+      photo: ["the lens shape seen from the side, the round glass tower, the glazed band, the red drums (Wikimedia Commons, compared only)"],
+      map: [],
+      inferred: ["the wing's thickness (13.3 m at its middle)", "the tower's radius and storey height", "two red drums (one is seen in the photo)"],
+    },
+  },
+  // The canopy rows over Shanghai's Grandstands H and K: thirteen round white membrane canopies in a row over each (26 in
+  // all – the published number), one model for a whole row at the row's middle; the stands under them are built without
+  // a roof of their own (grandstands.json)
+  ...[["h", "Grandstand H", [31.337114, 121.22731], 236.0], ["k", "Grandstand K", [31.336487, 121.226256], 234.3]].map(([key, over, at, heading]) => ({
+    id: `shanghai-canopies-${key}`, name: `Shanghai International Circuit – the canopy row over ${over}`, kind: "roof",
+    venue: [49], loc: ["Shanghai"], years: [2004, null],
+    status: "trial",
+    replaces: { near: at, within: 1 },   // (nothing: the stand under it is a grandstand, never taken away)
+    model: { file: "sha_lotus_row.glb", anchor: at, heading },
+    sources: [
+      "src/data/models/sha_lotus_row.glb – made for this app (2026-11-19): a row of thirteen round membrane canopies 317 m long, each about 28 m across on one column, every other one 1.6 m higher – the number (26 over the two stands, published) and the diameter from aerial imagery (looked at only); the heights and the shallow funnel shape are estimates; no outside asset, no logo or lettering",
+      "the rows' places: read by the chat-side session off Esri World Imagery (looked at only), ± 3 m – on this app's H and K map outlines",
+    ],
+    checked: "2026-11-19: trial (places ± 3 m from aerial imagery; number and diameter known, heights and shape estimated)",
+    evidence: {
+      confirmed: ["26 membrane canopies over the two stands (published)"],
+      photo: ["thirteen round white canopies in a row over each stand, about 28 m across (aerial imagery, looked at only)"],
+      map: ["the rows' places on the H and K outlines"],
+      inferred: ["the height (edges 21.9 / 23.5 m)", "the funnel shape, eight ribs"],
+    },
+  })),
+  // The team pavilions on the lake behind Shanghai's pit building: 26 of them (published), each a 15 m room under a low
+  // hipped roof on posts in the water – the same model at each centre read off a 2018 satellite picture (± 5 m); the real
+  // ones are each turned a little, here all face the pit building
+  ...[[31.339179, 121.220486], [31.339162, 121.220944], [31.339124, 121.221319], [31.338894, 121.219995], [31.338856, 121.220315], [31.33886, 121.220922], [31.338802, 121.221243], [31.33881, 121.221562], [31.338674, 121.219565], [31.338725, 121.220628], [31.338525, 121.219867], [31.338576, 121.2201], [31.33856, 121.221431], [31.338556, 121.221697], [31.338361, 121.219074], [31.338377, 121.219371], [31.338279, 121.220332], [31.338379, 121.220723], [31.338357, 121.220979], [31.338463, 121.221211], [31.338204, 121.219802], [31.338164, 121.22009], [31.338022, 121.21903], [31.338037, 121.219296], [31.338106, 121.219571], [31.337898, 121.218799]].map((at, k) => ({
+    id: `shanghai-pavilion-${k + 1}`, name: `Shanghai International Circuit – team pavilion ${k + 1} of 26`, kind: "paddock",
+    venue: [49], loc: ["Shanghai"], years: [2004, null],
+    status: "trial",
+    replaces: { near: at, within: 9 },
+    model: { file: "sha_pavilion.glb", anchor: at, heading: 347.9 },
+    sources: [
+      "src/data/models/sha_pavilion.glb – made for this app (2026-11-19, first pass): a 15 m square room under a low hipped roof, red corner posts, on posts in the water – from the published count (26 team pavilions on the lake) and Wikimedia Commons pictures compared by eye, nothing copied; every dimension an estimate; no logo or lettering",
+      "the 26 centres: read by the chat-side session off the Wikimedia Commons SkySat picture of 2018-04-07 (about 1 m per pixel, looked at only), ± 5 m",
+    ],
+    checked: "2026-11-19: trial (places from a satellite picture; sizes estimated; one heading for all)",
+    evidence: {
+      confirmed: ["26 team pavilions on the lake (published)"],
+      photo: ["white roofs on the lake, the red posts (Wikimedia Commons, compared only)"],
+      map: ["the places (a satellite picture, ± 5 m)"],
+      inferred: ["the size (15 m square, 8.2 m to the top)", "the heading"],
+    },
+  })),
+  {
     id: "hungaroring-paddock-2025", name: "Hungaroring – paddock building (2025)", kind: "pit-building",
     venue: [4], loc: ["Budapest"], years: [2025, null],
     status: "trial",
@@ -1453,16 +1637,21 @@ export function addUpper(g, r, root, U) {
   // (the floors along the building: a least-squares line through the garages' floors)
   let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (const sl of S) { const x = sOf(sl.front) - sc; n++; sx += x; sy += sl.floor; sxx += x * x; sxy += x * sl.floor; }
   const m = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1), a = (sy - m * sx) / n;
-  const ox = f0[0] + ax[0] * (sc - sOf(f0)) + iw[0] * U.front, oz = f0[1] + ax[1] * (sc - sOf(f0)) + iw[1] * U.front, oy = a + G.top - U.garageTop;
+  // (upper.along: the model's middle that many metres along its +X from the built footprint's middle – a map outline
+  // longer at one end than the building the model shows, Sakhir)
+  const A = U.along || 0;
+  const ox = f0[0] + ax[0] * (sc + A - sOf(f0)) + iw[0] * U.front, oz = f0[1] + ax[1] * (sc + A - sOf(f0)) + iw[1] * U.front, oy = a + m * A + G.top - U.garageTop;
   const holder = new THREE.Group(), tilt = new THREE.Group();
   holder.position.set(ox, oy, oz); holder.rotation.y = yaw; tilt.rotation.z = Math.atan(m); holder.add(tilt); tilt.add(root.clone(true));
   // the ground floor the model stands over where the builder built none (model axes)
-  const HL = U.length / 2, HD = U.depth / 2, xs = [s0 - sc, s1 - sc];
-  for (const sl of S) { const x = sOf(sl.front) - sc; xs[0] = Math.min(xs[0], x - sl.width / 2); xs[1] = Math.max(xs[1], x + sl.width / 2); }
-  const zb = dBack - dFront - U.front, boxes = [];
-  if (HD - zb > 0.3) boxes.push([xs[0], xs[1], zb - 0.05, HD]);
-  if (xs[0] + HL > 0.3) boxes.push([-HL, xs[0], -HD, HD]);
-  if (HL - xs[1] > 0.3) boxes.push([xs[1], HL, -HD, HD]);
+  const HL = U.length / 2, HD = U.depth / 2, xs = [s0 - sc - A, s1 - sc - A];
+  for (const sl of S) { const x = sOf(sl.front) - sc - A; xs[0] = Math.min(xs[0], x - sl.width / 2); xs[1] = Math.max(xs[1], x + sl.width / 2); }
+  // (upper.fillBack: the back of the part that needs a ground floor under it, in the model's z – a model whose rear
+  // blocks come down to the ground themselves, Jeddah; without it the model's whole depth)
+  const zb = dBack - dFront - U.front, FB = Number.isFinite(U.fillBack) ? U.fillBack : HD, boxes = [];
+  if (FB - zb > 0.3) boxes.push([xs[0], xs[1], zb - 0.05, FB]);
+  if (xs[0] + HL > 0.3) boxes.push([-HL, xs[0], -HD, FB]);
+  if (HL - xs[1] > 0.3) boxes.push([xs[1], HL, -HD, FB]);
   if (U.fill === false) boxes.length = 0;   // (the model has its own ground floor there)
   if (boxes.length) {
     const wall = new THREE.MeshStandardMaterial({ color: 0x3b3f45, roughness: 0.85, metalness: 0.05 }), y0 = -3, y1 = U.garageTop;
@@ -1474,7 +1663,7 @@ export function addUpper(g, r, root, U) {
   const corner = (x, z) => [ox + ax[0] * x + iw[0] * z, oz + ax[1] * x + iw[1] * z];
   const box = new THREE.Box3().setFromObject(holder);
   const zBack = Number.isFinite(U.backTo) ? U.backTo : HD;
-  return { footprint: [corner(-HL, -HD), corner(HL, -HD), corner(HL, zBack), corner(-HL, zBack)], top: box.max.y, info: { upper: U.file, upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] } };
+  return { footprint: [corner(-HL, -HD), corner(HL, -HD), corner(HL, zBack), corner(-HL, zBack)], top: box.max.y, info: { upper: U.file, upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] }, origin: [ox, oz], inward: iw };
 }
 // A model file stood at a place given in scene coordinates (a listed grandstand's own model – stands.js `swaps`): the
 // model's origin at (x, y, z), its +Z turned to the scene direction dir ([dx, dz]). Held as the facilities' models are
@@ -1653,6 +1842,20 @@ export const PIT_LOOKS = {
 // The upper storeys' own model for a venue whose pit building has no entry of its own (genericPitSpec) – as an entry's
 // `upper` (addUpper). fill: false – the model brings its own ground-floor ends (stair towers down to the ground).
 export const PIT_UPPERS = {
+  // (Melbourne: the 1995 pit building came down after the 2026 race; the new one is due for 2028 – the 2027 race runs
+  // with new garages and a temporary Paddock Club, so until 2028 the builder's own building stays)
+  10: { file: "mel_pit_upper.glb", garageTop: 5.5, front: 15, length: 270, depth: 30, from: 2028,
+    src: "src/data/models/mel_pit_upper.glb – Albert Park's new pit building (Woods Bagot, due 2028), the storeys over the garages: two timber-framed floors under a roof of light grey metal sheets on a deep timber grid, a taller glazed box at the turn-1 end – made for this app (2026-11-19, second pass: the roof) from the published facts (14 garages, a timber structure: development.vic.gov.au, sport.vic.gov.au, woodsbagot.com, austadiums.com) and the published renderings compared by eye; 270 m long after the old building's map outline, every dimension an estimate; no outside asset, no logo or lettering" },
+  63: { file: "bh_pit_upper.glb", garageTop: 5.0, front: 12.5, length: 318, depth: 25, along: 32,
+    src: "src/data/models/bh_pit_upper.glb – Bahrain International Circuit pit building, the storeys over the garages (the Paddock Club's glazed lounge under twelve membrane tents, six sand-coloured blocks between them): made for this app (2026-11-18, first pass) from tensinet.com's project text (PTFE membrane roofs), pre-opening figures and Wikimedia Commons photos and aerial imagery compared by eye – 318 × 25 m, the map outline's main body (its northern 318 m: `along`), every height estimated; no outside asset, no logo or lettering" },
+  23: { file: "mtl_pit_upper.glb", garageTop: 6.0, front: 18.5, length: 340, depth: 37, fillBack: 12.5, backTo: 23.5,
+    src: "src/data/models/mtl_pit_upper.glb – Circuit Gilles Villeneuve, the Espace Paddock (FABG, 2019) over the garages: a loge level open to the pit lane, a third level of terrace and glazed loges, 21 white roof modules on timber beams and V-shaped white columns, a podium at the middle, a timber terrace strip on the Olympic Basin side – made for this app (2026-11-19) from the published facts (docs/research/pitbuildings.md) and Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; 340 m long (the map outline 331 m, the roof strip in aerial imagery 354 m), every height estimated; no outside asset, no logo or lettering" },
+  49: { file: "sha_pit_upper.glb", garageTop: 5.6, front: 15, length: 337, depth: 30,
+    src: "src/data/models/sha_pit_upper.glb – Shanghai International Circuit pit building, the storeys over the garages: one glazed floor (the Paddock Club) behind a balcony, a roof terrace with six planted squares – made for this app (2026-11-19, first pass) from the published wording (garages below, VIP suites above) and a 2018 satellite picture and Wikimedia Commons photos compared by eye; 337 m long between the two end towers, every height an estimate; no outside asset, no logo or lettering" },
+  149: { file: "jed_pit_upper.glb", garageTop: 5.2, front: 16, length: 280, depth: 32, fillBack: 8, backTo: 24,
+    src: "src/data/models/jed_pit_upper.glb – Jeddah Corniche Circuit pit building, the storeys over the garages: one long building of two glazed floors behind balconies, thin white slabs running out to a point at each end, a roof terrace with seven planted pergolas, and eight cream box blocks a storey higher on the paddock side (these stand from the ground, behind the garages) – made for this app (2026-11-19, second pass) from the promoter's 2021 renderings (formula1.com, looked at only) and aerial imagery compared by eye, nothing copied; 280 m and four storeys published, every height and the numbers of blocks and pergolas estimated; no outside asset, no logo or lettering" },
+  151: { file: "mia_pit_upper.glb", garageTop: 5.0, front: 21, length: 250, depth: 42, fillBack: 13, backTo: 33, from: 2023,
+    src: "src/data/models/mia_pit_upper.glb – Miami International Autodrome, the Paddock Club over the team garages (2023): three club floors behind deep balconies, a roof club over the turn-1 end, a four-storey entrance frame and a wide stair on the stadium side – made for this app (2026-11-19) from hok.com's project text and renderings and aerial imagery compared by eye, nothing copied; 250 m long as the roof strip in aerial imagery, every height estimated; no outside asset, no logo or lettering" },
   152: { file: "lv_pit_upper.glb", garageTop: 4.8, front: 16.6, length: 302.6, depth: 33.2, backTo: 22.2, fill: false, from: 2023,
     src: "src/data/models/lv_pit_upper.glb – Las Vegas Grand Prix Plaza pit building, the storeys over the garages: made for this app (2026-11-13) from published figures (1,000 × 100 ft, four levels, the 28,000 sq ft roof screen) and Wikimedia Commons photos of the 2025 race compared by eye, sized to the building as this app builds it (302.6 × 33.2 m, 40 garages, their top at 4.8 m) with a terrace behind – no outside asset, no logo or lettering" },
 };
@@ -1813,6 +2016,9 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         if (upperRoot) {
           const up = addUpper(g, r, upperRoot, spec.upper);
           made.footprint = up.footprint; made.top = up.top; made.info = { ...made.info, ...up.info }; how = "builder+model";
+          // (development: where the model's origin stands and the bearing its +Z – the paddock side – points to, for
+          // placing a neighbour by the pit building as built)
+          if (gf.toLL) { const a = gf.toLL(up.origin[0], up.origin[1]), b = gf.toLL(up.origin[0] + up.inward[0] * 50, up.origin[1] + up.inward[1] * 50); made.info.upperAt = a.map((v) => +v.toFixed(6)); made.info.upperFacing = +(((Math.atan2((b[1] - a[1]) * Math.cos((a[0] * Math.PI) / 180), b[0] - a[0]) * 180) / Math.PI + 360) % 360).toFixed(1); }
           own.holds.delete(upperHold); const hold = upperHold; upperHold = null; g.userData.onDispose = () => hold.release();
         }
       } catch (e) { reason = (reason ? reason + "; " : "") + e.message; }
