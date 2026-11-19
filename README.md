@@ -60,7 +60,7 @@ Claude Code와 회차별로 증상 재현 → 원인 찾기 → 보정 및 수�
 
 > 2026 Miami pit entry: a 35–50 m leap of the feed … the curve ran 1.9 m back at 60 km/h and the velocity's heading turned 180° (8 cars). … test/yaw53.test.js (fails on the old code).
 
-## 검증 (v0.53–v0.64)
+## 검증 (v0.53–v0.65)
 
 자동 측정 기록이며, 화면 확인은 따로 했습니다. 측정 조건과 근거는 [docs/VERIFICATION.md](docs/VERIFICATION.md)에 있습니다.
 
