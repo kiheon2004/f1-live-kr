@@ -198,6 +198,47 @@ export const FACILITIES = [
     },
   },
   {
+    id: "madring-puerta-sur", name: "Madring – IFEMA's Puerta Sur building between the two permanent pit blocks", kind: "paddock",
+    venue: [153], loc: ["Madrid"], years: [2026, null],
+    status: "trial",
+    // the map's block "Centro de Convenciones Sur" (the same building) makes way; the place is the chat side's reading of
+    // aerial imagery (the patio's middle) – not moved with the pit buildings
+    replaces: { names: /^Centro de Convenciones Sur$/ },
+    model: { file: "mad_puerta_sur.glb", anchor: [40.465774, -3.616706], heading: 350 },
+    sources: [
+      "src/data/models/mad_puerta_sur.glb – made for this app (2026-11-19): a glass square of 88 m round a patio 46 m across (aerial imagery, looked at only), an entrance canopy on the track side – its height (20 m) and its outer walls are estimates; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building 'Centro de Convenciones Sur' at this place",
+    ],
+    checked: "2026-11-19: trial (plan from aerial imagery; height and walls estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a square of 88 m with a round patio (aerial imagery, looked at only)"],
+      map: ["the place: the map's 'Centro de Convenciones Sur'"],
+      inferred: ["the height (20 m)", "the glass walls and the canopy"],
+    },
+  },
+  {
+    id: "madring-flag", name: "Madring – the flag by turn 3 (a 54 m mast)", kind: "tower",
+    venue: [153], loc: ["Madrid"], years: [2026, null],
+    status: "trial",
+    // Where: the official text only says 'between turn 3 and where the pit lane joins the track, on the west side'. Put
+    // in the empty wedge inside turn 3: 24 m from the track's inner edge, 26 m from the pit exit lane's path (measured
+    // against this app's track, v0.65) – 8 m north of the chat side's guess.
+    replaces: { names: /^\(no map record makes way\)$/ },   // (nothing: no map building carries that name)
+    model: { file: "mad_flag.glb", anchor: [40.464585, -3.620386], heading: 350 },
+    sources: [
+      "src/data/models/mad_flag.glb – made for this app (2026-11-19): a white mast 54 m high with a cloth of 16.66 × 25 m in red, yellow and red (official sizes; no coat of arms), lit at night, a red beacon on top; no outside asset",
+      "the place: an estimate inside turn 3 (the official text gives no coordinates)",
+    ],
+    checked: "2026-11-19: trial (sizes official; the place an estimate)",
+    evidence: {
+      confirmed: ["a 54 m mast, a flag of 16.66 × 25 m, lit at night (official release, 2026-06-16)"],
+      photo: [],
+      map: [],
+      inferred: ["the exact place inside turn 3"],
+    },
+  },
+  {
     id: "monaco-pool", name: "Monaco – the Stade Nautique Rainier III (the pool the swimming-pool chicane runs round)", kind: "paddock",
     venue: [22], loc: ["Monte Carlo", "Monaco"], years: [2004, null],
     status: "trial",
@@ -240,25 +281,26 @@ export const FACILITIES = [
     },
   },
   {
-    id: "monaco-hotel-de-paris", name: "Monaco – the Hôtel de Paris, its front range on the casino square", kind: "tower",
+    id: "monaco-hotel-de-paris", name: "Monaco – the Hôtel de Paris on the casino square", kind: "tower",
     venue: [22], loc: ["Monte Carlo", "Monaco"], years: [2004, null],
     status: "trial",
-    // Where: along the square front of the map's block of the hotel (111 × 75 m, unnamed – it stays: the wings and the
-    // courtyard behind are not modelled, so nothing makes way). The block's front faces 36°; the model's front wall stands
-    // 4 m behind it, because this app's track edge runs obliquely within 1.2 m of that front – set back, the model's wall
-    // is 2 m and more from the track's edge (measured, v0.64).
-    replaces: { names: /^\(no map record makes way\)$/ },   // (nothing: no map building carries that name)
+    // Where: on the map's block of the hotel (111 × 75 m, unnamed), built to that outline: the front range on the square
+    // (facing 36°), its front stepping back in three steps towards the south-east, the wings round the courtyard, the big
+    // round end (the Rotonde). The whole stands 4 m behind the mapped front, because this app's track edge runs obliquely
+    // within 1.2 m of it: so the front range is 2.5 m, the three steps 3.0–3.5 m and the round end 8.4 m from the track's
+    // edge (measured, v0.65). The map's block makes way (it lies under the model).
+    replaces: { names: /^\(no map record makes way\)$/ },   // (by name nothing – the block under the model's footprint goes with it)
     model: { file: "mon_hotel_paris.glb", anchor: [43.739129, 7.427126], heading: 36 },
     sources: [
-      "src/data/models/mon_hotel_paris.glb – made for this app (2026-11-19, second pass): the front range only, 52 × 20 m with a round corner set back at its south-east end – four storeys of windows over a tall ground floor, two bands of iron balconies, a dark slate roof with dormers, taller roofs over the middle and the ends, a short white entrance awning – from Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; heights and the depth estimated; no outside asset, no logo or lettering",
-      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the hotel block's outline at this place (the direction and length of its front)",
+      "src/data/models/mon_hotel_paris.glb – made for this app (2026-11-19, third pass: the whole block): the front range on the square (four storeys of windows over a tall ground floor, iron balconies, a dark slate roof with dormers, a short white awning), its three stepped bays to the south-east, the band and the two wings behind it round an open courtyard, the round end (the Rotonde) – its plan after OpenStreetMap's outline, Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; every height behind the front estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the hotel's outline (the model's plan, place and direction)",
     ],
-    checked: "2026-11-19: trial (direction and length of the front from the map's outline, set 4 m back from it; heights estimated)",
+    checked: "2026-11-19: trial (plan, place and direction from the map's outline, set 4 m back from its front; heights estimated)",
     evidence: {
       confirmed: [],
-      photo: ["the front on the square: balconies, slate roof, the round corner (Wikimedia Commons, compared only)"],
-      map: ["the direction and length of the front (the block's front edge)"],
-      inferred: ["every height", "the range's depth (20 m)", "the 4 m it stands back from the mapped front"],
+      photo: ["the front on the square: balconies, slate roof; the round end (Wikimedia Commons and aerial imagery, compared only)"],
+      map: ["the plan: the block's outline with its courtyard", "the direction of the front"],
+      inferred: ["every height", "the windows' arrangement", "the 4 m it stands back from the mapped front"],
     },
   },
   {
@@ -1962,6 +2004,10 @@ export const PIT_UPPERS = {
     src: "src/data/models/jed_pit_upper.glb – Jeddah Corniche Circuit pit building, the storeys over the garages: one long building of two glazed floors behind balconies, thin white slabs running out to a point at each end, a roof terrace with seven planted pergolas, and eight cream box blocks a storey higher on the paddock side (these stand from the ground, behind the garages) – made for this app (2026-11-19, second pass) from the promoter's 2021 renderings (formula1.com, looked at only) and aerial imagery compared by eye, nothing copied; 280 m and four storeys published, every height and the numbers of blocks and pergolas estimated; no outside asset, no logo or lettering" },
   151: { file: "mia_pit_upper.glb", garageTop: 5.0, front: 21, length: 250, depth: 42, fillBack: 13, backTo: 33, from: 2023,
     src: "src/data/models/mia_pit_upper.glb – Miami International Autodrome, the Paddock Club over the team garages (2023): three club floors behind deep balconies, a roof club over the turn-1 end, a four-storey entrance frame and a wide stair on the stadium side – made for this app (2026-11-19) from hok.com's project text and renderings and aerial imagery compared by eye, nothing copied; 250 m long as the roof strip in aerial imagery, every height estimated; no outside asset, no logo or lettering" },
+  // (Madring: the four pit buildings in one model – temporary BB, permanent B, the gap at IFEMA's Puerta Sur, permanent
+  // A, temporary AA – its origin on Puerta Sur's axis and ON the garage front line: front 0, everything behind it)
+  153: { file: "mad_pit_upper.glb", garageTop: 5.7, front: 0, length: 422, depth: 2, fillBack: 23.1, backTo: 23.1, along: -1.4, from: 2026,
+    src: "src/data/models/mad_pit_upper.glb – Madring's four pit buildings over the garages in one model: the two permanent blocks (89 m each: four boxes, a core, four boxes – timber terraces behind glass rails on two floors, a thin dark roof, 18.5 m at most) and the two temporary ones (two storeys, white roofs – their look an estimate), the 100 m gap between them at IFEMA's Puerta Sur – made for this app (2026-11-19) from the official pit box drawing (madring.com: boxes 10.00 × 23.10 m, 5.60 m high, 29 of them in this order), an official rendering and aerial imagery compared by eye, nothing copied; floor heights and terrace depths estimated; no outside asset, no logo or lettering" },
   152: { file: "lv_pit_upper.glb", garageTop: 4.8, front: 16.6, length: 302.6, depth: 33.2, backTo: 22.2, fill: false, from: 2023,
     src: "src/data/models/lv_pit_upper.glb – Las Vegas Grand Prix Plaza pit building, the storeys over the garages: made for this app (2026-11-13) from published figures (1,000 × 100 ft, four levels, the 28,000 sq ft roof screen) and Wikimedia Commons photos of the 2025 race compared by eye, sized to the building as this app builds it (302.6 × 33.2 m, 40 garages, their top at 4.8 m) with a terrace behind – no outside asset, no logo or lettering" },
 };
