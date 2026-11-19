@@ -71,6 +71,8 @@ test("the shipped model files: listed, present, and passing the app's own model 
   assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper_v2.glb") && files.includes("lv_stand_c.glb") && files.includes("lv_pit_upper.glb") && files.includes("lus_stand_c.glb") && files.includes("lus_pit_upper.glb"));
   assert.ok(["yas_stand_c.glb", "yas_pit_upper.glb", "yas_tower.glb", "lus_villas.glb"].every((f) => files.includes(f)), "v0.60: Yas Marina and the Lusail villas");
   assert.ok(["bh_dome_big.glb", "bh_dome_small.glb"].every((f) => files.includes(f)), "v0.62: Sakhir's two domes");
+  assert.ok(["bh_stand_c.glb", "bh_pit_upper.glb", "bh_tower.glb"].every((f) => files.includes(f)), "Sakhir's main straight");
+  assert.ok(files.includes("mel_pit_upper.glb") && F.PIT_UPPERS[10].from === 2028, "Albert Park's new pit building: from 2028");
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });

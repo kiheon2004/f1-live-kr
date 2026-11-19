@@ -3,7 +3,7 @@
 //   Las Vegas: Sphere (157 m across, 112 m high, LED skin)      Singapore: Marina Bay Sands SkyPark (340 m),
 //   Singapore Flyer (150 m wheel, 165 m high)                    Baku: Flame Towers (182 / 165 / 161 m)
 //   Abu Dhabi: W hotel's LED gridshell over the track, Ferrari World's red roof
-//   Bahrain: Sakhir Tower (VIP tower with its flared top)       Austin: COTA observation tower (77 m, red veil)
+//   (Bahrain's Sakhir Tower: a model, facilities.js)             Austin: COTA observation tower (77 m, red veil)
 //   Miami: Hard Rock Stadium (bowl, canopy, four masts)
 // (Circuit facilities – Silverstone's Wing, Suzuka's pit building – are in facilities.js.)
 import * as THREE from "./vendor/three.module.js";
@@ -173,14 +173,8 @@ const SPECS = [
     const funnel = new THREE.Mesh(new THREE.CylinderGeometry(42, 8, 34, 32, 1, true), std({ color: 0x9fc3d8, roughness: 0.1, metalness: 0.6, side: THREE.DoubleSide }));
     funnel.position.set(cx, base + 48 - 15, cz); add(funnel);
   } },
-  // Sakhir Tower: the VIP tower at the start line – a slim stem with a much wider glazed top
-  { loc: ["Sakhir", "Bahrain"], match: (b) => /Sakhir Tower/i.test(b.name || ""), build({ pts, base, add }) {
-    const [cx, cz] = centroid(pts), o = obb(pts), w = Math.max(14, o.u1 - o.u0), d = Math.max(12, o.v1 - o.v0), ang = Math.atan2(o.u[1], o.u[0]);
-    const stem = new THREE.Mesh(new THREE.BoxGeometry(w * 0.55, 34, d * 0.55), std({ color: 0xe8e2d4, roughness: 0.7 })); stem.position.set(cx, base + 17, cz); stem.rotation.y = -ang; add(stem);
-    const glass = lit(std({ color: 0x5b7184, roughness: 0.12, metalness: 0.5, emissive: 0xffe2b0 }), 0, 0.6);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.95, w * 0.62, 14, 8, 1), glass); cap.position.set(cx, base + 41, cz); cap.rotation.y = -ang + Math.PI / 8; add(cap);
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(w * 1.05, w * 0.95, 2.5, 8, 1), std({ color: 0xf2f0ea })); lid.position.set(cx, base + 49, cz); lid.rotation.y = -ang + Math.PI / 8; add(lid);
-  } },
+  // (Sakhir Tower: since v0.63 a model of its own – facilities.js `sakhir-tower`; the stem-and-cap drawn here until then
+  // was unlike the real tower, a drum of ringed storeys from the ground up)
   // COTA observation tower: 77 m, a lift core inside a red "veil" of 18 steel tubes over the amphitheatre stage
   { loc: ["Austin"], match: (b) => /amphit/i.test(b.name || ""), keep: true, build({ pts, base, add, scene, gf, skipB }) {
     let [cx, cz] = centroid(pts);

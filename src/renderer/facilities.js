@@ -178,6 +178,26 @@ export const FACILITIES = [
     },
   },
   {
+    id: "sakhir-tower", name: "Bahrain International Circuit – Sakhir Tower", kind: "tower",
+    venue: [63], loc: ["Sakhir", "Bahrain"], years: [2004, null],
+    status: "trial",
+    // the map's "Sakhir Tower" (man_made = tower, about 38 m across) – its record at this point
+    replaces: { near: [26.035443, 50.511542], within: 6 },
+    // a drum of eight ringed storeys from the ground up, a roof terrace under a tent (photos); every height estimated
+    model: { file: "bh_tower.glb", anchor: [26.035443, 50.511542], heading: 0 },
+    sources: [
+      "src/data/models/bh_tower.glb – made for this app (2026-11-18, first pass): a drum of eight storeys with ring balconies, a roof terrace at 33 m under a membrane tent, a mast to 53 m – from pre-opening figures (a nine-storey VIP tower) and Wikimedia Commons photos compared by eye; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building 'Sakhir Tower' (man_made = tower) at its position",
+    ],
+    checked: "2026-11-18: trial (place from the map; the heights and which way its entrance faces are estimates)",
+    evidence: {
+      confirmed: [],
+      photo: ["the drum of ringed storeys and the tent on its roof (Wikimedia Commons, compared only)"],
+      map: ["the place: the map's 'Sakhir Tower' building"],
+      inferred: ["the heights (terrace 33 m, mast 53 m)", "the entrance's side"],
+    },
+  },
+  {
     id: "hungaroring-paddock-2025", name: "Hungaroring – paddock building (2025)", kind: "pit-building",
     venue: [4], loc: ["Budapest"], years: [2025, null],
     status: "trial",
@@ -1453,12 +1473,15 @@ export function addUpper(g, r, root, U) {
   // (the floors along the building: a least-squares line through the garages' floors)
   let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (const sl of S) { const x = sOf(sl.front) - sc; n++; sx += x; sy += sl.floor; sxx += x * x; sxy += x * sl.floor; }
   const m = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1), a = (sy - m * sx) / n;
-  const ox = f0[0] + ax[0] * (sc - sOf(f0)) + iw[0] * U.front, oz = f0[1] + ax[1] * (sc - sOf(f0)) + iw[1] * U.front, oy = a + G.top - U.garageTop;
+  // (upper.along: the model's middle that many metres along its +X from the built footprint's middle – a map outline
+  // longer at one end than the building the model shows, Sakhir)
+  const A = U.along || 0;
+  const ox = f0[0] + ax[0] * (sc + A - sOf(f0)) + iw[0] * U.front, oz = f0[1] + ax[1] * (sc + A - sOf(f0)) + iw[1] * U.front, oy = a + m * A + G.top - U.garageTop;
   const holder = new THREE.Group(), tilt = new THREE.Group();
   holder.position.set(ox, oy, oz); holder.rotation.y = yaw; tilt.rotation.z = Math.atan(m); holder.add(tilt); tilt.add(root.clone(true));
   // the ground floor the model stands over where the builder built none (model axes)
-  const HL = U.length / 2, HD = U.depth / 2, xs = [s0 - sc, s1 - sc];
-  for (const sl of S) { const x = sOf(sl.front) - sc; xs[0] = Math.min(xs[0], x - sl.width / 2); xs[1] = Math.max(xs[1], x + sl.width / 2); }
+  const HL = U.length / 2, HD = U.depth / 2, xs = [s0 - sc - A, s1 - sc - A];
+  for (const sl of S) { const x = sOf(sl.front) - sc - A; xs[0] = Math.min(xs[0], x - sl.width / 2); xs[1] = Math.max(xs[1], x + sl.width / 2); }
   const zb = dBack - dFront - U.front, boxes = [];
   if (HD - zb > 0.3) boxes.push([xs[0], xs[1], zb - 0.05, HD]);
   if (xs[0] + HL > 0.3) boxes.push([-HL, xs[0], -HD, HD]);
@@ -1653,6 +1676,12 @@ export const PIT_LOOKS = {
 // The upper storeys' own model for a venue whose pit building has no entry of its own (genericPitSpec) – as an entry's
 // `upper` (addUpper). fill: false – the model brings its own ground-floor ends (stair towers down to the ground).
 export const PIT_UPPERS = {
+  // (Melbourne: the 1995 pit building came down after the 2026 race; the new one is due for 2028 – the 2027 race runs
+  // with new garages and a temporary Paddock Club, so until 2028 the builder's own building stays)
+  10: { file: "mel_pit_upper.glb", garageTop: 5.5, front: 15, length: 270, depth: 30, from: 2028,
+    src: "src/data/models/mel_pit_upper.glb – Albert Park's new pit building (Woods Bagot, due 2028), the storeys over the garages: two timber-framed floors under a timber roof, a taller glazed box at the turn-1 end – made for this app (2026-11-18, first pass) from the published facts (14 garages, a timber structure: development.vic.gov.au, sport.vic.gov.au, woodsbagot.com, austadiums.com) and the published renderings compared by eye; 270 m long after the old building's map outline, every dimension an estimate; no outside asset, no logo or lettering" },
+  63: { file: "bh_pit_upper.glb", garageTop: 5.0, front: 12.5, length: 318, depth: 25, along: 32,
+    src: "src/data/models/bh_pit_upper.glb – Bahrain International Circuit pit building, the storeys over the garages (the Paddock Club's glazed lounge under twelve membrane tents, six sand-coloured blocks between them): made for this app (2026-11-18, first pass) from tensinet.com's project text (PTFE membrane roofs), pre-opening figures and Wikimedia Commons photos and aerial imagery compared by eye – 318 × 25 m, the map outline's main body (its northern 318 m: `along`), every height estimated; no outside asset, no logo or lettering" },
   152: { file: "lv_pit_upper.glb", garageTop: 4.8, front: 16.6, length: 302.6, depth: 33.2, backTo: 22.2, fill: false, from: 2023,
     src: "src/data/models/lv_pit_upper.glb – Las Vegas Grand Prix Plaza pit building, the storeys over the garages: made for this app (2026-11-13) from published figures (1,000 × 100 ft, four levels, the 28,000 sq ft roof screen) and Wikimedia Commons photos of the 2025 race compared by eye, sized to the building as this app builds it (302.6 × 33.2 m, 40 garages, their top at 4.8 m) with a terrace behind – no outside asset, no logo or lettering" },
 };
