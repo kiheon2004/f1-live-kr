@@ -135,6 +135,10 @@ function standMaterial(opts = {}) {
 const sideSign = (s) => (s === "R" ? 1 : -1);
 const NOT_BUILT = new Map([["ga", "standing / grass"], ["hosp", "hospitality"], ["other", "not a circuit grandstand"]]);
 
+// Where a stand's model puts its origin along and across the stand (scene x, z): the middle of the chord between the
+// front line's ends – or, model.atMid, the front line's own middle point: a model made curved along this app's front
+// line (Marina Bay's Turn 1) has its origin on the line, and the chord's middle lies behind a line that bends.
+export const swapOrigin = (sw, M = sw?.model) => (M?.atMid && sw.mid ? [sw.mid[0], sw.mid[1]] : [sw.x, sw.z]);
 // Which built stands a model file stands on. One listed stand can be several map outlines (Suzuka's main stand: the
 // lower tier "V1" and the upper tier "V2" are mapped apart): `model.on` names the outline the model is placed on –
 // another outline carrying the same model places none –, `model.covers` names the built stands that make way with it

@@ -257,26 +257,141 @@ export const FACILITIES = [
     },
   },
   {
-    id: "baku-old-city-wall", name: "Baku – the Old City (İçərişəhər) wall with two round towers, between turns 8 and 10", kind: "tower",
+    id: "singapore-anderson-bridge", name: "Singapore – Anderson Bridge (1910): the steel trusses the track runs between", kind: "tower",
+    venue: [61], loc: ["Marina Bay", "Singapore"], years: [2008, null],
+    status: "trial",
+    // Three bowstring trusses with no deck: this app's track is the road. The track runs between the north-east and the
+    // middle truss; the real ones stand 12.2 and 11.1 m apart, the model's 17.0 and 11.1 m, as this app's track is 12 m
+    // wide there (the real carriageway about 9 m). The map has no building for the bridge: nothing makes way.
+    // `footprint`: the middle truss only – the model's box lies across the track, and rain must fall between the trusses.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "sgp_anderson_bridge.glb", anchor: [1.287275, 103.853017], heading: 218.8,
+      footprint: [[1.2874624, 103.8527597], [1.2870623, 103.8532541], [1.2870524, 103.8532462], [1.2874525, 103.8527518]] },
+    sources: [
+      "src/data/models/sgp_anderson_bridge.glb – made for this app (2026-11-21): three steel bowstring trusses 67 m long (7.1 m at the crown) tied overhead by five arched ribs, four rusticated stone pylons at the outer trusses' ends, the footway balustrade, lit at night – from aerial imagery and three Wikimedia Commons photos compared by eye, nothing copied; published: 70 m long, 28 m wide, opened 1910; the trusses' height, the number of panels and the pylons' size estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the bridge's carriageway and footways (the place); the place of the middle truss from aerial imagery (± 1.5 m)",
+    ],
+    checked: "2026-11-21: trial (place ± 1.5 m; the north-east truss set wider than the real one to clear this app's track)",
+    evidence: {
+      confirmed: ["the span and the year (published: 70 m, 1910)"],
+      photo: ["three bowstring trusses with arched ribs overhead, stone pylons at the ends (Wikimedia Commons, compared only)"],
+      map: ["the place: the road over the river"],
+      inferred: ["the trusses' height", "the number of panels", "the spacing of the north-east truss (17 m here, 12.2 m real)"],
+    },
+  },
+  {
+    id: "austin-main-grandstand", name: "Circuit of the Americas – Main Grandstand (the roofed building behind the front bleachers)", kind: "tower",
+    venue: [9], loc: ["Austin"], years: [2012, null],
+    status: "trial",
+    // The Main Grandstand is two things: the low bleachers along the fence (grandstands.json 'Main Grandstand', a model of
+    // their own) and this building 16 m behind the fence line. On the map's block of it (20 m high, unnamed): it makes
+    // way. Its canopy tip is 25.6 m from the track's edge (measured against this app's track, v0.67).
+    replaces: { near: [30.13258, -97.641625], within: 4 },
+    model: { file: "cota_stand_main_c.glb", anchor: [30.13258, -97.641625], heading: 38.25 },
+    sources: [
+      "src/data/models/cota_stand_main_c.glb – made for this app (2026-11-20): 150.5 m long, a lower tier of 11 rows, a red band, a floor of suites, an upper tier of 9 rows (4,400 seats), white end blocks, a white fabric canopy in ten scallops on eleven white trusses with three red pipes over it, a tube canopy over the concessions behind – from the published figures (Miró Rivera Architects, Walter P Moore, Architectural Record) and Wikimedia Commons photos compared by eye, nothing copied; tier depths and heights estimated (the canopy tip, 23.4 m, from its shadow); no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the outlines the model's plan and place were read from",
+    ],
+    checked: "2026-11-20: trial (length and bays from aerial imagery; the place across the track ± 3 m; heights estimated)",
+    evidence: {
+      confirmed: ["a canopy of white fabric with red pipes running parallel to the track (the architects' description)"],
+      photo: ["the two tiers with the suites between them, the white end blocks (Wikimedia Commons, compared only)"],
+      map: ["the place: the map's block behind the front bleachers"],
+      inferred: ["tier depths", "heights (canopy tip from its shadow)", "the rear canopy"],
+    },
+  },
+  {
+    id: "austin-tower", name: "Circuit of the Americas – Observation Tower and the amphitheatre stage canopy", kind: "tower",
+    venue: [9], loc: ["Austin"], years: [2012, null],
+    status: "trial",
+    // Stands where the shaft's foot is in aerial imagery (± 4 m), 10 m from the middle of the map's tower block. Makes
+    // way: the map's tower block and the low square beside it (a square traced along the tower as it lies in a leaning
+    // satellite picture – not a building), and the map's stage ('… Amphiteater'): the model brings the stage.
+    // (Until v0.66 the tower was drawn by landmarks.js: a round core in a cone of tubes – unlike the real one.)
+    replaces: { near: [30.134285, -97.637969], within: 4, also: { names: /Amphit/i } },
+    model: { file: "cota_tower.glb", anchor: [30.134285, -97.637969], heading: 180 },
+    sources: [
+      "src/data/models/cota_tower.glb – made for this app (2026-11-20): a white stair shaft 8.5 m square, 76.5 m high with its deck at 70.1 m (published), eighteen red tubes over the deck, down one side and out as a canopy 50 m long over the amphitheatre's stage (8.5 m wide at the tower, 28 m at its end), a clear roof between the tubes, white trusses on V legs, the stage and its back wall; the tubes glow red at night – from the published figures (Miró Rivera Architects, circuitoftheamericas.com) and Wikimedia Commons photos compared by eye, nothing copied; the canopy's plan estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the outlines the model's plan and place were read from",
+    ],
+    checked: "2026-11-20: trial (heights published; the place ± 4 m; the canopy's direction, bearing 327, between the stage's and the plaza pond's)",
+    evidence: {
+      confirmed: ["251 ft (76.5 m) high, the deck at 230 ft (70.1 m), a veil of 18 red steel tubes (published)"],
+      photo: ["the shaft, the tubes down one side and out over the stage (Wikimedia Commons, compared only)"],
+      map: ["the place: the tower's foot in aerial imagery, by the map's tower block and stage"],
+      inferred: ["the canopy's plan", "the stage's size"],
+    },
+  },
+  {
+    id: "austin-amphitheatre", name: "Circuit of the Americas – the amphitheatre's seats", kind: "tower",
+    venue: [9], loc: ["Austin"], years: [2013, null],
+    status: "trial",
+    // The same origin and heading as the tower. The real seats lie on a grass slope; here two flat rings (0.12 m a row).
+    // This app's ground under them is not level (4.1 m lower to 1.9 m higher than at the tower's foot): `drape` – the seats
+    // follow the ground, as the real ones lie on their slope; placed level, rows stood under the ground on one side.
+    // By name nothing makes way; the two low unnamed blocks whose centres lie inside the model's box go with it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "cota_amphitheatre.glb", anchor: [30.134285, -97.637969], heading: 180, drape: true },
+    sources: [
+      "src/data/models/cota_amphitheatre.glb – made for this app (2026-11-20): two rings of red seats round the stage front (21 and 17 rows, about 5,500 places – 5,240 fixed seats published), a mixing booth – from aerial imagery and a Wikimedia Commons photo taken from the tower, compared by eye, nothing copied; the rake estimated; no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the outlines the model's plan and place were read from",
+    ],
+    checked: "2026-11-20: trial (plan from aerial imagery; the rake an estimate)",
+    evidence: {
+      confirmed: [],
+      photo: ["two rings of red seats before the stage (Wikimedia Commons, compared only)"],
+      map: ["the place: before the map's stage"],
+      inferred: ["the rake", "the rows"],
+    },
+  },
+  {
+    id: "austin-pylon", name: "Circuit of the Americas – the scoring pylon at the pit exit", kind: "tower",
+    venue: [9], loc: ["Austin"], years: [2012, null],
+    status: "trial",
+    // Where: the chat side's place (the foot of its shadow, ± 1.5 m) slid 0.65 m across, away from the track (bearing 38): this
+    // app has no wall between the track and the pit exit lane there – tarmac runs through –, and at the given place the
+    // board's end was 0.7 m from the track's edge. Now its middle is 3.05 m from the track's edge and 4.05 m from the
+    // measured pit lane line: each end of the 3.4 m board 1.35 m clear of the track and of a car leaving the pits.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "cota_pylon.glb", anchor: [30.1314646, -97.6390528], heading: 308.25 },
+    sources: [
+      "src/data/models/cota_pylon.glb – made for this app (2026-11-20): a black board 3.4 × 1.1 m from 5 m to 23.5 m up on a column, positions 1 to 10 on both faces, lit at night – from Wikimedia Commons photos compared by eye, nothing copied; the height from its shadow in aerial imagery, the board's layout estimated; no outside asset, no logo or lettering",
+      "the place: the foot of its shadow in aerial imagery (± 1.5 m), between the track and the pit exit lane – slid 0.65 m across to stand clear of both (this app's track edge and pit lane line)",
+    ],
+    checked: "2026-11-20: trial (place ± 1.5 m; height from its shadow)",
+    evidence: {
+      confirmed: [],
+      photo: ["a tall black board showing the running order (Wikimedia Commons, compared only)"],
+      map: [],
+      inferred: ["the height (23.5 m)", "the board's layout"],
+    },
+  },
+  {
+    id: "baku-old-city-wall", name: "Baku – the Old City (İçərişəhər) wall with eight round towers, from turn 8 westwards", kind: "tower",
     venue: [144], loc: ["Baku"], years: [2004, null],
     status: "trial",
-    // Where: the chat side's reading of aerial imagery, slid 3.87 m towards the track (bearing 359) so that the nearer
-    // tower's front stands 0.5 m behind the track's left (south) edge – the user's instruction; the wall's face is then
-    // 1.7 m and more from that edge (measured against this app's track, v0.66). The map's own strip of the wall here (an
-    // unnamed outline with the same tower bulges, 1–2 m further from the track) makes way – with it its 36 m east of
-    // the model's end, one tower among them, which the model does not cover.
-    replaces: { near: [40.3687928, 49.8366402], within: 3 },
-    model: { file: "bak_old_city_wall.glb", anchor: [40.3687928, 49.8366402], heading: 359 },
+    // The second version (2026-11-21) is built on the map's own plan of the wall (two unnamed strips, OpenStreetMap ways
+    // 1502989778 and 1502989779): 236 m, eight towers, the leg that turns away south-east at turn 8's corner tower.
+    // Where: the anchor the first version stood at – the user: leave it there, don't slide it again. Against this app's
+    // track the corner tower stands 0.5 m behind the track's left edge (its radius cut from 2.4 to 2.2 m for that), the
+    // straight wall 1.3 m and more. Both of the map's strips make way: the one at the anchor and (`also`) the one that
+    // runs on west of it. `footprint`: a band 4 m either side of the wall's line – the model's box would take in a
+    // triangle of the Old City behind the wall, and every unnamed house in it would go.
+    // `drape`: the street climbs – this app's ground rises 17 m from the wall's east end to its west end; the model is
+    // made level, so each vertex follows the ground under it (the wall's top runs up the hill with the street).
+    replaces: { near: [40.3687928, 49.8366402], within: 3, also: { near: [40.36859, 49.8351446], within: 3 } },
+    model: { file: "bak_old_city_wall.glb", anchor: [40.3687928, 49.8366402], heading: 359, drape: true,
+      footprint: [[40.3686614, 49.8371107], [40.3687894, 49.8369044], [40.368813, 49.8368062], [40.3688096, 49.8357426], [40.3687447, 49.8354463], [40.3686236, 49.8351219], [40.3685031, 49.8348326], [40.3684075, 49.834537], [40.3683378, 49.8342741], [40.3682663, 49.8343066], [40.368337, 49.8345727], [40.368435, 49.8348756], [40.3685564, 49.8351672], [40.3686744, 49.8354827], [40.3687341, 49.8357489], [40.3687374, 49.8368047], [40.3687269, 49.8368486], [40.3686027, 49.8370484]] },
     sources: [
-      "src/data/models/bak_old_city_wall.glb – made for this app (2026-11-19): 76 m of straight wall (2.6 m thick, 9.5 m high under its merlons) with two round towers 12.5 m high, courses of large stone, lit at night – aerial imagery and a Wikimedia Commons photo of the 2026 race compared by eye, nothing copied; every height estimated (no published figures found); no outside asset, no logo or lettering",
-      "the line and the towers' spacing: read by the chat-side session off aerial imagery (looked at only); OpenStreetMap (© OpenStreetMap contributors, ODbL) – the unnamed strip of the wall at this place",
+      "src/data/models/bak_old_city_wall.glb – made for this app (second version, 2026-11-21): 236 m of wall (1.3–1.7 m thick, 9.5 m high under its merlons) with eight round towers 12.5 m high (one 14 m), two square buttresses, courses of large stone, lit at night – its plan after OpenStreetMap's two outlines of the wall, a Wikimedia Commons photo of the 2026 race compared by eye, nothing copied; every height estimated (no published figures found); no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the wall's two strips (the model's plan and place)",
     ],
-    checked: "2026-11-19: trial (line and tower spacing from aerial imagery, set 0.5 m behind the track's edge; heights estimated)",
+    checked: "2026-11-21: trial (plan and place from the map; heights estimated; the corner tower 0.5 m behind this app's track edge)",
     evidence: {
       confirmed: [],
       photo: ["round towers of large stone right beside the track, merlons on top (Wikimedia Commons, compared only)"],
-      map: ["the wall's line and its towers about 30 m apart (aerial imagery; the map's strip)"],
-      inferred: ["every height", "its distance from the track (set to 0.5 m at the nearer tower)"],
+      map: ["the wall's plan and its eight towers: the map's own outlines"],
+      inferred: ["every height", "the corner tower's radius (2.2 m, cut to stand clear of the track)"],
     },
   },
   {
@@ -785,7 +900,9 @@ export const FACILITIES = [
 // with `model`: { file: "name.glb", anchor: [lat, lon] (where the model's origin stands), heading: degrees from north
 // (clockwise) that the model's +Z axis points to, units: "m" | "cm" | "mm" | "ft", scale: 1, origin: "base-centre"
 // (the origin is on the ground at the model's centre) | "bbox" (place the bounding box's bottom centre at the anchor),
-// ground: "anchor" (terrain height at the anchor) | "lowest" (lowest terrain under the footprint), lift: metres }.
+// ground: "anchor" (terrain height at the anchor) | "lowest" (lowest terrain under the footprint), lift: metres,
+// drape: true (a long model on sloping ground: each vertex follows the terrain under it – drapeModel),
+// footprint: [[lat, lon] …] (its outline on the ground where the model's box is not it) }.
 // The model is never tilted to the terrain. `replaces` then also needs `within` (metres around the anchor) so only
 // map buildings at the model's spot go.
 const UNITS = { m: 1, cm: 0.01, mm: 0.001, ft: 0.3048 };
@@ -2003,6 +2120,27 @@ export function placement(m, gf, groundAt, bbox = null) {
   if (!Number.isFinite(y)) throw new Error("no ground at the model");
   return { position: [x, y + (m.lift || 0), z], rotationY: Math.atan2(d[0], d[1]), scale: s };
 }
+// model.drape: a long model on ground that is not level – every vertex is moved up or down by the terrain's height
+// under it less the height under the anchor (y0), so its foot is on the ground all along: verticals stay vertical, the
+// top follows the slope. For a wall along a street that climbs (Baku's Old City wall: 236 m, the ground under it rises
+// 17 m – placed level, its west half stood under the ground and its east end 3.5 m in the air). The geometries become
+// this placement's own (not the cache's shared ones) and are freed with the world.
+export function drapeModel(holder, groundAt, y0) {
+  holder.updateMatrixWorld(true);
+  const v = new THREE.Vector3(), inv = new THREE.Matrix4();
+  holder.traverse((o) => {
+    const src = o.isMesh && !o.isInstancedMesh && o.geometry?.attributes?.position; if (!src) return;
+    const g = o.geometry.clone(); g.userData = { ...g.userData, shared: false };
+    const arr = new Float32Array(src.count * 3); inv.copy(o.matrixWorld).invert();
+    for (let i = 0; i < src.count; i++) {
+      v.fromBufferAttribute(src, i).applyMatrix4(o.matrixWorld);
+      const gy = groundAt(v.x, v.z); if (Number.isFinite(gy)) v.y += gy - y0;
+      v.applyMatrix4(inv); arr[i * 3] = v.x; arr[i * 3 + 1] = v.y; arr[i * 3 + 2] = v.z;
+    }
+    g.setAttribute("position", new THREE.BufferAttribute(arr, 3)); g.computeBoundingBox(); g.computeBoundingSphere(); o.geometry = g;
+  });
+  return holder;
+}
 function placeModel(root, m, gf, groundAt) {
   const obj = root.clone(true);
   let box = new THREE.Box3().setFromObject(obj);
@@ -2013,6 +2151,7 @@ function placeModel(root, m, gf, groundAt) {
   holder.position.set(...pl.position); holder.rotation.y = pl.rotationY; holder.scale.setScalar(pl.scale);
   holder.updateMatrixWorld(true);
   holder.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  if (m.drape) drapeModel(holder, groundAt, pl.position[1] - (m.lift || 0));
   // its footprint on the ground (scene x, z): a footprint given with the entry ([lat, lon] corners, checked against the
   // real building), else the model's own box turned and scaled with it – a turned building's world box would take in
   // the empty ground at its corners (and the neighbours standing there)
@@ -2026,12 +2165,16 @@ function placeModel(root, m, gf, groundAt) {
 // The map records a facility stands for: named ones (and, for a model file, within `within` m of its anchor);
 // plus unnamed parts whose centre lies inside the built footprint (no doubles left standing in it).
 // replaces: { names (regex), near: [lat, lon] and within (m) – only records that close to the point (the point inside
-// the outline, or within that many metres of its edge); with near and no names, the records at the point }.
+// the outline, or within that many metres of its edge); with near and no names, the records at the point; also: a
+// second such rule, its records as well }.
 export function selectReplaced(spec, buildings, gf, footprint = null, anchorXZ = null) {
   const r = spec.replaces || {};
   if (r.near) anchorXZ = gf.fromLL(r.near[0], r.near[1]);
   const reach = (b) => { const pts = ring(b, gf); return inPoly(anchorXZ[0], anchorXZ[1], pts) || near(anchorXZ[0], anchorXZ[1], pts, r.within || 0); };
   const named = buildings.filter((b) => b.kind !== "grandstand" && (r.names ? r.names.test(b.name || "") : !!r.near) && (!(r.within || r.near) || !anchorXZ || reach(b)));
+  // (replaces.also: a second rule of the same kind – a model that stands for an unnamed block at its foot and a named
+  // building some way off: Austin's tower with the stage under its canopy)
+  if (r.also) for (const b of selectReplaced({ replaces: r.also }, buildings, gf, null, anchorXZ)) if (!named.includes(b)) named.push(b);
   if (!footprint) return named;
   const set = new Set(named);
   for (const b of buildings) {
@@ -2123,6 +2266,11 @@ export const PIT_UPPERS = {
     src: "src/data/models/cat_pit_upper.glb – Circuit de Barcelona-Catalunya pit building, the storeys over the garages: a set-back glazed floor behind dark columns, the top terrace under its 2024 roof of six modules carrying solar panels, five stair towers on the paddock side, and – standing from the ground – the control tower (white with a red top) at the pit-entry end and a block at the other end – made for this app (2026-11-19) from the published facts (a large roof over the 6,000 m² terrace, 1,080 panels on the pit building's roof) and Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; the garage row 293.4 m as the six roof modules in aerial imagery, every height and the control tower's size estimated; no outside asset, no logo or lettering" },
   49: { file: "sha_pit_upper.glb", garageTop: 5.6, front: 15, length: 337, depth: 30,
     src: "src/data/models/sha_pit_upper.glb – Shanghai International Circuit pit building, the storeys over the garages: one glazed floor (the Paddock Club) behind a balcony, a roof terrace with six planted squares – made for this app (2026-11-19, first pass) from the published wording (garages below, VIP suites above) and a 2018 satellite picture and Wikimedia Commons photos compared by eye; 337 m long between the two end towers, every height an estimate; no outside asset, no logo or lettering" },
+  // (Austin: made with its +Z to the pit lane – `turned`. The chat side had its garage doors 10 m behind the front of the
+  // map's outline; the cars' stops in the feed stand 15 m before that front, so the doors are on it, as built: `front`.
+  // The map's outline is 25.6 m deep, the model 15.5: the garage level runs on behind the model as the map has it.)
+  9: { file: "cota_pit_upper.glb", garageTop: 4.8, front: 7.75, length: 363, depth: 15.5, backTo: 18, turned: true,
+    src: "src/data/models/cota_pit_upper.glb – Circuit of the Americas pit building over the garages: a terrace with three rows of seats behind a glass rail, dark glazing set back, a third floor of balconies between white solid bays (stairs and lifts, every 52 m), a thick white roof slab with plant on it, a wider block at the north-west end and a glazed block with three flagpoles at the south-east end – its length (363 m) and joints after OpenStreetMap's outline and aerial imagery, Wikimedia Commons photos compared by eye, nothing copied; heights from shadows (roof 16–17 m), floor heights, balcony depths and the building's depth estimated; no outside asset, no logo or lettering" },
   // (Marina Bay: made with its +Z to the pit lane – `turned`; south of the garages it also brings a pavilion on stilts and a
   // stair tower, standing from the ground)
   61: { file: "sgp_pit_upper.glb", garageTop: 5.1, front: 12.25, length: 330.7, depth: 24.5, backTo: 15.75, maxDepth: 24.5, turned: true,

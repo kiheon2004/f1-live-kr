@@ -3,7 +3,7 @@
 //   Las Vegas: Sphere (157 m across, 112 m high, LED skin)      Singapore: Marina Bay Sands SkyPark (340 m),
 //   Singapore Flyer (150 m wheel, 165 m high)                    Baku: Flame Towers (182 / 165 / 161 m)
 //   Abu Dhabi: W hotel's LED gridshell over the track, Ferrari World's red roof
-//   (Bahrain's Sakhir Tower: a model, facilities.js)             Austin: COTA observation tower (77 m, red veil)
+//   (Bahrain's Sakhir Tower: a model, facilities.js)             (Austin's tower: a model, facilities.js)
 //   Miami: Hard Rock Stadium (bowl, canopy, four masts)
 // (Circuit facilities – Silverstone's Wing, Suzuka's pit building – are in facilities.js.)
 import * as THREE from "./vendor/three.module.js";
@@ -201,23 +201,8 @@ const SPECS = [
   } },
   // (Sakhir Tower: since v0.63 a model of its own – facilities.js `sakhir-tower`; the stem-and-cap drawn here until then
   // was unlike the real tower, a drum of ringed storeys from the ground up)
-  // COTA observation tower: 77 m, a lift core inside a red "veil" of 18 steel tubes over the amphitheatre stage
-  { loc: ["Austin"], match: (b) => /amphit/i.test(b.name || ""), keep: true, build({ pts, base, add, scene, gf, skipB }) {
-    let [cx, cz] = centroid(pts);
-    // the tower itself is often mapped as a tall building beside the stage: it stands there, drawn as the real one
-    for (const b of scene.buildings) {
-      if (b.h < 40) continue;
-      const ps = b.pts.map(gf.xz), [bx, bz] = centroid(ps);
-      if (Math.hypot(bx - cx, bz - cz) < 120) { skipB(b); [cx, cz] = [bx, bz]; }
-    }
-    const red = std({ color: 0xc8102e, roughness: 0.45, metalness: 0.4 }), white = std({ color: 0xf2f2f0, roughness: 0.5 });
-    const core = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 70, 12), white); core.position.set(cx, base + 35, cz); add(core);
-    for (let k = 0; k < 18; k++) {
-      const a = (k / 18) * Math.PI * 2, spread = 16 + 7 * Math.cos(a);
-      add(tube([new THREE.Vector3(cx + Math.cos(a) * spread, base, cz + Math.sin(a) * spread * 0.7), new THREE.Vector3(cx + Math.cos(a) * spread * 0.45, base + 30, cz + Math.sin(a) * spread * 0.32), new THREE.Vector3(cx + Math.cos(a) * 2.5, base + 66, cz + Math.sin(a) * 2.5), new THREE.Vector3(cx, base + 77, cz)], 0.35, red));
-    }
-    const deck = new THREE.Mesh(new THREE.CylinderGeometry(7.5, 6, 4, 16), lit(std({ color: 0x6e8494, roughness: 0.15, metalness: 0.5, emissive: 0xfff0d0 }), 0, 0.7)); deck.position.set(cx, base + 69, cz); add(deck);
-  } },
+  // (COTA's observation tower: since v0.67 a model of its own – facilities.js `austin-tower`; the core in a cone of
+  // tubes drawn here until then was unlike the real one, a square shaft with the tubes down one side and out over the stage)
   // Hard Rock Stadium: the seating bowl inside a 14-acre canopy held by four corner masts
   // (v0.63: ONE stadium from every piece of the grounds' outline – the map data has it in two halves, and one stadium
   // was built per half: the northern one stood through the pit building into the pit lane. And minBox, not obb: the
