@@ -13,6 +13,7 @@ import { rawYaw } from "./heading.js";
 import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, BLEND, fitGrid, slotS, slotLat, gridWeight, leaveBase, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
 import { START_DATA } from "./startdata.js";
+import { LOCAL_WIDTHS, applyLocalWidths } from "./localwidth.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch, departsFromFeed } from "./startplan.js";
 import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
@@ -1032,6 +1033,9 @@ function measureWidth(samples, grid, center) {
   }
   samples.measured = Lb.filter((v) => v != null).length / nb;
   samples.rawEdges = raw; samples.rawBin = B;
+  // (a stretch with its own width – localwidth.js: a corridor narrower than the circuit's usual width, Anderson Bridge)
+  const vk = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key;
+  samples.localWidth = applyLocalWidths(samples, LOCAL_WIDTHS[vk], ([X, Y]) => [X - center.x, -(Y - center.z)], (s) => raw[Math.floor(s.i / B)]);
   samples.pitDropped = dropped;
 }
 const ROAD_LIFT = 0.06;   // the asphalt over the lap line (roadMesh); cars and paint sit on it
@@ -6157,6 +6161,8 @@ window.Map3D = {
   // development: show or hide the built grandstands (to compare the satellite picture under them)
   standsShown(v) { const g = world?.real?.stands?.group; if (g) g.visible = !!v; return String(!!g); },
   // development: (lat, lon) → scene [x, ground y, z] (to aim another build's look() at the same place)
+  // development: (lat, lon) → the feed's own metres [X, Y] (the frame of START_DATA's pit paths × 0.1 and of localwidth.js)
+  llToFeed(lat, lon) { const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon), o = R.geo.xz([0, 0]); return JSON.stringify([+(x - o[0]).toFixed(2), +(o[1] - z).toFixed(2)]); },
   llToScene(lat, lon) { const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon); return JSON.stringify([+x.toFixed(2), +(R.groundAt?.(x, z) ?? 0).toFixed(2), +z.toFixed(2)]); },
   // development: the measured pit path (startdata.js) every `every` m – lat/lon, and how far the track's tarmac is from it on
   // each side (left / right of the path's direction, m; null beyond 60 m) and which lap sample that is
