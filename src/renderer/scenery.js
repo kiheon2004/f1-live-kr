@@ -8,7 +8,7 @@
 // Everything is in the scene frame of map3d.js: x = F1 east (m) − centre, z = −(F1 north − centre), y = up.
 import * as THREE from "./vendor/three.module.js";
 import { auxRuns, ribbonEdges, blendHeight, onJoiningRun } from "./auxroads.js";
-import { buildStands, swapRoles } from "./stands.js";
+import { buildStands, swapRoles, swapOrigin } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
 import { buildingsMesh } from "./buildings.js";
@@ -933,6 +933,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // Where: along the stand's front line, its middle at the line's middle; across, the model's front wall
     // (model.frontAt m from its origin, towards the track) either on the built stand's front line or – frontFromEdge –
     // that many metres from the track's edge (a stand whose map outline is not its real front).
+    // atMid: the origin on the front line's middle point (a curved model on a curved line), else on the chord's middle.
     // (frontAt may be negative: the model's front wall in front of the outline it stands on – Suzuka's lower tier before V2)
     if (stands?.swaps?.length && api.geo.model && opts.models !== false) {
       // (model.on / model.covers: a listed stand mapped as several outlines – the model stands on the one `on` names, the
@@ -944,7 +945,9 @@ async function buildReal(api, scene, world, opts, onStep, own) {
             let best = null, bd = Infinity; for (const q of world.samples) { const d = Math.hypot(q.p.x - sw.x, q.p.z - sw.z); if (d < bd) { bd = d; best = q; } }
             if (best) { const lat = (sw.x - best.p.x) * best.nor.x + (sw.z - best.p.z) * best.nor.z, half = lat > 0 ? (best.L ?? 7) : -(best.R ?? -7); back = M.frontFromEdge - (Math.abs(lat) - half); }
           }
-          let off = (M.frontAt || 0) + back, at = { x: sw.x + sw.n[0] * off, z: sw.z + sw.n[1] * off, y: sw.y + (M.lift || 0), dir: [-sw.n[0], -sw.n[1]] };
+          // (model.atMid: a model made curved along this app's own front line – its origin stands on the middle point of
+          // that line, not on the middle of the chord between its ends: Marina Bay's Turn 1)
+          let off = (M.frontAt || 0) + back, o0 = swapOrigin(sw, M), at = { x: o0[0] + sw.n[0] * off, z: o0[1] + sw.n[1] * off, y: sw.y + (M.lift || 0), dir: [-sw.n[0], -sw.n[1]] };
           // (model.alongTrack with frontFromEdge: the model stands square to the track where the stand's middle is – its
           // front wall parallel to the track's edge, frontFromEdge m from it – whatever way the stand's outline runs:
           // Baku's Absheron, traced from a half-dismantled scaffold, runs 4–10° off the straight it stands on)

@@ -83,8 +83,10 @@ test("the shipped model files: listed, present, and passing the app's own model 
   assert.ok(["mad_pit_upper.glb", "mad_puerta_sur.glb", "mad_flag.glb"].every((f) => files.includes(f)) && F.PIT_UPPERS[153].front === 0, "Madring: the pit buildings (origin on the garage front line), Puerta Sur, the flag");
   assert.ok(["bak_pit_upper.glb", "bak_government_house.glb", "bak_maiden_tower.glb"].every((f) => files.includes(f)) && F.PIT_UPPERS[144].turned === true, "Baku: the pit building (made the other way round), Government House, the Maiden Tower");
   assert.ok(files.includes("bak_stand_c.glb") && files.includes("bak_old_city_wall.glb"), "Baku: the Absheron grandstand, the Old City wall");
-  assert.ok(["sgp_pit_upper.glb", "sgp_stand_pit_c.glb", "sgp_stand_superpit_c.glb", "sgp_stand_t1_c.glb", "sgp_esplanade.glb", "sgp_fullerton.glb", "sgp_national_gallery.glb"].every((f) => files.includes(f)) && F.PIT_UPPERS[61].turned === true, "Marina Bay: the pit building (made the other way round), three stands, three landmarks");
+  assert.ok(["sgp_pit_upper.glb", "sgp_stand_pit_c.glb", "sgp_stand_superpit_c.glb", "sgp_stand_t1_curved_c.glb", "sgp_esplanade.glb", "sgp_fullerton.glb", "sgp_national_gallery.glb", "sgp_anderson_bridge.glb"].every((f) => files.includes(f)) && !files.includes("sgp_stand_t1_c.glb") && F.PIT_UPPERS[61].turned === true, "Marina Bay: the pit building (made the other way round), three stands (Turn 1 the curved one – the straight file is gone), three landmarks, Anderson Bridge");
   assert.ok(F.FACILITIES.find((f) => f.id === "singapore-national-gallery").replaces.names.test("Old City Hall") && !F.FACILITIES.find((f) => f.id === "singapore-national-gallery").replaces.names.test("Supreme Court of Singapore"), "the gallery takes the old court and city hall, not the new Supreme Court");
+  assert.ok(["cota_pit_upper.glb", "cota_stand_main_c.glb", "cota_stand_front_c.glb", "cota_stand_t1_c.glb", "cota_stand_t15_c.glb", "cota_tower.glb", "cota_pylon.glb"].every((f) => files.includes(f)) && F.PIT_UPPERS[9].turned === true && F.PIT_UPPERS[9].front === 7.75, "Austin: the pit building (its doors on the built garage front line), the Main Grandstand's building and front bleachers, Turn 1, Turn 15, the tower, the pylon");
+  assert.strictEqual((stands.circuits || stands).Austin.stands.find((s) => s.n === "Main Grandstand").roof, 0, "Austin's front bleachers have no roof: it is the building's behind them");
   assert.ok(files.includes("jed_team.glb"), "Jeddah's team building"); assert.strictEqual(F.PIT_UPPERS[149].fillBack, 8, "Jeddah: the ground floor is filled under the long body only – the rear blocks stand from the ground");
   assert.ok(["sha_stand_c.glb", "sha_pit_upper.glb", "sha_wing.glb", "sha_pavilion.glb", "sha_lotus_row.glb"].every((f) => files.includes(f)), "Shanghai's main straight and the canopy rows over H and K");
   assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-pavilion-\d+$/.test(f.id)).length, 26, "26 team pavilions"); assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-wing-/.test(f.id)).length, 2);
@@ -340,4 +342,65 @@ test("an upper-storey model made the other way round (`turned`, +Z to the pit la
   assert.ok(Math.abs(e.x + 60) < 1e-6, "its +X end is on this frame's −X side (turned, not mirrored)");
   const g2 = new THREE.Group(); F.addUpper(g2, r, root, { file: "t.glb", garageTop: 5, front: 13, length: 140, depth: 26 });
   assert.ok(Math.abs(at(g2, "laneMark").z - 36) < 1e-6, "(not turned, the same face stands at the back)");
+});
+
+test("replaces.also: a second rule – the unnamed blocks at a model's foot and a named building some way off (Austin's tower and the stage)", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  const gf = { xz: (p) => p, fromLL: (la, lo) => [lo, la] };
+  const sq = (x, z, r) => [[x - r, z - r], [x + r, z - r], [x + r, z + r], [x - r, z + r]];
+  const tower = { pts: sq(0, 0, 4), h: 76 }, square = { pts: sq(0, 14, 10), h: 2.6 }, stage = { pts: sq(-30, -40, 15), name: "Some Amphiteater", h: 21 };
+  const shed = { pts: sq(40, 40, 5), h: 8 }, other = { pts: sq(-80, 0, 5), name: "Media Center" }, stand = { pts: sq(0, -3, 5), kind: "grandstand" };
+  const all = [tower, square, stage, shed, other, stand];
+  const got = F.selectReplaced({ replaces: { near: [0, 0], within: 4.5, also: { names: /Amphit/i } } }, all, gf);
+  assert.deepStrictEqual(new Set(got), new Set([tower, square, stage]), "the records at the point, and the named one; nothing else, never a grandstand");
+  assert.deepStrictEqual(F.selectReplaced({ replaces: { near: [0, 0], within: 4.5 } }, all, gf), [tower, square], "without it: as before");
+  const spec = F.FACILITIES.find((f) => f.id === "austin-tower");
+  assert.ok(spec.replaces.also.names.test("Germania Insurance Amphiteater") && spec.replaces.within <= 5, "Austin's tower: the map's stage by name, the blocks only at its foot");
+  const L = await import("../src/renderer/landmarks.js");
+  assert.ok(!/COTA observation tower: 77 m/.test(fs.readFileSync(path.join(__dirname, "..", "src", "renderer", "landmarks.js"), "utf8")) && L.buildLandmarks, "the drawn tower is gone from landmarks.js");
+});
+
+test("v0.67: a curved stand model on the front line's middle point (atMid); Baku's wall on the map's plan; Anderson Bridge", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  const { swapOrigin } = await import("../src/renderer/stands.js");
+  const stands = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8"));
+  // a front line that bends: its middle point is not the middle of the chord between its ends
+  const sw = { x: 0, z: 0, mid: [0, 6], n: [0, -1] };
+  assert.deepStrictEqual(swapOrigin(sw, { atMid: true }), [0, 6], "atMid: the origin on the line's middle point");
+  assert.deepStrictEqual(swapOrigin(sw, { frontAt: 9.85 }), [0, 0], "without it: the chord's middle, as before");
+  assert.deepStrictEqual(swapOrigin({ x: 3, z: 4 }, { atMid: true }), [3, 4], "no middle point known: the chord's middle");
+  const sgp = Object.values(stands.circuits || stands).find((c) => (c.stands || []).some((s) => s.model?.file === "sgp_stand_t1_curved_c.glb"));
+  const t1 = sgp.stands.find((s) => s.n === "Turn 1").model;
+  assert.ok(t1.atMid === true && t1.frontAt === 0 && !("frontFromEdge" in t1), "Marina Bay's Turn 1: the curved model, its origin on the built front line's middle point, no frontFromEdge");
+  // Baku's wall: the anchor of the first version, both of the map's strips, a footprint that is the wall's band only
+  const wall = F.FACILITIES.find((f) => f.id === "baku-old-city-wall");
+  assert.deepStrictEqual(wall.model.anchor, [40.3687928, 49.8366402]); assert.strictEqual(wall.model.heading, 359);
+  assert.ok(wall.replaces.near && wall.replaces.also?.near && wall.model.footprint.length >= 8, "both strips (near, also.near); its own footprint");
+  const gf = { xz: (p) => p, fromLL: (la, lo) => [lo, la] };
+  const sq = (x, z, r) => [[x - r, z - r], [x + r, z - r], [x + r, z + r], [x - r, z + r]];
+  const east = { pts: [[-36, -1], [54, -1], [54, 1], [-36, 1]], h: 9.6 }, west = { pts: [[54, -1], [200, -50], [200, -48], [54, 1]], h: 9.6 };
+  const house = { pts: sq(60, -30, 5), h: 7 }, bath = { pts: sq(20, -12, 4), name: "Underground Bath" };
+  const band = [[-37, 4], [54, 4], [200, -45], [200, -53], [54, -4], [-37, -4]], box = [[-37, 4], [200, 4], [200, -53], [-37, -53]];
+  const rule = { replaces: { near: [0, 0], within: 3, also: { near: [-24.5, 127], within: 3 } } };   // (fromLL here: [lat, lon] → [lon, lat])
+  assert.deepStrictEqual(new Set(F.selectReplaced(rule, [east, west, house, bath], gf, band)), new Set([east, west]), "the two strips; the house behind the wall and the named bath stay");
+  assert.ok(F.selectReplaced(rule, [east, west, house, bath], gf, box).includes(house), "(with the model's box for a footprint the house would have gone)");
+  // … and it follows the ground: the street climbs 17 m along it (drape)
+  assert.strictEqual(wall.model.drape, true);
+  const THREE = await import("three");
+  const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0, 10, 0, 100, 0, 0, 100, 10, 0]), 3)); geo.userData.shared = true;
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial()), holder = new THREE.Group(); holder.add(mesh); holder.position.set(50, 3, 20); holder.rotation.y = Math.PI / 2;
+  F.drapeModel(holder, (x, z) => 3 + (20 - z) * 0.07, 3);   // (turned a quarter: the model's +x runs to scene −z; the ground rises 7 % that way)
+  const P = mesh.geometry.attributes.position, ys = [0, 1, 2, 3].map((i) => +P.getY(i).toFixed(3));
+  assert.deepStrictEqual(ys, [0, 10, 7, 17], "the far end is 7 m higher, foot and top alike: verticals stay vertical");
+  assert.ok(mesh.geometry !== geo && !mesh.geometry.userData.shared && geo.attributes.position.getY(2) === 0, "the cache's shared geometry is untouched; the draped copy is the placement's own");
+  // Anderson Bridge: nothing makes way; its footprint is the middle truss, not the box across the track
+  const br = F.FACILITIES.find((f) => f.id === "singapore-anderson-bridge");
+  assert.ok(br && br.model.file === "sgp_anderson_bridge.glb" && br.model.heading === 218.8 && !br.replaces.names.test("") && br.model.footprint.length === 4);
+  const lat = br.model.footprint.map((p) => p[0]), lon = br.model.footprint.map((p) => p[1]);
+  const wN = (Math.max(...lat) - Math.min(...lat)) * 110574, wE = (Math.max(...lon) - Math.min(...lon)) * 111320;
+  assert.ok(Math.hypot(wN, wE) > 60 && Math.hypot(wN, wE) < 80, "a strip the length of the truss");
+  // Austin's pylon: off the given place, clear of the track's edge and the pit lane's line
+  const py = F.FACILITIES.find((f) => f.id === "austin-pylon");
+  const d = Math.hypot((py.model.anchor[0] - 30.13146) * 110574, (py.model.anchor[1] + 97.639057) * 111320 * Math.cos(30.13 * Math.PI / 180));
+  assert.ok(d > 0.5 && d < 0.8, "0.65 m across from the given place");
 });

@@ -987,6 +987,7 @@ function measureWidth(samples, grid, center) {
     lat[Math.floor(s.i / B)].push(l);
   }
   const Lb = new Array(nb).fill(null), Rb = new Array(nb).fill(null), Mb = new Array(nb).fill(null);
+  const raw = new Array(nb).fill(null);   // (development: where the field was seen, before the circuit's usual width is applied)
   for (let b = 0; b < nb; b++) {
     const v = lat[b];
     if (v.length < 40) continue;
@@ -1000,6 +1001,7 @@ function measureWidth(samples, grid, center) {
     if (hi - lo + 1 < v.length * 0.25) continue;
     const cut = Math.floor((hi - lo + 1) * 0.01);
     const L = v[hi - cut] + 1, R = v[lo + cut] - 1;
+    raw[b] = [+R.toFixed(2), +L.toFixed(2)];
     // Cars rarely use every metre of a wide track, so the spread gives the centre of the tarmac (the racing
     // line keeps to one side on straights) and a lower bound on its width.
     const c = Math.max(-22, Math.min(22, (L + R) / 2)), W = Math.min(28, Math.max(L - R, TRACK_W));
@@ -1029,6 +1031,7 @@ function measureWidth(samples, grid, center) {
     s.L = L[i0] * (1 - t) + L[i1] * t; s.R = R[i0] * (1 - t) + R[i1] * t; s.M = M[i0] * (1 - t) + M[i1] * t;
   }
   samples.measured = Lb.filter((v) => v != null).length / nb;
+  samples.rawEdges = raw; samples.rawBin = B;
   samples.pitDropped = dropped;
 }
 const ROAD_LIFT = 0.06;   // the asphalt over the lap line (roadMesh); cars and paint sit on it
@@ -5028,7 +5031,9 @@ window.Map3D = {
     const [px, pz] = R.geo.fromLL(lat, lon), out = [], ll = (x, z) => R.geo.toLL(x, z).map((v) => +v.toFixed(7));
     for (let i = 0; i < world.n; i++) {
       const s = world.samples[i]; if (Math.hypot(s.p.x - px, s.p.z - pz) > r) continue;
-      out.push([i, ll(s.p.x + s.nor.x * (s.L ?? 7), s.p.z + s.nor.z * (s.L ?? 7)), ll(s.p.x + s.nor.x * (s.R ?? -7), s.p.z + s.nor.z * (s.R ?? -7))]);
+      // (4th: the edges as drawn [R, L] from the lap line; 5th: where the field was seen there [R, L] – half a car added –,
+      // before the circuit's usual width was applied: null where too few cars were seen)
+      out.push([i, ll(s.p.x + s.nor.x * (s.L ?? 7), s.p.z + s.nor.z * (s.L ?? 7)), ll(s.p.x + s.nor.x * (s.R ?? -7), s.p.z + s.nor.z * (s.R ?? -7)), [+(s.R ?? -7).toFixed(2), +(s.L ?? 7).toFixed(2)], world.samples.rawEdges?.[Math.floor(s.i / (world.samples.rawBin || 5))] ?? null]);
     }
     return JSON.stringify(out);
   },
