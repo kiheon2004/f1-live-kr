@@ -5020,6 +5020,18 @@ window.Map3D = {
       return { name: b.name, kind: b.kind, h: b.h, n: pts.length, mid: R.geo.toLL((x0 + x1) / 2, (z0 + z1) / 2).map((v) => +v.toFixed(6)), box: [Math.round(x1 - x0), Math.round(z1 - z0)], ll: pts.map(([x, z]) => R.geo.toLL(x, z).map((v) => +v.toFixed(6))) };
     }));
   },
+  // development: the track's two edges at every sample within r metres of a place – [sample, [lat, lon] at the edge on
+  // the sample normal's + side, [lat, lon] at the edge on its − side] (which of them is the cars' left depends on the
+  // circuit's frame: tell them apart by where they lie)
+  trackEdgesNear(lat, lon, r = 100) {
+    const R = world?.real; if (!R) return JSON.stringify({ real: false });
+    const [px, pz] = R.geo.fromLL(lat, lon), out = [], ll = (x, z) => R.geo.toLL(x, z).map((v) => +v.toFixed(7));
+    for (let i = 0; i < world.n; i++) {
+      const s = world.samples[i]; if (Math.hypot(s.p.x - px, s.p.z - pz) > r) continue;
+      out.push([i, ll(s.p.x + s.nor.x * (s.L ?? 7), s.p.z + s.nor.z * (s.L ?? 7)), ll(s.p.x + s.nor.x * (s.R ?? -7), s.p.z + s.nor.z * (s.R ?? -7))]);
+    }
+    return JSON.stringify(out);
+  },
   // development: the map's buildings at a place – those whose outline holds the point or comes within r metres of it
   buildingsAt(lat, lon, r = 0) {
     const R = world?.real; if (!R) return JSON.stringify({ real: false });

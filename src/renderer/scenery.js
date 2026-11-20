@@ -944,7 +944,15 @@ async function buildReal(api, scene, world, opts, onStep, own) {
             let best = null, bd = Infinity; for (const q of world.samples) { const d = Math.hypot(q.p.x - sw.x, q.p.z - sw.z); if (d < bd) { bd = d; best = q; } }
             if (best) { const lat = (sw.x - best.p.x) * best.nor.x + (sw.z - best.p.z) * best.nor.z, half = lat > 0 ? (best.L ?? 7) : -(best.R ?? -7); back = M.frontFromEdge - (Math.abs(lat) - half); }
           }
-          const off = (M.frontAt || 0) + back, at = { x: sw.x + sw.n[0] * off, z: sw.z + sw.n[1] * off, y: sw.y + (M.lift || 0), dir: [-sw.n[0], -sw.n[1]] };
+          let off = (M.frontAt || 0) + back, at = { x: sw.x + sw.n[0] * off, z: sw.z + sw.n[1] * off, y: sw.y + (M.lift || 0), dir: [-sw.n[0], -sw.n[1]] };
+          // (model.alongTrack with frontFromEdge: the model stands square to the track where the stand's middle is – its
+          // front wall parallel to the track's edge, frontFromEdge m from it – whatever way the stand's outline runs:
+          // Baku's Absheron, traced from a half-dismantled scaffold, runs 4–10° off the straight it stands on)
+          if (M.alongTrack && Number.isFinite(M.frontFromEdge)) {
+            let best = null, bd = Infinity; for (const q of world.samples) { const d = Math.hypot(q.p.x - sw.x, q.p.z - sw.z); if (d < bd) { bd = d; best = q; } }
+            if (best) { const sgn = (sw.x - best.p.x) * best.nor.x + (sw.z - best.p.z) * best.nor.z > 0 ? 1 : -1, half = sgn > 0 ? (best.L ?? 7) : -(best.R ?? -7), d = half + M.frontFromEdge + (M.frontAt || 0);
+              at = { x: best.p.x + best.nor.x * sgn * d, z: best.p.z + best.nor.z * sgn * d, y: sw.y + (M.lift || 0), dir: [-best.nor.x * sgn, -best.nor.z * sgn] }; back = M.frontFromEdge; }
+          }
           const obj = await modelAt(M.file, (f) => api.geo.model(f), at);
           if (opts.isCurrent && !opts.isCurrent()) { obj.userData.onDispose?.(); break; }   // (this build's world is gone)
           obj.name = "standModel:" + sw.name; stands.group.add(obj); sw.replace(); for (const o of follow) o.replace();
