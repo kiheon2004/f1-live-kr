@@ -81,6 +81,10 @@ test("the shipped model files: listed, present, and passing the app's own model 
   assert.strictEqual(F.PIT_UPPERS[23].front, 15, "Montréal: the second-pass Espace Paddock, its origin 15 m behind the garage fronts"); assert.deepStrictEqual(F.FACILITIES.find((f) => f.id === "barcelona-rooftop").years, [2024, null]);
   assert.ok(!F.FACILITIES.find((f) => f.id === "monaco-hotel-de-paris").replaces.names.test(""), "the hotel's block stays: its model takes no map building away – above all not the unnamed ones");
   assert.ok(["mad_pit_upper.glb", "mad_puerta_sur.glb", "mad_flag.glb"].every((f) => files.includes(f)) && F.PIT_UPPERS[153].front === 0, "Madring: the pit buildings (origin on the garage front line), Puerta Sur, the flag");
+  assert.ok(["bak_pit_upper.glb", "bak_government_house.glb", "bak_maiden_tower.glb"].every((f) => files.includes(f)) && F.PIT_UPPERS[144].turned === true, "Baku: the pit building (made the other way round), Government House, the Maiden Tower");
+  assert.ok(files.includes("bak_stand_c.glb") && files.includes("bak_old_city_wall.glb"), "Baku: the Absheron grandstand, the Old City wall");
+  assert.ok(["sgp_pit_upper.glb", "sgp_stand_pit_c.glb", "sgp_stand_superpit_c.glb", "sgp_stand_t1_c.glb", "sgp_esplanade.glb", "sgp_fullerton.glb", "sgp_national_gallery.glb"].every((f) => files.includes(f)) && F.PIT_UPPERS[61].turned === true, "Marina Bay: the pit building (made the other way round), three stands, three landmarks");
+  assert.ok(F.FACILITIES.find((f) => f.id === "singapore-national-gallery").replaces.names.test("Old City Hall") && !F.FACILITIES.find((f) => f.id === "singapore-national-gallery").replaces.names.test("Supreme Court of Singapore"), "the gallery takes the old court and city hall, not the new Supreme Court");
   assert.ok(files.includes("jed_team.glb"), "Jeddah's team building"); assert.strictEqual(F.PIT_UPPERS[149].fillBack, 8, "Jeddah: the ground floor is filled under the long body only – the rear blocks stand from the ground");
   assert.ok(["sha_stand_c.glb", "sha_pit_upper.glb", "sha_wing.glb", "sha_pavilion.glb", "sha_lotus_row.glb"].every((f) => files.includes(f)), "Shanghai's main straight and the canopy rows over H and K");
   assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-pavilion-\d+$/.test(f.id)).length, 26, "26 team pavilions"); assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-wing-/.test(f.id)).length, 2);
@@ -317,4 +321,23 @@ test("the smallest box round a nearly square outline keeps its sides' direction 
   assert.ok(Math.abs(whole.u1 - whole.u0 - L) < 1 && Math.abs(whole.v1 - whole.v0 - W) < 1 && Math.hypot(whole.c[0] - o.c[0], whole.c[1] - o.c[1]) < 1, "two pieces → the same box");
   const half = minBox(hull(north));
   assert.ok(half.c[0] * n[0] + half.c[1] * n[1] > o.c[0] * n[0] + o.c[1] * n[1] + 40, "(one half alone sits 40 m and more towards the pit building – what v0.62 built a second stadium on)");
+});
+
+test("an upper-storey model made the other way round (`turned`, +Z to the pit lane – Baku) is turned half round: its marked front ends up on the lane side", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const F = await import("../src/renderer/facilities.js");
+  // the same garages as above: fronts at z = 10, the building towards +z
+  const slots = []; for (let k = 0; k < 10; k++) slots.push({ front: [-45 + k * 10, 10], floor: 5, width: 10, inward: [0, 1], along: [1, 0] });
+  const r = { garages: { slots, top: 4.8 }, footprint: [[-50, 10], [50, 10], [50, 28], [-50, 28]] };
+  // a model whose lane face is its +Z side (z = +13): a marker box there, and one at its +X end
+  const root = new THREE.Group();
+  const lane = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2).translate(0, 8, 13), new THREE.MeshStandardMaterial()); lane.name = "laneMark"; root.add(lane);
+  const east = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2).translate(60, 8, 0), new THREE.MeshStandardMaterial()); east.name = "eastMark"; root.add(east);
+  const at = (g, name) => { g.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(g.getObjectByName(name)); return b.getCenter(new THREE.Vector3()); };
+  const g = new THREE.Group(); F.addUpper(g, r, root, { file: "t.glb", garageTop: 5, front: 13, length: 140, depth: 26, turned: true });
+  const p = at(g, "laneMark"), e = at(g, "eastMark");
+  assert.ok(Math.abs(p.z - 10) < 1e-6, `its lane face on the garages' front line (z ${p.z.toFixed(2)})`);
+  assert.ok(Math.abs(e.x + 60) < 1e-6, "its +X end is on this frame's −X side (turned, not mirrored)");
+  const g2 = new THREE.Group(); F.addUpper(g2, r, root, { file: "t.glb", garageTop: 5, front: 13, length: 140, depth: 26 });
+  assert.ok(Math.abs(at(g2, "laneMark").z - 36) < 1e-6, "(not turned, the same face stands at the back)");
 });

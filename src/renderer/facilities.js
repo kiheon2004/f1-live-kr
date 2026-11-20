@@ -198,6 +198,125 @@ export const FACILITIES = [
     },
   },
   {
+    id: "singapore-esplanade", name: "Singapore – Esplanade, Theatres on the Bay", kind: "tower",
+    venue: [61], loc: ["Marina Bay", "Singapore"], years: [2008, null],
+    status: "trial",
+    // on the map's own outlines (the podium and the two shells): they make way. The track's edge passes 6.6 m from the
+    // podium's outline and 6.9 m from the Theatre shell's (measured against this app's track, v0.66)
+    replaces: { names: /^Esplanade (Theatres on the Bay|Concert Hall|Theatre)$/ },
+    model: { file: "sgp_esplanade.glb", anchor: [1.28953, 103.855824], heading: 180 },
+    sources: [
+      "src/data/models/sgp_esplanade.glb – made for this app (2026-11-20): the Concert Hall and Theatre shells (about 110 m across, 35 m high) with their triangular sun shades on a pink-brown podium, softly lit at night – its plan after OpenStreetMap's outlines, a Wikimedia Commons photo compared by eye, nothing copied; the shells' profile and the shades' size estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline and height tags (the model's plan and place)",
+    ],
+    checked: "2026-11-20: trial (plan and place from the map; look from photos, heights partly estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the two spiked shells on their podium (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: the map's own outlines"],
+      inferred: ["the shells' profile", "the size of the sun shades"],
+    },
+  },
+  {
+    id: "singapore-fullerton", name: "Singapore – The Fullerton Hotel", kind: "tower",
+    venue: [61], loc: ["Marina Bay", "Singapore"], years: [2008, null],
+    status: "trial",
+    // on the map's own outline (three records under that name): they make way; 25 m from the track's edge
+    replaces: { names: /^The Fullerton Hotel$/ },
+    model: { file: "sgp_fullerton.glb", anchor: [1.286184, 103.853093], heading: 180 },
+    sources: [
+      "src/data/models/sgp_fullerton.glb – made for this app (2026-11-20): a grey granite block (25 m, 30 m at its middle, a roof pavilion to 36 m) with giant colonnades on its long fronts, base and cornice bands, rows of windows, lit at night – its plan after OpenStreetMap's outline, a Wikimedia Commons photo compared by eye, nothing copied; the numbers of columns and windows estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline and height tags (the model's plan and place)",
+    ],
+    checked: "2026-11-20: trial (plan and place from the map; look from photos, heights partly estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the granite fronts and their giant columns (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: the map's own outlines"],
+      inferred: ["the numbers of columns and windows"],
+    },
+  },
+  {
+    id: "singapore-national-gallery", name: "Singapore – National Gallery (the former Supreme Court and City Hall)", kind: "tower",
+    venue: [61], loc: ["Marina Bay", "Singapore"], years: [2008, null],
+    status: "trial",
+    // on the map's own outlines ('Old Supreme Court' with its dome parts, 'Old City Hall'): they make way – not the new
+    // 'Supreme Court of Singapore' behind; 14 m from the track's edge
+    replaces: { names: /^(Old Supreme Court|Old City Hall)$/ },
+    model: { file: "sgp_national_gallery.glb", anchor: [1.290025, 103.851506], heading: 180 },
+    sources: [
+      "src/data/models/sgp_national_gallery.glb – made for this app (2026-11-20): the former Supreme Court (portico, a ribbed dome with its lantern, 42 m) and the former City Hall (a long colonnade) in cream stone, lit at night – its plan after OpenStreetMap's outlines and height tags, Wikimedia Commons photos compared by eye, nothing copied; the dome's drum and the numbers of columns estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline and height tags (the model's plan and place)",
+    ],
+    checked: "2026-11-20: trial (plan and place from the map; look from photos, heights partly estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the portico and dome, City Hall's colonnade (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: the map's own outlines"],
+      inferred: ["the dome's drum", "the numbers of columns"],
+    },
+  },
+  {
+    id: "baku-old-city-wall", name: "Baku – the Old City (İçərişəhər) wall with two round towers, between turns 8 and 10", kind: "tower",
+    venue: [144], loc: ["Baku"], years: [2004, null],
+    status: "trial",
+    // Where: the chat side's reading of aerial imagery, slid 3.87 m towards the track (bearing 359) so that the nearer
+    // tower's front stands 0.5 m behind the track's left (south) edge – the user's instruction; the wall's face is then
+    // 1.7 m and more from that edge (measured against this app's track, v0.66). The map's own strip of the wall here (an
+    // unnamed outline with the same tower bulges, 1–2 m further from the track) makes way – with it its 36 m east of
+    // the model's end, one tower among them, which the model does not cover.
+    replaces: { near: [40.3687928, 49.8366402], within: 3 },
+    model: { file: "bak_old_city_wall.glb", anchor: [40.3687928, 49.8366402], heading: 359 },
+    sources: [
+      "src/data/models/bak_old_city_wall.glb – made for this app (2026-11-19): 76 m of straight wall (2.6 m thick, 9.5 m high under its merlons) with two round towers 12.5 m high, courses of large stone, lit at night – aerial imagery and a Wikimedia Commons photo of the 2026 race compared by eye, nothing copied; every height estimated (no published figures found); no outside asset, no logo or lettering",
+      "the line and the towers' spacing: read by the chat-side session off aerial imagery (looked at only); OpenStreetMap (© OpenStreetMap contributors, ODbL) – the unnamed strip of the wall at this place",
+    ],
+    checked: "2026-11-19: trial (line and tower spacing from aerial imagery, set 0.5 m behind the track's edge; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["round towers of large stone right beside the track, merlons on top (Wikimedia Commons, compared only)"],
+      map: ["the wall's line and its towers about 30 m apart (aerial imagery; the map's strip)"],
+      inferred: ["every height", "its distance from the track (set to 0.5 m at the nearer tower)"],
+    },
+  },
+  {
+    id: "baku-government-house", name: "Baku – Government House (Hökumət Evi) on Neftchilar Avenue", kind: "tower",
+    venue: [144], loc: ["Baku"], years: [2004, null],
+    status: "trial",
+    // on the map's own outline of it ('Hökumət Evi', recorded twice): both records make way
+    replaces: { names: /^Hökumət Evi$/ },
+    model: { file: "bak_government_house.glb", anchor: [40.373795, 49.852659], heading: 156.8 },
+    sources: [
+      "src/data/models/bak_government_house.glb – made for this app (2026-11-19): on its map outline – a forecourt open to the avenue between four corner towers (arched loggias, stepped crowns, pinnacles, small green domes), the wings and the main range behind (rusticated base, a two-storey arcade, rows of square and round windows) in cream stone lit at night – Wikimedia Commons photos compared by eye, nothing copied; every height estimated (the map says 10 storeys); no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building 'Hökumət Evi' (the model's plan and place)",
+    ],
+    checked: "2026-11-19: trial (plan and place from the map; every height estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["the corner towers, the arcade, the forecourt (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: the map's 'Hökumət Evi'"],
+      inferred: ["every height (main range 38 m, towers to 54 m)", "the numbers of windows and arches"],
+    },
+  },
+  {
+    id: "baku-maiden-tower", name: "Baku – the Maiden Tower (Qız Qalası) in the old town", kind: "tower",
+    venue: [144], loc: ["Baku"], years: [2004, null],
+    status: "trial",
+    replaces: { names: /^Qız Qalası$/ },
+    model: { file: "bak_maiden_tower.glb", anchor: [40.366148, 49.837215], heading: 206 },
+    sources: [
+      "src/data/models/bak_maiden_tower.glb – made for this app (2026-11-19): a stone cylinder 29.5 m high and 16.5 m across (published figures) with its buttress to the east, bands of darker stone, narrow windows, a flat top with a glass rail, lit at night – the buttress after OpenStreetMap's outline, its height an estimate; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building 'Qız Qalası' (the model's place and the buttress's plan)",
+    ],
+    checked: "2026-11-19: trial (sizes published, place from the map; the buttress's height estimated)",
+    evidence: {
+      confirmed: ["29.5 m high, 16.5 m across (published)"],
+      photo: [],
+      map: ["the place and the buttress's plan: the map's 'Qız Qalası'"],
+      inferred: ["the buttress's height (28.6 m)", "the stone bands and windows"],
+    },
+  },
+  {
     id: "madring-puerta-sur", name: "Madring – IFEMA's Puerta Sur building between the two permanent pit blocks", kind: "paddock",
     venue: [153], loc: ["Madrid"], years: [2026, null],
     status: "trial",
@@ -1767,7 +1886,7 @@ function holdModel(file, read) {
 }
 // A pit building's upper storeys from a model file over the builder's own garage level (an entry's `upper`): the
 // garages, their insides, the pit wall and everything the pit stops use stay the builder's; the model stands on them.
-// The model's axes: +Z into the building from the garage fronts (the paddock side), +X along the building, the origin on
+// The model's axes (or, with `turned`, the other way round): +Z into the building from the garage fronts (the paddock side), +X along the building, the origin on
 // the ground at its plan's middle. Where: its garage front (upper.front m towards the track from the origin) on the
 // built garages' front line; along, its middle at the built footprint's middle; its first slab's underside
 // (upper.garageTop) on the garages' top – tilted along the building as the garages' floors rise or fall (a straight
@@ -1788,7 +1907,11 @@ export function addUpper(g, r, root, U) {
   const A = U.along || 0;
   const ox = f0[0] + ax[0] * (sc + A - sOf(f0)) + iw[0] * U.front, oz = f0[1] + ax[1] * (sc + A - sOf(f0)) + iw[1] * U.front, oy = a + m * A + G.top - U.garageTop;
   const holder = new THREE.Group(), tilt = new THREE.Group();
-  holder.position.set(ox, oy, oz); holder.rotation.y = yaw; tilt.rotation.z = Math.atan(m); holder.add(tilt); tilt.add(root.clone(true));
+  // (upper.turned: a model made the other way round – its +Z to the pit lane, its +X against this frame's, Baku – is turned
+  // half round about its origin, so its front still faces the lane and everything else here – front, depth, fills – is
+  // in this frame as for any other)
+  const own = root.clone(true); if (U.turned) own.rotation.y = Math.PI;
+  holder.position.set(ox, oy, oz); holder.rotation.y = yaw; tilt.rotation.z = Math.atan(m); holder.add(tilt); tilt.add(own);
   // the ground floor the model stands over where the builder built none (model axes)
   const HL = U.length / 2, HD = U.depth / 2, xs = [s0 - sc - A, s1 - sc - A];
   for (const sl of S) { const x = sOf(sl.front) - sc - A; xs[0] = Math.min(xs[0], x - sl.width / 2); xs[1] = Math.max(xs[1], x + sl.width / 2); }
@@ -2000,6 +2123,13 @@ export const PIT_UPPERS = {
     src: "src/data/models/cat_pit_upper.glb – Circuit de Barcelona-Catalunya pit building, the storeys over the garages: a set-back glazed floor behind dark columns, the top terrace under its 2024 roof of six modules carrying solar panels, five stair towers on the paddock side, and – standing from the ground – the control tower (white with a red top) at the pit-entry end and a block at the other end – made for this app (2026-11-19) from the published facts (a large roof over the 6,000 m² terrace, 1,080 panels on the pit building's roof) and Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; the garage row 293.4 m as the six roof modules in aerial imagery, every height and the control tower's size estimated; no outside asset, no logo or lettering" },
   49: { file: "sha_pit_upper.glb", garageTop: 5.6, front: 15, length: 337, depth: 30,
     src: "src/data/models/sha_pit_upper.glb – Shanghai International Circuit pit building, the storeys over the garages: one glazed floor (the Paddock Club) behind a balcony, a roof terrace with six planted squares – made for this app (2026-11-19, first pass) from the published wording (garages below, VIP suites above) and a 2018 satellite picture and Wikimedia Commons photos compared by eye; 337 m long between the two end towers, every height an estimate; no outside asset, no logo or lettering" },
+  // (Marina Bay: made with its +Z to the pit lane – `turned`; south of the garages it also brings a pavilion on stilts and a
+  // stair tower, standing from the ground)
+  61: { file: "sgp_pit_upper.glb", garageTop: 5.1, front: 12.25, length: 330.7, depth: 24.5, backTo: 15.75, maxDepth: 24.5, turned: true,
+    src: "src/data/models/sgp_pit_upper.glb – Marina Bay's permanent F1 Pit Building (2008) over the garages: two floors of outward-leaning glass between mint and white bands, a sage flat roof with five hoods, the south end block under a roof sweeping up to 22.5 m, a glazed pavilion on steel stilts and a green stair tower south of it – its plan after OpenStreetMap's outline (300.7 × 24.5 m + the 30 m end block), the published facts (docs/research/pitbuildings.md: three storeys, columns 6 m apart) and Wikimedia Commons photos compared by eye, nothing copied; floor heights, the hoods and the pavilion's place estimated; no outside asset, no logo or lettering" },
+  // (Baku: made with its +Z to the pit lane – `turned`)
+  144: { file: "bak_pit_upper.glb", garageTop: 5.5, front: 13.5, length: 296, depth: 27, backTo: 19, maxDepth: 27, turned: true,
+    src: "src/data/models/bak_pit_upper.glb – Baku City Circuit's temporary pit building on Neftchilar Avenue, over the garages: the Paddock Club floor behind a dark parapet and three rows of terrace seats, a deep canopy rising towards the track (white on top), a two-storey block at the west end and a three-storey one with a roof terrace at the east end (which end is the taller one is an estimate), five steel stair towers on the paddock side standing from the ground – its plan after OpenStreetMap's outline (296 × 27 m), Wikimedia Commons photos (2018 satellite picture, 2026 race) and a 2025 construction photo compared by eye, nothing copied; every height estimated; no outside asset, no logo or lettering" },
   149: { file: "jed_pit_upper.glb", garageTop: 5.2, front: 16, length: 280, depth: 32, fillBack: 8, backTo: 24,
     src: "src/data/models/jed_pit_upper.glb – Jeddah Corniche Circuit pit building, the storeys over the garages: one long building of two glazed floors behind balconies, thin white slabs running out to a point at each end, a roof terrace with seven planted pergolas, and eight cream box blocks a storey higher on the paddock side (these stand from the ground, behind the garages) – made for this app (2026-11-19, second pass) from the promoter's 2021 renderings (formula1.com, looked at only) and aerial imagery compared by eye, nothing copied; 280 m and four storeys published, every height and the numbers of blocks and pergolas estimated; no outside asset, no logo or lettering" },
   151: { file: "mia_pit_upper.glb", garageTop: 5.0, front: 21, length: 250, depth: 42, fillBack: 13, backTo: 33, from: 2023,
