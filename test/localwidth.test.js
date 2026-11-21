@@ -38,5 +38,10 @@ test("Marina Bay's Anderson Bridge is listed: 9 m, a corridor 76 m long in the f
   const { LOCAL_WIDTHS } = await import("../src/renderer/localwidth.js");
   const [W] = LOCAL_WIDTHS[61];
   assert.strictEqual(W.w, 9); assert.ok(Math.abs(Math.hypot(W.b[0] - W.a[0], W.b[1] - W.a[1]) - 76) < 1.5);
-  assert.deepStrictEqual(Object.keys(LOCAL_WIDTHS), ["61"], "nowhere else");
+  assert.deepStrictEqual(Object.keys(LOCAL_WIDTHS).sort(), ["61", "65"], "nowhere else");
+  const [G] = LOCAL_WIDTHS[65];
+  assert.strictEqual(G.w, 14); assert.ok(Math.abs(Math.hypot(G.b[0] - G.a[0], G.b[1] - G.a[1]) - 46.3) < 1, "Mexico City: the stadium's gap, 46 m of corridor");
+  // the gap's corners (feed metres, measured in the app) lie 6 m and more outside the corridor's edges
+  const u = [(G.b[0] - G.a[0]) / 46.33, (G.b[1] - G.a[1]) / 46.33];
+  for (const c of [[-180.99, -18.07], [-177.68, 9.19]]) { const d = Math.abs((c[0] - G.a[0]) * -u[1] + (c[1] - G.a[1]) * u[0]); assert.ok(d - G.w / 2 > 5.5 && d - G.w / 2 < 8, "a corner " + (d - G.w / 2).toFixed(1) + " m outside the corridor"); }
 });

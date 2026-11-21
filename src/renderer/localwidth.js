@@ -9,7 +9,13 @@
 //   one line (seen 2.2 m wide, half a car each side included – 2025 race), and the circuit's 12 m put the track's
 //   edges where the real trusses stand. The centre line is the real carriageway's: 6.1 m north-east of the middle
 //   truss, from 38 m before the bridge's middle to 38 m past it (the end pylons stand at ± 33.5 … 37 m).
+//   Mexico City, the stadium's west gap (venue 65): the track leaves the stadium through a 27.4 m gap between the two
+//   stands' ends. The field passes it on one line 7 m from the south stand's corner (setting up for the right-hander
+//   after it), and a 14 m ribbon centred on that line reached the corner itself (0.05 m – 2025 race). The corridor is
+//   the gap's own middle line (from 7 m inside the stadium to 39 m outside it), the circuit's usual 14 m wide: both
+//   corners about 6 m from the track's edges, the field still inside it on its south side.
 export const LOCAL_WIDTHS = {
+  65: [{ name: "the stadium's west gap", a: [-173.88, -5.05], b: [-219.95, -0.12], w: 14, ease: 25 }],
   61: [{ name: "Anderson Bridge", a: [-1189.94, -385.95], b: [-1130.98, -434.45], w: 9, ease: 25 }],
 };
 
