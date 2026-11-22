@@ -135,6 +135,17 @@ function standMaterial(opts = {}) {
 const sideSign = (s) => (s === "R" ? 1 : -1);
 const NOT_BUILT = new Map([["ga", "standing / grass"], ["hosp", "hospitality"], ["other", "not a circuit grandstand"]]);
 
+// Which of the listed entries of one name an outline belongs to (pts: the outline in the frame of the entries' osmAt):
+// the one whose osmAt lies inside it, else the one whose osmAt is nearest a corner of it; one entry, no outline or no
+// osmAt at all: the last entry (a Map by name kept the last).
+export function listedEntry(entries, pts = null) {
+  if (!entries?.length) return undefined;
+  const marked = entries.filter((L) => L.osmAt);
+  if (entries.length < 2 || !pts?.length || !marked.length) return entries[entries.length - 1];
+  let best = null, bd = Infinity;
+  for (const L of marked) { const [x, y] = L.osmAt, d = inPoly(x, y, pts) ? 0 : Math.min(...pts.map(([px, py]) => Math.hypot(px - x, py - y))); if (d < bd) { bd = d; best = L; } }
+  return best;
+}
 // Where a stand's model puts its origin along and across the stand (scene x, z): the middle of the chord between the
 // front line's ends – or, model.atMid, the front line's own middle point: a model made curved along this app's front
 // line (Marina Bay's Turn 1) has its origin on the line, and the chord's middle lies behind a line that bends.
@@ -267,7 +278,12 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   }
   const traced = (scene.stands?.list || []).filter((L) => L.poly && !isMound(L) && inYear(L) && (!NOT_BUILT.has(L.type) || builds(L)))
     .map((L) => ({ kind: "grandstand", name: L.n, standOf: L.n, est: 1, h: 12, pts: L.poly, standRoof: L.roof ?? null, standPerm: L.perm ?? null, traced: L.img || "traced", other: builds(L) ? L.type : null, levels: L.levels || 2, shape: builds(L) && L.shape === "dome" ? "dome" : null, domeH: L.h || 0 }));
-  const seen = [], listedBy = new Map((scene.stands?.list || []).map((L) => [L.n, L]));
+  const seen = [], sameName = new Map();
+  for (const L of scene.stands?.list || []) { if (!sameName.has(L.n)) sameName.set(L.n, []); sameName.get(L.n).push(L); }
+  // (two listed entries can share a name, each marking an outline of its own – Mexico City's "Grada 1" is the long main
+  // body and a low stand west of it: an outline's entry is the one whose osmAt lies in it, or nearest it; with one
+  // entry of that name, or none marked, the last one – as before)
+  const listedBy = { get: (name, b = null) => listedEntry(sameName.get(name), b?.pts) };
   // (largest first: an outline mostly inside one already taken – the west part of Spielberg's main stand mapped
   // again on its own, Shanghai's B2 twice – is that stand, not another one)
   const areaOf = (b) => Math.abs(polyArea(b.pts.map(gf.xz)));
@@ -283,8 +299,8 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // (an outline taken for the pit building – facilities.js genericPitSpec – is no stand)
     // (one under a stand traced from imagery: that stand is built from its traced outline instead – scene.js)
     if (b.kind !== "grandstand" || b.asPitBuilding || b.underTraced) continue;
-    if (b.standOf && listedBy.get(b.standOf) && !inYear(listedBy.get(b.standOf))) { skipped.push(`${b.standOf}: not in ${year}`); continue; }
-    const lt = b.standOf ? listedBy.get(b.standOf)?.type : null;
+    if (b.standOf && listedBy.get(b.standOf, b) && !inYear(listedBy.get(b.standOf, b))) { skipped.push(`${b.standOf}: not in ${year}`); continue; }
+    const lt = b.standOf ? listedBy.get(b.standOf, b)?.type : null;
     if (NOT_BUILT.has(lt) && !b.other) { skipped.push(`${b.standOf}: ${NOT_BUILT.get(lt)}`); continue; }
     let pts = b.pts.map(gf.xz);
     if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1);
@@ -338,7 +354,7 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
     // a tagged height sets the rake; otherwise a usual 0.45 m per row
     const rise = b.est ? 0.45 : Math.max(0.3, Math.min(0.62, (b.h - FRONT_H - 3) / rows));
     // (roof and permanence: the listed stand's where it says – for its traced outline or its map outline –, else a guess)
-    const lst = b.standOf ? listedBy.get(b.standOf) : null, rf = b.standRoof ?? lst?.roof, pm = b.standPerm ?? lst?.perm;
+    const lst = b.standOf ? listedBy.get(b.standOf, b) : null, rf = b.standRoof ?? lst?.roof, pm = b.standPerm ?? lst?.perm;
     const roofOf = rf != null ? (rf === "upper" ? "upper" : !!rf) : b.traced ? false : depth > 14 && area > 1500, permOf = pm != null ? !!pm : true;
     // (model: the listed stand's own model file, if it has one – it is still built here as every stand, apart from the
     // others' shared mesh, so the model can take its place once it has loaded; see `swaps` below)

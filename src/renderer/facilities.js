@@ -260,23 +260,120 @@ export const FACILITIES = [
     id: "singapore-anderson-bridge", name: "Singapore – Anderson Bridge (1910): the steel trusses the track runs between", kind: "tower",
     venue: [61], loc: ["Marina Bay", "Singapore"], years: [2008, null],
     status: "trial",
-    // Three bowstring trusses with no deck: this app's track is the road. The track runs between the north-east and the
-    // middle truss; the real ones stand 12.2 and 11.1 m apart, the model's 17.0 and 11.1 m, as this app's track is 12 m
-    // wide there (the real carriageway about 9 m). The map has no building for the bridge: nothing makes way.
+    // Three bowstring trusses with no deck: this app's track is the road. The second version (2026-11-21) has the trusses
+    // where the real ones stand (12.2 and 11.1 m apart); the track runs between the north-east and the middle one in a
+    // corridor of its own, 9 m wide and straight (localwidth.js – the circuit's usual 12 m put the track's edges where
+    // the trusses are): the trusses' inner faces are 1.2 m outside its edges, the end pylons 1.1 m.
+    // The map has no building for the bridge: nothing makes way.
     // `footprint`: the middle truss only – the model's box lies across the track, and rain must fall between the trusses.
     replaces: { names: /^\(no map record makes way\)$/ },
-    model: { file: "sgp_anderson_bridge.glb", anchor: [1.287275, 103.853017], heading: 218.8,
-      footprint: [[1.2874624, 103.8527597], [1.2870623, 103.8532541], [1.2870524, 103.8532462], [1.2874525, 103.8527518]] },
+    model: { file: "sgp_anderson_bridge_v2.glb", anchor: [1.287275, 103.853017], heading: 218.8,
+      footprint: [[1.28748, 103.8527737], [1.2870799, 103.8532681], [1.28707, 103.8532603], [1.2874701, 103.8527659]] },
     sources: [
-      "src/data/models/sgp_anderson_bridge.glb – made for this app (2026-11-21): three steel bowstring trusses 67 m long (7.1 m at the crown) tied overhead by five arched ribs, four rusticated stone pylons at the outer trusses' ends, the footway balustrade, lit at night – from aerial imagery and three Wikimedia Commons photos compared by eye, nothing copied; published: 70 m long, 28 m wide, opened 1910; the trusses' height, the number of panels and the pylons' size estimated; no outside asset, no logo or lettering",
-      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the bridge's carriageway and footways (the place); the place of the middle truss from aerial imagery (± 1.5 m)",
+      "src/data/models/sgp_anderson_bridge_v2.glb – made for this app (2026-11-21, second version: the trusses at their real spacing): three steel bowstring trusses 67 m long (7.1 m at the crown) tied overhead by five arched ribs, four rusticated stone pylons at the outer trusses' ends, the footway balustrade, lit at night – from aerial imagery and three Wikimedia Commons photos compared by eye, nothing copied; published: 70 m long, 28 m wide, opened 1910; the trusses' height, the number of panels and the pylons' size estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the bridge's carriageway and footways (the place); the trusses' places and spacing from aerial imagery (± 1.5 m)",
     ],
-    checked: "2026-11-21: trial (place ± 1.5 m; the north-east truss set wider than the real one to clear this app's track)",
+    checked: "2026-11-21: trial (place ± 1.5 m; the trusses at their real spacing, 1.2 m outside this app's 9 m track on the bridge)",
     evidence: {
       confirmed: ["the span and the year (published: 70 m, 1910)"],
       photo: ["three bowstring trusses with arched ribs overhead, stone pylons at the ends (Wikimedia Commons, compared only)"],
       map: ["the place: the road over the river"],
-      inferred: ["the trusses' height", "the number of panels", "the spacing of the north-east truss (17 m here, 12.2 m real)"],
+      inferred: ["the trusses' height", "the number of panels"],
+    },
+  },
+  {
+    id: "interlagos-hospitality-center", name: "Interlagos – the Hospitality Center (2025) in the infield, behind the paddock", kind: "tower",
+    venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2025, null],
+    status: "trial",
+    // 116 m from the track, on the slope that falls from the paddock to the lake: the elevation model has the ground
+    // under it falling 18 m along its 142 m (it is older than the building). `level: "mid"`: a terrace is cut and filled
+    // at the middle height of the ground under it before the model is stood there. The map's blocks inside its plan make way
+    // (`footprint`: the plan and the two small blocks the map has against its north-east end and its back).
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spo_hospitality.glb", anchor: [-23.70333, -46.698134], heading: 137.23, level: "mid",
+      footprint: [[-23.7035484, -46.6989101], [-23.7025818, -46.6977762], [-23.703013, -46.6973434], [-23.7039796, -46.6984772]] },
+    sources: [
+      "src/data/models/spo_hospitality.glb – made for this app (2026-11-22): three decks with thick white edges and glass rails round a dark glazed body with rounded corners (142.5 × 52 m), a white barrel-vault roof over the top deck (to 22 m), lit at night – its plan after OpenStreetMap's outline, aerial imagery and one Wikimedia Commons photo from the air compared by eye, nothing copied; published: three floors, 22 m, 22,000 m² (São Paulo city hall); deck heights estimated; the lettering on its roof is not shown; no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-23: trial (plan and place from the map; look from one photo; heights estimated; the ground under it levelled)",
+    evidence: {
+      confirmed: ["three floors, 22 m high, opened for the 2025 race (published)"],
+      photo: ["white deck edges round a dark glazed body under a white vault (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the deck heights", "the column spacing", "the floor's level on the slope"],
+    },
+  },
+  {
+    id: "interlagos-footbridge", name: "Interlagos – the footbridge over the track and the pit exit at the south end of the main straight", kind: "tower",
+    venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2018, null],
+    status: "trial",
+    // The map has its footway from sector M's front line to the pit building's south end. This app builds the pit
+    // building about 10 m further from the track and 5 m further south than the map's outline (PIT_UPPERS 14): at the
+    // map's place the bridge's east pier stood on the pit apron before the last garage and its deck in the membrane roof.
+    // It stands beside the pit building as built (2025 race): its east pier 2.4 m south of the building's end and 9.3 m
+    // behind the garage fronts, as in the map – 10.2 m east and 6.7 m south of the map's place. `drape`: the stairs' feet
+    // on the ground at either end.
+    // `footprint`: its west pier only – the span lies over the track and the pit lane, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spo_footbridge.glb", anchor: [-23.7061, -46.6993804], heading: 165.23, drape: true,
+      footprint: [[-23.7060842, -46.6994001], [-23.7060801, -46.6993831], [-23.7061185, -46.6993721], [-23.7061227, -46.6993891]] },
+    sources: [
+      "src/data/models/spo_footbridge.glb – made for this app (2026-11-22): a white footbridge of one 48 m span, its deck 6.2 m over the ground, a pier and a stair at either end – its place after OpenStreetMap's footway and aerial imagery; seen from afar and from above only: its look and height are estimated, and whether a pier stands at the pit wall is not known (none is shown); no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the footway across the track (the place)",
+    ],
+    checked: "2026-11-23: trial (place from the map; look and height estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a white footbridge across the straight's south end (aerial imagery, compared only)"],
+      map: ["the place: OpenStreetMap's footway"],
+      inferred: ["its look", "its height (6.2 m under the deck)", "no pier at the pit wall"],
+    },
+  },
+  {
+    id: "mexico-palacio-de-los-deportes", name: "Mexico City – Palacio de los Deportes (1968), the copper dome west of the stadium section", kind: "tower",
+    venue: [65], loc: ["Mexico City"], years: [1968, null],
+    status: "trial",
+    // On the map's own outline (the named record makes way), 310 m from the track: a landmark behind the stadium section.
+    // `level`: the elevation model has the dome itself as a mound 28 m high – the ground under the footprint is levelled
+    // to the low ground round it before the model is stood there.
+    replaces: { names: /^Palacio de los Deportes$/ },
+    model: { file: "mex_palacio.glb", anchor: [19.405285, -99.099802], heading: 180, level: true,
+      footprint: [[19.4058733, -99.1008035], [19.4063487, -99.1000752], [19.4062104, -99.0992041], [19.4055064, -99.0986443], [19.4047274, -99.0987786], [19.4042258, -99.0995611], [19.4043695, -99.1004265], [19.4049515, -99.1009235]] },
+    sources: [
+      "src/data/models/mex_palacio.glb – made for this app (2026-11-21): a rounded-square copper dome (134 × 136 m, 43.6 m at its crown) of pointed panels on an 11 × 11 grid of arches, glazing under its rim, forty pairs of white V struts, two red terraces after the mapped outline with its eight entrance arms, lit at night – its plan after OpenStreetMap's outlines, aerial imagery and Wikimedia Commons photos compared by eye, nothing copied; published: a copper dome, opened 1968; every height estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the dome's and the terraces' outlines (the model's plan and place)",
+    ],
+    checked: "2026-11-21: trial (plan and place from the map; look from photos; heights estimated)",
+    evidence: {
+      confirmed: ["a copper dome, opened 1968 (published)"],
+      photo: ["the dome of pointed copper panels on white V struts (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: the map's own outlines"],
+      inferred: ["every height", "the number of panels"],
+    },
+  },
+  {
+    id: "mexico-harp-helu", name: "Mexico City – Estadio Alfredo Harp Helú (2019), the baseball stadium's trident roof beside turn 1", kind: "tower",
+    venue: [65], loc: ["Mexico City"], years: [2019, null],
+    status: "trial",
+    // On the map's own outline of the roof. Against this app's track (2025 race): on the ground its nearest part – the end
+    // of the ramp – is 16.6 m from the track's edge; the middle blade's point hangs 9.6 m from it in plan, 38 m up.
+    // The map's seating outlines there are not built by this app (grandstands.json: not a circuit grandstand); its two
+    // 'Rampa' blocks make way (the model has the ramp). `footprint`: the roof's own outline, not its box.
+    // `level`: the elevation model has the stadium as bumps and hollows (−11 … +7 m round the anchor): levelled first.
+    replaces: { names: /^Rampa$/, within: 45 },
+    model: { file: "mex_harp_helu.glb", anchor: [19.4040532, -99.0856152], heading: 180, level: true,
+      footprint: [[19.4038453, -99.0863902], [19.4048295, -99.0862997], [19.4050871, -99.0862216], [19.4050157, -99.0859494], [19.4046271, -99.0849907], [19.4037559, -99.0844823], [19.4036926, -99.0844756], [19.4029579, -99.0858123], [19.4030356, -99.0859198]] },
+    sources: [
+      "src/data/models/mex_harp_helu.glb – made for this app (2026-11-21): the white trident roof – seven gabled blades lying towards the north-north-west, the middle one 130 m long and rising to a point 38.7 m up, three lower ones either side – on leaning steel columns, six dark stepped pyramids at the side blades' ends, a stepped ramp under the middle blade, the stands a dark mass, lit at night – its plan after OpenStreetMap's outline of the roof, aerial imagery and Wikimedia Commons photos compared by eye, nothing copied; published: about 20,000 seats, a steel and PTFE roof, opened 2019; every height estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the roof's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-21: trial (plan and place from the map; look from photos; heights estimated; 16.6 m from this app's track edge on the ground)",
+    evidence: {
+      confirmed: ["a steel and PTFE roof, opened 2019 (published)"],
+      photo: ["the white trident roof on leaning columns, the stepped pyramids (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: the map's own outline of the roof"],
+      inferred: ["every height", "the stands under the roof (a plain mass)"],
     },
   },
   {
@@ -377,13 +474,15 @@ export const FACILITIES = [
     // straight wall 1.3 m and more. Both of the map's strips make way: the one at the anchor and (`also`) the one that
     // runs on west of it. `footprint`: a band 4 m either side of the wall's line – the model's box would take in a
     // triangle of the Old City behind the wall, and every unnamed house in it would go.
-    // `drape`: the street climbs – this app's ground rises 17 m from the wall's east end to its west end; the model is
-    // made level, so each vertex follows the ground under it (the wall's top runs up the hill with the street).
+    // The street climbs – this app's ground rises 17 m from the wall's east end to its west end. The third version
+    // (2026-11-21) is stepped to it: made on this app's ground heights along the wall (2025 race), its height 0 the ground
+    // at the anchor, each stretch between towers level on top and a step up at each tower, every piece reaching 1.5 m
+    // under the ground. (The second version was level and followed the ground vertex by vertex – `drape`.)
     replaces: { near: [40.3687928, 49.8366402], within: 3, also: { near: [40.36859, 49.8351446], within: 3 } },
-    model: { file: "bak_old_city_wall.glb", anchor: [40.3687928, 49.8366402], heading: 359, drape: true,
+    model: { file: "bak_old_city_wall_stepped.glb", anchor: [40.3687928, 49.8366402], heading: 359,
       footprint: [[40.3686614, 49.8371107], [40.3687894, 49.8369044], [40.368813, 49.8368062], [40.3688096, 49.8357426], [40.3687447, 49.8354463], [40.3686236, 49.8351219], [40.3685031, 49.8348326], [40.3684075, 49.834537], [40.3683378, 49.8342741], [40.3682663, 49.8343066], [40.368337, 49.8345727], [40.368435, 49.8348756], [40.3685564, 49.8351672], [40.3686744, 49.8354827], [40.3687341, 49.8357489], [40.3687374, 49.8368047], [40.3687269, 49.8368486], [40.3686027, 49.8370484]] },
     sources: [
-      "src/data/models/bak_old_city_wall.glb – made for this app (second version, 2026-11-21): 236 m of wall (1.3–1.7 m thick, 9.5 m high under its merlons) with eight round towers 12.5 m high (one 14 m), two square buttresses, courses of large stone, lit at night – its plan after OpenStreetMap's two outlines of the wall, a Wikimedia Commons photo of the 2026 race compared by eye, nothing copied; every height estimated (no published figures found); no outside asset, no logo or lettering",
+      "src/data/models/bak_old_city_wall_stepped.glb – made for this app (third version, 2026-11-21: stepped up the hill with the street): 236 m of wall (1.3–1.7 m thick, 9.5 m high under its merlons) with eight round towers 12.5 m high (one 14 m), two square buttresses, courses of large stone, lit at night – its plan after OpenStreetMap's two outlines of the wall, a Wikimedia Commons photo of the 2026 race compared by eye, nothing copied; every height estimated (no published figures found); no outside asset, no logo or lettering",
       "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the wall's two strips (the model's plan and place)",
     ],
     checked: "2026-11-21: trial (plan and place from the map; heights estimated; the corner tower 0.5 m behind this app's track edge)",
@@ -902,7 +1001,8 @@ export const FACILITIES = [
 // (the origin is on the ground at the model's centre) | "bbox" (place the bounding box's bottom centre at the anchor),
 // ground: "anchor" (terrain height at the anchor) | "lowest" (lowest terrain under the footprint), lift: metres,
 // drape: true (a long model on sloping ground: each vertex follows the terrain under it – drapeModel),
-// footprint: [[lat, lon] …] (its outline on the ground where the model's box is not it) }.
+// footprint: [[lat, lon] …] (its outline on the ground where the model's box is not it),
+// level: true (with footprint: the ground under it is levelled first – a building the elevation model shows as a hill) }.
 // The model is never tilted to the terrain. `replaces` then also needs `within` (metres around the anchor) so only
 // map buildings at the model's spot go.
 const UNITS = { m: 1, cm: 0.01, mm: 0.001, ft: 0.3048 };
@@ -2049,7 +2149,10 @@ export function addUpper(g, r, root, U) {
   const corner = (x, z) => [ox + ax[0] * x + iw[0] * z, oz + ax[1] * x + iw[1] * z];
   const box = new THREE.Box3().setFromObject(holder);
   const zBack = Number.isFinite(U.backTo) ? U.backTo : HD;
-  return { footprint: [corner(-HL, -HD), corner(HL, -HD), corner(HL, zBack), corner(-HL, zBack)], top: box.max.y, info: { upper: U.file, upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] }, origin: [ox, oz], inward: iw };
+  // (upper.span: the model's own ends along this frame's +X, where it reaches further at one end than at the other –
+  // Interlagos: the Operations Centre stands at the pit-entry end of the garages; without it ± length / 2)
+  const [XA, XB] = Array.isArray(U.span) ? U.span : [-HL, HL];
+  return { footprint: [corner(XA, -HD), corner(XB, -HD), corner(XB, zBack), corner(XA, zBack)], top: box.max.y, info: { upper: U.file, upperBase: +oy.toFixed(2), upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] }, origin: [ox, oz], inward: iw };
 }
 // A model file stood at a place given in scene coordinates (a listed grandstand's own model – stands.js `swaps`): the
 // model's origin at (x, y, z), its +Z turned to the scene direction dir ([dx, dz]). Held as the facilities' models are
@@ -2162,6 +2265,13 @@ function placeModel(root, m, gf, groundAt) {
 }
 
 // ---------- the facilities of one circuit ----------
+// The footprints ([lat, lon] corners) of this circuit's model entries that ask for level ground under them
+// (model.level with model.footprint): scenery.js lays a yard there before anything is built (footing.js padPlan, force).
+// level: "mid" – the yard at the middle height of the ground under it (a building on a real slope: cut and fill), marked
+// `mid` on the footprint given back; level: true – at the low ground (the elevation model shows the building as a hill).
+export function levelledFootprints({ venue = null, location = null, year = null, registry = FACILITIES } = {}) {
+  return registry.filter((s) => s.model?.level && s.model.footprint?.length >= 3 && entryAt(s, venue, location) && !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])))).map((s) => (s.model.level === "mid" ? Object.assign([...s.model.footprint], { mid: true }) : s.model.footprint));
+}
 // The map records a facility stands for: named ones (and, for a model file, within `within` m of its anchor);
 // plus unnamed parts whose centre lies inside the built footprint (no doubles left standing in it).
 // replaces: { names (regex), near: [lat, lon] and within (m) – only records that close to the point (the point inside
@@ -2266,11 +2376,31 @@ export const PIT_UPPERS = {
     src: "src/data/models/cat_pit_upper.glb – Circuit de Barcelona-Catalunya pit building, the storeys over the garages: a set-back glazed floor behind dark columns, the top terrace under its 2024 roof of six modules carrying solar panels, five stair towers on the paddock side, and – standing from the ground – the control tower (white with a red top) at the pit-entry end and a block at the other end – made for this app (2026-11-19) from the published facts (a large roof over the 6,000 m² terrace, 1,080 panels on the pit building's roof) and Wikimedia Commons photos and aerial imagery compared by eye, nothing copied; the garage row 293.4 m as the six roof modules in aerial imagery, every height and the control tower's size estimated; no outside asset, no logo or lettering" },
   49: { file: "sha_pit_upper.glb", garageTop: 5.6, front: 15, length: 337, depth: 30,
     src: "src/data/models/sha_pit_upper.glb – Shanghai International Circuit pit building, the storeys over the garages: one glazed floor (the Paddock Club) behind a balcony, a roof terrace with six planted squares – made for this app (2026-11-19, first pass) from the published wording (garages below, VIP suites above) and a 2018 satellite picture and Wikimedia Commons photos compared by eye; 337 m long between the two end towers, every height an estimate; no outside asset, no logo or lettering" },
-  // (Austin: made with its +Z to the pit lane – `turned`. The chat side had its garage doors 10 m behind the front of the
-  // map's outline; the cars' stops in the feed stand 15 m before that front, so the doors are on it, as built: `front`.
-  // The map's outline is 25.6 m deep, the model 15.5: the garage level runs on behind the model as the map has it.)
-  9: { file: "cota_pit_upper.glb", garageTop: 4.8, front: 7.75, length: 363, depth: 15.5, backTo: 18, turned: true,
-    src: "src/data/models/cota_pit_upper.glb – Circuit of the Americas pit building over the garages: a terrace with three rows of seats behind a glass rail, dark glazing set back, a third floor of balconies between white solid bays (stairs and lifts, every 52 m), a thick white roof slab with plant on it, a wider block at the north-west end and a glazed block with three flagpoles at the south-east end – its length (363 m) and joints after OpenStreetMap's outline and aerial imagery, Wikimedia Commons photos compared by eye, nothing copied; heights from shadows (roof 16–17 m), floor heights, balcony depths and the building's depth estimated; no outside asset, no logo or lettering" },
+  // (Austin: made with its +Z to the pit lane – `turned`. The cars' stops in the feed stand 15 m before the front of the
+  // map's outline, so the garage doors are on that front, as built; the second version of the model (2026-11-21) is as
+  // deep as the outline, 25.6 m, with its doors at z +12.8 – the first was 15.5 m deep and left 10 m of bare garage
+  // level behind it.)
+  9: { file: "cota_pit_upper_v2.glb", garageTop: 4.8, front: 12.8, length: 363, depth: 25.6, backTo: 18.2, turned: true,
+    src: "src/data/models/cota_pit_upper_v2.glb – Circuit of the Americas pit building over the garages: a terrace with three rows of seats behind a glass rail, dark glazing set back, a third floor of balconies between white solid bays (stairs and lifts, every 52 m), a thick white roof slab with plant on it, a wider block at the north-west end and a glazed block with three flagpoles at the south-east end – its length (363 m) and joints after OpenStreetMap's outline and aerial imagery, Wikimedia Commons photos compared by eye, nothing copied; heights from shadows (roof 16–17 m), floor heights, balcony depths and the building's depth estimated; no outside asset, no logo or lettering" },
+  // (Interlagos: made with its +Z to the pit lane – `turned`. This app builds the garages itself here (24 bays after the
+  // FIA's pit lane drawing, their fronts 11 m from the cars' path in the pit lane): the map's outline stands about 10 m
+  // nearer the track than that – its track-side edge 1 m from the path – and makes way. The model stands on the built
+  // garages: its door line (z +9) on their fronts, its 23 garages and the link to the Operations Centre over the 24 built
+  // bays (`along`: the middle of those is 6.35 m towards the pit entry from the model's origin). `span`: the Operations
+  // Centre reaches 44.5 m past the garages at the pit-entry end. `fill: false`: behind the garages the model is a roof
+  // over the paddock street and a strip with its own walls down to the falling ground; the Operations Centre has its own.
+  // `platform`: the ground falls up to 10 m behind the garages (the real paddock stands on a platform over an 8 m retaining
+  // wall): the terrain under the roofed street – as far back as the support strip's front, z −36 – is laid at the garages'
+  // floor, so the street is level and the strip's walls (down to −10 m; the natural ground at its back was 9.9 m down at
+  // the lowest) stand in ground that is never lower than it was.)
+  14: { file: "spo_pit_upper.glb", garageTop: 5.0, front: 9.0, length: 291, depth: 18, backTo: 43.3, along: -6.35, span: [-140, 184.5], fill: false, platform: 36, turned: true,
+    src: "src/data/models/spo_pit_upper.glb – Interlagos pit building over the garages with the Operations Centre at its pit-entry end: a terrace with a glass rail and a glass awning, one cream membrane cone over each of the 23 garages, a white mast leaning out over the pit lane at every bay line, a flatter membrane over the paddock street, the support strip behind; the Operations Centre in pale concrete and grey-blue glass (its mural is not shown) – made for this app (2026-11-22) from this app's research notes, OpenStreetMap's outlines (279 × 52 m), aerial imagery (one cone every 12.1 m) and Wikimedia Commons photos compared by eye, nothing copied; published: 23 boxes of 216 m², a six-storey operations centre; every height estimated; no outside asset, no logo or lettering" },
+  // (Mexico City: made with its +Z to the pit lane – `turned`. As at Austin the garage doors are on the front of the map's
+  // outline – the cars' stops in the feed stand 13–14 m before it –, and the model's body is as deep as the outline's:
+  // the model's pit-lane face (z +12.75) on the built garage front line. No maxDepth: the garage level follows the map's
+  // outline behind, under the model's five stair cores and its deeper end blocks.)
+  65: { file: "mex_pit_upper.glb", garageTop: 4.6, front: 12.75, length: 303.4, depth: 25.5, backTo: 29.25, turned: true,
+    src: "src/data/models/mex_pit_upper.glb – Autódromo Hermanos Rodríguez pit building (2015) over the garages: a terrace with three rows of seats behind a band, large glazing, a thick white third-floor slab standing forward, a red flat roof with seven white blocks on it, five stair cores on the paddock side, the control tower at the pit-entry end – made for this app (2026-11-21) from this app's research notes, OpenStreetMap's outline (303 × 25.5 m), aerial imagery and Wikimedia Commons photos of the pits compared by eye, nothing copied; every height estimated (about 15 m to the roof); no outside asset, no logo or lettering" },
   // (Marina Bay: made with its +Z to the pit lane – `turned`; south of the garages it also brings a pavilion on stilts and a
   // stair tower, standing from the ground)
   61: { file: "sgp_pit_upper.glb", garageTop: 5.1, front: 12.25, length: 330.7, depth: 24.5, backTo: 15.75, maxDepth: 24.5, turned: true,
@@ -2449,6 +2579,9 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         if (upperRoot) {
           const up = addUpper(g, r, upperRoot, spec.upper);
           made.footprint = up.footprint; made.top = up.top; made.info = { ...made.info, ...up.info }; how = "builder+model";
+          // (upper.platform: the ground behind the garages, under the model, is laid at the garages' floor as far back as
+          // that many metres behind the model's origin – scenery.js: a paddock on a platform over falling ground, Interlagos)
+          if (Number.isFinite(spec.upper.platform) && g.userData.garages) g.userData.garages.platformBack = spec.upper.front + spec.upper.platform;
           // (development: where the model's origin stands and the bearing its +Z – the paddock side – points to, for
           // placing a neighbour by the pit building as built)
           if (gf.toLL) { const a = gf.toLL(up.origin[0], up.origin[1]), b = gf.toLL(up.origin[0] + up.inward[0] * 50, up.origin[1] + up.inward[1] * 50); made.info.upperAt = a.map((v) => +v.toFixed(6)); made.info.upperFacing = +(((Math.atan2((b[1] - a[1]) * Math.cos((a[0] * Math.PI) / 180), b[0] - a[0]) * 180) / Math.PI + 360) % 360).toFixed(1); }

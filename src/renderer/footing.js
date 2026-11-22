@@ -77,9 +77,14 @@ export function padPlan(grid, heightAt, surfaceAt, footprints, keepOut, { flat =
     const hs = footprintSamples(P).map(([x, z]) => surfaceAt(x, z)).filter(Number.isFinite).sort((p, q) => p - q);
     if (!hs.length) continue;
     const range = hs[hs.length - 1] - hs[0];
-    if (range < flat) { skipped.flat++; why[fi] = "flat"; continue; }
-    if (range > steep) { skipped.steep++; why[fi] = "steep"; continue; }
-    const level = hs[Math.floor(hs.length / 2)];
+    // (P.force – a footprint that must stand on level ground whatever is under it: a large building the elevation model
+    // itself shows as a hill – Mexico City's Palacio de los Deportes, a 44 m dome, is a 28 m mound in it. Its yard is
+    // laid at the LOW ground under it (the tenth lowest in a hundred samples): the mound is the building, not the ground.)
+    const force = !!P.force;
+    if (!force && range < flat) { skipped.flat++; why[fi] = "flat"; continue; }
+    if (!force && range > steep) { skipped.steep++; why[fi] = "steep"; continue; }
+    // (P.force === "mid": forced, but at the middle height – a building that really stands on a slope, Interlagos' Hospitality Center)
+    const level = force && P.force !== "mid" ? hs[Math.floor(hs.length * 0.1)] : hs[Math.floor(hs.length / 2)];
     let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
     for (const [x, z] of P) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); }
     const i0 = Math.max(0, Math.floor((bx0 - reach - x0) / cw)), i1 = Math.min(nx, Math.ceil((bx1 + reach - x0) / cw));
@@ -101,7 +106,7 @@ export function padPlan(grid, heightAt, surfaceAt, footprints, keepOut, { flat =
     // are): the building meets the lane flush, as the pit and paddock buildings do – its middle-of-the-ground height
     // would leave a step or a slope against the tarmac. (Not when the tarmac is far off the ground under it.)
     let lv = level;
-    if (tarmac.length) { lv = tarmac.reduce((a, b) => a + b, 0) / tarmac.length; if (Math.abs(lv - level) > steep / 2) { skipped.kept++; why[fi] = "tarmac far off"; continue; } skipped.tarmac = (skipped.tarmac || 0) + 1; }
+    if (tarmac.length) { lv = tarmac.reduce((a, b) => a + b, 0) / tarmac.length; if (!force && Math.abs(lv - level) > steep / 2) { skipped.kept++; why[fi] = "tarmac far off"; continue; } skipped.tarmac = (skipped.tarmac || 0) + 1; }
     for (const [k, d] of mine) { const M = d === 0 ? inner : targets, t = M.get(k); if (t == null || d < t.d - 1e-6 || (Math.abs(d - t.d) <= 1e-6 && lv < t.lv)) M.set(k, { lv, d }); }
     why[fi] = { level: +lv.toFixed(2), mid: +level.toFixed(2), range: +range.toFixed(2), vertices: mine.length, tarmac: tarmac.length };
     pads++;

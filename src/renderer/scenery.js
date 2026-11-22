@@ -15,7 +15,7 @@ import { buildingsMesh } from "./buildings.js";
 import { vegGeometries, speciesMix, speciesAt, standHeight, treeTint, treeMaterial, nearTreeLayer } from "./vegetation.js";
 import { padPlan, polyDist } from "./footing.js";
 import { buildLandmarks } from "./landmarks.js";
-import { buildFacilities, combine, genericPitSpec, FACILITIES, modelAt } from "./facilities.js";
+import { buildFacilities, combine, genericPitSpec, FACILITIES, modelAt, placement, levelledFootprints, drapeModel } from "./facilities.js";
 import { START_DATA } from "./startdata.js";
 import { PIT_BOXES, STANDINGS, teamKey } from "./pitorder.js";
 import { layoutFor } from "./garageplans.js";
@@ -747,6 +747,8 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     };
     padKeepOut = keepOut;
     const padded = scene.buildings.filter((b) => b.kind !== "grandstand" && !(b.min > 3)), fps = padded.map((b) => b.pts.map(gf.xz));
+    // (model entries that ask for level ground under them – facilities.js levelledFootprints: after the buildings', forced)
+    if (opts.facilities !== false) for (const F of levelledFootprints({ venue: opts.venue, location: scene.location, year: opts.year })) { const P = F.map(([la, lo]) => gf.fromLL(la, lo)); P.force = F.mid ? "mid" : true; fps.push(P); }
     const plan = padPlan({ x0: ext.x0, z0: ext.z0, W, H, nx, nz }, (k) => pos[k * 3 + 1], terrainAt, fps, keepOut);
     for (const [k, t] of plan.targets) { dY[k] += t - pos[k * 3 + 1]; pos[k * 3 + 1] = t; }
     padWhy = new WeakMap(padded.map((b, i) => [b, plan.why[i] ?? null]));
@@ -934,6 +936,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // (model.frontAt m from its origin, towards the track) either on the built stand's front line or – frontFromEdge –
     // that many metres from the track's edge (a stand whose map outline is not its real front).
     // atMid: the origin on the front line's middle point (a curved model on a curved line), else on the chord's middle.
+    // at ([lat, lon]) + heading: a place of its own instead of the stand's front line.
     // (frontAt may be negative: the model's front wall in front of the outline it stands on – Suzuka's lower tier before V2)
     if (stands?.swaps?.length && api.geo.model && opts.models !== false) {
       // (model.on / model.covers: a listed stand mapped as several outlines – the model stands on the one `on` names, the
@@ -956,8 +959,14 @@ async function buildReal(api, scene, world, opts, onStep, own) {
             if (best) { const sgn = (sw.x - best.p.x) * best.nor.x + (sw.z - best.p.z) * best.nor.z > 0 ? 1 : -1, half = sgn > 0 ? (best.L ?? 7) : -(best.R ?? -7), d = half + M.frontFromEdge + (M.frontAt || 0);
               at = { x: best.p.x + best.nor.x * sgn * d, z: best.p.z + best.nor.z * sgn * d, y: sw.y + (M.lift || 0), dir: [-best.nor.x * sgn, -best.nor.z * sgn] }; back = M.frontFromEdge; }
           }
+          // (model.at + model.heading: the model's origin at a place of its own ([lat, lon]), its +Z to that bearing – a model
+          // that is more than the stand it stands for: Mexico City's stadium, one model for two listed stands round the track)
+          if (Array.isArray(M.at)) { const pl = placement({ anchor: M.at, heading: M.heading || 0, lift: M.lift || 0 }, gf, groundAt); at = { x: pl.position[0], y: pl.position[1], z: pl.position[2], dir: [Math.sin(pl.rotationY), Math.cos(pl.rotationY)] }; back = 0; }
           const obj = await modelAt(M.file, (f) => api.geo.model(f), at);
           if (opts.isCurrent && !opts.isCurrent()) { obj.userData.onDispose?.(); break; }   // (this build's world is gone)
+          // (model.drape: a long stand on ground that is not level follows it – facilities.js drapeModel: Interlagos' D, 173 m
+          // round the Senna S on ground 5 m higher at one end)
+          if (M.drape) drapeModel(obj, groundAt, at.y - (M.lift || 0));
           obj.name = "standModel:" + sw.name; stands.group.add(obj); sw.replace(); for (const o of follow) o.replace();
           (stands.info.models ||= []).push({ n: sw.name, file: M.file, back: +back.toFixed(1), at: [+at.x.toFixed(1), +at.y.toFixed(1), +at.z.toFixed(1)], ...(follow.length ? { with: follow.map((o) => o.name) } : {}) });
         } catch (e) { (stands.info.models ||= []).push({ n: sw.name, file: sw.model.file, error: String(e.message || e).slice(0, 160) }); }
@@ -979,9 +988,13 @@ async function buildReal(api, scene, world, opts, onStep, own) {
         const far = (G.wallFace?.(Math.max(G.gStart, Math.min(G.gEnd, p.u))) ?? 12) + 2;
         // (to a grid cell behind the garages' back wall: a vertex left high there tilts the triangles into the garage –
         // v0.39 Monaco, a mound inside every garage; not the track's own vertices: those the ground already holds under it)
-        if (p.off < -(G.depth + cell * 1.05) || p.off > far || trackDist(x, z) < (opts.trackW || 14) / 2 + 1) continue;
+        // (G.platformBack – a pit building's model over falling ground behind the garages, facilities.js upper.platform:
+        // from the garages' back as far as that many metres behind their fronts the ground is LAID at the floor, raised
+        // too – the paddock's platform; behind it the ground runs down to where it was. Interlagos: up to 10 m)
+        const back = G.platformBack || 0;
+        if (p.off < -Math.max(G.depth + cell * 1.05, back) || p.off > far || trackDist(x, z) < (opts.trackW || 14) / 2 + 1) continue;
         const f = G.floorAt(Math.max(G.gStart, Math.min(G.gEnd, p.u))) - 0.1;
-        if (pos[k * 3 + 1] > f) { pos[k * 3 + 1] = f; n++; }
+        if (pos[k * 3 + 1] > f || (back && p.off < -G.depth + 1 && pos[k * 3 + 1] < f)) { pos[k * 3 + 1] = f; n++; }
       }
       if (n) { tg.attributes.position.needsUpdate = true; tg.computeVertexNormals(); tg.computeBoundingSphere(); }
       G.terrainLowered = n;
