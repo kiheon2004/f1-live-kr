@@ -83,7 +83,8 @@ export function padPlan(grid, heightAt, surfaceAt, footprints, keepOut, { flat =
     const force = !!P.force;
     if (!force && range < flat) { skipped.flat++; why[fi] = "flat"; continue; }
     if (!force && range > steep) { skipped.steep++; why[fi] = "steep"; continue; }
-    const level = force ? hs[Math.floor(hs.length * 0.1)] : hs[Math.floor(hs.length / 2)];
+    // (P.force === "mid": forced, but at the middle height – a building that really stands on a slope, Interlagos' Hospitality Center)
+    const level = force && P.force !== "mid" ? hs[Math.floor(hs.length * 0.1)] : hs[Math.floor(hs.length / 2)];
     let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
     for (const [x, z] of P) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); }
     const i0 = Math.max(0, Math.floor((bx0 - reach - x0) / cw)), i1 = Math.min(nx, Math.ceil((bx1 + reach - x0) / cw));

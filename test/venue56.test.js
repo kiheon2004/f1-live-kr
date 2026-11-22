@@ -441,3 +441,39 @@ test("v0.68: Mexico City – the pit building, Grada 1 (two outlines, two models
   const plan = padPlan(grid, hAt, hill, [forced], () => false), centre = 10 * (nx + 1) + 10;
   assert.strictEqual(plan.pads, 1); assert.ok(plan.targets.get(centre) < 3, "the middle of the mound comes down to the low ground: " + plan.targets.get(centre));
 });
+
+test("v0.68: Interlagos – the pit building on the garages this app builds, three stands, D from 2026, the Hospitality Center on a terrace, the footbridge", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  const { padPlan } = await import("../src/renderer/footing.js");
+  const stands = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits["São Paulo"].stands;
+  const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));
+  assert.ok(["spo_pit_upper.glb", "spo_stand_b_c.glb", "spo_stand_ps_c.glb", "spo_stand_m_c.glb", "spo_stand_d_c.glb", "spo_hospitality.glb", "spo_footbridge.glb"].every((f) => files.includes(f)));
+  // the pit building: door line on the built garage fronts; its 24 bays (23 garages + the link) over the 24 built ones; the
+  // Operations Centre past the pit-entry end; no fill boxes; the paddock street's ground laid at the floor
+  const U = F.PIT_UPPERS[14];
+  assert.ok(U.turned === true && U.front === 9 && U.garageTop === 5 && U.fill === false && U.along === -6.35 && U.platform === 36 && U.backTo === 43.3);
+  assert.deepStrictEqual(U.span, [-140, 184.5]); assert.ok(U.span[1] - U.span[0] > U.length, "the model is longer than the garages: the Operations Centre");
+  assert.ok(Math.abs((-152.2 + 139.5) / 2 - U.along) < 0.01, "along: the middle of the model's 24 bays (own x −152.2 … +139.5; turned: this frame's x is the other way)");
+  // the stands: B at the place given (the app's own front line of its bent outline put it 1.3 m nearer the track), the
+  // other two from their outlines' fronts; the models have the roofs
+  const by = (n) => stands.find((s) => s.n === n), b = by("B").model, ps = by("Pit Stop Club").model, m = by("M").model, d = by("D").model;
+  assert.ok(b.file === "spo_stand_b_c.glb" && Array.isArray(b.at) && b.heading === 75.69 && !("frontAt" in b));
+  assert.ok(ps.file === "spo_stand_ps_c.glb" && ps.frontAt === 10.75 && m.file === "spo_stand_m_c.glb" && m.frontAt === 10.2);
+  assert.ok(by("B").roof === 0 && by("Pit Stop Club").roof === 0 && by("M").roof === 0);
+  // D: the permanent stand of 2026 – before that the builder's own stand; it follows the ground
+  assert.ok(d.file === "spo_stand_d_c.glb" && d.from === 2026 && d.heading === 180 && d.drape === true && Array.isArray(d.at) && by("D").roof === 1);
+  // the Hospitality Center (2025): its terrace at the middle height of the slope under it; the footbridge follows the ground
+  const hc = F.FACILITIES.find((f) => f.id === "interlagos-hospitality-center"), fb = F.FACILITIES.find((f) => f.id === "interlagos-footbridge");
+  assert.ok(hc.model.level === "mid" && hc.years[0] === 2025 && fb.model.drape === true && fb.model.footprint.length === 4);
+  const lv = F.levelledFootprints({ venue: { key: 14 }, location: "São Paulo", year: 2025 });
+  assert.ok(lv.length === 1 && lv[0].mid === true && lv[0].length === hc.model.footprint.length);
+  assert.strictEqual(F.levelledFootprints({ venue: { key: 14 }, location: "São Paulo", year: 2024 }).length, 0, "before it was built");
+  assert.ok(!F.levelledFootprints({ venue: { key: 65 }, location: "Mexico City", year: 2025 }).some((p) => p.mid), "level: true stays at the low ground");
+  // a forced yard on a real slope: "mid" lays it at the middle height, plain force at the low end
+  const nx = 20, nz = 20, grid = { x0: 0, z0: 0, W: 200, H: 200, nx, nz }, slope = (x) => x * 0.1;
+  const hAt = (k) => slope((k % (nx + 1)) * 10), sq = (cx, cz, r) => [[cx - r, cz - r], [cx + r, cz - r], [cx + r, cz + r], [cx - r, cz + r]], centre = 10 * (nx + 1) + 10;
+  const low = sq(100, 100, 70); low.force = true; const mid = sq(100, 100, 70); mid.force = "mid";
+  assert.strictEqual(padPlan(grid, hAt, slope, [sq(100, 100, 70)], () => false).pads, 0, "14 m of fall under a footprint: left alone unless forced");
+  const pl = padPlan(grid, hAt, slope, [low], () => false).targets.get(centre), pm = padPlan(grid, hAt, slope, [mid], () => false).targets.get(centre);
+  assert.ok(Math.abs(pm - 10) < 1.2 && pl < 5.5 && pl < pm, `mid ${pm} at the middle of 3 … 17, low ${pl} near the bottom`);
+});

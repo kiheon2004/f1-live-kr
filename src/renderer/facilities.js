@@ -282,6 +282,55 @@ export const FACILITIES = [
     },
   },
   {
+    id: "interlagos-hospitality-center", name: "Interlagos – the Hospitality Center (2025) in the infield, behind the paddock", kind: "tower",
+    venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2025, null],
+    status: "trial",
+    // 116 m from the track, on the slope that falls from the paddock to the lake: the elevation model has the ground
+    // under it falling 18 m along its 142 m (it is older than the building). `level: "mid"`: a terrace is cut and filled
+    // at the middle height of the ground under it before the model is stood there. The map's blocks inside its plan make way
+    // (`footprint`: the plan and the two small blocks the map has against its north-east end and its back).
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spo_hospitality.glb", anchor: [-23.70333, -46.698134], heading: 137.23, level: "mid",
+      footprint: [[-23.7035484, -46.6989101], [-23.7025818, -46.6977762], [-23.703013, -46.6973434], [-23.7039796, -46.6984772]] },
+    sources: [
+      "src/data/models/spo_hospitality.glb – made for this app (2026-11-22): three decks with thick white edges and glass rails round a dark glazed body with rounded corners (142.5 × 52 m), a white barrel-vault roof over the top deck (to 22 m), lit at night – its plan after OpenStreetMap's outline, aerial imagery and one Wikimedia Commons photo from the air compared by eye, nothing copied; published: three floors, 22 m, 22,000 m² (São Paulo city hall); deck heights estimated; the lettering on its roof is not shown; no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-23: trial (plan and place from the map; look from one photo; heights estimated; the ground under it levelled)",
+    evidence: {
+      confirmed: ["three floors, 22 m high, opened for the 2025 race (published)"],
+      photo: ["white deck edges round a dark glazed body under a white vault (Wikimedia Commons, compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the deck heights", "the column spacing", "the floor's level on the slope"],
+    },
+  },
+  {
+    id: "interlagos-footbridge", name: "Interlagos – the footbridge over the track and the pit exit at the south end of the main straight", kind: "tower",
+    venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2018, null],
+    status: "trial",
+    // The map has its footway from sector M's front line to the pit building's south end. This app builds the pit
+    // building about 10 m further from the track and 5 m further south than the map's outline (PIT_UPPERS 14): at the
+    // map's place the bridge's east pier stood on the pit apron before the last garage and its deck in the membrane roof.
+    // It stands beside the pit building as built (2025 race): its east pier 2.4 m south of the building's end and 9.3 m
+    // behind the garage fronts, as in the map – 10.2 m east and 6.7 m south of the map's place. `drape`: the stairs' feet
+    // on the ground at either end.
+    // `footprint`: its west pier only – the span lies over the track and the pit lane, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spo_footbridge.glb", anchor: [-23.7061, -46.6993804], heading: 165.23, drape: true,
+      footprint: [[-23.7060842, -46.6994001], [-23.7060801, -46.6993831], [-23.7061185, -46.6993721], [-23.7061227, -46.6993891]] },
+    sources: [
+      "src/data/models/spo_footbridge.glb – made for this app (2026-11-22): a white footbridge of one 48 m span, its deck 6.2 m over the ground, a pier and a stair at either end – its place after OpenStreetMap's footway and aerial imagery; seen from afar and from above only: its look and height are estimated, and whether a pier stands at the pit wall is not known (none is shown); no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the footway across the track (the place)",
+    ],
+    checked: "2026-11-23: trial (place from the map; look and height estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a white footbridge across the straight's south end (aerial imagery, compared only)"],
+      map: ["the place: OpenStreetMap's footway"],
+      inferred: ["its look", "its height (6.2 m under the deck)", "no pier at the pit wall"],
+    },
+  },
+  {
     id: "mexico-palacio-de-los-deportes", name: "Mexico City – Palacio de los Deportes (1968), the copper dome west of the stadium section", kind: "tower",
     venue: [65], loc: ["Mexico City"], years: [1968, null],
     status: "trial",
@@ -2100,7 +2149,10 @@ export function addUpper(g, r, root, U) {
   const corner = (x, z) => [ox + ax[0] * x + iw[0] * z, oz + ax[1] * x + iw[1] * z];
   const box = new THREE.Box3().setFromObject(holder);
   const zBack = Number.isFinite(U.backTo) ? U.backTo : HD;
-  return { footprint: [corner(-HL, -HD), corner(HL, -HD), corner(HL, zBack), corner(-HL, zBack)], top: box.max.y, info: { upper: U.file, upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] }, origin: [ox, oz], inward: iw };
+  // (upper.span: the model's own ends along this frame's +X, where it reaches further at one end than at the other –
+  // Interlagos: the Operations Centre stands at the pit-entry end of the garages; without it ± length / 2)
+  const [XA, XB] = Array.isArray(U.span) ? U.span : [-HL, HL];
+  return { footprint: [corner(XA, -HD), corner(XB, -HD), corner(XB, zBack), corner(XA, zBack)], top: box.max.y, info: { upper: U.file, upperBase: +oy.toFixed(2), upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] }, origin: [ox, oz], inward: iw };
 }
 // A model file stood at a place given in scene coordinates (a listed grandstand's own model – stands.js `swaps`): the
 // model's origin at (x, y, z), its +Z turned to the scene direction dir ([dx, dz]). Held as the facilities' models are
@@ -2215,8 +2267,10 @@ function placeModel(root, m, gf, groundAt) {
 // ---------- the facilities of one circuit ----------
 // The footprints ([lat, lon] corners) of this circuit's model entries that ask for level ground under them
 // (model.level with model.footprint): scenery.js lays a yard there before anything is built (footing.js padPlan, force).
+// level: "mid" – the yard at the middle height of the ground under it (a building on a real slope: cut and fill), marked
+// `mid` on the footprint given back; level: true – at the low ground (the elevation model shows the building as a hill).
 export function levelledFootprints({ venue = null, location = null, year = null, registry = FACILITIES } = {}) {
-  return registry.filter((s) => s.model?.level && s.model.footprint?.length >= 3 && entryAt(s, venue, location) && !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])))).map((s) => s.model.footprint);
+  return registry.filter((s) => s.model?.level && s.model.footprint?.length >= 3 && entryAt(s, venue, location) && !(year && s.years && (year < s.years[0] || (s.years[1] != null && year > s.years[1])))).map((s) => (s.model.level === "mid" ? Object.assign([...s.model.footprint], { mid: true }) : s.model.footprint));
 }
 // The map records a facility stands for: named ones (and, for a model file, within `within` m of its anchor);
 // plus unnamed parts whose centre lies inside the built footprint (no doubles left standing in it).
@@ -2328,6 +2382,19 @@ export const PIT_UPPERS = {
   // level behind it.)
   9: { file: "cota_pit_upper_v2.glb", garageTop: 4.8, front: 12.8, length: 363, depth: 25.6, backTo: 18.2, turned: true,
     src: "src/data/models/cota_pit_upper_v2.glb – Circuit of the Americas pit building over the garages: a terrace with three rows of seats behind a glass rail, dark glazing set back, a third floor of balconies between white solid bays (stairs and lifts, every 52 m), a thick white roof slab with plant on it, a wider block at the north-west end and a glazed block with three flagpoles at the south-east end – its length (363 m) and joints after OpenStreetMap's outline and aerial imagery, Wikimedia Commons photos compared by eye, nothing copied; heights from shadows (roof 16–17 m), floor heights, balcony depths and the building's depth estimated; no outside asset, no logo or lettering" },
+  // (Interlagos: made with its +Z to the pit lane – `turned`. This app builds the garages itself here (24 bays after the
+  // FIA's pit lane drawing, their fronts 11 m from the cars' path in the pit lane): the map's outline stands about 10 m
+  // nearer the track than that – its track-side edge 1 m from the path – and makes way. The model stands on the built
+  // garages: its door line (z +9) on their fronts, its 23 garages and the link to the Operations Centre over the 24 built
+  // bays (`along`: the middle of those is 6.35 m towards the pit entry from the model's origin). `span`: the Operations
+  // Centre reaches 44.5 m past the garages at the pit-entry end. `fill: false`: behind the garages the model is a roof
+  // over the paddock street and a strip with its own walls down to the falling ground; the Operations Centre has its own.
+  // `platform`: the ground falls up to 10 m behind the garages (the real paddock stands on a platform over an 8 m retaining
+  // wall): the terrain under the roofed street – as far back as the support strip's front, z −36 – is laid at the garages'
+  // floor, so the street is level and the strip's walls (down to −10 m; the natural ground at its back was 9.9 m down at
+  // the lowest) stand in ground that is never lower than it was.)
+  14: { file: "spo_pit_upper.glb", garageTop: 5.0, front: 9.0, length: 291, depth: 18, backTo: 43.3, along: -6.35, span: [-140, 184.5], fill: false, platform: 36, turned: true,
+    src: "src/data/models/spo_pit_upper.glb – Interlagos pit building over the garages with the Operations Centre at its pit-entry end: a terrace with a glass rail and a glass awning, one cream membrane cone over each of the 23 garages, a white mast leaning out over the pit lane at every bay line, a flatter membrane over the paddock street, the support strip behind; the Operations Centre in pale concrete and grey-blue glass (its mural is not shown) – made for this app (2026-11-22) from this app's research notes, OpenStreetMap's outlines (279 × 52 m), aerial imagery (one cone every 12.1 m) and Wikimedia Commons photos compared by eye, nothing copied; published: 23 boxes of 216 m², a six-storey operations centre; every height estimated; no outside asset, no logo or lettering" },
   // (Mexico City: made with its +Z to the pit lane – `turned`. As at Austin the garage doors are on the front of the map's
   // outline – the cars' stops in the feed stand 13–14 m before it –, and the model's body is as deep as the outline's:
   // the model's pit-lane face (z +12.75) on the built garage front line. No maxDepth: the garage level follows the map's
@@ -2512,6 +2579,9 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         if (upperRoot) {
           const up = addUpper(g, r, upperRoot, spec.upper);
           made.footprint = up.footprint; made.top = up.top; made.info = { ...made.info, ...up.info }; how = "builder+model";
+          // (upper.platform: the ground behind the garages, under the model, is laid at the garages' floor as far back as
+          // that many metres behind the model's origin – scenery.js: a paddock on a platform over falling ground, Interlagos)
+          if (Number.isFinite(spec.upper.platform) && g.userData.garages) g.userData.garages.platformBack = spec.upper.front + spec.upper.platform;
           // (development: where the model's origin stands and the bearing its +Z – the paddock side – points to, for
           // placing a neighbour by the pit building as built)
           if (gf.toLL) { const a = gf.toLL(up.origin[0], up.origin[1]), b = gf.toLL(up.origin[0] + up.inward[0] * 50, up.origin[1] + up.inward[1] * 50); made.info.upperAt = a.map((v) => +v.toFixed(6)); made.info.upperFacing = +(((Math.atan2((b[1] - a[1]) * Math.cos((a[0] * Math.PI) / 180), b[0] - a[0]) * 180) / Math.PI + 360) % 360).toFixed(1); }
