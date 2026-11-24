@@ -15,7 +15,7 @@ import { buildingsMesh } from "./buildings.js";
 import { vegGeometries, speciesMix, speciesAt, standHeight, treeTint, treeMaterial, nearTreeLayer } from "./vegetation.js";
 import { padPlan, polyDist } from "./footing.js";
 import { buildLandmarks } from "./landmarks.js";
-import { buildFacilities, combine, genericPitSpec, FACILITIES, modelAt, placement, levelledFootprints, drapeModel } from "./facilities.js";
+import { buildFacilities, combine, genericPitSpec, FACILITIES, modelAt, placement, levelledFootprints, drapeModel, tiltModel } from "./facilities.js";
 import { START_DATA } from "./startdata.js";
 import { PIT_BOXES, STANDINGS, teamKey } from "./pitorder.js";
 import { layoutFor } from "./garageplans.js";
@@ -936,7 +936,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     // (model.frontAt m from its origin, towards the track) either on the built stand's front line or – frontFromEdge –
     // that many metres from the track's edge (a stand whose map outline is not its real front).
     // atMid: the origin on the front line's middle point (a curved model on a curved line), else on the chord's middle.
-    // at ([lat, lon]) + heading: a place of its own instead of the stand's front line.
+    // at ([lat, lon]) + heading: a place of its own instead of the stand's front line. also: more pieces, each at its own.
     // (frontAt may be negative: the model's front wall in front of the outline it stands on – Suzuka's lower tier before V2)
     if (stands?.swaps?.length && api.geo.model && opts.models !== false) {
       // (model.on / model.covers: a listed stand mapped as several outlines – the model stands on the one `on` names, the
@@ -967,8 +967,22 @@ async function buildReal(api, scene, world, opts, onStep, own) {
           // (model.drape: a long stand on ground that is not level follows it – facilities.js drapeModel: Interlagos' D, 173 m
           // round the Senna S on ground 5 m higher at one end)
           if (M.drape) drapeModel(obj, groundAt, at.y - (M.lift || 0));
+          // (model.tilt: a long level stand beside a track that climbs leans along its length with the ground on the line
+          // `tilt` m before its origin – facilities.js tiltModel: Red Bull Ring's Start-Ziel)
+          if (Number.isFinite(M.tilt)) { tiltModel(obj, groundAt, M.tilt, M.lift || 0); at.y = obj.position.y; }
           obj.name = "standModel:" + sw.name; stands.group.add(obj); sw.replace(); for (const o of follow) o.replace();
           (stands.info.models ||= []).push({ n: sw.name, file: M.file, back: +back.toFixed(1), at: [+at.x.toFixed(1), +at.y.toFixed(1), +at.z.toFixed(1)], ...(follow.length ? { with: follow.map((o) => o.name) } : {}) });
+          // (model.also: the stand's other pieces, each a file at a place of its own – { file, at, heading, drape, tilt, lift }:
+          // Red Bull Ring's Start-Ziel is the building under the wing and a roofed wing either side of it)
+          for (const A of M.also || []) {
+            const pl = placement({ anchor: A.at, heading: A.heading || 0, lift: A.lift || 0 }, gf, groundAt), pa = { x: pl.position[0], y: pl.position[1], z: pl.position[2], dir: [Math.sin(pl.rotationY), Math.cos(pl.rotationY)] };
+            const piece = await modelAt(A.file, (f) => api.geo.model(f), pa);
+            if (opts.isCurrent && !opts.isCurrent()) { piece.userData.onDispose?.(); break; }
+            if (A.drape) drapeModel(piece, groundAt, pa.y - (A.lift || 0));
+            if (Number.isFinite(A.tilt)) { tiltModel(piece, groundAt, A.tilt, A.lift || 0); pa.y = piece.position.y; }
+            piece.name = "standModel:" + sw.name + ":" + A.file; stands.group.add(piece);
+            stands.info.models.push({ n: sw.name, file: A.file, back: 0, at: [+pa.x.toFixed(1), +pa.y.toFixed(1), +pa.z.toFixed(1)] });
+          }
         } catch (e) { (stands.info.models ||= []).push({ n: sw.name, file: sw.model.file, error: String(e.message || e).slice(0, 160) }); }
       }
     }
