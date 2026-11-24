@@ -75,7 +75,7 @@ export const STATUS_2026 = [
   { key: 23, state: "missing", note: "Montreal: Espace Paddock (FABG, 2019) – 3 storeys, garages, two loge levels open-sided under a wood / white membrane roof, glass curtain wall; length and height estimated (PIT_HEIGHTS)" },
   { key: 22, state: "unconfirmed", note: "Monaco: temporary pits and grandstands each year; garages between the straight and the pit lane, three floors since ~2021, pit stand upstairs (Red Bull 2021, The B1M 2021); paddock separate on Quai Antoine 1er. A 5 June 2026 photo (Pirelli via Formula1-Data, all rights reserved) compared only; sizes estimated (PIT_LAYOUTS)" },
   { key: 15, state: "missing", note: "Barcelona-Catalunya: Paddock Club in the pit building, new roof over the top terrace (2023–24); garage count only unofficial, no height – the map's building" },
-  { key: 19, state: "partial", facility: ["red-bull-ring-pits"], note: "Red Bull Ring: nextroom (2011) + 30 boxes (2025); the 2025/26 extension east isn't in the map data" },
+  { key: 19, state: "partial", facility: ["red-bull-ring-pits"], note: "Red Bull Ring: nextroom (2011) + 30 boxes (2025); from 2026 a model with the extension east" },
   { key: 2, state: "verified", facility: ["silverstone-wing"], note: "Silverstone Wing: published dimensions + photos; the 2026 paddock from 3 July 2026 photos (CC BY-SA 4.0), team places neutral" },
   { key: 7, state: "missing", note: "Spa: the 2007 two-storey pit building, 36 garages (Acte1 + Greisch); length not found – height estimated (PIT_HEIGHTS)" },
   { key: 4, state: "partial", facility: ["hungaroring-paddock-2025"], note: "Hungaroring: new five-storey paddock building, >340 m, handed over June 2025 (DVM Group); height and facade estimated" },

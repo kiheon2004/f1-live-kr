@@ -103,22 +103,61 @@ export const FACILITIES = [
       // lounges on the 1st floor with inclined glazing and loggias, aluminium-glass facade – nextroom (Domenig &
       // Wallner, 2011); 30 boxes – auto motor und sport (2025); the glazing leaning out over the pit lane under a
       // white roof – photo 2021. estimated (photo): ~12 m to the roof, the glazing's lean, the roof's overhang.
-      // (the 2025/26 extension east and the 2027 roof terrace aren't in the map data: not modelled)
+      // (up to 2025; from 2026 a model stands on the garages – `upper` below)
       garages: 30, height: 12, slopedGlass: { y0: 5.8, y1: 10.4, lean: 2.6 },
       plate: 0.9, overhang: { pit: 5, paddock: 1.5, end: 2 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#e9ecee", fascia: "fasciaWhite",
     },
+    // From 2026 the storeys over the garages are a model – the building as it stands since it was lengthened east for
+    // 2026 (four more boxes, a medical centre), made with its +Z to the pit lane (`turned`); before 2026 the builder's own
+    // building above stays (`from`). The map's outline ends, on the pit lane, at the noses of the white fins between the
+    // garages (the roof deck's edge in aerial imagery) – the real doors stand 2 m behind them – and the builder puts its
+    // garage fronts on that edge: the model's fin noses (z +12.8) stand on the built front line (`front`), which puts it
+    // on its real place (2026 race: 0.3 m off); with its door line there instead it stood 2.25 m nearer the track. The
+    // old building, the wedge and the first 26 m of the 2026 section stand over the built garages; the last 32.5 m at the
+    // pit-entry end – the map does not have them yet – get plain walls under them (`along`: the model's middle is 15.85 m
+    // towards the pit entry from the map outline's). `maxDepth`: the garage level is cut to the model's depth (the
+    // builder's own building is 27 m deep after the outline, the model 23.6 m from the fins' noses to its paddock face).
+    // `also`: what stands on the roof deck – four white marquees in 2026 (sold that autumn), from 2027 the roofed, glazed
+    // roof storey announced for the July 2027 race (its look is a guess: no picture of it is published).
+    upper: { file: "rbr_pit_upper.glb", garageTop: 4.2, front: 12.8, length: 338, depth: 21.6, maxDepth: 23.6, along: -15.85, turned: true, from: 2026,
+      also: [{ file: "rbr_pit_tents2026.glb", to: 2026 }, { file: "rbr_pit_roof2027.glb", from: 2027 }] },
     sources: [
+      "src/data/models/rbr_pit_upper.glb – made for this app (2026-11-24): the building over the garages as it stands since 2026 – the first floor behind glass leaning out over the pit lane, white fins up to the roof deck, the podium platform, the grey wedge of race control at the pit-entry end of the old building, the 2026 section (a set-back glass floor under a thick roof slab) and the medical centre – its plan after OpenStreetMap's outline and aerial imagery, press and Wikimedia Commons photos compared by eye, nothing copied; published: boxes 17 × 7 × 4.2 m, four more boxes and a medical centre for 2026; the 2026 section's length (59 m) and every height estimated; no outside asset, no logo or lettering",
+      "src/data/models/rbr_pit_tents2026.glb – made for this app (2026-11-24): the four white marquees on the roof deck up to 2026 (aerial imagery, photos compared by eye); no outside asset",
+      "src/data/models/rbr_pit_roof2027.glb – made for this app (2026-11-24): the roofed, fully glazed roof storey reported for the 2027 race (Kleine Zeitung via laola1.at 2026-09-30, leadersnet.at 2026-10-01, meinbezirk.at 2026-10-09: about 250 m, ready for 9–11 July 2027) – 231 m of glass under a flat white roof; its look is a guess, no picture is published; no outside asset",
       "https://www.nextroom.at/building.php?id=36412&inc=datenblatt – Domenig & Wallner 2011: Werkstättengebäude, EG boxes with lift gates to the pit lane, 1. OG VIP lounges with inclined glazing and loggias; aluminium-glass facade",
       "https://www.auto-motor-und-sport.de/formel-1/umbau-red-bull-ring-spielberg-boxengebaeude/ – 30 boxes (2025), extension east",
       "Photo: '2021 4 Hours of Red Bull Ring – Paddock' (United Autosports, Wikimedia Commons, CC BY-SA 2.0)",
     ],
-    checked: "2026-10-09: trial (height and the glazing's lean estimated from a photo)",
+    checked: "2026-11-24: trial (up to 2025 the builder's building – height and the glazing's lean estimated from a photo; from 2026 a model – heights and the 2026 section's length estimated, the 2027 roof storey a guess)",
     evidence: {
-      confirmed: ["workshop boxes with lift gates, VIP lounges with inclined glazing (nextroom, 2011)", "30 boxes (auto motor und sport, 2025)"],
-      photo: ["~12 m to the roof, the glazing's lean, the roof's overhang (2021 photo, CC BY-SA 2.0)"],
+      confirmed: ["workshop boxes with lift gates, VIP lounges with inclined glazing (nextroom, 2011)", "30 boxes (auto motor und sport, 2025)", "four more boxes and a medical centre for 2026 (redbullring.com)", "a roofed, glazed roof storey for the 2027 race (press, autumn 2026)"],
+      photo: ["~12 m to the roof, the glazing's lean, the roof's overhang (2021 photo, CC BY-SA 2.0)", "the 2026 section's pit-lane side (press photos of April 2026, compared only)"],
       map: ["the footprint: the map's two 'Box' records"],
-      inferred: [],
+      inferred: ["the 2026 section's length (59 m)", "every height of the model", "the 2027 roof storey's look"],
+    },
+  },
+  {
+    id: "red-bull-ring-start-gantry", name: "Red Bull Ring – the start gantry over the main straight", kind: "tower",
+    venue: [19], loc: ["Spielberg"], years: [2011, null],
+    status: "trial",
+    // At its place in aerial imagery (2026 race): its leg on the pit side 1.8 m behind the track's edge – on the pit
+    // wall's line –, the other 6.3 m beyond the far edge and 6.7 m before the Start-Ziel grandstand's wall; the track as
+    // this app draws it (13.9 m) passes between them. Below the beam (6.6 m) only the lights' panel hangs lower, at 5.6 m.
+    // `footprint`: its leg on the pit wall only – the beam lies over the track, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "rbr_gantry.glb", anchor: [47.220051, 14.76484], heading: 254.85,
+      footprint: [[47.2200564, 14.7648488], [47.2200494, 14.7648516], [47.2200456, 14.7648312], [47.2200526, 14.7648284]] },
+    sources: [
+      "src/data/models/rbr_gantry.glb – made for this app (2026-11-24): a plain white portal over the track west of the grid, 22.9 m between its legs, its underside 6.6 m up – its place after aerial imagery, its heights estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-24: trial (place from aerial imagery; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a white gantry over the main straight (aerial imagery and race photos, compared only)"],
+      map: [],
+      inferred: ["its heights (6.6 m under the beam)", "since when it stands"],
     },
   },
   {
@@ -281,6 +320,26 @@ export const FACILITIES = [
       inferred: ["the trusses' height", "the number of panels"],
     },
   },
+  // Interlagos: seven white lattice towers on the infield lawn east of the Hospitality Center – one entry each, the same
+  // model file. Their places are read off leaning aerial imagery (± 6 m), 165 m and more from the track; each stands on
+  // the ground under it. Whether they stand on a race weekend is not confirmed (the lawn is the festival ground).
+  ...[[-23.703293, -46.697117], [-23.703788, -46.697531], [-23.703914, -46.697266], [-23.704298, -46.697961], [-23.704424, -46.697696], [-23.704535, -46.697432], [-23.704651, -46.697167]].map((at, i) => ({
+    id: "interlagos-lawn-tower-" + (i + 1), name: "Interlagos – a white lattice tower on the infield lawn (" + (i + 1) + " of 7)", kind: "tower",
+    venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2025, null],
+    status: "trial",
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spo_tower.glb", anchor: at, heading: 0 },
+    sources: [
+      "src/data/models/spo_tower.glb – made for this app (2026-11-22): a white lattice tower shaped like an hourglass, 15 m – seen in aerial imagery of April 2025 only: its place is good to about 6 m, its height and lattice are estimated; no outside asset",
+    ],
+    checked: "2026-11-23: trial (place from aerial imagery, ± 6 m; height estimated; not confirmed for race weekends)",
+    evidence: {
+      confirmed: [],
+      photo: ["seven white hourglass towers on the lawn (aerial imagery of April 2025, compared only)"],
+      map: [],
+      inferred: ["the height (15 m)", "the lattice", "that they stand during a race weekend"],
+    },
+  })),
   {
     id: "interlagos-hospitality-center", name: "Interlagos – the Hospitality Center (2025) in the infield, behind the paddock", kind: "tower",
     venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2025, null],
@@ -2109,7 +2168,9 @@ function holdModel(file, read) {
 // (upper.garageTop) on the garages' top – tilted along the building as the garages' floors rise or fall (a straight
 // fit: the builder's floor follows the ground, a model is rigid). What the model covers beyond the built garage level –
 // its ends, its back – gets plain ground-floor walls.
-export function addUpper(g, r, root, U) {
+// Whether a file of upper.also stands in a season ({ from, to }, either may be missing; no season: the newest state).
+export const upperAlsoIn = (a, year) => { const y = year || Infinity; return !((a.from && y < a.from) || (a.to && y > a.to)); };
+export function addUpper(g, r, root, U, also = []) {
   const G = r.garages, S = G?.slots || [];
   if (S.length < 2) throw new Error("upper model: no garages to stand on");
   const iw = S[0].inward, yaw = Math.atan2(iw[0], iw[1]), ax = [iw[1], -iw[0]];
@@ -2129,6 +2190,9 @@ export function addUpper(g, r, root, U) {
   // in this frame as for any other)
   const own = root.clone(true); if (U.turned) own.rotation.y = Math.PI;
   holder.position.set(ox, oy, oz); holder.rotation.y = yaw; tilt.rotation.z = Math.atan(m); holder.add(tilt); tilt.add(own);
+  // (also: more model files in the same frame – the same origin, the same turn: what stands on a roof deck changes with
+  // the seasons, the building under it does not – upper.also, Red Bull Ring's marquees and its roof storey)
+  for (const a of also) { const c = a.clone(true); if (U.turned) c.rotation.y = Math.PI; tilt.add(c); }
   // the ground floor the model stands over where the builder built none (model axes)
   const HL = U.length / 2, HD = U.depth / 2, xs = [s0 - sc - A, s1 - sc - A];
   for (const sl of S) { const x = sOf(sl.front) - sc - A; xs[0] = Math.min(xs[0], x - sl.width / 2); xs[1] = Math.max(xs[1], x + sl.width / 2); }
@@ -2222,6 +2286,27 @@ export function placement(m, gf, groundAt, bbox = null) {
   }
   if (!Number.isFinite(y)) throw new Error("no ground at the model");
   return { position: [x, y + (m.lift || 0), z], rotationY: Math.atan2(d[0], d[1]), scale: s };
+}
+// model.tilt: a long, level model beside a track that climbs is stood on the straight line fitted through the ground
+// along its length – read on the line `z` m towards its +Z from its origin, its front wall –: its origin at that line's
+// height, the whole model leaning along its length as the ground does. Nothing bends: a roof draped over every bump
+// would wave, and the elevation data has a big stand's own bulk as a bump under it. (Red Bull Ring's Start-Ziel: the
+// straight climbs 3.9 m along the west wing; placed level, one end stood 2.9 m in the air and the other 1 m under ground.)
+export function tiltModel(holder, groundAt, z = 0, lift = 0) {
+  const ry = holder.rotation.y, c = Math.cos(ry), s = Math.sin(ry);
+  holder.rotation.y = 0; holder.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(holder), x0 = b.min.x - holder.position.x, x1 = b.max.x - holder.position.x;
+  holder.rotation.y = ry; holder.updateMatrixWorld(true);
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let k = 0; k <= 12; k++) {
+    const x = x0 + ((x1 - x0) * k) / 12, y = groundAt(holder.position.x + x * c + z * s, holder.position.z - x * s + z * c);
+    if (Number.isFinite(y)) { n++; sx += x; sy += y; sxx += x * x; sxy += x * y; }
+  }
+  if (n < 2) return null;
+  const m = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1), a = (sy - m * sx) / n;
+  holder.position.y = a + lift; for (const ch of holder.children) ch.rotation.z = Math.atan(m);
+  holder.updateMatrixWorld(true);
+  return { slope: m, y: a };
 }
 // model.drape: a long model on ground that is not level – every vertex is moved up or down by the terrain's height
 // under it less the height under the anchor (y0), so its foot is on the ground all along: verticals stay vertical, the
@@ -2540,10 +2625,18 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     let made = null, how = null, reason = null;
     // (the upper storeys' own model over the builder's garages – `upper`: read first; without it the builder builds the
     // whole building as before)
-    let upperRoot = null, upperHold = null;
-    if (spec.upper?.file && spec.builder && readModel) {
+    // (upper.from: the model from that season on – before it the builder's own building; upper.also: [{ file, from, to }] –
+    // more files in the model's frame, each in its seasons only (without a season: the newest state); one that does not
+    // load is left out)
+    let upperRoot = null, upperHold = null; const also = [];
+    if (spec.upper?.file && spec.builder && readModel && !(year && spec.upper.from && year < spec.upper.from)) {
       const hold = holdModel(spec.upper.file, readModel); own.holds.add(hold);
       try { upperRoot = await hold.job; if (!isCurrent()) return null; upperHold = hold; } catch (e) { reason = e.message; own.holds.delete(hold); hold.release(); }
+      if (upperRoot) for (const a of spec.upper.also || []) {
+        if (!upperAlsoIn(a, year)) continue;
+        const h = holdModel(a.file, readModel); own.holds.add(h);
+        try { const root = await h.job; if (!isCurrent()) return null; also.push({ file: a.file, root, hold: h }); } catch (e) { own.holds.delete(h); h.release(); }
+      }
     }
     // a model file first, the builder as its fallback
     if (spec.model?.file && readModel) {
@@ -2568,7 +2661,8 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         // (the FIA drawing's garages for this event, placed along the pit lane – garageplans.js: the pit building's bays)
         if (spec.kind === "pit-building" && bays?.list?.length) params = { ...params, bays };
         // (under an upper model the builder stops at the garages' top: no storeys, balconies or eaves of its own)
-        if (upperRoot) params = { ...params, height: (GARAGE_TOP[params.facade?.pit] || 4.8) + 0.25, plate: 0.25, overhang: { pit: 0.05, paddock: 0.05, end: 0.05 }, balconies: [], roofRail: 0, tents: null };
+        // (upper.maxDepth on an entry: the garage level no deeper than that from its pit-lane side – only under the model)
+        if (upperRoot) params = { ...params, height: (GARAGE_TOP[params.facade?.pit] || 4.8) + 0.25, plate: 0.25, overhang: { pit: 0.05, paddock: 0.05, end: 0.05 }, balconies: [], roofRail: 0, tents: null, ...(spec.upper.maxDepth ? { maxDepth: spec.upper.maxDepth } : {}) };
         // (an entry with its own side of the lane – a venue's layout, genericPitSpec – builds its garages facing that way: the
         // nearest track is not always the lane's side – Monaco, the straight behind the garages had them face away from the
         // lane, every car 22 m in front of them and never "in box", v0.35)
@@ -2577,18 +2671,19 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
         made = { object: g, footprint: r.footprint, occupancy: r.occupancy, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
         if (upperRoot) {
-          const up = addUpper(g, r, upperRoot, spec.upper);
-          made.footprint = up.footprint; made.top = up.top; made.info = { ...made.info, ...up.info }; how = "builder+model";
+          const up = addUpper(g, r, upperRoot, spec.upper, also.map((a) => a.root));
+          made.footprint = up.footprint; made.top = up.top; made.info = { ...made.info, ...up.info, ...(also.length ? { upperAlso: also.map((a) => a.file) } : {}) }; how = "builder+model";
           // (upper.platform: the ground behind the garages, under the model, is laid at the garages' floor as far back as
           // that many metres behind the model's origin – scenery.js: a paddock on a platform over falling ground, Interlagos)
           if (Number.isFinite(spec.upper.platform) && g.userData.garages) g.userData.garages.platformBack = spec.upper.front + spec.upper.platform;
           // (development: where the model's origin stands and the bearing its +Z – the paddock side – points to, for
           // placing a neighbour by the pit building as built)
           if (gf.toLL) { const a = gf.toLL(up.origin[0], up.origin[1]), b = gf.toLL(up.origin[0] + up.inward[0] * 50, up.origin[1] + up.inward[1] * 50); made.info.upperAt = a.map((v) => +v.toFixed(6)); made.info.upperFacing = +(((Math.atan2((b[1] - a[1]) * Math.cos((a[0] * Math.PI) / 180), b[0] - a[0]) * 180) / Math.PI + 360) % 360).toFixed(1); }
-          own.holds.delete(upperHold); const hold = upperHold; upperHold = null; g.userData.onDispose = () => hold.release();
+          const held = [upperHold, ...also.map((a) => a.hold)]; for (const h of held) own.holds.delete(h); upperHold = null; also.length = 0; g.userData.onDispose = () => { for (const h of held) h.release(); };
         }
       } catch (e) { reason = (reason ? reason + "; " : "") + e.message; }
       if (upperHold) { own.holds.delete(upperHold); upperHold.release(); upperHold = null; }   // (not used after all)
+      for (const a of also) { own.holds.delete(a.hold); a.hold.release(); } also.length = 0;
     }
     if (!made) { info.push({ id: spec.id, how: "fallback", reason, ...(spec.found ? { found: spec.found } : {}) }); continue; }   // the map's buildings stay
     made.object.name = spec.id; made.object.userData.facility = spec.id;
