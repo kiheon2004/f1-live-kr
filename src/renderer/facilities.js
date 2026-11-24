@@ -281,6 +281,26 @@ export const FACILITIES = [
       inferred: ["the trusses' height", "the number of panels"],
     },
   },
+  // Interlagos: seven white lattice towers on the infield lawn east of the Hospitality Center – one entry each, the same
+  // model file. Their places are read off leaning aerial imagery (± 6 m), 165 m and more from the track; each stands on
+  // the ground under it. Whether they stand on a race weekend is not confirmed (the lawn is the festival ground).
+  ...[[-23.703293, -46.697117], [-23.703788, -46.697531], [-23.703914, -46.697266], [-23.704298, -46.697961], [-23.704424, -46.697696], [-23.704535, -46.697432], [-23.704651, -46.697167]].map((at, i) => ({
+    id: "interlagos-lawn-tower-" + (i + 1), name: "Interlagos – a white lattice tower on the infield lawn (" + (i + 1) + " of 7)", kind: "tower",
+    venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2025, null],
+    status: "trial",
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spo_tower.glb", anchor: at, heading: 0 },
+    sources: [
+      "src/data/models/spo_tower.glb – made for this app (2026-11-22): a white lattice tower shaped like an hourglass, 15 m – seen in aerial imagery of April 2025 only: its place is good to about 6 m, its height and lattice are estimated; no outside asset",
+    ],
+    checked: "2026-11-23: trial (place from aerial imagery, ± 6 m; height estimated; not confirmed for race weekends)",
+    evidence: {
+      confirmed: [],
+      photo: ["seven white hourglass towers on the lawn (aerial imagery of April 2025, compared only)"],
+      map: [],
+      inferred: ["the height (15 m)", "the lattice", "that they stand during a race weekend"],
+    },
+  })),
   {
     id: "interlagos-hospitality-center", name: "Interlagos – the Hospitality Center (2025) in the infield, behind the paddock", kind: "tower",
     venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2025, null],

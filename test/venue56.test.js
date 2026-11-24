@@ -469,6 +469,10 @@ test("v0.68: Interlagos – the pit building on the garages this app builds, thr
   assert.ok(lv.length === 1 && lv[0].mid === true && lv[0].length === hc.model.footprint.length);
   assert.strictEqual(F.levelledFootprints({ venue: { key: 14 }, location: "São Paulo", year: 2024 }).length, 0, "before it was built");
   assert.ok(!F.levelledFootprints({ venue: { key: 65 }, location: "Mexico City", year: 2025 }).some((p) => p.mid), "level: true stays at the low ground");
+  // the lawn towers: seven entries of one model file, each at its own place, nothing makes way
+  const tw = F.FACILITIES.filter((f) => /^interlagos-lawn-tower-\d$/.test(f.id));
+  assert.ok(tw.length === 7 && files.includes("spo_tower.glb") && tw.every((f) => f.model.file === "spo_tower.glb" && f.venue[0] === 14 && !f.model.level && !f.replaces.names.test("B")));
+  assert.strictEqual(new Set(tw.map((f) => f.model.anchor.join())).size, 7); assert.strictEqual(new Set(F.FACILITIES.map((f) => f.id)).size, F.FACILITIES.length, "no two entries share an id");
   // a forced yard on a real slope: "mid" lays it at the middle height, plain force at the low end
   const nx = 20, nz = 20, grid = { x0: 0, z0: 0, W: 200, H: 200, nx, nz }, slope = (x) => x * 0.1;
   const hAt = (k) => slope((k % (nx + 1)) * 10), sq = (cx, cz, r) => [[cx - r, cz - r], [cx + r, cz - r], [cx + r, cz + r], [cx - r, cz + r]], centre = 10 * (nx + 1) + 10;
