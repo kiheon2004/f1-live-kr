@@ -66,6 +66,7 @@
     $("modeReplay").setAttribute("aria-selected", String(m === "replay"));
     $("modeLive").setAttribute("aria-selected", String(m === "live"));
     $("replayBar").hidden = m !== "replay"; $("liveBar").hidden = m !== "live"; $("player").hidden = m !== "replay";
+    $("sessBtn").classList.toggle("live", m === "live"); sessMenu?.close();
     pause();
     src = m === "live" ? (liveStatus.state === "live" || live.state.DriverList || live.queue.length ? live : null) : replay;
     rcCount = -1; seenMsgs = src?.rc ? src.rc.added : 0; prevPos = {}; outline = []; outlineFor = null;
@@ -78,7 +79,7 @@
 
   // ---------- replay picker ----------
   const thisYear = new Date().getFullYear();
-  for (let y = thisYear; y >= 2023; y--) $("year").add(new Option(`${y}년`, y));
+  for (let y = thisYear; y >= 2023; y--) $("year").add(new Option(String(y), y));
   $("year").value = store.get("year", thisYear);
   // StartDate is local track time; GmtOffset turns it into UTC.
   const toOffset = (off) => { const m = /^(-?)(\d\d):(\d\d)/.exec(off || "00:00"); return `${m[1] ? "-" : "+"}${m[2]}:${m[3]}`; };
@@ -90,16 +91,34 @@
   async function loadSessionList({ quiet = false } = {}) {
     const req = ++listReq;
     store.set("year", +$("year").value);
-    $("session").innerHTML = ""; if (!quiet) { $("loadBar").hidden = true; $("progress").textContent = "목록 불러오는 중…"; }
+    $("session").innerHTML = ""; if (!quiet) { $("loadBar").hidden = true; $("progress").textContent = "목록 불러오는 중…"; sessions = []; paintSessList(); }
     try {
       const list = (await window.api.listSessions(+$("year").value)).reverse();
       if (req !== listReq) return false;
       sessions = list;
       for (const s of sessions) $("session").add(new Option(sessionLabel(s), s.path));
       if (!quiet) $("progress").textContent = "";
+      paintSessList();
       return true;
-    } catch (e) { if (req === listReq && !quiet) $("progress").textContent = `목록을 불러오지 못했어요 (${e.message})`; return false; }
+    } catch (e) { if (req === listReq && !quiet) $("progress").textContent = `목록을 불러오지 못했어요 (${e.message})`; if (req === listReq) paintSessList(`목록을 불러오지 못했어요 (${e.message})`); return false; }
   }
+  // The session button's list (v0.71): the season's Grands Prix, latest first, each with its sessions as small buttons –
+  // a press loads that session at once (the same path as the hidden picker and its 불러오기: #session + #load). The one on
+  // screen is marked.
+  function paintSessList(note = "") {
+    const groups = [];
+    for (const s of sessions) { const g = groups[groups.length - 1]; if (g && g.meeting === s.meeting) g.list.push(s); else groups.push({ meeting: s.meeting, list: [s] }); }
+    const cur = replayInfo?.path;
+    $("sessList").innerHTML = groups.map((g) => `<li><span class="sl-gp">${esc(KO.gpShort(g.meeting))}</span><span class="sl-s">${g.list.slice().reverse().map((x) => `<button role="menuitem" data-path="${esc(x.path)}"${x.path === cur ? ` aria-current="true"` : ""} title="${esc(sessionLabel(x))}">${esc(KO.sessionShort(x.name))}</button>`).join("")}</span></li>`).join("")
+      || `<li class="empty-li">${esc(note || "목록 불러오는 중…")}</li>`;
+  }
+  $("sessList").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-path]"); if (!b) return;
+    if (![...$("session").options].some((o) => o.value === b.dataset.path)) return;
+    $("session").value = b.dataset.path; $("load").click();
+  });
+  const sessMenu = UIKit.menu($("sessBtn"), $("sessPop"), { onOpen: () => requestAnimationFrame(() => $("sessList").querySelector('[aria-current="true"]')?.scrollIntoView({ block: "center" })) });
+  $("sessBtn").addEventListener("click", () => { if (mode === "live") sessMenu.close(); });   // (live: the session is the one F1 sends – nothing to pick)
   // v0.44: after a load, the pickers show the session loaded (HomeData.pickerPlan) – before, a session opened from the
   // home screen left the picker on the year and session it showed before (v0.43 report §8). A list that can't be
   // fetched (offline) gets the loaded session as its one entry: the picker never names another session than the one
@@ -107,10 +126,11 @@
   async function syncPicker(path, info, job) {
     const years = [...$("year").options].map((o) => +o.value), plan = HomeData.pickerPlan({ years, year: +$("year").value, paths: sessions.map((s) => s.path) }, path);
     if (!plan) return;
-    if (plan.addYear) { const sel = $("year"); sel.innerHTML = ""; for (const y of HomeData.yearsWith(years, plan.year)) sel.add(new Option(`${y}년`, y)); }
+    if (plan.addYear) { const sel = $("year"); sel.innerHTML = ""; for (const y of HomeData.yearsWith(years, plan.year)) sel.add(new Option(String(y), y)); }
     if (plan.reload) { $("year").value = plan.year; await loadSessionList({ quiet: true }); if (job !== loadJob) return; }
     if (![...$("session").options].some((o) => o.value === path)) $("session").add(new Option(info?.meeting ? sessionLabel(info) : path, path), 0);
     $("session").value = path;
+    paintSessList();
   }
   $("year").addEventListener("change", loadSessionList);
   // Loading runs in stages; the bar maps them onto one 0–100%:
@@ -233,7 +253,7 @@
 
   // ---------- replay playback ----------
   // (the button names what it does next; the session bar says what is happening – paintSource)
-  const paintPlay = () => { $("play").innerHTML = playing ? `${ico("pause")}<span>일시정지</span>` : `${ico("play")}<span>재생</span>`; $("play").setAttribute("aria-label", playing ? "일시정지" : "재생"); };
+  const paintPlay = () => { $("play").innerHTML = playing ? `${ico("pause")}<span class="sr-only">일시정지</span>` : `${ico("play")}<span class="sr-only">재생</span>`; $("play").setAttribute("aria-label", playing ? "일시정지" : "재생"); $("play").title = playing ? "일시정지 (Space)" : "재생 (Space)"; };
   function play() { if (!replay || mode !== "replay") return; playing = true; paintPlay(); lastFrame = performance.now(); paintSource(); }
   function pause() { playing = false; paintPlay(); paintSource(); }
   function seekTo(ms) {
@@ -307,7 +327,7 @@
     document.body.classList.toggle("compact", on);
     $("compactBtn").setAttribute("aria-pressed", String(on)); $("compactBtn").innerHTML = ico(on ? "panel-right-open" : "panel-right-close");
     window.api.compactWindow(on);
-    if (on && !pinned) toast("위에 고정(핀 버튼)도 함께 켜면 중계 화면 위에 계속 떠 있어요.", "");
+    if (on && !pinned) toast("⋯ 메뉴의 '위에 고정'도 함께 켜면 중계 화면 위에 계속 떠 있어요.", "");
     setTimeout(() => { applySizes(); renderAll(true); }, 250);
   }
   $("compactBtn").addEventListener("click", () => setCompact(!compactOn));
@@ -443,12 +463,13 @@
   const timed = (name, fn) => { const a = performance.now(); fn(); const d = performance.now() - a; const s = uiCost[name] || (uiCost[name] = { n: 0, total: 0, max: 0 }); s.n++; s.total += d; s.max = Math.max(s.max, d); };
   function renderAll(heavy) {
     if (window.F1KR_NOUI && heavy) heavy = false;
-    if (mode === "replay") { $("seek").value = t; $("elapsed").textContent = `${t < tStart ? `출발 전 ${hms(tStart - t + 999).slice(3)}` : hms(t - tStart)} / ${hms(t1 - tStart)}`; }
+    if (mode === "replay") { $("seek").value = t; $("elNow").textContent = t < tStart ? `출발 전 ${hms(tStart - t + 999).slice(3)}` : hms(t - tStart); $("elTotal").textContent = `/ ${hms(t1 - tStart)}`; }
     drawMap();
     if (!heavy) return;
     lastHeavy = performance.now();
     paintIdle();
-    if (!src) { setHTML($("board").tBodies[0], ""); $("rc").innerHTML = ""; renderDriver(); paintTicker(); paintRcBadge(); renderWork(); return; }
+    // (nothing on screen – live not connected, nothing loaded: the bar says nothing of the session shown before)
+    if (!src) { setHTML($("board").tBodies[0], ""); $("rc").innerHTML = ""; for (const id of ["trackStatus", "part", "sessStatus"]) $(id).hidden = true; for (const id of ["lap", "clock", "weather"]) setHTML($(id), ""); renderDriver(); paintRcBadge(); renderWork(); return; }
     uiQueue = [];   // (all drawn now)
     const T = timed;
     T("status", renderStatus); T("board", renderBoard); T("rc", renderRC); T("driver", renderDriver); T("work", renderWork); T("radio", renderRadio); T("strat", renderStrat); T("trace", renderTrace); T("champ", renderChamp); T("mini", renderMiniBoard); T("alerts", checkAlerts);
@@ -460,17 +481,16 @@
   function refreshTitle() {
     const tag = LiveStatus.sessionTag(mode, replayInfo?.path, live.state.SessionInfo?.Key);
     if (tag !== sessionTag) { sessionTag = tag; document.querySelectorAll("#radio audio").forEach((a) => a.pause()); }
-    $("sbYear").textContent = "";
     $("demoBadge").hidden = !(src && !src.isLive && src === replay && replayInfo?.demo);
     document.body.classList.toggle("demo-on", !$("demoBadge").hidden);   // (the same words over the expanded 3D view: #demoMark)
-    if (!src) { $("title").textContent = mode === "live" ? "실시간: 연결하면 지금 진행 중인 세션이 표시돼요" : "세션을 골라 불러오세요"; $("title").title = ""; return; }
+    // (the session button: the place and the session – "싱가포르 · 결승"; the season, the circuit and the country in its tooltip)
+    if (!src) { $("title").textContent = mode === "live" ? "실시간" : "세션 선택"; $("sessBtn").title = mode === "live" ? "실시간: 연결하면 지금 진행 중인 세션이 표시돼요" : "세션을 골라 불러오세요"; return; }
     const si = src.state.SessionInfo || {};
-    if (src.isLive && !si.Name) { $("title").textContent = "실시간: 세션 정보를 기다리는 중…"; return; }
+    if (src.isLive && !si.Name) { $("title").textContent = "실시간 · 대기 중"; $("sessBtn").title = "실시간: 세션 정보를 기다리는 중…"; return; }
     const meeting = si.Meeting?.Name || (src.isLive ? "" : replayInfo?.meeting), name = si.Name || (src.isLive ? "" : replayInfo?.name);
     const year = +(si.Path || (src.isLive ? "" : replayInfo?.path) || si.StartDate || "").slice(0, 4);
-    $("sbYear").textContent = year >= 1950 ? `${year}` : "";
-    $("title").textContent = `${KO.gpName(meeting)} · ${KO.sessionName(name)}`;
-    $("title").title = [si.Meeting?.Circuit?.ShortName, si.Meeting?.Location, si.Meeting?.Country?.Name].filter(Boolean).join(" · ");
+    $("title").textContent = `${KO.gpShort(meeting)} · ${KO.sessionName(name)}`;
+    $("sessBtn").title = [year >= 1950 ? `${year} ${KO.gpName(meeting)}` : KO.gpName(meeting), si.Meeting?.Circuit?.ShortName, si.Meeting?.Location, si.Meeting?.Country?.Name].filter(Boolean).join(" · ") + (mode === "replay" ? "\n누르면 다른 세션을 골라요" : "");
   }
   // Where the data comes from and how fresh it is – the meaning of the clock, the delay and a pause, in words.
   //   replay: 다시보기 · 재생 중 2배속 | 일시정지 (the session clock and lap are the recording's at that moment)
@@ -481,19 +501,15 @@
   function liveStale(now = Date.now()) { return LiveStatus.stale({ mode, liveOnScreen: src === live, hasDrivers: !!live.state.DriverList, conn: liveStatus.state, message: liveStatus.message, now, lastReceived: lastReceived() }); }
   function paintSource() {
     const box = $("sbSource"); if (!box) return;
+    // v0.71: the bar says only what is wrong. A replay playing or paused is said by the player's button and its speed; a
+    // live session's delay, pause and connection are in the live controls beside (연결 · 중계 지연 · 멈춤). Here: a
+    // connection being made or lost, an error, and nothing received for a while.
     let html = "";
-    if (mode === "replay") {
-      // (v0.53: the app bar's 다시보기 tab already says where the data comes from – the session bar says only how it plays)
-      if (replay) html = `<span title="저장된 기록을 재생 중이에요 · 남은 시간과 랩은 그 순간의 기록이에요">${playing ? `재생 중 <b>${esc(speed)}배속</b>` : `${ico("pause", { size: 14 })}일시정지`}</span>`;
-    } else {
-      const st = liveStatus.state, conn = { live: ["수신 중", "ok"], connecting: ["연결 중…", "warn"], reconnecting: ["다시 연결 중…", "warn"], error: ["오류", "bad"], stopped: ["연결 안 됨", ""] }[st] || [st, ""];
-      const delay = Math.round(live.delayMs / 1000), stale = liveStale(), wait = st !== "stopped" ? live.waitingMs() : 0;
-      html = `<span class="src live${st === "live" ? "" : " off"}" title="F1 실시간 서버에서 받은 데이터예요">실시간</span><span class="${conn[1]}">${ico(st === "live" ? "wifi" : "wifi-off", { size: 14 })}${conn[0]}</span>`
-        + (delay ? `<span title="TV 중계에 맞추려고 일부러 늦춰 보여 주는 시간이에요">지연 <b>${esc(delayText(delay))}</b></span>` : `<span class="more" title="받는 즉시 보여 줘요 (TV보다 빠를 수 있어요)">지연 없음</span>`)
-        + (live.paused ? `<span class="warn" title="화면을 멈췄어요 · 이어서를 누르면 멈춘 시간만큼 지연이 늘어나요"><b>멈춤</b></span>` : "")
-        + (wait > 0 ? `<span>${Math.ceil(wait / 1000)}초 뒤 표시</span>` : "")
-        + (stale?.age ? `<span class="warn">수신 없음 ${Math.round(stale.age / 1000)}초</span>` : "")
-        + (st === "live" && !liveStatus.positions ? `<span class="more" title="F1 TV로 로그인하면 차량 위치와 텔레메트리도 받아요">위치 없음</span>` : "");
+    if (mode === "live") {
+      const st = liveStatus.state, conn = { connecting: ["연결 중…", "warn"], reconnecting: ["다시 연결 중…", "warn"], error: ["오류", "bad"] }[st];
+      const stale = liveStale();
+      html = (conn ? `<span class="${conn[1]}" title="F1 실시간 서버와의 연결 상태예요">${ico("wifi-off", { size: 14 })}${conn[0]}</span>` : "")
+        + (stale?.age ? `<span class="warn" title="받은 값이 없어요 · 표의 값은 마지막으로 받은 값이에요">수신 없음 ${Math.round(stale.age / 1000)}초</span>` : "");
     }
     setHTML(box, html);
     // the table: values not refreshed for a while are greyed and a line says why (never shown as zeros)
@@ -508,27 +524,35 @@
     // the flag: word + colour; a race whose session is over shows the chequered flag
     const over = /Finished|Finalised|Ends/.test(s.SessionStatus?.Status || "") && /Race/.test(sessionType());
     const ts = over ? { ko: "체커기 · 종료", cls: "chequered" } : KO.TRACK_STATUS[s.TrackStatus?.Status] || { ko: "깃발 정보 없음", cls: "" };
-    $("trackStatus").textContent = ts.ko; $("trackStatus").className = "pill " + ts.cls;
+    // (the block says the flag in a word – 그린, 황색기, 세이프티카 –; the whole phrase is its tooltip; no flag information: no block)
+    const flag = $("trackStatus");
+    flag.textContent = ts.ko.split(/ [–·] /)[0]; flag.title = ts.ko; flag.className = "flag-block timing-only " + ts.cls; flag.hidden = !ts.cls;
     const part = s.TimingData?.SessionPart;
     $("part").hidden = !(sessionType() === "Qualifying" && part);
     $("part").textContent = `${isSprint() ? "SQ" : "Q"}${part}`;
     const lc = s.LapCount;
-    setHTML($("lap"), lc?.CurrentLap ? `<span title="선두 기준 현재 랩">랩 <b>${esc(lc.CurrentLap)}</b> / ${esc(lc.TotalLaps || "?")}</span>` : "");
+    setHTML($("lap"), lc?.CurrentLap ? `<span class="lapc" title="선두 기준 현재 랩"><small>LAP</small><b>${esc(lc.CurrentLap)}</b><i>/${esc(lc.TotalLaps || "?")}</i></span>` : "");
+    // The session clock: only where there is no lap count to tell how far the session is – practice and qualifying. In a
+    // race (and a sprint) the lap says it, and the clock is off the screen.
     const clk = s.ExtrapolatedClock;
     let rem = parseClock(clk?.Remaining);
     if (rem != null && clk.Extrapolating) { const nowUtc = src.utcAt(src.now()); if (nowUtc) rem -= nowUtc - ReplayKit.parseUtc(clk.Utc); }
-    setHTML($("clock"), rem != null ? `<span title="F1 세션 시계의 남은 시간${src.isLive ? " (중계 지연을 적용한 화면 기준)" : " (재생 중인 순간의 기록)"}${clk.Extrapolating ? "" : " · 시계 멈춤"}">남은 시간 <b>${hms(Math.max(0, rem))}</b>${clk.Extrapolating ? "" : " <small>(멈춤)</small>"}</span>` : "");
+    const showClock = rem != null && !lc?.CurrentLap && !/Race/.test(sessionType());
+    setHTML($("clock"), showClock ? `<span class="lapc${clk.Extrapolating ? "" : " held"}" title="F1 세션 시계의 남은 시간${src.isLive ? " (중계 지연을 적용한 화면 기준)" : " (재생 중인 순간의 기록)"}${clk.Extrapolating ? "" : " · 시계 멈춤"}"><small>남은 시간</small><b>${hms(Math.max(0, rem)).replace(/^00:/, "")}</b></span>` : "");
     // In qualifying "Finished"/"Inactive" also happen between Q1, Q2 and Q3, so name the part.
     const st = s.SessionStatus?.Status, qp = sessionType() === "Qualifying" ? s.TimingData?.SessionPart : null, qn = `${isSprint() ? "SQ" : "Q"}${qp}`;
     const ss = qp && st === "Finished" && qp < 3 ? `${qn} 종료` : qp && st === "Inactive" && qp > 1 ? `${qn} 시작 전` : qp && st === "Started" ? `${qn} 진행 중`
       : { Inactive: "시작 전", Started: "진행 중", Aborted: "중단", Finished: "종료", Finalised: "결과 확정", Ends: "세션 종료" }[st];
-    // (a race or practice under way is the normal case – said by the flag and the clock; the chip only for the other states)
-    const usual = st === "Started" && !qp;
+    // (a session under way is the normal case – said by the flag and the lap or clock; the small block only for the other
+    // states, and in qualifying the part alone stands for "Q2 진행 중")
+    const usual = st === "Started";
     $("sessStatus").hidden = !ss || usual; $("sessStatus").textContent = ss || "";
-    $("sessStatus").className = "chip " + (s.SessionStatus?.Status === "Started" ? "ok" : s.SessionStatus?.Status === "Aborted" ? "bad" : "");
+    $("sessStatus").className = "flag-side timing-only " + (st === "Aborted" ? "bad" : "");
+    $("part").className = "flag-side timing-only";
     const w = s.WeatherData;
-    const wv = (v) => (v == null || v === "" ? "–" : esc(v));
-    setHTML($("weather"), w ? `<span class="w air" title="기온">${ico("thermometer")}기온 <b>${wv(w.AirTemp)}°</b></span><span class="w track" title="노면 온도">노면 <b>${wv(w.TrackTemp)}°</b></span><span class="w hum" title="습도">${ico("droplets")}${wv(w.Humidity)}%</span><span class="w wind" title="풍속">${ico("wind")}${wv(w.WindSpeed)}m/s</span>${w.Rainfall === "1" ? `<span class="w rain" title="F1 날씨 데이터: 비 감지">${ico("cloud-rain")}비</span>` : ""}` : "");
+    const wv = (v) => (v == null || v === "" ? "" : esc(Math.round(+v)));
+    // (air and track temperature on screen; humidity and wind in the tooltip; rain – F1's own flag – as a small mark)
+    setHTML($("weather"), w && (w.AirTemp || w.TrackTemp) ? `<span class="w" title="${esc(`기온 ${w.AirTemp ?? "?"}° · 노면 ${w.TrackTemp ?? "?"}° · 습도 ${w.Humidity ?? "?"}% · 풍속 ${w.WindSpeed ?? "?"}m/s`)}">${wv(w.AirTemp)}° · 노면 ${wv(w.TrackTemp)}°</span>${w.Rainfall === "1" ? `<span class="w rain" title="F1 날씨 데이터: 비 감지">${ico("cloud-rain")}<span class="sr-only">비</span></span>` : ""}` : "");
   }
 
   // ---------- leaderboard ----------
@@ -541,9 +565,9 @@
   };
   const sectorCls = (s) => (s?.OverallFastest ? "s-purple" : s?.PersonalFastest ? "s-green" : s?.Value ? "s-yellow" : "");
   const HEADERS = {
-    Race: ["선두와 차이", "선두와의 시간 차이(초). '+1랩'은 선두에게 한 바퀴 뒤처졌다는 뜻이에요 · –: 아직 받지 않은 값", "앞 차 간격", "바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요 · 작은 ▼/▲: 최근 3랩 동안 줄어든/늘어난 간격"],
-    Qualifying: ["1위와 차이", "이번 단계(Q1·Q2·Q3)에서 가장 빠른 기록과의 차이 · –: 아직 기록 없음", "앞 순위와", "바로 앞 순위 드라이버 기록과의 차이"],
-    Practice: ["1위와 차이", "이 세션 가장 빠른 기록과의 차이 · –: 아직 기록 없음", "앞 순위와", "바로 앞 순위 드라이버 기록과의 차이"],
+    Race: ["차이", "선두와의 시간 차이(초). '+1랩'은 선두에게 한 바퀴 뒤처졌다는 뜻이에요 · 빈칸: 아직 받지 않은 값", "간격", "바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요 · 작은 ▼/▲: 최근 3랩 동안 줄어든/늘어난 간격"],
+    Qualifying: ["차이", "이번 단계(Q1·Q2·Q3)에서 가장 빠른 기록(1위)과의 차이 · 빈칸: 아직 기록 없음", "간격", "바로 앞 순위 드라이버 기록과의 차이"],
+    Practice: ["차이", "이 세션 가장 빠른 기록(1위)과의 차이 · 빈칸: 아직 기록 없음", "간격", "바로 앞 순위 드라이버 기록과의 차이"],
   };
   const lines0 = () => src?.state.TimingData?.Lines || {};
   function rowsNow() {
@@ -554,7 +578,7 @@
   // Lap column shows the last lap, or (toggled from the header) each driver's personal best.
   let lapMode = store.get("lapMode", "last");
   function paintLapToggle() {
-    $("lapLabel").textContent = lapMode === "best" ? "개인 최고" : "최근 랩";
+    $("lapLabel").textContent = lapMode === "best" ? "최고 랩" : "랩";
     $("lapToggle").setAttribute("aria-pressed", String(lapMode === "best"));
   }
   $("lapToggle").addEventListener("click", () => { lapMode = lapMode === "best" ? "last" : "best"; store.set("lapMode", lapMode); paintLapToggle(); renderAll(true); });
@@ -610,11 +634,14 @@
     return null;
   }
 
-  // v0.50 table: times right-aligned with tabular digits; "–" where nothing has been received (never a made-up 0);
+  // v0.71: a value not received is a BLANK cell (no "–", and no "0" for pit stops not counted yet) – never a made-up 0;
+  // the driver cell is the team bar and the Korean name (code, number and team in its tooltip); a place gained or lost
+  // since the grid shows only when there is one (▲ / ▼); the selected row's position is the yellow block.
+  // v0.50 table: times right-aligned with tabular digits;
   // overall best = purple fill, personal best = green text (fill vs none: not colour alone); the tyre as its lettered
   // ring (dashed: a used set); state as badges. A row whose position changed slides from where it was (300 ms; off under
   // reduced motion and after a jump) and its position number is tinted for a few seconds (gain / loss).
-  const NONE = `<span class="t-none">–</span>`;
+  const NONE = "";
   const cell = (v) => (v == null || v === "" ? NONE : esc(v));
   const TYRE_LETTER = { SOFT: "S", MEDIUM: "M", HARD: "H", INTERMEDIATE: "I", WET: "W" };
   let boardOrder = "", moved = {};
@@ -671,7 +698,7 @@
       const close = type === "Race" && /^\+?0\.\d+$/.test(interval);
       const grid = +a.GridPos, pos = +l.Position;
       const chg = type === "Race" && grid && pos ? grid - pos : 0;
-      const state = l.Retired ? ["리타이어", "bad"] : l.Stopped ? ["정지", "bad"] : l.KnockedOut ? ["탈락", ""] : l.InPit ? ["피트", "info"] : l.PitOut ? ["피트 아웃", "info"] : null;
+      const state = l.Retired ? ["리타이어", "bad"] : l.Stopped ? ["정지", "bad"] : l.KnockedOut ? ["탈락", ""] : l.InPit ? ["피트", "pit"] : l.PitOut ? ["피트 아웃", "pit"] : null;
       // Deleted laps: in races every track limits deletion is a strike (the 4th brings a penalty).
       const del = deleted[num] || [];
       const strikes = del.filter((x) => x.limits).length;
@@ -684,17 +711,17 @@
       const lapTitle = lapCls === "purple" ? "전체 최고" : lapCls === "green" ? "개인 최고" : lapCls === "slow" ? "피트를 오간 느린 랩(아웃랩·인랩)" : "";
       const pits = l.NumberOfPitStops;
       return `<tr class="${cls}" data-num="${esc(num)}">
-        <td class="pos">${esc(l.Position || "")}</td>
-        <td class="chg">${chg > 0 ? `<span class="up" title="출발 그리드보다 ${chg}계단 올라감"><b>↑</b>${chg}</span>` : chg < 0 ? `<span class="down" title="출발 그리드보다 ${-chg}계단 내려감"><b>↓</b>${-chg}</span>` : type === "Race" && grid ? `<span class="same">–</span>` : ""}</td>
-        <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
-          <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span><span class="tla">${esc(d.Tla)}</span>${num === compare && num !== focus ? `<span class="mark" title="Shift+클릭으로 고른 비교 드라이버">비교</span>` : ""}<span class="team">${esc(KO.TEAMS[d.TeamName] || d.TeamName)}</span></div></td>
-        <td class="time r${type === "Race" && !rel ? " gapc" : ""}">${leader && type === "Race" && !rel ? `<span class="faint">선두</span>` : cell(gap)}</td>
+        <td class="pos"><span>${esc(l.Position || "")}</span></td>
+        <td class="chg">${chg > 0 ? `<span class="up" title="출발 그리드보다 ${chg}계단 올라감">▲${chg}</span>` : chg < 0 ? `<span class="down" title="출발 그리드보다 ${-chg}계단 내려감">▼${-chg}</span>` : ""}</td>
+        <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} (${d.Tla}) · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
+          <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span>${num === compare && num !== focus ? `<span class="mark" title="Shift+클릭으로 고른 비교 드라이버">비교</span>` : ""}</div></td>
+        <td class="time r${type === "Race" && !rel ? " gapc" : ""}">${leader && type === "Race" && !rel ? "" : cell(gap)}</td>
         <td class="time r ${close ? "close" : ""}"${close ? ` title="앞 차와 1초 이내"` : ""}>${leader ? "" : interval ? esc(interval) + trendTag(trend[num]) : NONE}</td>
         <td class="time r">${lapV ? `<span class="lap ${lapCls}"${lapTitle ? ` title="${lapTitle}"` : ""}>${esc(lapV)}</span>` : NONE}</td>
         ${[0, 1, 2].map((i) => `<td class="time r sec ${sectorCls(sectors[i])}"${sectors[i]?.OverallFastest ? ` title="전체 최고"` : sectors[i]?.PersonalFastest ? ` title="개인 최고"` : ""}><span>${esc(sectors[i]?.Value || "")}</span>${miniSectors(sectors[i])}</td>`).join("")}
         <td class="time r sec ${sectorCls(l.Speeds?.ST)}"><span>${esc(l.Speeds?.ST?.Value || "")}</span></td>
         <td class="c">${ty ? `<span class="tyre" title="${esc(ty.ko)}${stint.New === "true" ? " (새 타이어)" : " (중고 타이어로 시작)"} · 이 타이어로 ${esc(stint.TotalLaps ?? 0)}랩"><i class="ui-tyre ${TYRE_LETTER[stint.Compound] || ""}${stint.New === "false" ? " used" : ""}">${ty.short}</i><span class="n">${esc(stint.TotalLaps ?? "")}</span></span>` : NONE}</td>
-        <td class="c pits">${pits != null ? esc(pits) : type === "Race" && l.Position ? `<span class="zero" title="피트스톱 기록이 아직 없어요 (F1은 첫 피트스톱 뒤에 횟수를 보내요)">0</span>` : NONE}</td>
+        <td class="r pits">${+pits > 0 ? esc(pits) : ""}</td>
         <td class="state">${state ? `<span class="ui-badge ${state[1]}">${state[0]}</span>` : ""}${delTag}</td></tr>`;
     }).join(""));
     boardOrder = order;
@@ -762,23 +789,11 @@
     b.textContent = u.count > 99 ? "99+" : String(u.count); b.className = `ui-count ${u.top}`;
     b.title = `안 본 메시지 ${u.count}개`;
   }
-  function paintTicker() {
-    const msgs = src?.messages || [], el = $("rcTicker");
-    let m = null;
-    for (let i = msgs.length - 1; i >= 0 && !m; i--) if (!/TRACK LIMITS|DELETED|BLUE FLAG/.test(msgs[i].Message)) m = msgs[i];
-    m ||= msgs[msgs.length - 1];
-    el.hidden = !m;
-    if (!m) return;
-    const time = m.Utc ? kstTime.format(new Date(m.Utc + (/Z$/.test(m.Utc) ? "" : "Z"))) : "";
-    setHTML(el, `<small>${m.Lap ? `${esc(m.Lap)}랩 · ` : ""}${esc(time)}</small><span>${esc(KO.translate(m.Message) || m.Message)}</span>`);
-    el.className = `rc-ticker ${rcKindOf(m)}`;
-  }
-  $("rcTicker").addEventListener("click", () => setPanel("rc"));
   // (redrawn when the list changes – a new message, or one corrected or taken back in place)
   function renderRC() {
     const msgs = src.messages;
     if (src.rc?.rev === rcCount) return; rcCount = src.rc?.rev;
-    paintRcBadge(); paintTicker();
+    paintRcBadge();
     const pool = rcBlue ? msgs : msgs.filter((m) => !isBlue(m)), blues = msgs.length - msgs.filter((m) => !isBlue(m)).length;
     $("rcFilter").innerHTML = RC_KINDS.map(([k, label, fn]) => {
       const n = k === "all" ? pool.length : pool.filter(fn).length;
@@ -786,12 +801,14 @@
     }).join("") + (blues ? `<button data-blue class="blue-toggle" aria-pressed="${rcBlue}" title="파란 깃발(랩다운 차에게 비켜 주라는 신호) 메시지를 목록에 보일지">파란 깃발 ${rcBlue ? "보임" : "숨김"} <span>${blues}</span></button>` : "");
     const keep = (RC_KINDS.find(([k]) => k === rcKind) || RC_KINDS[0])[2];
     const shown = pool.filter(keep);
+    $("rcFilterDot").hidden = rcKind === "all" && !rcBlue;   // (the filter button: marked while something other than "all" is picked)
     if (!shown.length) { $("rc").innerHTML = `<li class="empty-li">${msgs.length ? "이 종류의 메시지는 아직 없어요." : "레이스 컨트롤 메시지가 오면 여기에 한국어로 보여 줘요."}</li>`; return; }
     $("rc").innerHTML = shown.slice().reverse().map((m) => {
       const ko = KO.translate(m.Message);
       const time = m.Utc ? kstTime.format(new Date(m.Utc + (/Z$/.test(m.Utc) ? "" : "Z"))) : "";
-      return `<li class="${rcClass(m)}"><div class="meta"><span>${time} KST</span>${m.Lap ? `<span>${m.Lap}랩</span>` : ""}</div>
-        <div class="ko">${esc(ko || m.Message)}</div>${ko ? `<div class="en">${esc(m.Message)}</div>` : ""}</li>`;
+      // (a row: the lap, a square in the message's colour – red flag, SC, penalty, yellow, green; none: an empty square –
+      // and the words in Korean; the time and F1's own English text are the row's tooltip)
+      return `<li class="${rcClass(m)}" title="${esc(`${time} KST${m.Lap ? ` · ${m.Lap}랩` : ""}\n${m.Message}`)}"><span class="lapn">${m.Lap ? `L${esc(m.Lap)}` : ""}</span><i class="sq ${rcKindOf(m)}" aria-hidden="true"></i><span class="ko">${esc(ko || m.Message)}</span></li>`;
     }).join("");
   }
 
@@ -834,11 +851,13 @@
   function setPanel(p) {
     panel = p;
     for (const [id, key] of [["tabRC", "rc"], ["tabDriver", "driver"], ["tabRadio", "radio"], ["tabStrat", "strat"], ["tabTrace", "trace"], ["tabChamp", "champ"]]) $(id).setAttribute("aria-selected", String(p === key));
-    $("rc").hidden = $("rcFilter").hidden = p !== "rc"; $("driver").hidden = p !== "driver"; $("radio").hidden = $("radioBar").hidden = p !== "radio"; $("trace").hidden = p !== "trace"; $("champ").hidden = p !== "champ";
+    $("rc").hidden = p !== "rc"; rcMenu?.close(); $("rcFilterBtn").parentElement.hidden = p !== "rc"; $("driver").hidden = p !== "driver"; $("radio").hidden = $("radioBar").hidden = p !== "radio"; $("trace").hidden = p !== "trace"; $("champ").hidden = p !== "champ";
     $("strat").hidden = p !== "strat";
     radioKey = ""; traceKey = ""; champKey = ""; stratKey = ""; renderDriver(); if (src) { renderRadio(); renderTrace(); renderChamp(); renderStrat(); }
     paintRcBadge();
   }
+  const rcMenu = UIKit.menu($("rcFilterBtn"), $("rcFilter"));
+  $("rcFilter").setAttribute("role", "group");
   $("tabRC").addEventListener("click", () => setPanel("rc"));
   $("tabDriver").addEventListener("click", () => setPanel("driver"));
   $("tabRadio").addEventListener("click", () => setPanel("radio"));
@@ -1464,7 +1483,7 @@
     // Rotate (clockwise on screen), fit to the canvas, then apply zoom around the centre plus pan.
     const th = view.rot * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
     const R = ([x, y]) => [x * cs + y * sn, -x * sn + y * cs];
-    const ckey = `${w}|${h}|${view.rot}|${view.zoom}|${view.panX}|${view.panY}|${k}`;
+    const ckey = `${w}|${h}|${view.rot}|${view.zoom}|${view.panX}|${view.panY}|${k}|${$("mapCard").classList.contains("expanded")}`;
     const fresh = !trackCache || trackCache.shape !== shape || trackCache.n !== shape.length;
     if (fresh) {
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1476,15 +1495,24 @@
       trackCache.rot = view.rot; trackCache.box = [minX, maxX, minY, maxY]; trackCache.key = null;
     }
     const [minX, maxX, minY, maxY] = trackCache.box;
-    // Margins keep the track clear of the buttons: 2D/3D switch on top, map tools on the left.
-    const padT = 56, padL = 64, pad = 30 * k;
-    const sc = Math.min((w - padL - pad) / (maxX - minX || 1), (h - padT - pad) / (maxY - minY || 1));
-    const ox = padL + (w - padL - pad - (maxX - minX) * sc) / 2, oy = pad + (h - padT - pad - (maxY - minY) * sc) / 2, z = view.zoom;
+    // v0.71 – the 2D view's look: a blue board with a light edge and a grid, the road on it as a filled light band with a
+    // dark edge and a flat shadow, each car a square block in its team's colour carrying its position; the selected
+    // car's block is larger and yellow. (Not a dark map with an outlined track and coloured dots.)
+    const INK = "#0d0d0f", LIGHT = "#f2efe6", BLUE = "#3d4dff", YELLOW = "#ffe500";
+    // Margins keep the track clear of the board's edge and of the map tools on the left.
+    // (in the full window the standings list stands over the board's right side: the track keeps clear of it)
+    const edge = 10, padT = 30 * k, padL = 64, pad = 30 * k, padR = $("mapCard").classList.contains("expanded") ? 270 : pad;
+    const sc = Math.min((w - padL - padR) / (maxX - minX || 1), (h - padT - pad) / (maxY - minY || 1));
+    const ox = padL + (w - padL - padR - (maxX - minX) * sc) / 2, oy = pad + (h - padT - pad - (maxY - minY) * sc) / 2, z = view.zoom;
     const P = (pt) => {
       const [rx, ry] = R(pt), bx = ox + (rx - minX) * sc, by = h - (oy + (ry - minY) * sc);
       return [w / 2 + (bx - w / 2) * z + view.panX, h / 2 + (by - h / 2) * z + view.panY];
     };
-    // Satellite ground under everything (canvas row 0 is the north edge of its box, in F1 metres).
+    // the board: everything is drawn inside it (a zoomed track is cut at its edge)
+    ctx.save();
+    ctx.beginPath(); ctx.rect(edge, edge, w - 2 * edge, h - 2 * edge); ctx.clip();
+    ctx.fillStyle = BLUE; ctx.fillRect(edge, edge, w - 2 * edge, h - 2 * edge);
+    // Satellite ground over the board (canvas row 0 is the north edge of its box, in F1 metres).
     const sat = satFor(shape);
     if (sat) {
       const e = sat.ext, cw = sat.canvas.width, chh = sat.canvas.height;
@@ -1494,9 +1522,15 @@
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(sat.canvas, 0, 0);
       ctx.restore();
-      ctx.fillStyle = "rgba(14,16,19,0.32)"; ctx.fillRect(0, 0, w, h);   // keeps cars and labels readable
+      ctx.fillStyle = "rgba(13,13,15,0.32)"; ctx.fillRect(0, 0, w, h);   // keeps cars and labels readable
+    } else {
+      // the grid: squares of 50 px at 1×, fixed to the track – it moves and grows with it
+      const cell = 50 * z, gx = w / 2 + view.panX, gy = h / 2 + view.panY;
+      ctx.beginPath();
+      for (let x = gx - Math.ceil((gx - edge) / cell) * cell; x < w - edge; x += cell) { ctx.moveTo(Math.round(x) + 0.75, edge); ctx.lineTo(Math.round(x) + 0.75, h - edge); }
+      for (let y = gy - Math.ceil((gy - edge) / cell) * cell; y < h - edge; y += cell) { ctx.moveTo(edge, Math.round(y) + 0.75); ctx.lineTo(w - edge, Math.round(y) + 0.75); }
+      ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 1.5; ctx.stroke();
     }
-    ctx.lineWidth = 7 * Math.sqrt(k) * Math.min(2, Math.sqrt(z)); ctx.lineJoin = ctx.lineCap = "round"; ctx.strokeStyle = sat ? "rgba(20,22,26,0.85)" : "#2a3038";
     if (trackCache.key !== ckey) {
       const path = new Path2D();
       let prev = null;
@@ -1507,61 +1541,63 @@
       }
       trackCache.path = path; trackCache.key = ckey;
     }
-    ctx.stroke(trackCache.path);
+    // the road: a flat shadow, the dark edge, the light fill
+    const sk = Math.sqrt(k), zk = Math.min(2, Math.sqrt(z)), rw = 10 * sk * zk, ow = rw + 6 * sk;
+    ctx.lineJoin = ctx.lineCap = "round";
+    ctx.save(); ctx.translate(4 * sk, 5 * sk); ctx.strokeStyle = INK; ctx.lineWidth = ow; ctx.stroke(trackCache.path); ctx.restore();
+    ctx.strokeStyle = INK; ctx.lineWidth = ow; ctx.stroke(trackCache.path);
+    ctx.strokeStyle = LIGHT; ctx.lineWidth = rw; ctx.stroke(trackCache.path);
 
-    // Corner numbers sit just off the track, on the outside of the bend.
+    // Corner numbers sit just off the road, on the outside of the bend: a small dark square with the number.
     if (circuit?.corners.length) {
-      const off = 16 * k / (sc * z);   // label distance stays the same on screen at any zoom
-      ctx.font = `600 ${Math.round(9 * k)}px -apple-system, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const off = (ow / 2 + 12 * k) / (sc * z);   // label distance stays the same on screen at any zoom
+      const cs2 = 14 * sk;
+      ctx.font = `500 ${Math.round(9.5 * sk)}px "IBM Plex Mono", monospace`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       for (const c of circuit.corners) {
         const a = c.angle * Math.PI / 180;
         const [x, y] = P([c.x + Math.cos(a) * off, c.y + Math.sin(a) * off]);
-        ctx.fillStyle = "rgba(14,16,19,.75)"; ctx.beginPath(); ctx.arc(x, y, 7.5 * k, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = "#8b96a3"; ctx.fillText(String(c.n), x, y + 0.5);
+        ctx.fillStyle = INK; ctx.fillRect(Math.round(x - cs2 / 2), Math.round(y - cs2 / 2), cs2, cs2);
+        ctx.fillStyle = LIGHT; ctx.fillText(String(c.n), x, y + 0.5);
       }
       ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
     }
 
     const drivers = src.state.DriverList || {}, pos = src.positionsAt(src.now());
     lastMapPts = {};
-    ctx.font = `600 ${Math.round(10 * k)}px -apple-system, sans-serif`;
     const lines = lines0();
-    // Retired cars sit in the garage or by the track: drawn faint and without a name.
+    // Retired cars sit in the garage or by the track: drawn faint and without a number.
     const gone = (n) => lines[n]?.Retired || lines[n]?.Stopped;
     // Back to front: retired, then by race order (leader on top), then compared and focused drivers.
     const rank = (n) => (n === focus ? 1e4 : n === compare ? 1e3 : gone(n) ? -1e3 : 100 - (+lines[n]?.Position || 99));
     const order = Object.keys(pos).filter((n) => drivers[n]).sort((a, b) => rank(a) - rank(b));
-    const dots = [];
+    // (dark digits on a light block, light ones on a dark block)
+    const lightBlock = (hex) => { const v = parseInt(hex, 16); return 0.299 * (v >> 16 & 255) + 0.587 * (v >> 8 & 255) + 0.114 * (v & 255) > 150; };
+    const ck = Math.min(1.5, sk);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (const num of order) {
       const d = drivers[num];
       const [x, y] = P(pos[num]); lastMapPts[num] = [x, y];
-      const hl = num === focus || num === compare, r = (hl ? 6 : 4.6) * k;   // a touch smaller so the track shows
-      ctx.globalAlpha = gone(num) ? 0.25 : focus && !hl ? 0.55 : 1;
-      if (hl) { ctx.strokeStyle = num === focus ? "#ffffff" : "#7aa7d8"; ctx.lineWidth = 2.5 * k; ctx.beginPath(); ctx.arc(x, y, r + 3 * k, 0, Math.PI * 2); ctx.stroke(); }
-      ctx.fillStyle = "#" + (hexColour(d?.TeamColour, "888")); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#0e1013"; ctx.lineWidth = 1.5 * k; ctx.stroke();
-      if (!gone(num)) dots.push({ num, d, x, y, r, hl });
+      const isF = num === focus, isC = num === compare;
+      const hex = hexColour(d?.TeamColour, "888888"), col = isF ? YELLOW : "#" + hex;
+      const sz = Math.round((isF ? 26 : isC ? 22 : 18) * ck), e = 2.5 * ck, x0 = Math.round(x - sz / 2), y0 = Math.round(y - sz / 2);
+      ctx.globalAlpha = gone(num) ? 0.3 : 1;
+      ctx.fillStyle = isC ? LIGHT : INK; ctx.fillRect(x0 - e, y0 - e, sz + 2 * e, sz + 2 * e);   // (the edge; the compared car's is light)
+      ctx.fillStyle = col; ctx.fillRect(x0, y0, sz, sz);
+      const p = +lines[num]?.Position;
+      if (p && !gone(num)) {
+        ctx.font = `400 ${Math.round(sz * 0.7)}px Anton, "IBM Plex Sans KR", sans-serif`;
+        ctx.fillStyle = isF || lightBlock(hex.length === 6 ? hex : "888888") ? INK : "#ffffff";
+        ctx.fillText(String(p), x0 + sz / 2, y0 + sz / 2 + sz * 0.05);
+      }
     }
-    // Name tags, most important first (focus, compare, then race order); a tag that would land on one
-    // already placed tries the other side, then is left out – the dot is still there to hover or click.
-    const fs = Math.round(10 * k), lh = fs + 2;
-    const placed = [];
-    const hit = (bx, by, bw) => placed.some((p) => bx < p[0] + p[2] && bx + bw > p[0] && by < p[1] + lh && by + lh > p[1]);
-    dots.sort((a, b) => rank(b.num) - rank(a.num));
-    for (const o of dots) {
-      const label = o.d.Tla, bw = ctx.measureText(label).width + 2;
-      const spots = [[o.x + o.r + 3.5 * k, o.y - lh / 2], [o.x - o.r - 3.5 * k - bw, o.y - lh / 2], [o.x - bw / 2, o.y - o.r - lh - 2], [o.x - bw / 2, o.y + o.r + 2]];
-      const spot = spots.find(([bx, by]) => !hit(bx, by, bw)) || (o.hl ? spots[0] : null);
-      if (!spot) continue;
-      placed.push([spot[0], spot[1], bw]);
-      ctx.globalAlpha = focus && !o.hl ? 0.7 : 1;
-      ctx.fillStyle = o.hl ? "#ffffff" : "#e8ecf0"; ctx.fillText(label, spot[0] + 1, spot[1] + lh / 2 + fs * 0.35);
-    }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = 1; ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
+    ctx.restore();
+    // the board's light edge, over everything
+    ctx.strokeStyle = LIGHT; ctx.lineWidth = 3; ctx.strokeRect(edge + 1.5, edge + 1.5, w - 2 * edge - 3, h - 2 * edge - 3);
     // Map credits are listed in the 🛰 지도 panel; Google's terms ask for its logo on the imagery itself.
     if (sat?.provider === "google") {
       ctx.font = "700 11px Arial, sans-serif"; ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.fillText("Google", w - 8, h - 6);
+      ctx.fillText("Google", w - 20, h - 18);
       ctx.textAlign = "start";
     }
   }
@@ -1716,12 +1752,14 @@
     trackPoints: () => (mode === "replay" ? (replay ? replay.lapShape() || replayFallbackLap() : []) : liveShape()),
     setFocus(n) { focus = n; store.set("focus", n); if (panel !== "driver" && !analysisOn() && !$("mapCard").classList.contains("expanded")) setPanel("driver"); renderAll(true); },
   };
+  // (the 2D map writes its numbers with the page's fonts: drawn again once they are there)
+  document.fonts?.load('400 16px "Anton"').then(() => { trackCache = null; drawMap(); }).catch(() => {});
   let mapView = store.get("mapView", "2d");
   function setView(v) {
     if (!["2d", "3d", "tel", "laps"].includes(v)) v = "2d";
     mapView = v; store.set("mapView", v);
     $("mapCard").dataset.view = v;
-    $("map3d").hidden = v !== "3d";
+    $("map3d").hidden = v !== "3d"; $("camSel").hidden = v !== "3d";
     $("workTel").hidden = v !== "tel"; $("workLaps").hidden = v !== "laps"; $("workLaps").__key = "";
     if (analysisOn() && $("mapCard").classList.contains("expanded")) setExpanded(false);
     if (analysisOn()) renderWork(); else drawMap();
@@ -1732,6 +1770,15 @@
     if (typeof renderMiniBoard === "function") renderMiniBoard(true);
   }
   document.querySelectorAll(".view-switch button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+  // The 3D view's camera as one list in the map bar (v0.71): it presses the view's own [data-cam] button (map3d.js binds
+  // them and marks the one in use – the list follows that mark, however the camera was changed).
+  {
+    const sel = $("camSel"), host = $("map3d");
+    sel.addEventListener("change", () => host.querySelector(`[data-cam="${sel.value}"]`)?.click());
+    const follow = () => { const on = host.querySelector('[data-cam][aria-pressed="true"]')?.dataset.cam; if (on && on !== sel.value && [...sel.options].some((o) => o.value === on)) sel.value = on; };
+    new MutationObserver(follow).observe(host, { subtree: true, attributes: true, attributeFilter: ["aria-pressed"] });
+    addEventListener("map3d-ready", follow);
+  }
   setView(mapView);
   function setExpanded(on) {
     if (!on) setDetail(false);
@@ -1960,8 +2007,9 @@
   }
   $("colsList").addEventListener("change", (e) => { const k = e.target.dataset.col; if (!k) return; if (e.target.checked) hiddenCols.delete(k); else hiddenCols.add(k); store.set("hiddenCols", [...hiddenCols]); applyCols(); });
   $("colsReset").addEventListener("click", () => { hiddenCols = new Set(COLS_DEFAULT_OFF); store.set("hiddenCols", [...hiddenCols]); applyCols(); });
-  // (popovers: the column picker and the 메뉴 – keyboard, Escape and outside clicks from UIKit.menu)
-  UIKit.menu($("colsBtn"), $("colsPop"));
+  // (popovers: the ⋯ menu – the column picker is a part of it – and the player's "?" (shortcuts, 처음으로): keyboard, Escape
+  // and outside clicks from UIKit.menu)
+  UIKit.menu($("helpBtn"), $("helpPop"));
   UIKit.menu($("menuBtn"), $("appMenu"));
   applyCols();
 

@@ -9,7 +9,10 @@
 #map3d { position: absolute; inset: 0; overflow: hidden; }
 #map3d .map3d-canvas { width: 100%; height: 100%; display: block; }
 /* the full-window map's own standings and key hint (the timing layout's) are the 3D HUD's tower and camera tools here */
-.map-card[data-view="3d"] > #miniBoard, .map-card[data-view="3d"] > .expand-hint { display: none; }
+.map-card[data-view="3d"] #miniBoard, .map-card[data-view="3d"] .expand-hint { display: none; }
+/* (v0.71: the camera is picked from the list in the map bar – #camSel; the HUD's own row of camera buttons is not shown.
+   The buttons stay in the page: the list presses them.) */
+#map3d[data-mode="spec"] [role="group"][aria-label="카메라"] { display: none; }
 
 /* ---------- legacy camera buttons and bottom bar: the game's mode ---------- */
 #map3d .cam3d { position: absolute; top: 10px; left: 10px; display: grid; gap: var(--s-3); z-index: 5; }
