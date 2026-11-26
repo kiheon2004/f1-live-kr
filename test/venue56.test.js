@@ -638,3 +638,54 @@ test("v0.70: Silverstone – the Wing's upper storeys, 33 stand files, the Lando
   const sg = F.FACILITIES.find((f) => f.id === "interlagos-start-gantry");
   assert.ok(sg.model.file === "spo_gantry.glb" && sg.model.heading === 345.77 && sg.venue[0] === 14 && !sg.replaces.names.test("") && sg.model.footprint.length === 4 && !sg.model.level);
 });
+
+// v0.70: Spa-Francorchamps – the pit building's storeys over the builder's garages, on the line through the garages that
+// stand on the door line (the map's outline, and with it the garages, stands 3 m further out along the middle 78 m); the
+// start gantry; 13 stand files, each following the ground along its own front line; the pit-lane roads from surveyed lines
+// (pitroads.js – test/pitroads.test.js). Held back: the endurance pits and their footbridge (this app's track runs through
+// their place), the pit wall and the three road slabs (built by the app).
+test("v0.70: Spa-Francorchamps – the pit building's storeys, the start gantry, 13 stand files on their front lines; a pit model along the garages that stand on one line", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const F = await import("../src/renderer/facilities.js");
+  const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));
+  const spa = files.filter((f) => /^spa_/.test(f)).sort();
+  assert.strictEqual(spa.length, 15); assert.ok(spa.includes("spa_pit_upper.glb") && spa.includes("spa_gantry.glb")); assert.strictEqual(spa.filter((f) => /^spa_stand_/.test(f)).length, 13);
+  for (const f of ["spa_endurance.glb", "spa_footbridge.glb", "spa_pitwall.glb", "spa_pit.glb", "spa_pitlane_entry.glb", "spa_pitlane_main.glb", "spa_pitlane_exit.glb"]) assert.ok(!files.includes(f), f + " is not shipped");
+  const readme = fs.readFileSync(path.join(__dirname, "..", "src", "data", "models", "README.md"), "utf8"); for (const f of spa) assert.ok(readme.includes("`" + f + "`"), f);
+  // the storeys: made with +Z to the pit lane, set on the garage fronts' line, the garage level cut to the model's depth
+  const U = F.PIT_UPPERS[7];
+  assert.ok(U.file === "spa_pit_upper.glb" && U.turned === true && U.alongFronts === true && U.fill === false && U.front === 11.75 && U.garageTop === 4.8 && U.maxDepth >= U.depth && !U.from && !U.seasons);
+  assert.ok(U.span[0] < 0 && U.span[1] > 0 && Math.abs(U.span[1] - U.span[0] - U.length) < 0.05);
+  // the gantry: no map record makes way, its footprint the outer leg only
+  const sg = F.FACILITIES.find((f) => f.id === "spa-start-gantry");
+  assert.ok(sg.model.file === "spa_gantry.glb" && sg.venue[0] === 7 && sg.kind === "tower" && !sg.replaces.names.test("") && sg.model.footprint.length === 4 && !sg.model.level);
+  // the stands: 13 listed stands carry a file – one each –, heading 180, the ground read along their front lines
+  const st = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits["Spa-Francorchamps"].stands.filter((s) => s.model);
+  assert.strictEqual(st.length, 13); assert.strictEqual(new Set(st.map((s) => s.model.file)).size, 13);
+  assert.ok(st.every((s) => files.includes(s.model.file) && s.model.heading === 180 && Array.isArray(s.model.at) && Array.isArray(s.model.drape.along) && s.model.drape.along.length >= 2 && s.model.drape.along.every((q) => q.length === 2) && !s.model.also && /made for this app/.test(s.model.src)));
+  assert.ok(st.find((s) => s.n === "Gold 7").model.src.includes("GUESS"), "Gold 7's facing is a guess – said so in its source line");
+  // upper.alongFronts where a stretch of garages stands further out: 20 garages on one line, the middle five 3 m out in the
+  // lane – the model's front on the line through the fifteen, not dragged out by the five
+  const kf = 0.01, sl = []; for (let i = 0; i < 20; i++) { const x = -95 + i * 10, out = i >= 8 && i <= 12 ? 3 : 0; sl.push({ front: [x, 10 + kf * x - out], floor: 5, width: 10, inward: [0, 1], along: [1, 0] }); }
+  const r = { garages: { slots: sl, top: 4.8 }, footprint: [[-100, 6], [100, 8], [100, 30], [-100, 28]] };
+  const long = () => { const m = new THREE.Group(); m.add(new THREE.Mesh(new THREE.BoxGeometry(200, 10, 20).translate(0, 10, 0), new THREE.MeshStandardMaterial())); return m; };
+  const ua = F.addUpper(new THREE.Group(), r, long(), { file: "t.glb", garageTop: 5, front: 10, length: 200, depth: 20, alongFronts: true });
+  assert.ok(Math.abs(ua.inward[0] + ua.inward[1] * kf) < 1e-9, "square to the fifteen garages' line");
+  const off = ua.info.upperFronts.map(([, e]) => e); assert.ok(off.every((e) => Math.abs(e) < 0.02), "the end garages on the model's front line: " + JSON.stringify(off));
+  // a start-lights gantry model carries a mark where this app's five lamps hang (model.lights): with it in the scene
+  // map3d.js builds no gantry of its own. The four gantries name the face: the grid's side (Red Bull Ring's panel hangs on
+  // the far side: its lamps under the beam, looking back)
+  const ids = ["spa-start-gantry", "silverstone-start-gantry", "interlagos-start-gantry", "red-bull-ring-start-gantry"].map((id) => F.FACILITIES.find((f) => f.id === id).model.lights);
+  assert.ok(ids.every((L) => L && L.y[1] > L.y[0] && L.y[0] > 5 && Math.abs(L.face) === 1)); assert.deepStrictEqual(ids.map((L) => L.face), [1, 1, 1, -1]);
+  // a beam from x 0 to 20, turned a quarter (its +Z to scene +x), at (100, 3, 50); the mark on its +Z face 0.9 m out
+  const holder = new THREE.Group(); holder.position.set(100, 3, 50); holder.rotation.y = Math.PI / 2;
+  const mk = new THREE.Object3D(); mk.position.set(0, 6.5, 0.9 + 0.19); mk.userData = { h: 1.3, face: 1, x0: -0.4, x1: 20.4 }; holder.add(mk); holder.updateMatrixWorld(true);
+  const onMid = F.lampsOnModel(mk);
+  assert.strictEqual(onMid.pos.length, 5); assert.ok(onMid.pos.every((q) => Math.abs(q[0] - 101.09) < 1e-9 && Math.abs(q[1] - 9.5) < 1e-9));
+  assert.ok(Math.abs(onMid.pos[2][2] - 40) < 1e-9 && Math.abs(onMid.pos[1][2] - onMid.pos[2][2]) - 1.4 < 1e-9 && Math.abs(onMid.h - 1.2) < 1e-9, "over the beam's middle, 1.4 m apart: " + JSON.stringify(onMid.pos[2]));
+  assert.ok(Math.abs(Math.sin(onMid.yaw) - 1) < 1e-9, "looking along the model's +Z (scene +x)");
+  // over the track's middle where that is known – kept 3.6 m inside the beam's ends
+  assert.ok(Math.abs(F.lampsOnModel(mk, [80, 44]).pos[2][2] - 44) < 1e-9);
+  assert.ok(Math.abs(F.lampsOnModel(mk, [80, 70]).pos[2][2] - (50 + 0.4 - 3.6)) < 1e-9 && Math.abs(F.lampsOnModel(mk, [80, 20]).pos[2][2] - (50 - 20.4 + 3.6)) < 1e-9);
+  mk.userData.face = -1; assert.ok(Math.abs(Math.sin(F.lampsOnModel(mk).yaw) + 1) < 1e-9, "face −1: looking the other way");
+});

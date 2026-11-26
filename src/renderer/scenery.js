@@ -8,6 +8,7 @@
 // Everything is in the scene frame of map3d.js: x = F1 east (m) − centre, z = −(F1 north − centre), y = up.
 import * as THREE from "./vendor/three.module.js";
 import { auxRuns, ribbonEdges, blendHeight, onJoiningRun } from "./auxroads.js";
+import { PIT_ROADS, onPitRoads } from "./pitroads.js";
 import { buildStands, swapRoles, swapOrigin } from "./stands.js";
 import { classRaster, groundMaterial, fillPolygon, strokeLine } from "./ground.js";
 import { seaRaster } from "./sea.js";
@@ -1076,7 +1077,10 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   // points as v0.46 drew them, a straight piece can cross the lane between two mapped points)
   const inLane = pitLaneOf(pitG);
   const nearPits = inLane ? (x, z) => { const p = pitG.project(x, z); return p.u > pitG.gStart - 80 && p.u < pitG.gEnd + 80 && Math.abs(p.off) < 120; } : null;
-  const near = clipBarrierLines(scene.lines, gf.xz, { cut: (x, z) => (inLane?.(x, z) && "lane") || (corridor.on(x, z, -0.3) && "road"), keep: wallKeep, dense: nearPits, stats: wallStats.final });
+  // (…or on a pit-lane road laid from surveyed lines – pitroads.js –, a metre or more inside its edge: the map's fence
+  // beside Spa's pit entry ran across the road's edge where the lane begins)
+  const pitPlan = opts.venue?.key != null ? PIT_ROADS[opts.venue.key] : null, pitRoad = pitPlan ? onPitRoads(pitPlan, ([la, lo]) => gf.fromLL(la, lo)) : null;
+  const near = clipBarrierLines(scene.lines, gf.xz, { cut: (x, z) => (inLane?.(x, z) && "lane") || (corridor.on(x, z, -0.3) && "road") || (pitRoad?.(x, z, 1) && "pit road"), keep: wallKeep, dense: nearPits, stats: wallStats.final });
   const laneCut = wallStats.final.cut.lane || 0;
   if (pitG) pitG.mapBarrierPointsCut = laneCut;
   let covered = 0;
@@ -1131,6 +1135,8 @@ async function buildReal(api, scene, world, opts, onStep, own) {
     bounds: ext,
     // (development: the drawn terrain's height – its grid triangles, not groundAt – and its cell size: Map3D.groundDiag)
     terrainAt, terrainCell: [W / nx, H / nz], padKeepOut, padWhy: (b) => padWhy?.get(b) ?? null, padAt,
+    // (the height an auxiliary road has at a point: the pit-lane roads laid from surveyed lines lie on it – pitroads.js)
+    roadAt: auxY,
   };
 }
 

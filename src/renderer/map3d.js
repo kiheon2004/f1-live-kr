@@ -47,6 +47,8 @@ import { drsAt, activeAeroAt, aeroLock, zonesFor, zoneSpans, zoneAt, estimateZon
 import { footing } from "./footing.js";
 import { boxDepth, episodeLog, summarise, classifyOverlap, makeTraffic, resetTraffic, stepTraffic, timeJump, TRAFFIC } from "./traffic.js";
 import { createWeather } from "./weather3d.js";
+import { PIT_ROADS, pitRoads, roadHeight, ROAD_LIFT as PIT_ROAD_LIFT } from "./pitroads.js";
+import { lampsOnModel } from "./facilities.js";
 import { updateGameCars, paintGameHud, pitPoint } from "./game/cars3d.js";
 import { createPitCam } from "./game/pitcam.js";
 import { createPitKit } from "./garagekit/pitkit.js";
@@ -356,10 +358,14 @@ function pitModelFor(G) {
 function pitLaneMeshes(m) {
   const g = new THREE.Group(); g.name = "pitLaneSurface";
   const R = world.real, sl = m.st, pos = [], col = [], uv = [], idx = [], line = [], lidx = [];
+  // (a venue whose pit-lane roads are surveyed – pitroads.js PIT_ROADS: the entry road, the lane beyond the garages, the
+  // exit road and the lane's paint are laid from those lines below, in this same tarmac – the car in the pits rides on
+  // them – instead of the two 20 m ends and the one generic line)
+  const A1 = app(), plan = R?.geo?.fromLL && R.terrainAt && sl.length > 1 ? PIT_ROADS[venueOf({ circuitKey: A1.circuitKey?.(), location: A1.location?.() })?.key] || null : null;
   const rows = [];
-  rows.push({ x: sl[0], du: -sl[0].s.width / 2 - 20, end: true });
+  if (!plan) rows.push({ x: sl[0], du: -sl[0].s.width / 2 - 20, end: true });
   for (const x of sl) rows.push({ x, du: 0 });
-  rows.push({ x: sl[sl.length - 1], du: sl[sl.length - 1].s.width / 2 + 20, end: true });
+  if (!plan) rows.push({ x: sl[sl.length - 1], du: sl[sl.length - 1].s.width / 2 + 20, end: true });
   let dist = 0, prev = null;
   for (const r of rows) {
     const s = r.x.s, w = r.x.cs.wall ?? r.x.edge ?? 12, inner = r.x.cs.inner ?? w - 3.5;
@@ -369,7 +375,18 @@ function pitLaneMeshes(m) {
     const v0 = pos.length / 3;
     for (const off of [-0.3, w * 0.5, w]) { pos.push(...P(off, yAt(off))); const c = 0.4; col.push(c, c * 1.01, c * 1.03); uv.push(off / 6, dist / 6); }
     if (v0) for (let k = 0; k < 2; k++) { const a = v0 - 3 + k, b = v0 + k; idx.push(a, b, a + 1, a + 1, b, b + 1); }
-    if (!r.end) { const l0 = line.length / 3; line.push(...P(inner - 0.06, r.x.floor + 0.012), ...P(inner + 0.06, r.x.floor + 0.012)); if (l0) lidx.push(l0 - 2, l0 - 1, l0, l0 - 1, l0 + 1, l0); }
+    if (!r.end && !plan) { const l0 = line.length / 3; line.push(...P(inner - 0.06, r.x.floor + 0.012), ...P(inner + 0.06, r.x.floor + 0.012)); if (l0) lidx.push(l0 - 2, l0 - 1, l0, l0 - 1, l0 + 1, l0); }
+  }
+  let coats = null;
+  if (plan) {
+    const roadY = R.roadAt ? (x, z) => R.roadAt(x, z) + PIT_ROAD_LIFT : (x, z) => { const [s, d] = world.grid.nearest(x, z, 3); return roadHeight(s ? s.p.y : null, R.terrainAt(x, z), d); };
+    // (a line that runs on inside the track's edge – a pit exit line – lies on the track's own surface there)
+    const onTrackY = (x, z) => { const [s] = world.grid.nearest(x, z, 3); if (!s) return null; const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; return l <= edgeOf(s, 1) && l >= edgeOf(s, -1) ? s.p.y + ROAD_LIFT : null; };
+    const pr = pitRoads(plan, ([la, lo]) => R.geo.fromLL(la, lo), roadY, sl.map((x) => ({ front: x.s.front, inward: x.s.inward, width: x.s.width, floor: x.floor, w: x.cs.wall ?? x.edge ?? 12 })), onTrackY);
+    const o = pos.length / 3; pos.push(...pr.tarmac.pos); for (let k = 0; k < pr.tarmac.pos.length / 3; k++) col.push(0.4, 0.404, 0.412); uv.push(...pr.tarmac.uv); for (const i of pr.tarmac.idx) idx.push(o + i);
+    const k0 = pos.length / 3; pos.push(...pr.skirt.pos); for (let k = 0; k < pr.skirt.pos.length / 3; k++) { col.push(0.26, 0.262, 0.268); uv.push(0, (k % 2) * 0.08); } for (const i of pr.skirt.idx) idx.push(k0 + i);   // (the strips' sides)
+    const lo = line.length / 3; line.push(...pr.white.pos); for (const i of pr.white.idx) lidx.push(lo + i);
+    coats = pr.paint; g.userData.pitRoads = pr.info;
   }
   const mk = (p, i, mat, name, c, u) => {
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
@@ -379,6 +396,9 @@ function pitLaneMeshes(m) {
   };
   mk(pos, idx, new THREE.MeshStandardMaterial({ vertexColors: true, map: asphaltTexture(), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, side: THREE.DoubleSide }), "pitLaneTarmac", col, uv);
   mk(line, lidx, new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }), "laneLine");
+  // (the surveyed lane's other paint – pitroads.js: a red band, a green stripe, a pale concrete working lane under the lines)
+  const COAT = { red: 0xb3261e, green: 0x2f8f4e, concrete: 0xb4b1a8 };
+  for (const [c, m] of Object.entries(coats || {})) if (c !== "white" && m.idx.length) mk(m.pos, m.idx, new THREE.MeshStandardMaterial({ color: COAT[c] ?? 0xeeeeea, roughness: c === "concrete" ? 0.85 : 0.6, polygonOffset: true, polygonOffsetFactor: c === "concrete" ? -3 : -4, polygonOffsetUnits: c === "concrete" ? -3 : -4, side: THREE.DoubleSide }), "lanePaint:" + c);
   return g;
 }
 // (the car's state on the steadied tracks at t, or null – they aren't built yet, or it is off them)
@@ -536,7 +556,9 @@ function pitSurfaceY(x, z, y, floor, inRun) {
   if (inRun >= 1) return floor + 0.004;
   const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"), R = world?.real;
   let s = null;
-  if (tm) { surfFrom.set(x, floor + 3, z); surfRay.set(surfFrom, surfDown); surfRay.far = 8; const h = surfRay.intersectObject(tm, false)[0]; if (h) s = h.point.y + 0.004; }
+  // (with surveyed roads in the tarmac – pitroads.js – the surface can lie well over or under the garages' floor: a longer ray)
+  const far = tm?.parent?.userData.pitRoads ? 20 : 3;
+  if (tm) { surfFrom.set(x, floor + far, z); surfRay.set(surfFrom, surfDown); surfRay.far = far * 2 + 2; const h = surfRay.intersectObject(tm, false)[0]; if (h) s = h.point.y + 0.004; }
   if (s == null && R?.groundAt) { const g = R.groundAt(x, z); if (Number.isFinite(g)) s = g + 0.02; }
   if (s == null) return y + (floor + 0.004 - y) * inRun;
   return y + (s - y) * Math.min(1, inRun * 4);
@@ -782,6 +804,7 @@ function pitTeamsInfo() {
 function rebuild() {
   if (!world) return;
   if (world.real) { world.group.remove(world.real.group); disposeReal(world.real); world.real = null; world.occluders = []; releaseShadowRefs(); }
+  if (world.group.getObjectByName("grid")?.userData.gantry === "model") addGrid();   // (its lamps hung on a model just freed: the grid's own gantry again)
   forgetPitTeams();   // (its layer was in the real map just freed)
   for (const k of ["terrain", "trees", "walls"]) if (!world.syn[k].parent) world.group.add(world.syn[k]);
   world.farBase = world.far.material.color.clone().set(0x4f7a3c);
@@ -3234,6 +3257,8 @@ async function loadGeo(w) {
     refreshShadows();
     w.real = built;
     w.occluders = built.occluders;
+    // (a start-lights gantry among the models: the grid's own gantry makes way, its lamps move onto the model – paintGrid)
+    if (w === world && w.gridModel && built.group.getObjectByName("startLightPanel")) addGrid();
     if (built.tunnel?.inside) { const k = kerbs(w.samples, built.tunnel.inside); w.group.remove(w.kerb); disposeGroup(w.kerb); w.kerb = k; w.group.add(k); w.kerbMark = w.samples.kerbMark; }
     applyLighting();
     // credits are listed in the 🛰 지도 panel; only Google's imagery must carry its logo and data credits on the map
@@ -3824,7 +3849,18 @@ function paintGrid(m) {
   const paint = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }));
   paint.receiveShadow = true; paint.name = "gridPaint";
   const g = new THREE.Group(); g.name = "grid"; g.add(paint);
-  {
+  // (a start-lights gantry stands in the scene as a model – facilities.js model.lights: no gantry of this app's own; the
+  // five lamps hang on the model, over the track's middle there)
+  const mark = world.real?.group.getObjectByName("startLightPanel") || null;
+  if (mark) {
+    mark.updateWorldMatrix(true, false); const e = mark.matrixWorld.elements, [ns] = world.grid.nearest(e[12], e[14], 4);
+    const mid = ns ? (edgeOf(ns, 1) + edgeOf(ns, -1)) / 2 : 0, L = lampsOnModel(mark, ns ? [ns.p.x + ns.nor.x * mid, ns.p.z + ns.nor.z * mid] : null), lamps = [];
+    for (const q of L.pos) {
+      const lamp = new THREE.MeshStandardMaterial({ color: 0x180505, emissive: 0xff2a1a, emissiveIntensity: 0.04 }); lamps.push(lamp);
+      const pod = new THREE.Mesh(new THREE.BoxGeometry(0.7, L.h, 0.35), lamp); pod.position.set(q[0], q[1], q[2]); pod.rotation.y = L.yaw; g.add(pod);
+    }
+    g.userData.lamps = lamps; g.userData.gantry = "model";
+  } else {
     // the light gantry over the start line
     F.at(startS, 0, P, D);
     const fx = D[0], fzz = D[1], nx = -D[1], nz = D[0], yaw = Math.atan2(fx, fzz), sx = P[0], sz = P[2], y = P[1], mid = (wl + wr) / 2;
@@ -3843,7 +3879,7 @@ function paintGrid(m) {
       const pod = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.35), lamp);
       pod.position.set(sx + nx * (mid + i * 1.4) - fx * 0.45, y + H - 0.9, sz + nz * (mid + i * 1.4) - fz * 0.45); pod.rotation.y = yaw; g.add(pod);
     }
-    g.userData.lamps = lamps;
+    g.userData.lamps = lamps; g.userData.gantry = "own";
   }
   world.group.add(g);
 }
@@ -4951,7 +4987,7 @@ window.Map3D = {
       const nm = hit ? (() => { let x = hit.object; while (x && !x.name) x = x.parent; return x?.name || hit.object.type; })() : null;
       rows.push([Math.round(u), +toEdge.toFixed(1), +Math.abs(pr.d).toFixed(1), garage, hit ? +hit.distance.toFixed(1) : null, nm, ...(whole && world.real ? [world.real.geo.toLL(o.x, o.z).map((v) => +v.toFixed(6))] : [])]);
     }
-    return JSON.stringify({ ok: true, loc: app().location(), facility: G?.facility || null, len: Math.round(P.len), rows });
+    return JSON.stringify({ ok: true, loc: app().location(), facility: G?.facility || null, len: Math.round(P.len), rows, roads: world.real?.group.getObjectByName("pitLaneSurface")?.userData.pitRoads || null });
   },
   // development: car num against the pit building's garages – along them (u), how far out it is drawn and where the
   // feed has it, its speed, its team's box
@@ -5785,7 +5821,7 @@ window.Map3D = {
     const p1 = world?.gridModel?.slots.get(1), gf = world?.real?.geo, poleLL = p1 && gf ? gf.toLL(p1.x, p1.z).map((v) => +v.toFixed(6)) : null;
     const S = app().src ? startState(app().src, app().t) : null, ctx = S ? startCtxAt(S, app().t) : null;
     const lastLL = (() => { const sl = world?.gridModel?.slots, l = sl?.get(sl.size); return l && gf ? gf.toLL(l.x, l.z).map((v) => +v.toFixed(6)) : null; })();
-    return JSON.stringify({ cost: { avgMs: +(gridCost.ms / Math.max(1, gridCost.frames)).toFixed(3), worstMs: +gridCost.worst.toFixed(2), frames: gridCost.frames }, model: world?.gridInfo || null, poleLL, lastLL, pit: world?.pitInfo || null,
+    return JSON.stringify({ cost: { avgMs: +(gridCost.ms / Math.max(1, gridCost.frames)).toFixed(3), worstMs: +gridCost.worst.toFixed(2), frames: gridCost.frames }, model: world?.gridInfo || null, gantry: world?.group.getObjectByName("grid")?.userData.gantry || null, poleLL, lastLL, pit: world?.pitInfo || null,
       start: ctx ? { t: ctx.t, n: ctx.n, pending: !!ctx.pending, standing: ctx.standing, orderFrom: ctx.orderFrom, order: ctx.order } : null, pitExit: S?.hist.pitExitAt(app().t) ?? null, preStart: f?.preStart ?? null, cars: cs,
       drawn: [...cars.values()].filter((c) => c.obj.visible).length, estimated: [...cars.values()].filter((c) => c.obj.visible && c.est).map((c) => [c.num, c.est.kind, c.est.g, c.est.est]) });
   },

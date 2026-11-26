@@ -151,7 +151,9 @@ export const FACILITIES = [
     // this app draws it (13.9 m) passes between them. Below the beam (6.6 m) only the lights' panel hangs lower, at 5.6 m.
     // `footprint`: its leg on the pit wall only – the beam lies over the track, and rain must fall under it.
     replaces: { names: /^\(no map record makes way\)$/ },
-    model: { file: "rbr_gantry.glb", anchor: [47.220051, 14.76484], heading: 254.85,
+    // `lights`: its dark panel hangs under the beam on the side the cars drive away to; the lamps hang before it, under
+    // the beam, looking back at the grid.
+    model: { file: "rbr_gantry.glb", anchor: [47.220051, 14.76484], heading: 254.85, lights: { y: [5.6, 6.5], z: 0.35, face: -1 },
       footprint: [[47.2200564, 14.7648488], [47.2200494, 14.7648516], [47.2200456, 14.7648312], [47.2200526, 14.7648284]] },
     sources: [
       "src/data/models/rbr_gantry.glb – made for this app (2026-11-24): a plain white portal over the track west of the grid, 22.9 m between its legs, its underside 6.6 m up – its place after aerial imagery, its heights estimated; no lettering; no outside asset",
@@ -394,6 +396,27 @@ export const FACILITIES = [
     },
   },
   {
+    id: "spa-start-gantry", name: "Spa-Francorchamps – the start lights' gantry over the pit straight", kind: "tower",
+    venue: [7], loc: ["Spa-Francorchamps"], years: [2007, null],
+    status: "trial",
+    // A pale lattice across the track at the start line, from beyond the track's far edge to the platform behind the pit
+    // wall, 22.7 m; its light panel hangs over the track on the side the grid looks at. SPA_GANTRY_PLACE
+    // `footprint`: its outer leg only – the beam lies over the track, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spa_gantry.glb", anchor: [50.444189, 5.96487], heading: 150.07, lights: { y: [5.7, 7.0], z: 0.9, face: 1 },
+      footprint: [[50.4441927, 5.9648602], [50.4441962, 5.96487], [50.4441838, 5.9648812], [50.4441802, 5.9648714]] },
+    sources: [
+      "src/data/models/spa_gantry.glb – made for this app (2026-11-26): a pale grey lattice girder on two legs, 22.7 m between them, its underside 6.6 m up, a blank light panel over the track – its place after aerial imagery (the track line's first point lies under it), its heights estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place from aerial imagery; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a pale lattice gantry at the start line (aerial imagery, compared only)"],
+      map: [],
+      inferred: ["its heights (6.6 m under the girder)", "since when it stands"],
+    },
+  },
+  {
     id: "interlagos-start-gantry", name: "Interlagos – the start lights' gantry over the main straight", kind: "tower",
     venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2018, null],
     status: "trial",
@@ -404,7 +427,7 @@ export const FACILITIES = [
     // stand 15.6 m apart). As placed (2025 race): 1.5 m outside either edge; below 6 m only its light panel hangs over the track.
     // `footprint`: its leg on the pit side only – the truss lies over the track, and rain must fall under it.
     replaces: { names: /^\(no map record makes way\)$/ },
-    model: { file: "spo_gantry.glb", anchor: [-23.7040078, -46.6998112], heading: 345.77,
+    model: { file: "spo_gantry.glb", anchor: [-23.7040078, -46.6998112], heading: 345.77, lights: { y: [5.7, 6.9], z: 0.8, face: 1 },
       footprint: [[-23.7040124, -46.6998069], [-23.7040137, -46.6998126], [-23.7040015, -46.699816], [-23.7040001, -46.6998103]] },
     sources: [
       "src/data/models/spo_gantry.glb – made for this app (2026-11-26): a black truss on two legs, 17 m between them, its underside 6.5 m up, a blank light panel over the track on the side the grid looks at – its place along the track after aerial imagery of April 2025 (a dark truss and its shadow) and photographs compared by eye; its heights and its length estimated; no lettering; no outside asset",
@@ -1075,8 +1098,9 @@ export const FACILITIES = [
     // `flat`: the map has this building as 21 parts with their heights – under the model each stops at the garages' top,
     // and the builder's own blade is left out. `fill: false`: the model's ends stand over the built ground floor.
     // `alongFronts`: the builder's own axis – through all 21 parts, the blade's among them – lies off the outline's long
-    // edge; the model stands along the garages' fronts instead.
-    upper: { file: "sil_wing_upper.glb", garageTop: 4.7, front: 15.0, length: 375.9, depth: 25, turned: true, flat: true, fill: false, trial: true, alongFronts: true },
+    // edge; the model stands along the garages' fronts instead. `maxDepth`: the garage level ends at the model's paddock
+    // face (the map's outline is 1.1 m deeper: a ledge at the garages' height ran along the back).
+    upper: { file: "sil_wing_upper.glb", garageTop: 4.7, front: 15.0, length: 375.9, depth: 25, maxDepth: 27.5, turned: true, flat: true, fill: false, trial: true, alongFronts: true },
     sources: [
       "src/data/models/sil_wing_upper.glb – made for this app (2026-11-24): the Wing above the garage level – the white terrace band over the pit lane, a glass floor, the tall hall floor behind glass that leans out to the eaves, a dark roof in four planes with thick white fascias and a red line under the eaves, solar panels, the five cores, the lattice mast with a blank screen, and at the Club end the blade (30 m at its tip), the dark body under it with the glass box of race control, the leaning dark fin and the podium terrace – its plan after OpenStreetMap's outline and its parts with heights, aerial imagery, three Wikimedia Commons photographs compared by eye, nothing copied; published: 390 m long, the blade's tip 30 m, 41 garages, four blocks between the cores; the roof's planes, the door line and nearly every height estimated; no outside asset, no logo or lettering",
       "New Steel Construction, 'Wing heralds new era for famous circuit' (2011): 390 m long; blade 16.5 m at 40°, tip 30 m; 41 garages",
@@ -1158,7 +1182,7 @@ export const FACILITIES = [
     // 5.9 m behind the track's edge; the other 17.4 m beyond the far edge, 2.4 m before the front of the stand there.
     // `footprint`: its leg on the hotel side only – the beam lies over the track, and rain must fall under it.
     replaces: { names: /^\(no map record makes way\)$/ },
-    model: { file: "sil_gantry.glb", anchor: [52.0694701, -1.0224063], heading: 215.14,
+    model: { file: "sil_gantry.glb", anchor: [52.0694701, -1.0224063], heading: 215.14, lights: { y: [6.1, 7.4], z: 0.9, face: 1 },
       footprint: [[52.0694781, -1.0224044], [52.0694739, -1.0223948], [52.0694621, -1.0224082], [52.0694663, -1.0224178]] },
     sources: [
       "src/data/models/sil_gantry.glb – made for this app (2026-11-24): a dark lattice box girder on two legs, 37.3 m between them, its underside 7.0 m up, a blank light panel over the track – its place after aerial imagery, its heights estimated; no lettering; no outside asset",
@@ -2463,17 +2487,22 @@ export function addUpper(g, r, root, U, also = []) {
   // them stands 1.6 m before the garages at one end and as far behind them at the other – Silverstone's Wing)
   let iw = S[0].inward, fit = null;
   if (U.alongFronts && S.length > 2) {
-    const a0 = [iw[1], -iw[0]]; let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
-    for (const sl of S) { const x = sl.front[0] * a0[0] + sl.front[1] * a0[1], y = sl.front[0] * iw[0] + sl.front[1] * iw[1]; n++; sx += x; sy += y; sxx += x * x; sxy += x * y; }
-    const k = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1), l = Math.hypot(1, k);   // (the fronts' line: inward = k × along + c)
-    iw = [(iw[0] - k * a0[0]) / l, (iw[1] - k * a0[1]) / l]; fit = true;
+    // (…through the garages that stand on one line: a stretch of the outline set further out – Spa's roof reaches 3 m over
+    // the lane along its middle 78 m, and the map draws it – is left out of the fit: the line through all of them, then
+    // again through those within 1.5 m of it, twice)
+    const a0 = [iw[1], -iw[0]], XY = S.map((sl) => [sl.front[0] * a0[0] + sl.front[1] * a0[1], sl.front[0] * iw[0] + sl.front[1] * iw[1]]);
+    const lsq = (P) => { let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (const [x, y] of P) { n++; sx += x; sy += y; sxx += x * x; sxy += x * y; } const k = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1); return [k, (sy - k * sx) / n]; };
+    let [k, c] = lsq(XY);
+    for (let it = 0; it < 2; it++) { const res = XY.map(([x, y]) => y - k * x - c).sort((p, q) => p - q), med = res[Math.floor(res.length / 2)], keep = XY.filter(([x, y]) => Math.abs(y - k * x - c - med) < 1.5); if (keep.length >= 3 && keep.length > XY.length / 2) [k, c] = lsq(keep); }
+    const l = Math.hypot(1, k);   // (the fronts' line: inward = k × along + c)
+    fit = { a0, iw0: iw, k, c }; iw = [(iw[0] - k * a0[0]) / l, (iw[1] - k * a0[1]) / l];
   }
   const yaw = Math.atan2(iw[0], iw[1]), ax = [iw[1], -iw[0]];
   const sOf = ([x, z]) => x * ax[0] + z * ax[1], dOf = ([x, z]) => x * iw[0] + z * iw[1];
   let s0 = Infinity, s1 = -Infinity, dBack = -Infinity; for (const q of r.footprint) { const sv = sOf(q); s0 = Math.min(s0, sv); s1 = Math.max(s1, sv); dBack = Math.max(dBack, dOf(q)); }
   let f0 = S[Math.floor(S.length / 2)].front;
-  // (…its front on that line – the fronts' mean distance –, not on the middle garage's own front)
-  if (fit) { const dm = S.reduce((a, sl) => a + dOf(sl.front), 0) / S.length, e = dm - dOf(f0); f0 = [f0[0] + iw[0] * e, f0[1] + iw[1] * e]; }
+  // (…its front on that line, not on the middle garage's own front)
+  if (fit) { const x = f0[0] * fit.a0[0] + f0[1] * fit.a0[1], y = f0[0] * fit.iw0[0] + f0[1] * fit.iw0[1], e = fit.k * x + fit.c - y; f0 = [f0[0] + fit.iw0[0] * e, f0[1] + fit.iw0[1] * e]; }
   const sc = (s0 + s1) / 2, dFront = dOf(f0);
   // (the floors along the building: a least-squares line through the garages' floors)
   let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (const sl of S) { const x = sOf(sl.front) - sc; n++; sx += x; sy += sl.floor; sxx += x * x; sxy += x * sl.floor; }
@@ -2664,7 +2693,25 @@ function placeModel(root, m, gf, groundAt) {
   const footprint = m.footprint?.length >= 3 ? m.footprint.map(([la, lo]) => gf.fromLL(la, lo))
     : [[box.min.x, box.min.z], [box.max.x, box.min.z], [box.max.x, box.max.z], [box.min.x, box.max.z]].map(([x, z]) => { const v = new THREE.Vector3(x, 0, z).applyMatrix4(holder.matrixWorld); return [v.x, v.z]; });
   const wb = new THREE.Box3().setFromObject(holder);
+  // (a start-lights gantry – model.lights: a mark where this app's five start lamps hang on it; with it in the scene
+  // map3d.js builds no gantry of its own – two portals stood some metres apart, review of v0.70's Silverstone pictures)
+  if (m.lights) {
+    const L = m.lights, face = L.face < 0 ? -1 : 1, mk = new THREE.Object3D(); mk.name = "startLightPanel";
+    mk.position.set(0, (L.y[0] + L.y[1]) / 2, L.z + face * 0.19); mk.userData = { h: L.y[1] - L.y[0], face, x0: box.min.x, x1: box.max.x };
+    holder.add(mk); holder.updateMatrixWorld(true);
+  }
   return { object: holder, footprint, top: wb.max.y };
+}
+// Where the five start lamps hang on a gantry model: on the face the entry names (model.lights: { y: [from, to] – the
+// lamps' height –, z – the face they hang on –, face: 1 | −1 – the way they look along the model's +Z }), 1.4 m apart,
+// over the track's middle (`centre` [x, z], the lap line's middle near the gantry) – kept on the beam, 3.6 m inside its
+// ends. marker: the "startLightPanel" mark placeModel leaves. → { pos: five [x, y, z], yaw, h: a lamp box's height }
+export function lampsOnModel(marker, centre = null) {
+  marker.updateWorldMatrix(true, false);
+  const e = marker.matrixWorld.elements, sc = Math.hypot(e[0], e[1], e[2]) || 1, O = [e[12], e[13], e[14]], X = [e[0] / sc, e[2] / sc], f = marker.userData.face;
+  const x0 = marker.userData.x0 * sc, x1 = marker.userData.x1 * sc, lo = Math.min(x0 + 3.6, (x0 + x1) / 2), hi = Math.max(x1 - 3.6, (x0 + x1) / 2);
+  const t = Math.max(lo, Math.min(hi, centre ? (centre[0] - O[0]) * X[0] + (centre[1] - O[2]) * X[1] : (x0 + x1) / 2));
+  return { pos: [-2, -1, 0, 1, 2].map((i) => [O[0] + X[0] * (t + i * 1.4), O[1], O[2] + X[1] * (t + i * 1.4)]), yaw: Math.atan2((e[8] / sc) * f, (e[10] / sc) * f), h: Math.max(0.5, Math.min(1.6, marker.userData.h * sc - 0.1)) };
 }
 
 // ---------- the facilities of one circuit ----------
@@ -2796,6 +2843,13 @@ export const PIT_UPPERS = {
   // wall): the terrain under the roofed street – as far back as the support strip's front, z −36 – is laid at the garages'
   // floor, so the street is level and the strip's walls (down to −10 m; the natural ground at its back was 9.9 m down at
   // the lowest) stand in ground that is never lower than it was.)
+  // Spa-Francorchamps: made with its +Z to the pit lane (`turned`); its door line (z +11.75) on the built garage fronts – on
+  // the line through those that stand on the door line (`alongFronts`): along the middle 78 m the map's outline, and with
+  // it this app's garages, stands 3 m further out, under the model's roof and deck, which reach 5.2 m over the lane there.
+  // The model reaches 12.4 m further at its La Source end (a low annexe) than at the other (`span`); the garage level is
+  // cut to its depth (`maxDepth`: the map's outline takes in the stair towers behind). SPA_UPPER_PLACE
+  7: { file: "spa_pit_upper.glb", garageTop: 4.8, front: 11.75, length: 312.7, depth: 23.5, maxDepth: 23.55, span: [-150.4, 162.3], along: -5.8, fill: false, turned: true, alongFronts: true,
+    src: "src/data/models/spa_pit_upper.glb – Spa-Francorchamps' F1 pit building (2007) over the garages: a dark walkway deck 2.3 m out over the pit lane with tall pale posts at its edge, a glazed first floor, a white roof (9.45 m) – deck and roof 5.2 m out along the middle 78 m –, a dark-roofed south block, a glazed bay under a rising dark roof at the La Source end, five stair towers and a low annexe behind; made for this app (2026-11-26) after OpenStreetMap's outline, aerial imagery and one 2022 photograph compared by eye, nothing copied; every height, the south block's look, the paddock side estimated; no outside asset, no logo or lettering" },
   14: { file: "spo_pit_upper.glb", garageTop: 5.0, front: 9.0, length: 291, depth: 18, backTo: 43.3, along: -6.35, span: [-140, 184.5], fill: false, platform: 36, turned: true,
     src: "src/data/models/spo_pit_upper.glb – Interlagos pit building over the garages with the Operations Centre at its pit-entry end: a terrace with a glass rail and a glass awning, one cream membrane cone over each of the 23 garages, a white mast leaning out over the pit lane at every bay line, a flatter membrane over the paddock street, the support strip behind; the Operations Centre in pale concrete and grey-blue glass (its mural is not shown) – made for this app (2026-11-22) from this app's research notes, OpenStreetMap's outlines (279 × 52 m), aerial imagery (one cone every 12.1 m) and Wikimedia Commons photos compared by eye, nothing copied; published: 23 boxes of 216 m², a six-storey operations centre; every height estimated; no outside asset, no logo or lettering" },
   // (Mexico City: made with its +Z to the pit lane – `turned`. As at Austin the garage doors are on the front of the map's

@@ -168,3 +168,18 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 | `spo_stand_a_3.glb` (0.10 MB, 2,258 triangles) | Interlagos, sector A, piece 3 of 5 from the south: bare concrete steps on the bank (92.7 m, 11–12 steps) | the same |
 | `spo_stand_a_4.glb` (0.10 MB, 2,210 triangles) | Interlagos, sector A, piece 4 of 5 from the south: bare concrete steps on the bank (92.7 m, 11 steps) | the same |
 | `spo_stand_a_5.glb` (0.10 MB, 2,210 triangles) | Interlagos, sector A, piece 5 of 5 from the south: bare concrete steps on the bank (92.7 m, 11 steps) | the same |
+| `spa_pit_upper.glb` (0.07 MB, 1,416 triangles) | Spa-Francorchamps pit building over the garages: the walkway deck over the pit lane, a glazed floor under a white roof, the south block, five stair towers | made for this app, 2026-11-26: OpenStreetMap's outline, aerial imagery and one 2022 photograph compared by eye – nothing copied, no outside asset, no logo or lettering; every height and the south block estimated |
+| `spa_gantry.glb` (0.01 MB, 200 triangles) | Spa-Francorchamps, the start lights' gantry (a pale lattice, 22.7 m, blank panel) | made for this app, 2026-11-26: its place from aerial imagery; heights estimated |
+| `spa_stand_trib_f1.glb` (0.24 MB, 5,474 triangles) | Spa-Francorchamps, grandstand: Gold 1 : Pit (90 m, 25 rows, roofed) | made for this app, 2026-11-26: its plan from OpenStreetMap's outline or this app's traced one and aerial imagery (Esri World Imagery 2025-06-22); rows and height worked out from its depth; seat strips, no single seats |
+| `spa_stand_trib_end.glb` (0.36 MB, 8,152 triangles) | Spa-Francorchamps, grandstand: Gold 2 : GP2 (101 m, 34 rows, roofed) | the same |
+| `spa_stand_silver1.glb` (0.16 MB, 3,550 triangles) | Spa-Francorchamps, grandstand: Silver 1 (121 m, 11 rows, open) | the same |
+| `spa_stand_raidillon.glb` (0.33 MB, 7,368 triangles) | Spa-Francorchamps, grandstand: Gold 3 : Eau-Rouge (130 m, 23 rows, roofed) | the same |
+| `spa_stand_gold8.glb` (0.09 MB, 1,872 triangles) | Spa-Francorchamps, grandstand: Gold 8 (33 m, 23 rows, roofed) | the same |
+| `spa_stand_gold7.glb` (0.04 MB, 864 triangles) | Spa-Francorchamps, grandstand: Gold 7 (20 m, 20 rows, roofed) | the same |
+| `spa_stand_gold7bis.glb` (0.02 MB, 460 triangles) | Spa-Francorchamps, grandstand: Gold 7 Bis (17 m, 10 rows, open) | the same |
+| `spa_stand_gold7ter.glb` (0.11 MB, 2,472 triangles) | Spa-Francorchamps, grandstand: Gold 7 ter : Endurance (67 m, 16 rows, open) | the same |
+| `spa_stand_fanzone.glb` (0.25 MB, 5,656 triangles) | Spa-Francorchamps, grandstand: Fanzone Grandstand (190 m, 11 rows, open) | the same |
+| `spa_stand_gold4a.glb` (0.06 MB, 1,270 triangles) | Spa-Francorchamps, grandstand: Gold 4 : Eau-Rouge (22 m, 23 rows, open) | the same |
+| `spa_stand_gold4b.glb` (0.08 MB, 1,776 triangles) | Spa-Francorchamps, grandstand: Gold 4 : Eau-Rouge (2) (35 m, 24 rows, open) | the same |
+| `spa_stand_gold6.glb` (0.12 MB, 2,578 triangles) | Spa-Francorchamps, grandstand: Gold 6 : Chicane (69 m, 11 rows, roofed) | the same |
+| `spa_stand_speed_corner.glb` (0.21 MB, 4,600 triangles) | Spa-Francorchamps, grandstand: Speed Corner (120 m, 16 rows, open) | the same |
