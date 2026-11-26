@@ -100,7 +100,7 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 | `spo_footbridge.glb` (0.03 MB, 688 triangles) | Interlagos, the footbridge over the track at the south end of the main straight | made for this app, 2026-11-22: its place from OpenStreetMap and aerial imagery; its look and height estimated |
 | `spo_tower.glb` (0.03 MB, 720 triangles) | Interlagos, a white hourglass lattice tower (15 m) – seven stand on the infield lawn east of the Hospitality Center | made for this app, 2026-11-22: places from aerial imagery (± 6 m); height and lattice estimated |
 | `rbr_pit_upper.glb` (0.06 MB, 1,152 triangles) | Red Bull Ring pit building over the garages (from 2026): the first floor behind glass leaning out over the pit lane, white fins, the roof deck, the podium, the grey wedge of race control, the 2026 section and the medical centre | made for this app, 2026-11-24: OpenStreetMap's outline, aerial imagery, press and Wikimedia Commons photos compared by eye – nothing copied, no outside asset, no logo or lettering; the 2026 section's length and every height estimated |
-| `rbr_pit_tents2026.glb` (0.01 MB, 192 triangles) | Red Bull Ring, the four white marquees on the pit building's roof deck (2026 only) | the same |
+| `rbr_pit_tents2026.glb` (0.01 MB, 192 triangles) | Red Bull Ring, the four white marquees on the pit building's roof deck (up to 2026) | the same |
 | `rbr_pit_roof2027.glb` (0.04 MB, 852 triangles) | Red Bull Ring, the glazed roof storey on the pit building (from 2027) | the same; reported for the July 2027 race – its look is a guess, no picture is published |
 | `rbr_gantry.glb` (0.004 MB, 44 triangles) | Red Bull Ring, the start gantry over the main straight (blank) | made for this app, 2026-11-24: its place from aerial imagery; heights estimated |
 | `rbr_sz_centre_c.glb` (0.16 MB, 3,454 triangles) | Red Bull Ring, Start-Ziel grandstand: the middle (sector K) under the wing, with the welcome centre behind | made for this app, 2026-11-24: OpenStreetMap's outline (92 × 37 m), published sizes (wing 92 × 20 m), photos compared by eye – nothing copied; its back and its heights are less sure |
@@ -114,6 +114,57 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 | `rbr_open_t9.glb` (0.20 MB, 4,422 triangles) | Red Bull Ring, open steel stand: T9 (60 m, five blocks) | the same |
 | `rbr_open_t10.glb` (0.30 MB, 6,692 triangles) | Red Bull Ring, open steel stand: T10 (141 m, seven blocks) | the same |
 | `rbr_open_t8.glb` (0.11 MB, 2,396 triangles) | Red Bull Ring, open steel stand: T8 (85 m, 16 rows) | the same |
-| `rbr_open_mitte_ne.glb` (0.25 MB, 5,522 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the half facing north-east | the same |
-| `rbr_open_mitte_sw.glb` (0.17 MB, 3,818 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the half facing south-west | the same |
 | `rbr_open_schoenberg.glb` (0.13 MB, 2,942 triangles) | Red Bull Ring, open steel stand: Schönberg (101 m, 18 rows) | the same |
+| `sil_wing_upper.glb` (0.18 MB, 3,806 triangles) | Silverstone Wing over the garages: the terrace band, the hall floor behind leaning glass, the roof in four planes, the five cores, the mast, the blade, the fin and the podium terrace | made for this app, 2026-11-24: OpenStreetMap's outline and its parts with heights, aerial imagery, three Wikimedia Commons photographs compared by eye – nothing copied, no outside asset, no logo or lettering; the roof's planes, the door line and nearly every height estimated |
+| `sil_hotel.glb` (0.14 MB, 2,938 triangles) | Silverstone, the Hilton Garden Inn opposite the Wing (122 × 20 m, the roof bar under white sails) | made for this app, 2026-11-24: OpenStreetMap's outline, photographs compared by eye; the track face assumed |
+| `sil_skybridge.glb` (0.02 MB, 408 triangles) | Silverstone, the sky bridge from the hotel over the track to the Wing (69.6 m, deck 10 m up) | made for this app, 2026-11-24: its line from OpenStreetMap and aerial imagery; heights estimated; no banners |
+| `sil_gantry.glb` (0.01 MB, 260 triangles) | Silverstone, the start lights' gantry (a dark lattice, 37.3 m, blank panel) | made for this app, 2026-11-24: its place from aerial imagery; heights estimated |
+| `sil_brdc.glb` (0.02 MB, 394 triangles) | Silverstone, the BRDC clubhouse (three white floors with terraces, sails on the roof) | made for this app, 2026-11-24: OpenStreetMap's outline, 2026 photographs compared by eye; heights estimated |
+| `sil_national_pits_w.glb` (0.03 MB, 510 triangles) | Silverstone, the National pits' west garage block (118 m, 19 bays) | made for this app, 2026-11-24: OpenStreetMap's outline, one photograph compared by eye; bays and look estimated |
+| `sil_national_pits_e.glb` (0.03 MB, 532 triangles) | Silverstone, the National pits' east garage block (122 m, 20 bays) | the same |
+| `sil_escapade_unit.glb` (0.01 MB, 162 triangles) | Silverstone, one Escapade trackside residence – stood at 14 places outside Maggotts and Becketts | made for this app, 2026-11-24: OpenStreetMap's 14 outlines (the places), the published description (RIBA Journal 2024); heights estimated |
+| `sil_escapade_club.glb` (0.01 MB, 94 triangles) | Silverstone, the Escapade clubhouse beside the Becketts stand | made for this app, 2026-11-24: OpenStreetMap's outline; its look is a guess |
+| `sil_bridge_wellington.glb` (0.004 MB, 56 triangles) | Silverstone, the service road bridge over the Wellington Straight (26 m, blank) | made for this app, 2026-11-24: its place from OpenStreetMap's road; look and heights estimated |
+| `sil_bridge_hangar.glb` (0.004 MB, 56 triangles) | Silverstone, the service road bridge over the Hangar Straight (48 m, blank) | the same |
+| `sil_stand_hamilton_a.glb` (0.34 MB, 7,630 triangles) | Silverstone, grandstand: Hamilton Straight A (117 m, 26 rows, roofed) | made for this app, 2026-11-24: its plan from OpenStreetMap's outline or one traced from aerial imagery (Esri World Imagery 2025-06-18); rows and height worked out from its depth; navy seat strips, no single seats |
+| `sil_stand_hamilton_b1.glb` (0.11 MB, 2,376 triangles) | Silverstone, grandstand: Hamilton Straight B, the stand in front of the hotel (65 m, 15 rows, open) | the same |
+| `sil_stand_hamilton_b2.glb` (0.15 MB, 3,316 triangles) | Silverstone, grandstand: Hamilton Straight B, the stand north of the hotel (70 m, 20 rows, open) | the same |
+| `sil_stand_abbey.glb` (0.28 MB, 6,376 triangles) | Silverstone, grandstand: Abbey (141 m, 16 rows, roofed) | the same |
+| `sil_stand_farm.glb` (0.21 MB, 4,720 triangles) | Silverstone, grandstand: Farm Curve (from 2027 the George Russell Grandstand) (164 m, 11 rows, open) | the same |
+| `sil_stand_village_a.glb` (0.12 MB, 2,720 triangles) | Silverstone, grandstand: Village A (78 m, 13 rows, open) | the same |
+| `sil_stand_village_b.glb` (0.15 MB, 3,316 triangles) | Silverstone, grandstand: Village B (73 m, 17 rows, roofed) | the same |
+| `sil_stand_the_view.glb` (0.11 MB, 2,472 triangles) | Silverstone, grandstand: The View (67 m, 16 rows, open) | the same |
+| `sil_stand_int_paddock.glb` (0.17 MB, 3,862 triangles) | Silverstone, grandstand: International Paddock (100 m, 12 rows, roofed) | the same |
+| `sil_stand_wellington.glb` (0.06 MB, 1,210 triangles) | Silverstone, grandstand: Wellington (40 m, 11 rows, open) | the same |
+| `sil_stand_luffield_corner.glb` (0.28 MB, 6,248 triangles) | Silverstone, grandstand: Luffield Corner (125 m, 18 rows, roofed) | the same |
+| `sil_stand_luffield_corner_front.glb` (0.15 MB, 3,388 triangles) | Silverstone, grandstand: Luffield Corner (rows in front) (140 m, 8 rows, open) | the same |
+| `sil_stand_luffield.glb` (0.34 MB, 7,684 triangles) | Silverstone, grandstand: Luffield (171 m, 17 rows, roofed) | the same |
+| `sil_stand_luffield_front.glb` (0.14 MB, 3,040 triangles) | Silverstone, grandstand: Luffield (rows in front) (163 m, 6 rows, open) | the same |
+| `sil_stand_woodcote_a.glb` (0.30 MB, 6,824 triangles) | Silverstone, grandstand: Woodcote A (125 m, 21 rows, roofed) | the same |
+| `sil_stand_woodcote_b.glb` (0.21 MB, 4,704 triangles) | Silverstone, grandstand: Woodcote B (87 m, 21 rows, roofed) | the same |
+| `sil_stand_jim_clark.glb` (0.12 MB, 2,504 triangles) | Silverstone, grandstand: Jim Clark (BRDC) (31 m, 16 rows, roofed) | the same |
+| `sil_stand_national.glb` (0.17 MB, 3,832 triangles) | Silverstone, grandstand: National Pits Straight (94 m, 13 rows, roofed) | the same |
+| `sil_stand_stirling_a.glb` (0.04 MB, 784 triangles) | Silverstone, grandstand: Stirling A (29 m, 8 rows, open) | the same |
+| `sil_stand_stirling_b.glb` (0.09 MB, 2,008 triangles) | Silverstone, grandstand: Stirling B (61 m, 9 rows, roofed) | the same |
+| `sil_stand_copse_a.glb` (0.13 MB, 2,884 triangles) | Silverstone, grandstand: Copse A (73 m, 13 rows, roofed) | the same |
+| `sil_stand_copse_a_front.glb` (0.08 MB, 1,780 triangles) | Silverstone, grandstand: Copse A (rows in front) (83 m, 7 rows, open) | the same |
+| `sil_stand_copse_b.glb` (0.09 MB, 2,014 triangles) | Silverstone, grandstand: Copse B (56 m, 11 rows, roofed) | the same |
+| `sil_stand_copse_c.glb` (0.12 MB, 2,578 triangles) | Silverstone, grandstand: Copse C (69 m, 11 rows, roofed) | the same |
+| `sil_stand_copse_c_front.glb` (0.17 MB, 3,694 triangles) | Silverstone, grandstand: Copse C / D (rows in front) (170 m, 7 rows, open) | the same |
+| `sil_stand_copse_d.glb` (0.07 MB, 1,560 triangles) | Silverstone, grandstand: Copse D (38 m, 16 rows, open) | the same |
+| `sil_stand_silverstone_six.glb` (0.10 MB, 2,270 triangles) | Silverstone, grandstand: Silverstone Six (BRDC) (38 m, 25 rows, open) | the same |
+| `sil_stand_becketts.glb` (0.46 MB, 10,440 triangles) | Silverstone, grandstand: Becketts (208 m, 19 rows, roofed) | the same |
+| `sil_stand_chapel.glb` (0.13 MB, 2,988 triangles) | Silverstone, grandstand: Chapel (86 m, 13 rows, open) | the same |
+| `sil_stand_club_a.glb` (0.13 MB, 2,856 triangles) | Silverstone, grandstand: Club A (65 m, 19 rows, open) | the same |
+| `sil_stand_club_corner.glb` (0.38 MB, 8,520 triangles) | Silverstone, grandstand: Club Corner (161 m, 21 rows, roofed) | the same |
+| `sil_stand_vale.glb` (0.30 MB, 6,728 triangles) | Silverstone, grandstand: Vale (149 m, 19 rows, open) | the same |
+| `sil_stand_landostand.glb` (1.54 MB, 34,790 triangles) | Silverstone, grandstand: the Landostand as rebuilt for 2026 (323 m, 11–40 rows, open) | the same; its plan is not published – the 2025 blocks' fronts joined: an estimate |
+| `rbr_pit_upper_2025.glb` (0.05 MB, 1,032 triangles) | Red Bull Ring pit building over the garages as it stood up to 2025: the 30 boxes and the wedge of race control, before the 2026 extension | made for this app, 2026-11-24: the same sources as rbr_pit_upper.glb; the old medical centre east of it is not shown |
+| `rbr_open_mitte_abc.glb` (0.17 MB, 3,842 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the north-western block (sectors A–C, 56 rows) – facing south-west | made for this app, 2026-11-24 (second version): its plan from the outline and aerial imagery, rows and facing after the spectator guide (oversteer48.com); heights worked out from its depth |
+| `rbr_open_mitte_def.glb` (0.14 MB, 3,050 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the south-eastern block (sectors D–F, 44 rows) – facing south-west | the same |
+| `spo_gantry.glb` (0.01 MB, 284 triangles) | Interlagos, the start lights' gantry over the main straight (a black truss, 17 m, blank panel) | made for this app, 2026-11-26: its place along the track from aerial imagery of April 2025; heights and length estimated |
+| `spo_stand_a_1.glb` (0.16 MB, 3,494 triangles) | Interlagos, sector A, piece 1 of 5 from the south: bare concrete steps on the bank (92.7 m, 14–24 steps) | made for this app, 2026-11-26: its front line from OpenStreetMap's outline (the northern 251 m) and Esri World Imagery of April 2025 (the southern 213 m, ± 4 m); steps and heights worked out from its depth |
+| `spo_stand_a_2.glb` (0.11 MB, 2,438 triangles) | Interlagos, sector A, piece 2 of 5 from the south: bare concrete steps on the bank (92.7 m, 12–14 steps) | the same |
+| `spo_stand_a_3.glb` (0.10 MB, 2,258 triangles) | Interlagos, sector A, piece 3 of 5 from the south: bare concrete steps on the bank (92.7 m, 11–12 steps) | the same |
+| `spo_stand_a_4.glb` (0.10 MB, 2,210 triangles) | Interlagos, sector A, piece 4 of 5 from the south: bare concrete steps on the bank (92.7 m, 11 steps) | the same |
+| `spo_stand_a_5.glb` (0.10 MB, 2,210 triangles) | Interlagos, sector A, piece 5 of 5 from the south: bare concrete steps on the bank (92.7 m, 11 steps) | the same |

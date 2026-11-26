@@ -36,6 +36,24 @@ test("a map building under a listed stand's name (OSM's 'V1' at Suzuka) becomes 
   assert.deepStrictEqual(twin.map((x) => [x.kind, x.name, !!x.underTraced]), [["grandstand", "Club Corner", false], ["grandstand", null, true]]);
 });
 
+test("v0.70: a map building under a stand's traced plan keeps what it is on the map and the plans' seasons (a plan listed for some seasons swallows it in those only)", () => {
+  const { standBuildings } = require("../src/main/scene.js");
+  // one stand rebuilt between two seasons: a block up to 2025, the whole stand from 2026 – and a plan without seasons
+  const list = [{ n: "Lando", poly: box(0, 20, 40, 40), yr: [2018, 2025] }, { n: "Lando", poly: box(0, 20, 200, 50), yr: [2026, null] }, { n: "Other", poly: box(300, 20, 360, 40) }];
+  const b = (name, x0, x1, kind = "block") => ({ kind, name, h: 8, min: 0, pts: box(x0, 22, x1, 38) });
+  const blds = [b("Stowe A", 100, 180), b("Stowe C", 5, 35), b("shed", 310, 350, "shed"), b("far", 500, 540)];
+  standBuildings(blds, list);
+  assert.deepStrictEqual(blds.map((x) => [x.kind, !!x.underTraced, x.kindOwn || null]), [["grandstand", true, "block"], ["grandstand", true, "block"], ["grandstand", true, "shed"], ["block", false, null]]);
+  assert.deepStrictEqual(blds[0].underTracedYr, [[[2026, null], 1]], "under the 2026 plan only: in 2025 it is the map's building again (scenery.js)");
+  assert.deepStrictEqual(blds[1].underTracedYr.map(([yr, share]) => JSON.stringify(yr) + " " + share).sort(), ["[2018,2025] 1", "[2026,null] 1"], "under both seasons' plans (each counted, not only the first found): never a building");
+  assert.deepStrictEqual(blds[2].underTracedYr, [[null, 1]], "a plan without seasons: every season");
+  // the rule scenery.js applies with the session's season: the plans of that season cover 0.4 of it or more
+  const yrOn = (year) => (yr) => !yr || !year || !(year < yr[0] || (yr[1] != null && year > yr[1]));
+  const kindIn = (x, year) => (x.underTracedYr.reduce((a, [yr, share]) => a + (yrOn(year)(yr) ? share : 0), 0) >= 0.4 ? "grandstand" : x.kindOwn);
+  assert.deepStrictEqual([2024, 2025, 2026, 2030, null].map((y) => kindIn(blds[0], y)), ["block", "block", "grandstand", "grandstand", "grandstand"]);
+  assert.deepStrictEqual([2024, 2026].map((y) => kindIn(blds[1], y)), ["grandstand", "grandstand"]); assert.strictEqual(kindIn(blds[2], 2019), "grandstand");
+});
+
 test("grandstands: outlines are built as deep as they are; a stand in the way of a big building says which", async () => {
   const { buildStands, rayCross } = await import("../src/renderer/stands.js");
   assert.deepStrictEqual(rayCross(0, 0, 0, 1, box(-5, 10, 5, 22)), [10, 22]);

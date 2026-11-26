@@ -283,7 +283,10 @@ export function buildStands({ scene, gf, world, groundAt, corridor, street, year
   // (two listed entries can share a name, each marking an outline of its own – Mexico City's "Grada 1" is the long main
   // body and a low stand west of it: an outline's entry is the one whose osmAt lies in it, or nearest it; with one
   // entry of that name, or none marked, the last one – as before)
-  const listedBy = { get: (name, b = null) => listedEntry(sameName.get(name), b?.pts) };
+  // (…and of several entries of one name those of this season first: a stand rebuilt between two seasons is two entries
+  // with their own years – Silverstone's Landostand, four blocks up to 2025 and one stand round Stowe from 2026; the
+  // last entry of the name alone had every outline of the other season's skipped as "not in <year>")
+  const listedBy = { get: (name, b = null) => { const all = sameName.get(name), now = all?.filter(inYear); return listedEntry(now?.length ? now : all, b?.pts); } };
   // (largest first: an outline mostly inside one already taken – the west part of Spielberg's main stand mapped
   // again on its own, Shanghai's B2 twice – is that stand, not another one)
   const areaOf = (b) => Math.abs(polyArea(b.pts.map(gf.xz)));

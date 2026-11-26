@@ -675,6 +675,12 @@ async function buildReal(api, scene, world, opts, onStep, own) {
 
   // Covered stretches of the lap (tunnel.js – Monaco's tunnel), planned before the terrain (kept out of the shore's bank)
   // and the buildings, which the map has standing over them (drawn from the slab's top up, not cleared off the road)
+  // (a map building under a listed stand's traced plan – scene.js standBuildings – is that stand's own structure only in
+  // the seasons the plan is listed for (the plans of the session's season cover 0.4 of it or more, as scene.js asks of all
+  // plans); in the others it is the building the map has. The scene record is kept between builds, so its kind is set
+  // both ways each time)
+  { const yrOn = (yr) => !yr || !opts.year || !(opts.year < yr[0] || (yr[1] != null && opts.year > yr[1]));
+    for (const b of scene.buildings) if (b.underTracedYr) b.kind = b.underTracedYr.reduce((a, [yr, share]) => a + (yrOn(yr) ? share : 0), 0) >= 0.4 ? "grandstand" : b.kindOwn; }
   const tplan = planTunnels({ venueKey: opts.venue?.key, samples: world.samples, geo: gf, buildings: scene.buildings });
   // terrain mesh
   onStep?.("지형 만드는 중");
@@ -966,7 +972,8 @@ async function buildReal(api, scene, world, opts, onStep, own) {
           if (opts.isCurrent && !opts.isCurrent()) { obj.userData.onDispose?.(); break; }   // (this build's world is gone)
           // (model.drape: a long stand on ground that is not level follows it – facilities.js drapeModel: Interlagos' D, 173 m
           // round the Senna S on ground 5 m higher at one end)
-          if (M.drape) drapeModel(obj, groundAt, at.y - (M.lift || 0));
+          // (drape: { along } – the ground read along a line of the model's own, its front edge: Interlagos' sector A)
+          if (M.drape) drapeModel(obj, groundAt, at.y - (M.lift || 0), M.drape.along || null);
           // (model.tilt: a long level stand beside a track that climbs leans along its length with the ground on the line
           // `tilt` m before its origin – facilities.js tiltModel: Red Bull Ring's Start-Ziel)
           if (Number.isFinite(M.tilt)) { tiltModel(obj, groundAt, M.tilt, M.lift || 0); at.y = obj.position.y; }
@@ -978,7 +985,7 @@ async function buildReal(api, scene, world, opts, onStep, own) {
             const pl = placement({ anchor: A.at, heading: A.heading || 0, lift: A.lift || 0 }, gf, groundAt), pa = { x: pl.position[0], y: pl.position[1], z: pl.position[2], dir: [Math.sin(pl.rotationY), Math.cos(pl.rotationY)] };
             const piece = await modelAt(A.file, (f) => api.geo.model(f), pa);
             if (opts.isCurrent && !opts.isCurrent()) { piece.userData.onDispose?.(); break; }
-            if (A.drape) drapeModel(piece, groundAt, pa.y - (A.lift || 0));
+            if (A.drape) drapeModel(piece, groundAt, pa.y - (A.lift || 0), A.drape.along || null);
             if (Number.isFinite(A.tilt)) { tiltModel(piece, groundAt, A.tilt, A.lift || 0); pa.y = piece.position.y; }
             piece.name = "standModel:" + sw.name + ":" + A.file; stands.group.add(piece);
             stands.info.models.push({ n: sw.name, file: A.file, back: 0, at: [+pa.x.toFixed(1), +pa.y.toFixed(1), +pa.z.toFixed(1)] });

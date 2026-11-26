@@ -66,7 +66,8 @@ test("the shipped model files: listed, present, and passing the app's own model 
   for (const c of Object.values(stands.circuits || stands)) for (const s of c?.stands || []) if (s.model) { assert.ok(s.model.file && (Number.isFinite(s.model.frontAt) || (Array.isArray(s.model.at) && Number.isFinite(s.model.heading))), s.n + ": on the stand's front line (frontAt) or at a place of its own (at, heading)"); assert.ok(s.model.src, s.n + ": its source is recorded"); files.push(s.model.file);
     for (const a of s.model.also || []) { assert.ok(a.file && Array.isArray(a.at) && Number.isFinite(a.heading), s.n + ": each further piece at a place of its own"); files.push(a.file); } }
   for (const f of F.FACILITIES) if (f.upper) { assert.strictEqual(f.builder, "pitBuilding", f.id); for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(f.upper[k] > 0, f.id + " " + k); assert.ok(f.sources.some((x) => x.includes(f.upper.file)), f.id + ": the model's source is recorded"); files.push(f.upper.file);
-    for (const a of f.upper.also || []) { assert.ok(f.sources.some((x) => x.includes(a.file)), f.id + ": " + a.file + " – its source is recorded"); files.push(a.file); } }
+    // (upper.also: more files in the model's frame by season; upper.seasons: another file for the building itself in some seasons)
+    for (const a of [...(f.upper.also || []), ...(f.upper.seasons || [])]) { assert.ok(f.sources.some((x) => x.includes(a.file)), f.id + ": " + a.file + " – its source is recorded"); files.push(a.file); } }
   for (const [key, u] of Object.entries(F.PIT_UPPERS)) { for (const k of ["garageTop", "length", "depth"]) assert.ok(u[k] > 0, key + " " + k); assert.ok(u.front >= 0, key + " front (0: the model's origin on the garage front line – Madring)"); assert.ok(u.src && u.src.includes(u.file), key + ": the model's source is recorded"); files.push(u.file); }
   // (a facility that is a model of its own – a tower, the team villas: v0.60)
   for (const f of F.FACILITIES) if (f.model?.file) { assert.ok(f.sources.some((x) => x.includes(f.model.file)), f.id + ": the model's source is recorded"); files.push(f.model.file); }
@@ -92,6 +93,8 @@ test("the shipped model files: listed, present, and passing the app's own model 
   assert.ok(files.includes("jed_team.glb"), "Jeddah's team building"); assert.strictEqual(F.PIT_UPPERS[149].fillBack, 8, "Jeddah: the ground floor is filled under the long body only – the rear blocks stand from the ground");
   assert.ok(["sha_stand_c.glb", "sha_pit_upper.glb", "sha_wing.glb", "sha_pavilion.glb", "sha_lotus_row.glb"].every((f) => files.includes(f)), "Shanghai's main straight and the canopy rows over H and K");
   assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-pavilion-\d+$/.test(f.id)).length, 26, "26 team pavilions"); assert.strictEqual(F.FACILITIES.filter((f) => /^shanghai-wing-/.test(f.id)).length, 2);
+  assert.ok(files.includes("rbr_pit_upper_2025.glb") && files.includes("sil_wing_upper.glb") && new Set(files.filter((f) => /^sil_/.test(f))).size === 44, "v0.70: Red Bull Ring's pit building up to 2025; Silverstone's 44 files");
+  assert.ok(["rbr_open_mitte_abc.glb", "rbr_open_mitte_def.glb", "spo_gantry.glb", ...[1, 2, 3, 4, 5].map((k) => "spo_stand_a_" + k + ".glb")].every((f) => files.includes(f)) && !files.includes("rbr_open_mitte_ne.glb") && !files.includes("rbr_open_mitte_sw.glb"), "v0.70: Mitte's two blocks facing south-west (the first pair is gone); Interlagos' start gantry and sector A in five pieces");
   for (const f of files) { assert.match(f, /^[a-z0-9_-]+\.glb$/); assert.strictEqual(F.checkGlb(new Uint8Array(fs.readFileSync(path.join(dir, f)))), null, f); }
   assert.deepStrictEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".glb")).sort(), [...new Set(files)].sort(), "no model file ships unused");
 });
@@ -484,22 +487,27 @@ test("v0.68: Interlagos – the pit building on the garages this app builds, thr
   assert.ok(Math.abs(pm - 10) < 1.2 && pl < 5.5 && pl < pm, `mid ${pm} at the middle of 3 … 17, low ${pl} near the bottom`);
 });
 
-// v0.69: Red Bull Ring – the pit building's model from 2026 with what stands on its roof deck by season (upper.from,
-// upper.also), a stand of several pieces (model.also), the start gantry, every stand of the lap as a model.
-test("v0.69: Red Bull Ring – the pit building from 2026 (marquees in 2026, the roof storey from 2027), Start-Ziel in three pieces, the gantry, Nord roofed, ten open stands", async () => {
+// v0.69: Red Bull Ring – the pit building's model with what stands on its roof deck by season (upper.also), a stand of
+// several pieces (model.also), the start gantry, every stand of the lap as a model. (v0.70: up to 2025 the building
+// before its extension is a model too – upper.seasons; `upper.from` is gone from the entry. Mitte's two blocks face
+// south-west, side by side – the first pair of files, back to back, was wrong.)
+test("v0.69: Red Bull Ring – the pit building (up to 2025 before its extension, marquees up to 2026, the roof storey from 2027), Start-Ziel in three pieces, the gantry, Nord roofed, ten open stands", async () => {
   const THREE = await import("../src/renderer/vendor/three.module.js");
   const F = await import("../src/renderer/facilities.js");
   const dir = path.join(__dirname, "..", "src", "data", "models"), files = fs.readdirSync(dir);
   const stands = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Spielberg.stands;
-  const open = ["steiermark", "rb_s", "rb_n", "t3", "t9", "t10", "t8", "mitte_ne", "mitte_sw", "schoenberg"].map((k) => "rbr_open_" + k + ".glb");
-  assert.ok(["rbr_pit_upper.glb", "rbr_pit_tents2026.glb", "rbr_pit_roof2027.glb", "rbr_gantry.glb", "rbr_sz_centre_c.glb", "rbr_sz_east_c.glb", "rbr_sz_west_c.glb", "rbr_nord.glb", ...open].every((f) => files.includes(f)));
-  // the pit building: one entry – the builder's building up to 2025, the model on its garages from 2026
+  const open = ["steiermark", "rb_s", "rb_n", "t3", "t9", "t10", "t8", "mitte_abc", "mitte_def", "schoenberg"].map((k) => "rbr_open_" + k + ".glb");
+  assert.ok(["rbr_pit_upper.glb", "rbr_pit_upper_2025.glb", "rbr_pit_tents2026.glb", "rbr_pit_roof2027.glb", "rbr_gantry.glb", "rbr_sz_centre_c.glb", "rbr_sz_east_c.glb", "rbr_sz_west_c.glb", "rbr_nord.glb", ...open].every((f) => files.includes(f)));
+  // the pit building: one entry – a model on its garages in every season: up to 2025 the building before its extension
+  // (upper.seasons: a file of its own in the same frame), from 2026 the lengthened one
   const pits = F.FACILITIES.find((f) => f.id === "red-bull-ring-pits"), U = pits.upper;
-  assert.ok(U.file === "rbr_pit_upper.glb" && U.from === 2026 && U.turned === true && U.garageTop === 4.2 && U.front === 12.8 && U.maxDepth === 23.6 && pits.builder === "pitBuilding" && pits.years[0] === 2011);
+  assert.ok(U.file === "rbr_pit_upper.glb" && !("from" in U) && U.turned === true && U.garageTop === 4.2 && U.front === 12.8 && U.maxDepth === 23.6 && pits.builder === "pitBuilding" && pits.years[0] === 2011);
+  assert.deepStrictEqual(U.seasons, [{ to: 2025, file: "rbr_pit_upper_2025.glb", fill: false, span: [-111, 169.5] }]);
   const on = (y) => U.also.filter((a) => F.upperAlsoIn(a, y)).map((a) => a.file);
   assert.deepStrictEqual(on(2026), ["rbr_pit_tents2026.glb"], "2026: the marquees");
   assert.deepStrictEqual(on(2027), ["rbr_pit_roof2027.glb"], "2027: the roof storey"); assert.deepStrictEqual(on(2030), ["rbr_pit_roof2027.glb"]);
   assert.deepStrictEqual(on(null), ["rbr_pit_roof2027.glb"], "no season: the newest state");
+  assert.deepStrictEqual(on(2025), ["rbr_pit_tents2026.glb"], "up to 2025 too: the marquees stand on the building before its extension");
   // more files in the upper model's frame: the same origin, turned with it
   const slots = []; for (let k = 0; k < 10; k++) slots.push({ front: [-45 + k * 10, 10], floor: 5, width: 10, inward: [0, 1], along: [1, 0] });
   const r = { garages: { slots, top: 4.8 }, footprint: [[-50, 10], [50, 10], [50, 28], [-50, 28]] };
@@ -526,8 +534,107 @@ test("v0.69: Red Bull Ring – the pit building from 2026 (marquees in 2026, the
   const ends = new THREE.Box3().setFromObject(long); assert.ok(Math.abs(ends.min.y - (7 - 50 * Math.sin(Math.atan(0.03)))) < 0.01, "the low end's foot is on the ground there");
   assert.ok(sz.file === "rbr_sz_centre_c.glb" && sz.heading === 344.85 && sz.also.length === 2 && sz.also.every((a) => a.heading === 344.85 && /^rbr_sz_(east|west)_c\.glb$/.test(a.file)) && !sz.drape);
   assert.ok(by("North (Nord)").roof === 1 && by("North (Nord)").model.file === "rbr_nord.glb" && !by("North (Nord)").model.drape);
-  const mitte = by("Center (Mitte)").model; assert.ok(mitte.file === "rbr_open_mitte_ne.glb" && mitte.also[0].file === "rbr_open_mitte_sw.glb" && mitte.also[0].drape === true && Math.abs(((mitte.also[0].heading - mitte.heading + 360) % 360) - 180) < 1e-6, "two halves back to back");
-  for (const n of ["Red Bull (T1 end)", "Red Bull (T3 end)", "Steiermark Tribüne", "T3", "Schönberg", "Center (Mitte)", "T8", "T9", "T10"]) assert.ok(by(n).model.drape === true && /^rbr_open_/.test(by(n).model.file) && by(n).roof === 0, n);
+  const mitte = by("Center (Mitte)").model; assert.ok(mitte.file === "rbr_open_mitte_abc.glb" && mitte.also.length === 1 && mitte.also[0].file === "rbr_open_mitte_def.glb" && mitte.heading === 231.58 && mitte.also[0].heading === 231.58, "one stand of two blocks side by side, both facing south-west (v0.70; the first pair stood back to back)");
+  // on a hillside that rises behind it: the ground read along each block's front line (its +Z edge), not under every vertex
+  assert.deepStrictEqual([mitte.drape.along, mitte.also[0].drape.along], [[[-31.25, 21.74], [31.25, 21.74]], [[-29.15, 17.01], [29.15, 17.01]]]);
+  for (const n of ["Red Bull (T1 end)", "Red Bull (T3 end)", "Steiermark Tribüne", "T3", "Schönberg", "T8", "T9", "T10"]) assert.ok(by(n).model.drape === true && /^rbr_open_/.test(by(n).model.file) && by(n).roof === 0, n);
   assert.deepStrictEqual(by("Schönberg").yr, [2026, null], "Schönberg stays a stand of 2026 and later");
 });
 
+// v0.70: Silverstone – the Wing's storeys over the builder's garages (upper.flat; upper.trial on a verified entry), every
+// stand of the lap as a model, a stand rebuilt between two seasons as two entries of one name (the Landostand), 23 more
+// buildings; Red Bull Ring's pit building before its 2026 extension by season (upper.seasons). A pit building's model along
+// the garage fronts (upper.alongFronts); a model following the ground along its own front line (drape: { along }).
+test("v0.70: Silverstone – the Wing's upper storeys, 33 stand files, the Landostand one stand from 2026, Farm Curve under its 2027 name, 23 more buildings; Red Bull Ring's pit building up to 2025", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const F = await import("../src/renderer/facilities.js");
+  const { buildStands } = await import("../src/renderer/stands.js");
+  const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));
+  const sil = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Silverstone.stands;
+  assert.strictEqual(files.filter((f) => /^sil_/.test(f)).length, 44); assert.ok(!files.includes("sil_media_suite.glb"), "the Woodcote Media Suite's model is held back: it was made as the bounding box of the mapped building"); assert.ok(files.includes("rbr_pit_upper_2025.glb"));
+  // the Wing: the entry stays verified and the builder's; the model over its garages is a trial of its own
+  const wing = F.FACILITIES.find((f) => f.id === "silverstone-wing"), W = wing.upper;
+  assert.ok(wing.status === "permanent" && wing.builder === "pitBuilding" && W.file === "sil_wing_upper.glb" && W.turned === true && W.front === 15 && W.garageTop === 4.7 && W.flat === true && W.fill === false && W.trial === true);
+  // 23 more entries, each a trial model; the gantry and the two road bridges take no map building away
+  const at2 = F.FACILITIES.filter((f) => f.venue?.includes(2));
+  assert.strictEqual(at2.length, 24); assert.ok(at2.every((f) => f === wing || (f.status === "trial" && /^sil_[a-z_]+\.glb$/.test(f.model.file))));
+  const esc = at2.filter((f) => /^silverstone-escapade-\d+$/.test(f.id));
+  assert.ok(esc.length === 14 && esc.every((f) => f.model.file === "sil_escapade_unit.glb" && f.replaces.within === 2 && f.years[0] === 2024) && new Set(esc.map((f) => f.model.anchor.join())).size === 14);
+  for (const id of ["silverstone-start-gantry", "silverstone-wellington-bridge", "silverstone-hangar-bridge"]) { const f = at2.find((x) => x.id === id); assert.ok(!f.replaces.names.test("") && !f.replaces.names.test("Silverstone Wing") && f.model.footprint.length === 4, id + ": nothing makes way; its footprint is a leg, not the span over the track"); }
+  assert.ok(at2.find((f) => f.id === "silverstone-skybridge").model.footprint.length === 4 && at2.find((f) => f.id === "silverstone-hotel").years[0] === 2022);
+  // the stands: each at a place of its own, heading 180 (no frontAt); 33 files; the roofs as listed
+  const by = (n) => sil.filter((s) => s.n === n), one = (n) => by(n)[0], withModel = sil.filter((s) => s.model);
+  assert.strictEqual(withModel.length, 29);
+  assert.ok(withModel.every((s) => !("frontAt" in s.model) && [s.model, ...(s.model.also || [])].every((m) => /^sil_stand_[a-z0-9_]+\.glb$/.test(m.file) && m.heading === 180 && Array.isArray(m.at))));
+  assert.strictEqual(new Set(withModel.flatMap((s) => [s.model.file, ...(s.model.also || []).map((a) => a.file)])).size, 33);
+  const roofed = ["Hamilton Straight A", "Abbey", "Village B", "International Paddock", "Luffield Corner", "Luffield", "Woodcote A", "Woodcote B", "Jim Clark (BRDC)", "National Pits Straight", "Stirling B", "Copse A", "Copse B", "Copse C", "Becketts", "Club Corner"];
+  for (const s of withModel) assert.strictEqual(s.roof, roofed.includes(s.n) ? 1 : 0, s.n);
+  // the Landostand: four blocks up to 2025, one stand from 2026 – two entries share the name
+  const lando = by("Landostand");
+  assert.deepStrictEqual(lando.map((s) => [s.yr, s.model?.file || null]), [[[2018, 2025], null], [[2026, null], "sil_stand_landostand.glb"]]);
+  assert.ok(["Landostand (west)", "Landostand (south)", "Landostand (trackside)"].every((n) => by(n).length === 1 && one(n).yr[1] === 2025 && !one(n).model) && lando[1].seats === 16373);
+  // 'Hamilton Straight B' is two stands: one entry, a second file; the low rows in front of four stands likewise
+  const hb = one("Hamilton Straight B").model; assert.ok(by("Hamilton Straight B").length === 1 && hb.file === "sil_stand_hamilton_b2.glb" && hb.also.length === 1 && hb.also[0].file === "sil_stand_hamilton_b1.glb");
+  for (const [n, f] of [["Luffield Corner", "sil_stand_luffield_corner_front.glb"], ["Luffield", "sil_stand_luffield_front.glb"], ["Copse A", "sil_stand_copse_a_front.glb"], ["Copse C", "sil_stand_copse_c_front.glb"]]) assert.strictEqual(one(n).model.also[0].file, f);
+  // Farm Curve up to 2026, the George Russell Grandstand from 2027: the same outline and model
+  const farm = one("Farm Curve"), gr = one("George Russell Grandstand");
+  assert.deepStrictEqual([farm.yr, gr.yr], [[2018, 2026], [2027, null]]); assert.ok(farm.model.file === "sil_stand_farm.glb" && gr.model.file === farm.model.file && gr.model.at.join() === farm.model.at.join() && JSON.stringify(gr.poly) === JSON.stringify(farm.poly));
+  // two entries of one name with their own seasons: this season's is the outline's entry, whichever is listed last
+  const w = world(), groundAt = () => 0;
+  const old = { n: "Lando", poly: box(-60, 20, -20, 35), img: "t", yr: [2018, 2025] }, neu = { n: "Lando", poly: box(-100, 20, 100, 50), img: "t", yr: [2026, null], model: { file: "l.glb", at: [0, 35], heading: 180 } };
+  const farmS = { n: "Farm", poly: box(160, 20, 240, 32), img: "t", yr: [2018, 2026], model: { file: "f.glb", at: [200, 26], heading: 180 } }, george = { ...farmS, n: "George", yr: [2027, null] };
+  const run = (year, list = [old, neu, farmS, george]) => buildStands({ scene: { areas: [], lines: [], buildings: [], stands: { list } }, gf, world: w, groundAt, corridor: corridor(w), street: false, year });
+  const got = (r) => [r.info.list.map((s) => [s.n, Math.round(s.len)]).sort(), r.swaps.map((s) => s.model.file).sort()];
+  assert.deepStrictEqual(got(run(2025)), [[["Farm", 80], ["Lando", 40]], ["f.glb"]], "2025: the old block is built (it was skipped as 'not in 2025'), no model");
+  assert.deepStrictEqual(got(run(2026)), [[["Farm", 80], ["Lando", 200]], ["f.glb", "l.glb"]]);
+  assert.deepStrictEqual(got(run(2027)), [[["George", 80], ["Lando", 200]], ["f.glb", "l.glb"]]);
+  assert.deepStrictEqual(got(run(2025, [neu, old]))[0], [["Lando", 40]]);
+  // Red Bull Ring: up to 2025 another file in the same frame (upper.seasons – upperFor); from 2026 and without a season the entry's own
+  const pits = F.FACILITIES.find((f) => f.id === "red-bull-ring-pits"), U = pits.upper, old25 = F.upperFor(U, 2025);
+  assert.ok(old25.file === "rbr_pit_upper_2025.glb" && old25.fill === false && !("to" in old25) && ["garageTop", "front", "length", "depth", "maxDepth", "along", "turned", "also"].every((k) => old25[k] === U[k]));
+  assert.deepStrictEqual(old25.span, [-111, 169.5]); assert.ok(old25.span[1] - old25.span[0] < U.length, "shorter: without the 2026 section");
+  assert.strictEqual(F.upperFor(U, 2011).file, "rbr_pit_upper_2025.glb"); assert.strictEqual(F.upperFor(U, 2026), U); assert.strictEqual(F.upperFor(U, null), U, "no season: the newest state"); assert.strictEqual(F.upperFor(undefined, 2025), undefined);
+  const S = { file: "new.glb", front: 10, seasons: [{ to: 2019, file: "old.glb", fill: false }, { from: 2020, to: 2022, file: "mid.glb" }] };
+  assert.deepStrictEqual([2018, 2019, 2020, 2022, 2023, null].map((y) => F.upperFor(S, y).file), ["old.glb", "old.glb", "mid.glb", "mid.glb", "new.glb", "new.glb"]);
+  assert.ok(F.upperFor(S, 2021).front === 10 && !("from" in F.upperFor(S, 2021)) && F.upperFor(S, 2019).fill === false && F.upperFor(S, 2021).fill === undefined);
+  // a shorter model in the longer one's frame: no fill walls (fill: false); the footprint – the rain cover – is the model
+  // (span) and the built garage level beside it, from the garages' front line
+  const slots = []; for (let k = 0; k < 10; k++) slots.push({ front: [-45 + k * 10, 10], floor: 5, width: 10, inward: [0, 1], along: [1, 0] });
+  const r = { garages: { slots, top: 4.8 }, footprint: [[-50, 10], [50, 10], [50, 28], [-50, 28]] };
+  const root = new THREE.Group(); root.add(new THREE.Mesh(new THREE.BoxGeometry(100, 14, 26).translate(20, 12, 0), new THREE.MeshStandardMaterial()));
+  const g = new THREE.Group(), up = F.addUpper(g, r, root, { file: "t.glb", garageTop: 5, front: 13, length: 140, depth: 26, fill: false, span: [-30, 70] }), xs = up.footprint.map((p) => p[0]);
+  assert.ok(Math.abs(Math.min(...xs) + 50) < 1e-6 && Math.abs(Math.max(...xs) - 70) < 1e-6, "the garages built past the model's end (−50 … −30) are under the cover too");
+  const deep = F.addUpper(new THREE.Group(), r, root.clone(true), { file: "t.glb", garageTop: 5, front: 15, length: 100, depth: 20 }).footprint.map((p) => p[1]);
+  assert.ok(Math.abs(Math.min(...deep) - 10) < 1e-6, "a model whose box begins behind the garage fronts (front 15, depth 20): the cover from the front line");
+  let fills = 0; g.traverse((o) => { if (o.name === "upperFill") fills++; }); assert.strictEqual(fills, 0);
+  // every stand file follows the ground: flat as the old airfield is, Vale falls 4 m along its length and the Landostand's
+  // origin lies off its body
+  assert.ok(withModel.every((s) => [s.model, ...(s.model.also || [])].every((m) => m.drape === true)));
+  // the hotel on a terrace at the middle height; the old pits, by the track, on the lowest ground under them
+  assert.strictEqual(at2.find((f) => f.id === "silverstone-hotel").model.level, "mid");
+  for (const id of ["silverstone-national-pits-west", "silverstone-national-pits-east"]) assert.strictEqual(at2.find((f) => f.id === id).model.ground, "lowest", id);
+  // the Wing's model along the garage fronts (upper.alongFronts): garages whose fronts lie on a line turned from their own axis
+  assert.strictEqual(W.alongFronts, true);
+  const kf = 0.01, sl2 = []; for (let i = 0; i < 20; i++) { const x = -95 + i * 10; sl2.push({ front: [x, 10 + kf * x], floor: 5, width: 10, inward: [0, 1], along: [1, 0] }); }
+  const r2 = { garages: { slots: sl2, top: 4.8 }, footprint: [[-100, 9], [100, 11], [100, 30], [-100, 28]] };
+  const long = () => { const m = new THREE.Group(); m.add(new THREE.Mesh(new THREE.BoxGeometry(200, 10, 20).translate(0, 10, 0), new THREE.MeshStandardMaterial())); return m; };
+  const ua = F.addUpper(new THREE.Group(), r2, long(), { file: "t.glb", garageTop: 5, front: 10, length: 200, depth: 20, alongFronts: true });
+  assert.ok(ua.info.upperFronts.every(([, e]) => Math.abs(e) < 0.02) && Math.abs(ua.inward[0] + ua.inward[1] * kf) < 1e-9, "its front line on the garages' fronts from end to end, square to their line");
+  const ub = F.addUpper(new THREE.Group(), r2, long(), { file: "t.glb", garageTop: 5, front: 10, length: 200, depth: 20 });
+  assert.ok(Math.abs(ub.info.upperFronts[1][1] - ub.info.upperFronts[0][1] - 1.9) < 0.02 && ub.inward[0] === 0, "(along the builder's own axis – as before – the end garages stand 1.9 m apart across the model's front line)");
+  // drape: { along } – the ground read on the model's own front line: a bank the ground already holds is not built twice.
+  // A block 40 m long and 10 m deep behind its front line, turned a quarter; the ground climbs along it and banks up behind it
+  const bank = (x, z) => 20 + (z - 50) * 0.05 + Math.max(0, 100 - x) * 0.5;
+  const block = () => { const h = new THREE.Group(); h.add(new THREE.Mesh(new THREE.BoxGeometry(40, 2, 10).translate(0, 1, -5), new THREE.MeshStandardMaterial())); h.position.set(100, 20, 50); h.rotation.y = Math.PI / 2; return h; };
+  const span = (h) => { h.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(h); return [b.min.y, b.max.y]; };
+  const onLine = block(); F.drapeModel(onLine, bank, 20, [[-20, 0], [20, 0]]);
+  assert.ok(Math.abs(span(onLine)[0] - 19) < 1e-6 && Math.abs(span(onLine)[1] - 23) < 1e-6, "it follows the climb along its front (± 1 m) and keeps its own height across");
+  const under = block(); F.drapeModel(under, bank, 20);
+  assert.ok(Math.abs(span(under)[1] - 28) < 1e-6, "(read under each vertex, its back stands 5 m up the bank)");
+  // Interlagos: sector A in five pieces, each following the ground along its own front line; the start gantry over the track
+  const spoA = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits["São Paulo"].stands.find((s) => s.n === "A").model, pcs = [spoA, ...spoA.also];
+  assert.deepStrictEqual(pcs.map((p) => p.file).sort(), [1, 2, 3, 4, 5].map((k) => "spo_stand_a_" + k + ".glb"));
+  assert.ok(pcs.every((p) => p.heading === 180 && Array.isArray(p.at) && Array.isArray(p.drape.along) && p.drape.along.length >= 2 && p.drape.along.every((q) => q.length === 2) && !("tilt" in p)));
+  const sg = F.FACILITIES.find((f) => f.id === "interlagos-start-gantry");
+  assert.ok(sg.model.file === "spo_gantry.glb" && sg.model.heading === 345.77 && sg.venue[0] === 14 && !sg.replaces.names.test("") && sg.model.footprint.length === 4 && !sg.model.level);
+});

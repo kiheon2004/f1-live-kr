@@ -124,9 +124,13 @@ function standBuildings(buildings, list) {
     const st = Math.max(1, Math.sqrt(((bb[2] - bb[0]) * (bb[3] - bb[1])) / 400));
     for (let x = bb[0] + st / 2; x < bb[2]; x += st) for (let y = bb[1] + st / 2; y < bb[3]; y += st) {
       if (!inside(x, y, b.pts)) continue;
-      all++; const h = near.find(({ L }) => inside(x, y, L.poly)); if (h) { under++; cnt.set(h.L, (cnt.get(h.L) || 0) + 1); }
+      all++; let hit = false; for (const { L } of near) if (inside(x, y, L.poly)) { hit = true; cnt.set(L, (cnt.get(L) || 0) + 1); } if (hit) under++;
     }
-    if (all && under / all >= 0.4) { b.kind = "grandstand"; b.standOf = [...cnt].sort((p, q) => q[1] - p[1])[0][0].n; b.underTraced = true; n++; }
+    // (kindOwn, underTracedYr: what it is on the map, and for each plan it lies under that plan's seasons and the share of
+    // the building under it – a plan listed for some seasons only swallows it in those: scenery.js gives it its own kind back
+    // in the seasons whose plans cover under 0.4 of it. Silverstone's "Stowe A" lies under the Landostand of 2026 and
+    // later; up to 2025 it is the building the map has)
+    if (all && under / all >= 0.4) { b.kindOwn = b.kind; b.underTracedYr = [...cnt].map(([L, c]) => [L.yr || null, +(c / all).toFixed(3)]); b.kind = "grandstand"; b.standOf = [...cnt].sort((p, q) => q[1] - p[1])[0][0].n; b.underTraced = true; n++; }
   }
   return n;
 }
