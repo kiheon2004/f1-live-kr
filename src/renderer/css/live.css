@@ -526,18 +526,18 @@ body.home-on .status-bar, body.home-on .layout, body.home-on .player, body.home-
 .home { display: grid; min-height: 0; overflow: hidden; position: relative; z-index: 10; background: var(--bg-0); }   /* (above notes the 3D view hangs on the page itself) */
 .home-main { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 25vw, 400px); min-height: 0; }
 .home-left { display: grid; grid-template-rows: minmax(160px, 1fr) auto; gap: 20px; padding: 20px; min-height: 0; min-width: 0; }
-/* the globe: a bordered board; the ball itself is drawn by globe.js (blue, a light edge, grid lines) */
+/* the globe: a bordered board; the ball is globe.js's SVG picture (blue, a 3 px light edge, the design's fixed grid) */
 .home-globe { position: relative; min-height: 0; overflow: hidden; cursor: grab; border: var(--bw) solid var(--line); background: var(--bg-1); }
 .home-globe.dragging { cursor: grabbing; }
-.home-globe canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.home-globe .globe-ball { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .home-markers { position: absolute; inset: 0; pointer-events: none; }
 /* a marker: a red dot with a dark edge; the selected one a larger yellow dot with its yellow sticker label */
 .gm { position: absolute; left: 0; top: 0; pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; transform: translate(-7px, -7px); will-change: transform; min-height: 0; }
 .gm:hover { background: none; }
-.gm i { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--c-red); border: 2px solid var(--text-inv); }
+.gm i { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--c-red); border: 2px solid var(--text-inv); }
 .gm b { font: 400 12px/14px var(--font-num); color: var(--text-1); position: absolute; left: 11px; top: -9px; min-width: 16px; height: 16px; background: var(--bg-0); border: 1px solid var(--line); text-align: center; padding: 0 3px; }
 .gm span { background: var(--c-yellow); color: var(--c-yellow-ink); border: 2px solid var(--text-inv); padding: 4px 10px; font-size: var(--fs-lg); font-weight: var(--fw-bold); line-height: 1.3; white-space: nowrap; box-shadow: var(--shadow-sticker); }
-.gm.sel i { width: 24px; height: 24px; margin: -4px; background: var(--c-yellow); }
+.gm.sel i { width: 22px; height: 22px; margin: -4px; background: var(--c-yellow); }
 .gm.sel { z-index: 3; } .gm:hover { z-index: 4; }
 .gm:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .gm-pick { position: absolute; z-index: 6; pointer-events: auto; background: var(--bg-0); border: var(--bw) solid var(--line); padding: var(--s-2); box-shadow: var(--shadow-float); min-width: 240px; }

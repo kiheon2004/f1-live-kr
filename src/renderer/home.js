@@ -69,8 +69,8 @@ function globeShow() {
   if (!globe) { globe = makeGlobe(); placeMarkers(); const it = itemById(S.sel); if (it?.lat != null) globe.flyTo(it.lat, it.lon); }
   globe.start();
 }
-// Hidden: the loop stops at once; the GPU side (renderer, ~85 MB of texture with its mipmaps) is let go after a minute
-// in the timing screen – coming back within that is instant, later it's rebuilt (the texture is a local file).
+// Hidden: the loop stops at once; the globe itself (its picture, camera and markers – small since v0.71, no GPU side) is
+// let go after a minute in the timing screen and rebuilt when the home screen comes back.
 function globeHide() {
   globe?.stop();
   clearTimeout(globeDisposeTimer);

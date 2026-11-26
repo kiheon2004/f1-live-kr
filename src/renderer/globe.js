@@ -1,21 +1,22 @@
-// The home screen's globe: a flat blue ball with a light edge, a latitude/longitude grid and the season's circuits as
-// markers (v0.71: one colour, no photograph – the Blue Marble texture is no longer drawn).
-// Ownership: a Globe owns its renderer (one WebGL context), scene, camera, controls, the Earth texture, a
-// ResizeObserver, its pointer listeners and its marker elements; dispose() frees every one of them (disposeGroup for the
-// scene's geometries, materials and the texture, then the renderer and its context). It draws only while started (the
-// home screen shown) and only when something moved – the slow turn, a drag, a fly-to, a resize –; stop() ends the loop.
-// The 3D circuit view (map3d.js) is stopped by the app while the home screen is up, so the two never draw together.
-// Longitude 180°W is at the equirectangular left edge in HomeData.latLonToVec3; the ball itself has no map.
+// The home screen's globe, drawn like the design's picture: an upright flat blue ball with a light 3 px edge and a
+// fixed grid – two wide and two tall ellipses and the two centre lines – and the season's circuits as markers on it.
+// The ball and its grid are one SVG picture that does not turn; what turns is the globe underneath it – a camera
+// around a unit sphere (three.js maths only: no WebGL context, nothing rendered): dragging, zooming, the slow turn and
+// flying to a race move the markers over the ball, and a marker on the far side is hidden.
+// Ownership: a Globe owns its SVG element, the camera and its controls, a ResizeObserver, its listeners and its marker
+// elements; dispose() frees every one of them. It works only while started (the home screen shown) and only when
+// something moved – the slow turn, a drag, a fly-to, a resize –; stop() ends the loop.
+// Longitude 180°W is at the equirectangular left edge in HomeData.latLonToVec3.
 import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
-import { disposeGroup } from "./dispose.js";
 
-const BLUE = 0x3d4dff, EDGE = 0xf2efe6;   // (css/tokens.css --c-blue, --line)
-const EDGE_PX = 3, GRID_DEG = 30, GRID_PX = 1.5;
+const BLUE = "#3d4dff", EDGE = "#f2efe6";   // (css/tokens.css --c-blue, --line)
+const R = 166;                               // the ball's radius in the picture's own units (as in the design)
 const H = () => window.HomeData;
+const SVG = "http://www.w3.org/2000/svg";
 
 export class Globe {
-  // host: the element the canvas fills; markersEl: the layer for the marker buttons. opts: onPick(ids, x, y) when a
+  // host: the element the picture fills; markersEl: the layer for the marker buttons. opts: onPick(ids, x, y) when a
   // marker or cluster is clicked (not dragged), onError(message), onFirstFrame(), labelOf(ids) → the selected label
   constructor(host, markersEl, opts = {}) {
     this.host = host; this.markersEl = markersEl; this.opts = opts;
@@ -27,54 +28,34 @@ export class Globe {
     this.fly = null;
   }
 
-  // → true when the globe can draw (WebGL there), else false (opts.onError told why); the list works either way
+  // → true when the globe can draw, else false (opts.onError told why); the list works either way
   init() {
-    if (this.renderer) return true;
+    if (this.svg) return true;
     try {
-      if (this.opts.forceFail) throw new Error("WebGL 사용 안 함 (개발용 시험)");
-      this.canvas = document.createElement("canvas");
-      this.host.prepend(this.canvas);
-      this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: "low-power" });
+      if (this.opts.forceFail) throw new Error("그리기 사용 안 함 (개발용 시험)");
+      const el = (name, attrs, parent) => { const n = document.createElementNS(SVG, name); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); parent?.appendChild(n); return n; };
+      this.svg = el("svg", { class: "globe-ball", role: "img", "aria-label": "개최지 지구본" });
+      this.ball = el("g", {}, this.svg);
+      const keep = { "vector-effect": "non-scaling-stroke" };   // (the edge stays 3 px and the grid 1.5 px at any zoom)
+      el("circle", { r: R, fill: BLUE, stroke: EDGE, "stroke-width": 3, ...keep }, this.ball);
+      const grid = el("g", { fill: "none", stroke: EDGE, "stroke-opacity": 0.4, "stroke-width": 1.5 }, this.ball);
+      for (const [rx, ry] of [[R, 60], [R, 120], [60, R], [120, R]]) el("ellipse", { rx, ry, ...keep }, grid);
+      el("line", { x1: -R, y1: 0, x2: R, y2: 0, ...keep }, grid);
+      el("line", { x1: 0, y1: -R, x2: 0, y2: R, ...keep }, grid);
+      this.host.prepend(this.svg);
     } catch (e) {
-      this.canvas?.remove(); this.canvas = null; this.renderer = null;
-      this.opts.onError?.(`지구본을 그릴 수 없어요 (${e.message || "WebGL"}). 오른쪽 목록으로 고를 수 있어요.`);
+      this.svg?.remove(); this.svg = null;
+      this.opts.onError?.(`지구본을 그릴 수 없어요 (${e.message || "오류"}). 오른쪽 목록으로 고를 수 있어요.`);
       return false;
     }
-    const R = this.renderer;
-    R.setPixelRatio(Math.min(2, devicePixelRatio || 1));
-    R.outputColorSpace = THREE.SRGBColorSpace;
-    this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
-    // (looking at Europe at first – most races; the season's own first race is flown to once the list is in)
-    const start = H().latLonToVec3(30, 15, 4.25);   // (the ball takes about 85 % of the board's height)
+    // (looking at Europe at first – most races; the season's own race is flown to once the list is in. At this distance
+    // the ball takes about 85 % of the board's height, as in the design)
+    const start = H().latLonToVec3(30, 15, 4.25);
     this.camera.position.set(start.x, start.y, start.z);
-    this.scene.add(this.camera);
-    this.group = new THREE.Group(); this.scene.add(this.group);
-    // the ball: one flat colour (unlit), and behind it a slightly larger light ball whose rim shows as the 3 px edge
-    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), new THREE.MeshBasicMaterial({ color: BLUE }));
-    this.group.add(this.earth);
-    this.edge = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), new THREE.MeshBasicMaterial({ color: EDGE, side: THREE.BackSide }));
-    this.group.add(this.edge);
-    // latitude/longitude lines every 30° as thin bands on the ball (a GL line is one device pixel – too thin to read):
-    // each band is GRID_PX wide at the size the ball is first shown, and keeps to the ball as it is zoomed
-    const pos = [], r = 1.002, seg = 120, half = (GRID_PX / 2) / 170;   // (radians: ≈ 1.5 px on a 170 px ball)
-    const P = (lat, lon) => { const v = H().latLonToVec3(lat, lon, r); return [v.x, v.y, v.z]; };
-    const quad = (a, b, c, d) => pos.push(...a, ...b, ...c, ...a, ...c, ...d);
-    const hd = (half * 180) / Math.PI;
-    for (let lat = -60; lat <= 60; lat += GRID_DEG) for (let i = 0; i < seg; i++) {
-      const l0 = -180 + (360 * i) / seg, l1 = -180 + (360 * (i + 1)) / seg;
-      quad(P(lat - hd, l0), P(lat - hd, l1), P(lat + hd, l1), P(lat + hd, l0));
-    }
-    for (let lon = -180; lon < 180; lon += GRID_DEG) for (let i = 0; i < seg / 2; i++) {
-      const a0 = -90 + (180 * i) / (seg / 2), a1 = -90 + (180 * (i + 1)) / (seg / 2);
-      // (a meridian's band keeps its width towards the poles: the longitude step grows as the circle shrinks)
-      const w = (a) => hd / Math.max(0.02, Math.cos((a * Math.PI) / 180));
-      quad(P(a0, lon - w(a0)), P(a1, lon - w(a1)), P(a1, lon + w(a1)), P(a0, lon + w(a0)));
-    }
-    const gridGeo = new THREE.BufferGeometry(); gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    this.group.add(new THREE.Mesh(gridGeo, new THREE.MeshBasicMaterial({ color: EDGE, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide })));
+    this.camera.lookAt(0, 0, 0);
 
-    this.controls = new OrbitControls(this.camera, this.canvas);
+    this.controls = new OrbitControls(this.camera, this.svg);
     Object.assign(this.controls, { enablePan: false, enableDamping: true, dampingFactor: 0.08, rotateSpeed: 0.45, zoomSpeed: 0.6, minDistance: 1.6, maxDistance: 6 });
     this.controls.addEventListener("change", () => { this.dirty = true; });
     // the slow turn stops for good at the first touch (no animation the user has to wait out)
@@ -89,18 +70,18 @@ export class Globe {
   on(target, type, fn, opt) { target.addEventListener(type, fn, opt); this.listeners.push([target, type, fn, opt]); }
 
   resize() {
-    if (!this.renderer) return;
+    if (!this.svg) return;
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
-    this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.dirty = true;
+    this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.dirty = true;
   }
-  // the ball's radius on screen in CSS pixels (its silhouette is a circle: the camera always looks at its centre)
+  // the ball's radius on screen in CSS pixels (its outline is a circle: the camera always looks at its centre)
   radiusPx() {
     const d = this.camera.position.length(), h = Math.max(1, this.host.clientHeight);
     return ((h / 2) * Math.tan(Math.asin(Math.min(0.999, 1 / d)))) / Math.tan((this.camera.fov * Math.PI) / 360);
   }
 
   start() {
-    if (!this.renderer || this.running) return;
+    if (!this.svg || this.running) return;
     this.running = true; this.stats.started++; this.dirty = true; this.last = performance.now();
     cancelAnimationFrame(this.raf);
     this.raf = requestAnimationFrame((t) => this.frame(t));
@@ -130,11 +111,17 @@ export class Globe {
     if (!this.dirty) return;
     this.lastDraw = now; this.stats.idleFrames = (this.stats.idleFrames || 0) + (idle ? 1 : 0);
     this.dirty = false;
-    this.edge.scale.setScalar(1 + EDGE_PX / Math.max(40, this.radiusPx()));   // (the light rim: 3 px at any zoom)
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
     this.stats.frames++;
     this.layoutMarkers();
     if (this.stats.frames === 1) this.opts.onFirstFrame?.();
+  }
+  // the picture: centred on the board, as large as the globe is seen from the camera's distance
+  draw() {
+    this.camera.updateMatrixWorld();   // (no renderer does it: the markers are projected with this camera)
+    const w = this.host.clientWidth, h = this.host.clientHeight;
+    const tr = `translate(${(w / 2).toFixed(1)} ${(h / 2).toFixed(1)}) scale(${(this.radiusPx() / R).toFixed(4)})`;
+    if (this._tr !== tr) { this.ball.setAttribute("transform", tr); this._tr = tr; }
   }
 
   // places: [{ key, lat, lon, ids, label }] – one per spot (HomeData.placeGroups); selected: the selected race's id
@@ -144,7 +131,7 @@ export class Globe {
     for (const [k, el] of this.markerEls) if (!keep.has(k)) { el.remove(); this.markerEls.delete(k); }
     for (const p of places) p.v = H().latLonToVec3(p.lat, p.lon, 1.004);
     this.dirty = true;
-    if (!this.renderer) this.markersEl.replaceChildren();
+    if (!this.svg) this.markersEl.replaceChildren();
   }
   select(id) { this.selected = id; this.dirty = true; }
 
@@ -181,7 +168,7 @@ export class Globe {
       const label = sel ? this.opts.labelOf?.(this.selected) || "" : "";
       const html = `<i></i>${ids.length > 1 ? `<b>${ids.length}</b>` : ""}${label ? `<span>${label.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))}</span>` : ""}`;
       if (el._html !== html) { el.innerHTML = html; el._html = html; el.classList.toggle("sel", sel); el.title = places.map((p) => p.title || "").filter(Boolean).join("\n"); el.setAttribute("aria-label", el.title || "서킷"); }
-      const tr = `translate(${(c.x - 9).toFixed(1)}px, ${(c.y - 9).toFixed(1)}px)`;
+      const tr = `translate(${(c.x - 7).toFixed(1)}px, ${(c.y - 7).toFixed(1)}px)`;
       if (el._tr !== tr) { el.style.transform = tr; el._tr = tr; }
       if (el.hidden) el.hidden = false;
     }
@@ -190,7 +177,7 @@ export class Globe {
 
   // turn to face a spot (0.7 s, or at once when motion is reduced); the slow turn stops
   flyTo(lat, lon) {
-    if (!this.renderer || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    if (!this.svg || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
     this.autoRotate = false;
     const dist = this.camera.position.length(), t = H().latLonToVec3(Math.max(-60, Math.min(60, lat)), lon, dist);
     const to = new THREE.Vector3(t.x, t.y, t.z);
@@ -199,8 +186,7 @@ export class Globe {
   }
 
   info() {
-    const r = this.renderer;
-    return r ? { geometries: r.info.memory.geometries, textures: r.info.memory.textures, programs: r.info.programs?.length ?? null, calls: r.info.render.calls, triangles: r.info.render.triangles, ...this.stats, running: this.running, texture: false, markers: this.markerEls.size } : { disposed: true, ...this.stats };
+    return this.svg ? { webgl: false, ...this.stats, running: this.running, texture: false, markers: this.markerEls.size } : { disposed: true, ...this.stats };
   }
 
   dispose() {
@@ -211,9 +197,7 @@ export class Globe {
     this.controls?.dispose(); this.controls = null;
     for (const el of this.markerEls.values()) el.remove();
     this.markerEls.clear();
-    if (this.scene) disposeGroup(this.scene);
-    if (this.renderer) { this.renderer.dispose(); this.renderer.forceContextLoss(); }
-    this.canvas?.remove();
-    this.renderer = this.scene = this.camera = this.canvas = this.earth = this.edge = this.group = null;
+    this.svg?.remove();
+    this.svg = this.ball = this.camera = null; this._tr = null;
   }
 }
