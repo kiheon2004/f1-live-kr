@@ -183,3 +183,47 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 | `spa_stand_gold4b.glb` (0.08 MB, 1,776 triangles) | Spa-Francorchamps, grandstand: Gold 4 : Eau-Rouge (2) (35 m, 24 rows, open) | the same |
 | `spa_stand_gold6.glb` (0.12 MB, 2,578 triangles) | Spa-Francorchamps, grandstand: Gold 6 : Chicane (69 m, 11 rows, roofed) | the same |
 | `spa_stand_speed_corner.glb` (0.21 MB, 4,600 triangles) | Spa-Francorchamps, grandstand: Speed Corner (120 m, 16 rows, open) | the same |
+| `mza_pit_upper.glb` (0.18 MB, 3,952 triangles) | Monza, the Palazzina Box over the garages: leaning dark glass in silver mullions, a white sun-screen, the terrace, a glazed drum at either end | made for this app, 2026-11-26: OpenStreetMap's outline, aerial imagery and Commons photographs compared by eye – nothing copied, no outside asset, no logo or lettering; heights, the glass's lean, the drums' place estimated |
+| `mza_pit_canopy.glb` (0.13 MB, 2,892 triangles) | Monza, the long white canopy on the pit building's terrace (21 frames, eaves 13 m, crown 15.5 m) | made for this app, 2026-11-26: aerial imagery and one photograph compared by eye; sizes estimated |
+| `mza_hospitality.glb` (0.07 MB, 1,510 triangles) | Monza, the Hospitality Building: three glazed floors, a terrace, a thin white roof in three ridges | made for this app, 2026-11-26: its plan from OpenStreetMap; look and heights estimated |
+| `mza_medical.glb` (0.01 MB, 158 triangles) | Monza, the Centro Medico: two low white blocks | made for this app, 2026-11-26: its plan from OpenStreetMap; look estimated |
+| `mza_finish_gantry.glb` (0.10 MB, 2,190 triangles) | Monza, the lattice gantry before the control line (47 m on three legs, a blank board) | made for this app, 2026-11-26: place and span from aerial imagery; heights estimated |
+| `mza_tower.glb` (0.04 MB, 736 triangles) | Monza, a 1955 tower (Torre Sud / Torre Nord: the same file at two places): glazed floors in a silver grid, 9 × 9 m, 21 m | made for this app, 2026-11-26: after this app's research note and photographs compared by eye; place from a map point |
+| `mza_stand_laterale_destra.glb` (0.63 MB, 14,210 triangles) | Monza, grandstand: 26A/26B/26C Laterale Destra (220 m, 28 rows, roofed) | made for this app, 2026-11-26: its plan the map's rectangle (OpenStreetMap); rows and height worked out from its depth; blue seat strips, no single seats |
+| `mza_stand_centrale.glb` (0.18 MB, 4,034 triangles) | Monza, grandstand: 1 Centrale (68 m, 27 rows, roofed) | the same |
+| `mza_stand_laterale_sinistra.glb` (0.20 MB, 4,310 triangles) | Monza, grandstand: 4 Laterale Sinistra (74 m, 25 rows, roofed) | the same |
+| `mza_stand_piscina.glb` (0.11 MB, 2,380 triangles) | Monza, grandstand: 5 Piscina (83 m, 11 rows, open) | the same |
+| `mza_stand_vedano.glb` (0.27 MB, 5,966 triangles) | Monza, grandstand: 24 Vedano (145 m, 16 rows, roofed) | the same |
+| `mza_stand_parabolica_int_a.glb` (0.07 MB, 1,510 triangles) | Monza, grandstand: 23 Parabolica Interna (59 m, 10 rows, open) | the same |
+| `mza_stand_parabolica_int_b.glb` (0.05 MB, 970 triangles) | Monza, grandstand: 23 Parabolica Interna (38 m, 8 rows, open) | the same |
+| `mza_stand_garden.glb` (0.10 MB, 2,146 triangles) | Monza, grandstand: Tribuna Garden (72 m, 11 rows, open) | the same |
+| `mza_stand_biassono.glb` (0.06 MB, 1,300 triangles) | Monza, grandstand: 7 Biassono (50 m, 10 rows, open) | the same |
+| `mza_stand_alta_a.glb` (0.12 MB, 2,746 triangles) | Monza, grandstand: 6 Alta Velocità (91 m, 12 rows, open) | the same |
+| `mza_stand_alta_b.glb` (0.12 MB, 2,746 triangles) | Monza, grandstand: 6 Alta Velocità (90 m, 12 rows, open) | the same |
+| `mza_stand_alta_c.glb` (0.07 MB, 1,516 triangles) | Monza, grandstand: 6 Alta Velocità (51 m, 12 rows, open) | the same |
+| `mza_stand_prima_variante.glb` (0.43 MB, 9,760 triangles) | Monza, grandstand: 8A/8B Prima Variante Esterna (146 m, 31 rows, open) | the same |
+| `mza_stand_parabolica.glb` (0.15 MB, 3,238 triangles) | Monza, grandstand: 22 Parabolica (82 m, 15 rows, roofed) | the same |
+| `mza_stand_lat_parabolica_a.glb` (0.11 MB, 2,452 triangles) | Monza, grandstand: 21E Laterale Parabolica (71 m, 13 rows, open) | the same |
+| `mza_stand_lat_parabolica_b.glb` (0.07 MB, 1,516 triangles) | Monza, grandstand: 21D Laterale Parabolica (52 m, 12 rows, open) | the same |
+| `mza_stand_lat_parabolica_c.glb` (0.05 MB, 1,112 triangles) | Monza, grandstand: 21C Laterale Parabolica (34 m, 13 rows, open) | the same |
+| `mza_stand_lat_parabolica_d.glb` (0.05 MB, 1,024 triangles) | Monza, grandstand: 21B Laterale Parabolica (34 m, 12 rows, open) | the same |
+| `mza_stand_lat_parabolica_e.glb` (0.06 MB, 1,380 triangles) | Monza, grandstand: 21A Laterale Parabolica (37 m, 13 rows, open) | the same |
+| `mza_stand_uscita_ascari_a.glb` (0.07 MB, 1,418 triangles) | Monza, grandstand: 18 Uscita Ascari A (48 m, 9 rows, roofed) | the same |
+| `mza_stand_uscita_ascari_b.glb` (0.04 MB, 832 triangles) | Monza, grandstand: Uscita Ascari B (31 m, 9 rows, open) | the same |
+| `mza_stand_ascari.glb` (0.07 MB, 1,624 triangles) | Monza, grandstand: 16 Ascari (60 m, 9 rows, open) | the same |
+| `mza_stand_ascari_uno.glb` (0.02 MB, 412 triangles) | Monza, grandstand: Ascari Uno (20 m, 8 rows, open) | the same |
+| `mza_stand_amici.glb` (0.03 MB, 634 triangles) | Monza, grandstand: Amici Autodromo (21 m, 9 rows, open) | the same |
+| `mza_stand_ascari_due.glb` (0.03 MB, 544 triangles) | Monza, grandstand: 14 Ascari 2 (31 m, 4 rows, open) | the same |
+| `mza_stand_ascari_tre.glb` (0.04 MB, 784 triangles) | Monza, grandstand: 12 Ascari 3 (32 m, 8 rows, open) | the same |
+| `mza_stand_seconda_variante.glb` (0.04 MB, 832 triangles) | Monza, grandstand: 9 Seconda Variante (28 m, 9 rows, open) | the same |
+| `mza_stand_roggia.glb` (0.03 MB, 598 triangles) | Monza, grandstand: 10 Roggia (27 m, 8 rows, open) | the same |
+| `mza_stand_trib_p01.glb` (0.01 MB, 248 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 3 rows, open) | the same |
+| `mza_stand_trib_p02.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (15 m, 2 rows, open) | the same |
+| `mza_stand_trib_p03.glb` (0.01 MB, 248 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (19 m, 3 rows, open) | the same |
+| `mza_stand_trib_p04.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 2 rows, open) | the same |
+| `mza_stand_trib_p05.glb` (0.01 MB, 248 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 3 rows, open) | the same |
+| `mza_stand_trib_p06.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (17 m, 2 rows, open) | the same |
+| `mza_stand_trib_p07.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (19 m, 2 rows, open) | the same |
+| `mza_stand_trib_p08.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 2 rows, open) | the same |
+| `mza_stand_trib_p09.glb` (0.02 MB, 292 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 4 rows, open) | the same |
+| `mza_stand_pv_small.glb` (0.02 MB, 388 triangles) | Monza, grandstand: Prima Variante (small stand) (13 m, 7 rows, open) | the same |

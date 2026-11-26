@@ -19,6 +19,7 @@ import { disposeGroup } from "./dispose.js";
 import { entryAt } from "./venues.js";
 import { bayDepths } from "./garagespace.js";
 import { pathFrame, garageLine, garageRun, genericOutline, fitLine, rayRing, GENERIC, PICK } from "./pitlane.js";
+import { PIT_ROADS } from "./pitroads.js";
 
 // ---------- registry ----------
 export const FACILITIES = [
@@ -415,6 +416,86 @@ export const FACILITIES = [
       map: [],
       inferred: ["its heights (6.6 m under the girder)", "since when it stands"],
     },
+  },
+  {
+    id: "monza-hospitality", name: "Monza – the Hospitality Building at the pit exit", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [2018, null],
+    status: "trial",
+    // On the map's outline (90.5 × 28.4 m) north of the garages; its track face stands 4.2 m behind the door line – the pit
+    // lane runs on past it. The map's block, drawn with ribbon glazing (landmarks.js), makes way.
+    replaces: { names: /^hospitality building$/i },
+    model: { file: "mza_hospitality.glb", anchor: [45.618827, 9.281646], heading: 276.13 },
+    sources: [
+      "src/data/models/mza_hospitality.glb – made for this app (2026-11-26): three glazed floors between white slab edges, a terrace, a thin wide white roof in three shallow ridges on slim columns (17.2–17.8 m) – its plan after OpenStreetMap's outline (way 194458105), its look after one photograph and aerial imagery compared by eye, nothing copied; floor heights and the roof estimated; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; look and heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["glazed floors under a thin white roof (one photograph and aerial imagery, compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the floor heights (4.6 / 9.0 / 13.4 m)", "the roof (17.2–17.8 m)", "since when it stands"],
+    },
+  },
+  {
+    id: "monza-centro-medico", name: "Monza – the Centro Medico south of the garages", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [2018, null],
+    status: "trial",
+    replaces: { names: /^centro medico$/i },
+    model: { file: "mza_medical.glb", anchor: [45.615965, 9.281697], heading: 276.13 },
+    sources: [
+      "src/data/models/mza_medical.glb – made for this app (2026-11-26): two low white blocks (4.6 m) under a flat roof with a dark edge – its plan after OpenStreetMap's outline (way 194458108); its look an estimate; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; look estimated)",
+    evidence: { confirmed: [], photo: [], map: ["the plan and the place: OpenStreetMap's outline"], inferred: ["its look and height (4.6 m)", "since when it stands"] },
+  },
+  {
+    id: "monza-finish-gantry", name: "Monza – the gantry before the control line, over the track and the pit lane", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [2018, null],
+    status: "trial",
+    // A lattice from beyond the track's far edge across the track, the pit wall and the pit lane to the paddock side, 47 m,
+    // on three legs, 20 m before the control (finish) line – which at Monza lies 310 m before the start line. Not the start
+    // lights' gantry: the grid's lamps stay on this app's own gantry at the start line (no `lights`).
+    // Moved 1 m along its beam towards the paddock from the surveyed place: there its leg on the pit wall stood 0.4 m from
+    // this app's track edge (the track, drawn round the cars' line, lies 5 m nearer the pits here than the real tarmac);
+    // now 1.4 m. MZA_FGANTRY_PLACE. `footprint`: its leg beyond the track only.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "mza_finish_gantry.glb", anchor: [45.616015, 9.2805557], heading: 186.13,
+      footprint: [[45.6160249, 9.2805443], [45.616023, 9.2805698], [45.6160051, 9.2805671], [45.616007, 9.2805416]] },
+    sources: [
+      "src/data/models/mza_finish_gantry.glb – made for this app (2026-11-26): a lattice girder 2 m wide on three legs, 47 m, its underside 7.4 m up, a blank board over the track – its place and span after aerial imagery (corrected for the picture's lean), its heights and the board estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place and span from aerial imagery; heights estimated)",
+    evidence: { confirmed: [], photo: ["a lattice gantry across the track and the pit lane before the control line (aerial imagery, compared only)"], map: [], inferred: ["its heights (7.4 m under the girder)", "the board", "since when it stands"] },
+  },
+  {
+    id: "monza-torre-sud", name: "Monza – Torre Sud, one of the two 1955 towers on the main straight", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [1955, null],
+    status: "trial",
+    // The map has a point only (node 2396630532); the model stands 4 m west of it – at the point its face met the track's verge. The tower built in code at the point (landmarks.js) makes way.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "mza_tower.glb", anchor: [45.616199, 9.28059], heading: 6.13 },
+    sources: [
+      "src/data/models/mza_tower.glb – made for this app (2026-11-26): a concrete core with an outside stair, a grey band, three floors of blue-green glass in a silver grid, a set-back top floor; 9 × 9 m with cut corners, 21 m – after this app's research note (docs/research/monza_buildings.md) and photographs compared by eye, nothing copied; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the tower's point (the place; no outline is mapped)",
+    ],
+    checked: "2026-11-26: trial (place from a map point – low confidence; look from the research note)",
+    evidence: { confirmed: [], photo: ["a square glazed tower with a set-back top floor (photographs, compared only)"], map: ["the place: OpenStreetMap's point"], inferred: ["its exact place and its turn", "its size (9 × 9 m, 21 m)"] },
+  },
+  {
+    id: "monza-torre-nord", name: "Monza – Torre Nord, one of the two 1955 towers on the main straight", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [1955, null],
+    status: "trial",
+    // At the map's point (node 2396630508), 0.8 m from this app's track edge at its nearest; the tower built in code there (landmarks.js) makes way.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "mza_tower.glb", anchor: [45.621444, 9.281328], heading: 6.13 },
+    sources: [
+      "src/data/models/mza_tower.glb – made for this app (2026-11-26): a concrete core with an outside stair, a grey band, three floors of blue-green glass in a silver grid, a set-back top floor; 9 × 9 m with cut corners, 21 m – after this app's research note (docs/research/monza_buildings.md) and photographs compared by eye, nothing copied; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the tower's point (the place; no outline is mapped)",
+    ],
+    checked: "2026-11-26: trial (place from a map point – low confidence; look from the research note)",
+    evidence: { confirmed: [], photo: ["a square glazed tower with a set-back top floor (photographs, compared only)"], map: ["the place: OpenStreetMap's point"], inferred: ["its exact place and its turn", "its size (9 × 9 m, 21 m)"] },
   },
   {
     id: "interlagos-start-gantry", name: "Interlagos – the start lights' gantry over the main straight", kind: "tower",
@@ -2850,6 +2931,15 @@ export const PIT_UPPERS = {
   // cut to its depth (`maxDepth`: the map's outline takes in the stair towers behind). SPA_UPPER_PLACE
   7: { file: "spa_pit_upper.glb", garageTop: 4.8, front: 11.75, length: 312.7, depth: 23.5, maxDepth: 23.55, span: [-150.4, 162.3], along: -5.8, fill: false, turned: true, alongFronts: true,
     src: "src/data/models/spa_pit_upper.glb – Spa-Francorchamps' F1 pit building (2007) over the garages: a dark walkway deck 2.3 m out over the pit lane with tall pale posts at its edge, a glazed first floor, a white roof (9.45 m) – deck and roof 5.2 m out along the middle 78 m –, a dark-roofed south block, a glazed bay under a rising dark roof at the La Source end, five stair towers and a low annexe behind; made for this app (2026-11-26) after OpenStreetMap's outline, aerial imagery and one 2022 photograph compared by eye, nothing copied; every height, the south block's look, the paddock side estimated; no outside asset, no logo or lettering" },
+  // Monza: the Palazzina Box (1989) as raced to 2026 – not the 2027 rebuild (no drawings). Made with its +Z to the pit lane
+  // (`turned`), its door line (z +12.7) on the built garage fronts (`alongFronts`); a glazed drum stands at either end,
+  // 6.5 m past the end wall (`span`: the model from drum to drum); the long white canopy on the terrace is a file of its
+  // own (`also`) – it stands through the season. `along`: the garages this app builds follow the session's pit boxes – 58
+  // bays of 4.07 m, 236 m, their middle 4.9 m further on than the map's building (230.4 m): the model stands at the map's
+  // place, so the garage row runs 7.4 m on past its north end wall. MZA_UPPER_PLACE
+  39: { file: "mza_pit_upper.glb", garageTop: 5.0, front: 12.7, length: 230.4, depth: 25.4, maxDepth: 25.45, span: [-126.5, 126.5], along: -4.9, fill: false, turned: true, alongFronts: true,
+    also: [{ file: "mza_pit_canopy.glb" }],
+    src: "src/data/models/mza_pit_upper.glb + mza_pit_canopy.glb – Monza's Palazzina Box (1989) over the garages: a sloped silver band, two rows of dark glass leaning out over the lane in silver mullions, a white steel sun-screen, the terrace at 10 m behind a glass rail, a glazed drum at either end; on the terrace the long white canopy (eaves 13 m, crown 15.5 m) – made for this app (2026-11-26) after OpenStreetMap's outline (230.4 × 25.4 m), aerial imagery and Commons photographs compared by eye, nothing copied; every height, the glass's lean, the drums' place, the paddock side and the canopy's size estimated; no outside asset, no logo or lettering" },
   14: { file: "spo_pit_upper.glb", garageTop: 5.0, front: 9.0, length: 291, depth: 18, backTo: 43.3, along: -6.35, span: [-140, 184.5], fill: false, platform: 36, turned: true,
     src: "src/data/models/spo_pit_upper.glb – Interlagos pit building over the garages with the Operations Centre at its pit-entry end: a terrace with a glass rail and a glass awning, one cream membrane cone over each of the 23 garages, a white mast leaning out over the pit lane at every bay line, a flatter membrane over the paddock street, the support strip behind; the Operations Centre in pale concrete and grey-blue glass (its mural is not shown) – made for this app (2026-11-22) from this app's research notes, OpenStreetMap's outlines (279 × 52 m), aerial imagery (one cone every 12.1 m) and Wikimedia Commons photos compared by eye, nothing copied; published: 23 boxes of 216 m², a six-storey operations centre; every height estimated; no outside asset, no logo or lettering" },
   // (Mexico City: made with its +Z to the pit lane – `turned`. As at Austin the garage doors are on the front of the map's
@@ -2952,7 +3042,10 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       // 86 m – limits the building to its own depth: upper.maxDepth)
       ...(venue && PIT_UPPERS[venue.key]?.maxDepth && !(year && PIT_UPPERS[venue.key].from && year < PIT_UPPERS[venue.key].from) ? { maxDepth: PIT_UPPERS[venue.key].maxDepth } : {}),
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
-      pitWall: lay?.pitWall || PLAIN_PIT_WALL, ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : {}),
+      // (a lane surveyed from the doors to the wall – pitroads.js lane.wallAt: this app's wall's lane face that far out, the
+      // plain wall with its walkway behind it; a wall the map draws further out stays as mapped – Monza's outer wall)
+      pitWall: lay?.pitWall || (venue && PIT_ROADS[venue.key]?.lane.wallAt ? { ...PLAIN_PIT_WALL, at: PIT_ROADS[venue.key].lane.wallAt } : PLAIN_PIT_WALL),
+      ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : venue && PIT_ROADS[venue.key]?.lane.wallAt ? { pitWallFrom: `surveyed: ${PIT_ROADS[venue.key].lane.wallAt} m from the garage doors (pitroads.js)` } : {}),
       ...(venue && PIT_LOOKS[venue.key] ? { ...PIT_LOOKS[venue.key], lookFrom: PIT_LOOKS[venue.key].src } : {}),
     },
     ...(lay ? { layout: lay.src, toTrack } : {}),
@@ -3137,7 +3230,9 @@ function near(x, z, pts, d) {
 // meshes go in the landmarks group (one group named "landmarks": its night lighting is switched there).
 export function combine(lm, fac) {
   if (!fac) return lm;
-  let group = lm?.group || null;
+  // (a landmark built in code that a facility's model now stands for – Monza's podium and towers – gives way to it)
+  if (lm?.giveWay) lm.giveWay(new Set((fac.info || []).filter((i) => i.how === "model").map((i) => i.id)));
+  let group = lm?.group?.children.length ? lm.group : null;
   if (fac.group) { if (!group) { group = new THREE.Group(); group.name = "landmarks"; } group.add(fac.group); }
   return {
     group, skip: (b) => !!lm?.skip(b) || fac.skip(b), restyle: (b) => lm?.restyle(b) || null,

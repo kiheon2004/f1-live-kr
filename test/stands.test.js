@@ -91,3 +91,20 @@ test("grandstands: a listed stand's side L / R is left / right in the race's dir
   assert.ok(zOf("Right") > 7, "R: on the cars' right (+z running east)");
   assert.ok(zOf("Left") < -7, "L: on their left");
 });
+
+// v0.70: stands of one name, each with its own listed entry (and model): an entry marked on its stand's front edge belongs
+// to that stand – not to the neighbour whose corner is nearer in degrees (Monza's three 6 Alta Velocità blocks)
+test("listedEntry: of several entries with one name, the one marked on (or nearest to) this outline's edge", async () => {
+  const { listedEntry } = await import("../src/renderer/stands.js");
+  // three stands in a row along a meridian at 45.6° N, each 90 m long (lat) and 12 m deep (lon); each entry marked a metre
+  // in front of its stand's front edge, at its middle
+  const m = 1 / 111200, mx = 1 / (111320 * Math.cos((45.6 * Math.PI) / 180));
+  const stand = (i) => { const la = 45.62 + i * 100 * m; return [[la, 9.28], [la + 90 * m, 9.28], [la + 90 * m, 9.28 + 12 * mx], [la, 9.28 + 12 * mx]]; };
+  const entries = [0, 1, 2].map((i) => ({ n: "6 Alta", osmAt: [45.62 + (i * 100 + 45) * m, 9.28 - 1 * mx], id: i }));
+  for (const i of [0, 1, 2]) assert.strictEqual(listedEntry(entries, stand(i)).id, i);
+  // …and one marked just past its own stand's end, nearer a neighbour's corner in degrees than its own corner
+  const e2 = [{ n: "A", osmAt: [45.62 + 45 * m, 9.28 + 18 * mx], id: 0 }, { n: "A", osmAt: [45.62 + 99 * m, 9.28 + 6 * mx], id: 1 }];
+  assert.strictEqual(listedEntry(e2, stand(0)).id, 0, "6 m behind its own stand's back edge: nearer than the other's mark 9 m past the end");
+  assert.strictEqual(listedEntry(e2, stand(1)).id, 1);
+});
+

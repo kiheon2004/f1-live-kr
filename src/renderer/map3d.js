@@ -333,6 +333,8 @@ function updatePitTeams(force = false) {
 const pitModels = new WeakMap();
 function pitModelFor(G) {
   let m = pitModels.get(G); if (m) return m;
+  // (a venue whose lane is surveyed with its fast lane's place – pitroads.js lane.fast: the cars drive there)
+  const A1 = app(), FAST = PIT_ROADS[venueOf({ circuitKey: A1.circuitKey?.(), location: A1.location?.() })?.key]?.lane.fast || null;
   const F = world.frame, st = G.slots.map((s) => {
     const out = [-s.inward[0], -s.inward[1]];
     let edge = null;
@@ -342,13 +344,13 @@ function pitModelFor(G) {
       if (Math.abs(pr.d) <= half) { edge = d; break; }
     }
     const wall = G.wallFace ? G.wallFace(s.uc) : null;
-    return { s, cs: crossSection({ wall, edge }), edge, floor: s.floor };
+    return { s, cs: crossSection({ wall, edge, fast: FAST }), edge, floor: s.floor };
   });
   // (between the garages either side of u by their centres – a run's garages can have a gap, Madrid 2026 –, the wall's
   // face the facility's own at u, within the run: laneSectionAt)
   const us = st.map((x) => x.s.uc), wf = G.wallFace ? (u) => G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, u))) : null;
   // (v0.53: the lines driven – fast lane, boxes – without the wall's steps: pitlane.js laneLines)
-  const at = laneLines((u) => laneSectionAt(st, us, u, wf), G.gStart - PIT.ends - 5, G.gEnd + PIT.ends + 5);
+  const at = laneLines((u) => laneSectionAt(st, us, u, wf, FAST), G.gStart - PIT.ends - 5, G.gEnd + PIT.ends + 5);
   m = { G, st, at, ok: st.filter((x) => x.cs.ok).length, wallFrom: [...new Set(st.map((x) => x.cs.wallFrom))] };
   pitModels.set(G, m);
   return m;

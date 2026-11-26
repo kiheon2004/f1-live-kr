@@ -68,7 +68,9 @@ test("the shipped model files: listed, present, and passing the app's own model 
   for (const f of F.FACILITIES) if (f.upper) { assert.strictEqual(f.builder, "pitBuilding", f.id); for (const k of ["garageTop", "front", "length", "depth"]) assert.ok(f.upper[k] > 0, f.id + " " + k); assert.ok(f.sources.some((x) => x.includes(f.upper.file)), f.id + ": the model's source is recorded"); files.push(f.upper.file);
     // (upper.also: more files in the model's frame by season; upper.seasons: another file for the building itself in some seasons)
     for (const a of [...(f.upper.also || []), ...(f.upper.seasons || [])]) { assert.ok(f.sources.some((x) => x.includes(a.file)), f.id + ": " + a.file + " – its source is recorded"); files.push(a.file); } }
-  for (const [key, u] of Object.entries(F.PIT_UPPERS)) { for (const k of ["garageTop", "length", "depth"]) assert.ok(u[k] > 0, key + " " + k); assert.ok(u.front >= 0, key + " front (0: the model's origin on the garage front line – Madring)"); assert.ok(u.src && u.src.includes(u.file), key + ": the model's source is recorded"); files.push(u.file); }
+  for (const [key, u] of Object.entries(F.PIT_UPPERS)) { for (const k of ["garageTop", "length", "depth"]) assert.ok(u[k] > 0, key + " " + k); assert.ok(u.front >= 0, key + " front (0: the model's origin on the garage front line – Madring)"); assert.ok(u.src && u.src.includes(u.file), key + ": the model's source is recorded"); files.push(u.file);
+    // (upper.also on a generic pit building: a file in the model's frame – Monza's terrace canopy)
+    for (const a of [...(u.also || []), ...(u.seasons || [])]) { assert.ok(u.src.includes(a.file), key + ": " + a.file + " – its source is recorded"); files.push(a.file); } }
   // (a facility that is a model of its own – a tower, the team villas: v0.60)
   for (const f of F.FACILITIES) if (f.model?.file) { assert.ok(f.sources.some((x) => x.includes(f.model.file)), f.id + ": the model's source is recorded"); files.push(f.model.file); }
   assert.ok(files.includes("hun_stand_b.glb") && files.includes("hun_pit_upper_v2.glb") && files.includes("lv_stand_c.glb") && files.includes("lv_pit_upper.glb") && files.includes("lus_stand_c.glb") && files.includes("lus_pit_upper.glb"));
@@ -689,3 +691,48 @@ test("v0.70: Spa-Francorchamps – the pit building's storeys, the start gantry,
   assert.ok(Math.abs(F.lampsOnModel(mk, [80, 70]).pos[2][2] - (50 + 0.4 - 3.6)) < 1e-9 && Math.abs(F.lampsOnModel(mk, [80, 20]).pos[2][2] - (50 - 20.4 + 3.6)) < 1e-9);
   mk.userData.face = -1; assert.ok(Math.abs(Math.sin(F.lampsOnModel(mk).yaw) + 1) < 1e-9, "face −1: looking the other way");
 });
+
+// v0.70: Monza – the Palazzina Box's storeys and the terrace canopy over the builder's garages, the Hospitality
+// Building, the Centro Medico, the gantry before the control line, the two towers (the landmarks built in code give way to
+// the models), 38 stand files; the pit wall at its surveyed distance from the doors (pitroads.js lane.wallAt).
+test("v0.70: Monza – the pit building's storeys with the canopy, five more models, 38 stand files; landmarks built in code give way to a facility's model", async () => {
+  const THREE = await import("../src/renderer/vendor/three.module.js");
+  const F = await import("../src/renderer/facilities.js");
+  const L = await import("../src/renderer/landmarks.js");
+  const { PIT_ROADS } = await import("../src/renderer/pitroads.js");
+  const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));
+  const mza = files.filter((f) => /^mza_/.test(f)).sort();
+  assert.strictEqual(mza.length, 44); assert.strictEqual(mza.filter((f) => /^mza_stand_/.test(f)).length, 38);
+  for (const f of ["mza_podium.glb", "mza_pit.glb", "mza_pitwall.glb", "mza_gantry.glb", "mza_pitlane_entry.glb", "mza_pitlane_main.glb", "mza_pitlane_exit.glb", "mza_stand_trib_p10.glb", "mza_stand_trib_p11.glb", "mza_stand_vedano_n.glb"]) assert.ok(!files.includes(f), f + " is not shipped");
+  const readme = fs.readFileSync(path.join(__dirname, "..", "src", "data", "models", "README.md"), "utf8"); for (const f of mza) assert.ok(readme.includes("`" + f + "`"), f);
+  const U = F.PIT_UPPERS[39];
+  assert.ok(U.file === "mza_pit_upper.glb" && U.turned === true && U.alongFronts === true && U.fill === false && U.front === 12.7 && U.garageTop === 5.0 && U.maxDepth >= U.depth && U.also.length === 1 && U.also[0].file === "mza_pit_canopy.glb" && !U.also[0].to);
+  assert.ok(U.span[0] === -U.span[1] && U.span[1] > U.length / 2, "the model reaches past the building's ends: the drums");
+  const at = (id) => F.FACILITIES.find((f) => f.id === id);
+  for (const id of ["monza-hospitality", "monza-centro-medico", "monza-finish-gantry", "monza-torre-sud", "monza-torre-nord"]) { const f = at(id); assert.ok(f && f.venue[0] === 39 && f.status === "trial" && files.includes(f.model.file) && !f.model.lights && !f.model.level, id); }
+  assert.ok(at("monza-hospitality").replaces.names.test("Hospitality Building") && at("monza-centro-medico").replaces.names.test("Centro Medico") && !at("monza-finish-gantry").replaces.names.test("") && !at("monza-torre-sud").replaces.names.test(""));
+  assert.strictEqual(at("monza-torre-sud").model.file, at("monza-torre-nord").model.file);
+  // the podium's model (deck at 6.0 m) is held back: a 2011 photograph shows the deck level with the roof terrace, as the
+  // 9.5 m podium built in code has it – that one stays until a model at 9–10 m comes (its givesWayTo names the id)
+  assert.ok(!at("monza-podium"), "no podium model yet");
+  // the stands: 38 with a file (24 that were listed, 14 listed for it), each at a place of its own, following the ground
+  const st = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Monza.stands;
+  const wm = st.filter((s) => s.model); assert.strictEqual(st.length, 43); assert.strictEqual(wm.length, 38); assert.strictEqual(new Set(wm.map((s) => s.model.file)).size, 38);
+  assert.ok(wm.every((s) => files.includes(s.model.file) && s.model.heading === 180 && Array.isArray(s.model.at) && s.model.drape === true && !s.model.also && Array.isArray(s.osmAt)));
+  assert.strictEqual(st.filter((s) => s.n === "GF Gradinate Interno Parabolica").length, 9); assert.ok(st.find((s) => s.n === "26A/26B/26C Laterale Destra").model.file === "mza_stand_laterale_destra.glb" && st.find((s) => s.n === "8A/8B Prima Variante Esterna").model.file === "mza_stand_prima_variante.glb");
+  // the five Laterale Parabolica blocks keep this list's order (A south … E north): the files are matched by place
+  assert.ok(st.find((s) => s.n === "21A Laterale Parabolica").model.file === "mza_stand_lat_parabolica_e.glb" && st.find((s) => s.n === "21E Laterale Parabolica").model.file === "mza_stand_lat_parabolica_a.glb");
+  // the pit wall's lane face at the surveyed 11.5 m from the doors: the generic pit building's wall params carry it
+  assert.strictEqual(PIT_ROADS[39].lane.wallAt, 11.5); assert.ok(!PIT_ROADS[7].lane.wallAt, "Spa's garage fronts do not stand on one line: its wall stays the map's");
+  // a landmark built in code gives way to the facility's model (landmarks.js givesWayTo → combine)
+  const gf = { xz: (p) => p, fromLL: (la, lo) => [lo, la] }, scene = { buildings: [{ name: "Podio", pts: [[0, 0], [10, 0], [10, 10], [0, 10]] }] };
+  const mk = () => L.buildLandmarks({ scene, gf, groundAt: () => 0, location: "Monza", venue: { key: 39 }, toTrack: () => [1, 0] });
+  const lm = mk(); assert.ok(lm.count > 10 && lm.skip(scene.buildings[0]));
+  const marks = new Set(lm.group.children.map((m) => m.userData.givesWayTo)); assert.deepStrictEqual([...marks].sort(), ["monza-podium", "monza-torre-nord", "monza-torre-sud"]);
+  const fac = (ids) => ({ group: new THREE.Group(), skip: () => false, keepOut: () => false, count: 0, spots: [], info: ids.map(([id, how]) => ({ id, how })) });
+  const all = lm.group.children.length, both = F.combine(lm, fac([["monza-podium", "model"], ["monza-torre-sud", "builder"], ["generic-pits", "builder+model"]]));
+  assert.ok(lm.group.children.every((m) => m.userData.givesWayTo !== "monza-podium") && lm.group.children.some((m) => m.userData.givesWayTo === "monza-torre-sud") && lm.group.children.length < all, "the podium went, the towers stand (no model came for them)");
+  assert.ok(both.skip(scene.buildings[0]), "what the landmark replaced on the map stays replaced");
+  const lm2 = mk(); F.combine(lm2, fac([["monza-podium", "model"], ["monza-torre-sud", "model"], ["monza-torre-nord", "model"]])); assert.strictEqual(lm2.group.children.length, 0);
+});
+

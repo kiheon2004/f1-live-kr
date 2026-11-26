@@ -205,16 +205,20 @@ export const CREW_ROOM = { carHalf: 1, garageSide: 1.6, laneSide: 1.4, wallThick
 
 // st: { wall – the pit wall's face to the lane, metres out from the garages' fronts (null: no wall known), edge – the
 // track's tarmac edge, same metres (a wall assumed there, its thickness in: an estimate), path – the feed's pit line }
+// fast (optional) – a surveyed fast lane [a, b], same metres.
 // → { ok (room for a car in a box and the fast lane), wall, wallFrom, fast: [a, b], fastC, inner, boxC, narrow }
 export function crossSection(st, R = CREW_ROOM) {
   const wall = st.wall != null ? st.wall : st.edge != null ? st.edge - R.wallThick : null;
   const wallFrom = st.wall != null ? "facility wall" : st.edge != null ? "track edge (wall assumed there)" : null;
   if (wall == null || !(wall > 0)) return { ok: false, wall: null, wallFrom, why: "no wall or track edge" };
-  const fastW = Math.min(FIA.fastMax, wall / 2), inner = wall - fastW;
+  // (st.fast: [a, b] – a surveyed fast lane, metres out from the garages' fronts (pitroads.js lane.fast): the cars drive in
+  // it where it does not lie against the wall – Zandvoort: 9.4 … 12.7 m, a 2 m strip between it and the wall at 14.7 m)
+  const sf = Array.isArray(st.fast) && st.fast[0] > 0 && st.fast[1] > st.fast[0] && st.fast[1] <= wall + 0.01 ? st.fast : null;
+  const fastW = sf ? sf[1] - sf[0] : Math.min(FIA.fastMax, wall / 2), inner = sf ? sf[0] : wall - fastW;
   const lo = R.carHalf + R.garageSide, hi = inner - R.carHalf - R.laneSide;
   const narrow = hi < lo;
   const boxC = narrow ? inner / 2 : Math.max(lo, Math.min(hi, inner / 2));
-  return { ok: !narrow, wall, wallFrom, fast: [inner, wall], fastC: inner + fastW / 2, inner, boxC, narrow, lane: wall };
+  return { ok: !narrow, wall, wallFrom, fast: [inner, inner + fastW], fastC: inner + fastW / 2, inner, boxC, narrow, lane: wall };
 }
 
 // Between which two garages' cross sections a place u along the run lies, by the garages' own centres (us: ascending) –
@@ -240,12 +244,12 @@ export function laneStationAt(us, u) {
 // v0.53: with the lane's directions there – along (+ to the exit) and inward (into the garages) – turned smoothly from one
 // garage's to the next one's (a curved pit building: the nearest garage's own had the heading and a car moved across
 // step at each garage's edge)
-export function laneSectionAt(st, us, u, wallFace = null) {
+export function laneSectionAt(st, us, u, wallFace = null, fast = null) {
   const { i, t } = laneStationAt(us, u), a = st[Math.max(0, i)], b = st[Math.min(st.length - 1, Math.max(0, i) + 1)];
   const floor = a.floor + (b.floor - a.floor) * t, slot = t < 0.5 ? a.s : b.s, w = wallFace ? wallFace(u) : null;
   const dir = (k) => { const x = a.s[k][0] + (b.s[k][0] - a.s[k][0]) * t, z = a.s[k][1] + (b.s[k][1] - a.s[k][1]) * t, l = Math.hypot(x, z) || 1; return [x / l, z / l]; };
   const along = a.s.along && b.s.along ? dir("along") : slot.along, inward = a.s.inward && b.s.inward ? dir("inward") : slot.inward;
-  if (w > 0) { const cs = crossSection({ wall: w }); return { ok: cs.ok, fastC: cs.fastC, boxC: cs.boxC, inner: cs.inner, wall: cs.wall, floor, slot, along, inward }; }
+  if (w > 0) { const cs = crossSection({ wall: w, fast }); return { ok: cs.ok, fastC: cs.fastC, boxC: cs.boxC, inner: cs.inner, wall: cs.wall, floor, slot, along, inward }; }
   const L = (k) => (a.cs[k] ?? 0) + ((b.cs[k] ?? 0) - (a.cs[k] ?? 0)) * t;
   return { ok: a.cs.ok && b.cs.ok, fastC: L("fastC"), boxC: L("boxC"), inner: L("inner"), wall: L("wall"), floor, slot, along, inward };
 }
