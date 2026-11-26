@@ -235,18 +235,22 @@ async function solveFit(C, survey, { pit = null, margin = 2.5, wPit = 4 } = {}) 
     if (po.length) c += (wPit * po.reduce((a, o) => a + o * o, 0)) / po.length;
     return c + 0.01 * ((p[2] * 1000) ** 2 + (p[3] * 1000) ** 2);   // (a turn or a scale only where the lap asks for it)
   };
-  // downhill simplex (Nelder–Mead)
-  let X = [[0, 0, 0, 0], [2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0.002, 0], [0, 0, 0, 0.001]].map((p) => ({ p, f: cost(p) }));
-  for (let it = 0; it < 400; it++) {
-    X.sort((a, b) => a.f - b.f);
-    if (X[4].f - X[0].f < 1e-7 && it > 40) break;
-    const c0 = [0, 1, 2, 3].map((d) => (X[0].p[d] + X[1].p[d] + X[2].p[d] + X[3].p[d]) / 4), mk = (t) => { const p = c0.map((v, d) => v + t * (X[4].p[d] - v)); return { p, f: cost(p) }; };
-    const r = mk(-1);
-    if (r.f < X[0].f) { const e = mk(-2); X[4] = e.f < r.f ? e : r; }
-    else if (r.f < X[3].f) X[4] = r;
-    else { const k = mk(r.f < X[4].f ? -0.5 : 0.5); if (k.f < Math.min(r.f, X[4].f)) X[4] = k; else X = X.map((x, i) => (i ? (() => { const p = x.p.map((v, d) => X[0].p[d] + 0.5 * (v - X[0].p[d])); return { p, f: cost(p) }; })() : x)); }
+  // downhill simplex (Nelder–Mead), started again from where it stops with a smaller simplex (the cost is nearly flat
+  // where the line is clear of both edges: one run stops short, and two settings then gave fits a metre apart)
+  let X = null, start = [0, 0, 0, 0];
+  for (const size of [1, 0.5, 0.25, 0.12]) {
+    X = [start, ...[[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0.002, 0], [0, 0, 0, 0.001]].map((d) => start.map((v, i) => v + d[i] * size))].map((p) => ({ p, f: cost(p) }));
+    for (let it = 0; it < 300; it++) {
+      X.sort((a, b) => a.f - b.f);
+      if (X[4].f - X[0].f < 1e-9 && it > 60) break;
+      const c0 = [0, 1, 2, 3].map((d) => (X[0].p[d] + X[1].p[d] + X[2].p[d] + X[3].p[d]) / 4), mk = (t) => { const p = c0.map((v, d) => v + t * (X[4].p[d] - v)); return { p, f: cost(p) }; };
+      const r = mk(-1);
+      if (r.f < X[0].f) { const e = mk(-2); X[4] = e.f < r.f ? e : r; }
+      else if (r.f < X[3].f) X[4] = r;
+      else { const k = mk(r.f < X[4].f ? -0.5 : 0.5); if (k.f < Math.min(r.f, X[4].f)) X[4] = k; else X = X.map((x, i) => (i ? (() => { const p = x.p.map((v, d) => X[0].p[d] + 0.5 * (v - X[0].p[d])); return { p, f: cost(p) }; })() : x)); }
+    }
+    X.sort((a, b) => a.f - b.f); start = X[0].p;
   }
-  X.sort((a, b) => a.f - b.f);
   const best = free(X[0].p), F = fitOf(best);
   const sum = (Fx) => {
     const { m, po, missed } = look(Fx), v = m.map((x) => x[0]).sort((a, b) => a - b), q = (f) => (v.length ? +v[Math.min(v.length - 1, Math.floor(f * (v.length - 1)))].toFixed(2) : null);
