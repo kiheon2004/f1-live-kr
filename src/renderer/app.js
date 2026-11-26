@@ -225,9 +225,10 @@
   function paintHomeBtn() {
     const b = $("homeBtn"); if (!b) return;
     const canLeave = mode === "live" || !!replay;
-    b.innerHTML = homeOn ? `타이밍 화면 ${ico("chevron-right")}` : `${ico("house")}홈`;
-    b.title = homeOn ? "불러온 세션의 타이밍 화면으로 돌아가요" : "시즌 지구본 홈 (재생은 멈추고 위치를 기억해요)";
-    b.hidden = homeOn && !canLeave;
+    // (the logo: on the timing screen the way home; on the home screen the way back to what is loaded, when something is)
+    b.title = homeOn ? (canLeave ? "불러온 세션의 타이밍 화면으로 돌아가요" : "") : "시즌 지구본 홈 (재생은 멈추고 위치를 기억해요)";
+    b.setAttribute("aria-label", homeOn ? (canLeave ? "타이밍 화면" : "라이브 타이밍 KR") : "홈");
+    b.classList.toggle("idle", homeOn && !canLeave);
   }
 
   // ---------- replay playback ----------
@@ -295,7 +296,7 @@
   $("livePause").addEventListener("click", toggleLivePause);
   // Window stays on top of a full-screen stream when pinned.
   let pinned = store.get("pin", false);
-  const paintPin = () => { $("pinBtn").setAttribute("aria-pressed", String(pinned)); $("pinBtn").innerHTML = ico("pin"); };
+  const paintPin = () => { $("pinBtn").setAttribute("aria-pressed", String(pinned)); $("pinBtn").setAttribute("aria-checked", String(pinned)); $("pinBtn").innerHTML = `${ico(pinned ? "pin" : "pin-off")}위에 고정${pinned ? ` <span class="k">켜짐</span>` : ""}`; };
   $("pinBtn").addEventListener("click", () => { pinned = !pinned; store.set("pin", pinned); window.api.pinWindow(pinned); paintPin(); });
   if (pinned) window.api.pinWindow(true);
   paintPin();
@@ -1989,7 +1990,7 @@
     nextSession: () => nextSession(), loadSchedule: () => loadSchedule(),
   };
   // (the home button in the top bar: to the home screen and back)
-  $("homeBtn").addEventListener("click", () => setHome(!homeOn));
+  $("homeBtn").addEventListener("click", () => { if (homeOn && !(mode === "live" || !!replay)) return; setHome(!homeOn); });
 
   // ---------- boot ----------
   UIIcons.fill(document.body);

@@ -35,6 +35,8 @@ function createWindow() {
     width: 1520, height: 940, minWidth: 1180, minHeight: 720,
     title: "라이브 타이밍 KR",
     backgroundColor: "#0e1013",
+    // (development only: a screenshot run's window comes up without taking the keyboard – dev-snapshot shows it inactive)
+    show: !(process.env.F1KR_SNAPSHOT && !app.isPackaged),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),
       contextIsolation: true, nodeIntegration: false, sandbox: true,

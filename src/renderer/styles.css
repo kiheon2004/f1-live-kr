@@ -3,21 +3,21 @@
    left here is the legacy base, the 3D map block and the game block (moving to css/spectator.css / css/game.css). */
 :root {
   /* legacy names → the v0.50 tokens (css/tokens.css); area files use the tokens directly */
-  --bg: var(--bg-0); --panel: var(--bg-1); --panel-2: var(--bg-2); --line-2: var(--line-soft); --ink: var(--text-1); --muted: var(--text-2);
+  --bg: var(--bg-0); --panel: var(--bg-1); --panel-2: var(--bg-2); --line-2: var(--line-soft); --muted: var(--text-2);
   --green: var(--ok); --purple: var(--best); --yellow: var(--warn); --red: var(--bad);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--ink); font: 13px/1.4 var(--font); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
+body { background: var(--bg); color: var(--text-1); font: 13px/1.4 var(--font); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
 button, select, input { font: inherit; color: inherit; }
-button { cursor: pointer; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); padding: 6px 12px; }
+button { cursor: pointer; border-radius: 0; border: var(--bw) solid var(--line); background: transparent; padding: 5px 12px; font-weight: var(--fw-bold); }
 button:disabled { opacity: 0.4; cursor: default; }
-button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--line); color: var(--accent-ink); font-weight: var(--fw-bold); }
 button.ghost { background: none; }
 button.small { padding: 4px 8px; font-size: 12px; }
-select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+select { background: var(--bg-0); border: var(--bw) solid var(--line); border-radius: 0; padding: 4px 8px; font-weight: var(--fw-bold); }
 .muted { color: var(--muted); }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 

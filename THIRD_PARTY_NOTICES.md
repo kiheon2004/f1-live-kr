@@ -8,7 +8,10 @@ their terms apply.
 | Component | Where | License | License text |
 |---|---|---|---|
 | three.js r186 (and the addons OrbitControls, GLTFLoader, BufferGeometryUtils, SkeletonUtils) | npm dependency `three`; copied into `src/renderer/vendor/` by `npm install` (`postinstall` → `npm run vendor`), not tracked in the repository | MIT | `src/renderer/vendor/THREE_LICENSE` |
-| Pretendard Variable 1.3.9 (font) | `src/renderer/fonts/` | SIL Open Font License 1.1 | `src/renderer/fonts/PRETENDARD-LICENSE.txt` |
+| IBM Plex Sans KR (font, weights 400 / 500 / 700; Korean subset files of `@fontsource/ibm-plex-sans-kr` 5.3.0) | `src/renderer/fonts/IBMPlexSansKR-*.woff2` | SIL Open Font License 1.1, © IBM Corp. | `src/renderer/fonts/IBM-PLEX-SANS-KR-LICENSE.txt` |
+| IBM Plex Mono (font, weights 500 / 600; Latin subset files of `@fontsource/ibm-plex-mono` 5.3.0) | `src/renderer/fonts/IBMPlexMono-*.woff2` | SIL Open Font License 1.1, © IBM Corp. | `src/renderer/fonts/IBM-PLEX-MONO-LICENSE.txt` |
+| Black Han Sans (font; Korean subset file of `@fontsource/black-han-sans` 5.3.0) | `src/renderer/fonts/BlackHanSans-Regular.woff2` | SIL Open Font License 1.1, © The Black Han Sans Project Authors | `src/renderer/fonts/BLACK-HAN-SANS-LICENSE.txt` |
+| Anton (font; Latin subset file of `@fontsource/anton` 5.3.0) | `src/renderer/fonts/Anton-Regular.woff2` | SIL Open Font License 1.1, © The Anton Project Authors | `src/renderer/fonts/ANTON-LICENSE.txt` |
 | Lucide icons (subset, lucide-static 1.54.0) | `src/renderer/icons.js` | ISC | `src/renderer/ICONS-LICENSE.txt` |
 | bacinger/f1-circuits (circuit centre lines, lengths, opening years) | `src/data/f1-circuits.json` | MIT, © Tomislav Bacinger | `src/data/f1-circuits-LICENSE.md` |
 | NASA Blue Marble: Next Generation (globe texture) | `src/renderer/assets/earth-bluemarble-200407-4096.jpg` | NASA imagery, public use (see file) | `src/renderer/assets/EARTH-LICENSE.md` |

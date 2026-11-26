@@ -1,16 +1,17 @@
-// The home screen's globe: a textured Earth with a latitude/longitude grid and the season's circuits as markers.
+// The home screen's globe: a flat blue ball with a light edge, a latitude/longitude grid and the season's circuits as
+// markers (v0.71: one colour, no photograph – the Blue Marble texture is no longer drawn).
 // Ownership: a Globe owns its renderer (one WebGL context), scene, camera, controls, the Earth texture, a
 // ResizeObserver, its pointer listeners and its marker elements; dispose() frees every one of them (disposeGroup for the
 // scene's geometries, materials and the texture, then the renderer and its context). It draws only while started (the
 // home screen shown) and only when something moved – the slow turn, a drag, a fly-to, a resize –; stop() ends the loop.
 // The 3D circuit view (map3d.js) is stopped by the app while the home screen is up, so the two never draw together.
-// Texture: NASA Blue Marble Next Generation, July 2004, with topography and bathymetry (assets/EARTH-LICENSE.md), an
-// equirectangular map with 180°W at its left edge – HomeData.latLonToVec3 follows the same convention.
+// Longitude 180°W is at the equirectangular left edge in HomeData.latLonToVec3; the ball itself has no map.
 import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { disposeGroup } from "./dispose.js";
 
-export const EARTH_TEXTURE = "assets/earth-bluemarble-200407-4096.jpg";
+const BLUE = 0x3d4dff, EDGE = 0xf2efe6;   // (css/tokens.css --c-blue, --line)
+const EDGE_PX = 3, GRID_DEG = 30, GRID_PX = 1.5;
 const H = () => window.HomeData;
 
 export class Globe {
@@ -45,36 +46,33 @@ export class Globe {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
     // (looking at Europe at first – most races; the season's own first race is flown to once the list is in)
-    const start = H().latLonToVec3(30, 15, 3.9);
+    const start = H().latLonToVec3(30, 15, 4.25);   // (the ball takes about 85 % of the board's height)
     this.camera.position.set(start.x, start.y, start.z);
-    this.scene.add(new THREE.AmbientLight(0xffffff, 1.6));
-    // a light riding with the camera: the side looked at is always lit, as in the broadcast graphic
-    this.light = new THREE.DirectionalLight(0xffffff, 1.5); this.light.position.set(-1.5, 1.5, 3); this.camera.add(this.light); this.scene.add(this.camera);
-
+    this.scene.add(this.camera);
     this.group = new THREE.Group(); this.scene.add(this.group);
-    const earthMat = new THREE.MeshPhongMaterial({ color: 0x1d4f8a, shininess: 6, specular: 0x222222 });
-    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), earthMat);
+    // the ball: one flat colour (unlit), and behind it a slightly larger light ball whose rim shows as the 3 px edge
+    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), new THREE.MeshBasicMaterial({ color: BLUE }));
     this.group.add(this.earth);
-    new THREE.TextureLoader().load(EARTH_TEXTURE, (tex) => {
-      if (!this.renderer) { tex.dispose(); return; }   // (disposed while it loaded)
-      tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = Math.min(8, R.capabilities.getMaxAnisotropy());
-      earthMat.map = tex; earthMat.color.set(0xffffff); earthMat.needsUpdate = true; this.dirty = true;
-      this.textureLoaded = true;
-    }, undefined, () => this.opts.onError?.("지구 텍스처를 읽지 못했어요 (기본 색으로 그려요)."));
-    // latitude/longitude lines every 15°
-    const pts = [], r = 1.0025, seg = 96;
-    const push = (a, b) => { const p = H().latLonToVec3(a[0], a[1], r), q = H().latLonToVec3(b[0], b[1], r); pts.push(p.x, p.y, p.z, q.x, q.y, q.z); };
-    for (let lat = -75; lat <= 75; lat += 15) for (let i = 0; i < seg; i++) push([lat, -180 + (360 * i) / seg], [lat, -180 + (360 * (i + 1)) / seg]);
-    for (let lon = -180; lon < 180; lon += 15) for (let i = 0; i < seg / 2; i++) push([-90 + (180 * i) / (seg / 2), lon], [-90 + (180 * (i + 1)) / (seg / 2), lon]);
-    const gridGeo = new THREE.BufferGeometry(); gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-    this.group.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0xb8e2ff, transparent: true, opacity: 0.32, depthWrite: false })));
-    // a thin blue rim of atmosphere (back faces of a slightly larger sphere, brighter towards the edge)
-    const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.06, 64, 32), new THREE.ShaderMaterial({
-      side: THREE.BackSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      vertexShader: "varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
-      fragmentShader: "varying vec3 vN; void main(){ float i = pow(clamp(0.72 + vN.z, 0.0, 1.0), 5.0); gl_FragColor = vec4(0.35, 0.65, 1.0, 1.0) * i; }",
-    }));
-    this.group.add(atmo);
+    this.edge = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), new THREE.MeshBasicMaterial({ color: EDGE, side: THREE.BackSide }));
+    this.group.add(this.edge);
+    // latitude/longitude lines every 30° as thin bands on the ball (a GL line is one device pixel – too thin to read):
+    // each band is GRID_PX wide at the size the ball is first shown, and keeps to the ball as it is zoomed
+    const pos = [], r = 1.002, seg = 120, half = (GRID_PX / 2) / 170;   // (radians: ≈ 1.5 px on a 170 px ball)
+    const P = (lat, lon) => { const v = H().latLonToVec3(lat, lon, r); return [v.x, v.y, v.z]; };
+    const quad = (a, b, c, d) => pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+    const hd = (half * 180) / Math.PI;
+    for (let lat = -60; lat <= 60; lat += GRID_DEG) for (let i = 0; i < seg; i++) {
+      const l0 = -180 + (360 * i) / seg, l1 = -180 + (360 * (i + 1)) / seg;
+      quad(P(lat - hd, l0), P(lat - hd, l1), P(lat + hd, l1), P(lat + hd, l0));
+    }
+    for (let lon = -180; lon < 180; lon += GRID_DEG) for (let i = 0; i < seg / 2; i++) {
+      const a0 = -90 + (180 * i) / (seg / 2), a1 = -90 + (180 * (i + 1)) / (seg / 2);
+      // (a meridian's band keeps its width towards the poles: the longitude step grows as the circle shrinks)
+      const w = (a) => hd / Math.max(0.02, Math.cos((a * Math.PI) / 180));
+      quad(P(a0, lon - w(a0)), P(a1, lon - w(a1)), P(a1, lon + w(a1)), P(a0, lon + w(a0)));
+    }
+    const gridGeo = new THREE.BufferGeometry(); gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    this.group.add(new THREE.Mesh(gridGeo, new THREE.MeshBasicMaterial({ color: EDGE, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.DoubleSide })));
 
     this.controls = new OrbitControls(this.camera, this.canvas);
     Object.assign(this.controls, { enablePan: false, enableDamping: true, dampingFactor: 0.08, rotateSpeed: 0.45, zoomSpeed: 0.6, minDistance: 1.6, maxDistance: 6 });
@@ -94,6 +92,11 @@ export class Globe {
     if (!this.renderer) return;
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
     this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.dirty = true;
+  }
+  // the ball's radius on screen in CSS pixels (its silhouette is a circle: the camera always looks at its centre)
+  radiusPx() {
+    const d = this.camera.position.length(), h = Math.max(1, this.host.clientHeight);
+    return ((h / 2) * Math.tan(Math.asin(Math.min(0.999, 1 / d)))) / Math.tan((this.camera.fov * Math.PI) / 360);
   }
 
   start() {
@@ -127,6 +130,7 @@ export class Globe {
     if (!this.dirty) return;
     this.lastDraw = now; this.stats.idleFrames = (this.stats.idleFrames || 0) + (idle ? 1 : 0);
     this.dirty = false;
+    this.edge.scale.setScalar(1 + EDGE_PX / Math.max(40, this.radiusPx()));   // (the light rim: 3 px at any zoom)
     this.renderer.render(this.scene, this.camera);
     this.stats.frames++;
     this.layoutMarkers();
@@ -196,7 +200,7 @@ export class Globe {
 
   info() {
     const r = this.renderer;
-    return r ? { geometries: r.info.memory.geometries, textures: r.info.memory.textures, programs: r.info.programs?.length ?? null, calls: r.info.render.calls, triangles: r.info.render.triangles, ...this.stats, running: this.running, texture: !!this.textureLoaded, markers: this.markerEls.size } : { disposed: true, ...this.stats };
+    return r ? { geometries: r.info.memory.geometries, textures: r.info.memory.textures, programs: r.info.programs?.length ?? null, calls: r.info.render.calls, triangles: r.info.render.triangles, ...this.stats, running: this.running, texture: false, markers: this.markerEls.size } : { disposed: true, ...this.stats };
   }
 
   dispose() {
@@ -210,6 +214,6 @@ export class Globe {
     if (this.scene) disposeGroup(this.scene);
     if (this.renderer) { this.renderer.dispose(); this.renderer.forceContextLoss(); }
     this.canvas?.remove();
-    this.renderer = this.scene = this.camera = this.canvas = this.earth = this.group = null;
+    this.renderer = this.scene = this.camera = this.canvas = this.earth = this.edge = this.group = null;
   }
 }
