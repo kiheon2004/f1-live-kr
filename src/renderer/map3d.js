@@ -11,9 +11,10 @@ import { smoothedTracks, steadiness, racingLine, trackFrame, speedIntegral } fro
 import { pitLaneTest } from "./lanemember.js";
 import { rawYaw } from "./heading.js";
 import { gridMemo } from "./armswap.js";
-import { GRID_RULES, ASSIGN_TOL, BLEND, fitGrid, slotS, slotLat, gridWeight, leaveBase, assignSlots, poleSideFor, surveyedGrid, slotCount } from "./grid.js";
+import { GRID_RULES, ASSIGN_TOL, BLEND, fitGrid, slotS, slotLat, gridWeight, leaveBase, assignSlots, poleSideFor, surveyedGrid, slotCount, surveyedBoxes } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { LOCAL_WIDTHS, applyLocalWidths } from "./localwidth.js";
+import { trackFor, lapOnRef, applyTrackEdges, edgeSteps } from "./trackedges.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch, departsFromFeed } from "./startplan.js";
 import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
@@ -629,6 +630,9 @@ function aeroZones() {
 // A car's wing pose at t: { open 0..1, measured | estimated, why }
 let devAeroHold = null;
 let devYear = null;   // development (Map3D.tune({ year })): worlds built from now on take this season's stands and facilities (a season whose sessions are not there yet)
+// development (Map3D.tune({ track })): worlds built from now on take – undefined: the shipped surveyed tracks (trackdata.js);
+// false: none (the track as measured, for a before / after); an object: that entry for whatever circuit is built
+let devTrack;
 let devNoModels = false;   // development (Map3D.tune({ models: false })): a world built after this is built without model files (a session reloaded on the same circuit keeps its world: change a map setting to rebuild)
 // what every car's pose needs from the session, worked out once a frame (the setting, the venue's zones, lights out, race
 // control's word) – not per car: the setting is read from storage and the start found in the event list
@@ -932,9 +936,23 @@ function buildWorld(points) {
   let sx = 0, sy = 0, sz = 0;
   for (const p of lap) { sx += p[0]; sy += p[1]; sz += p[2] || 0; }
   const center = { x: (sx / lap.length) * DM, z: (sy / lap.length) * DM, y: (sz / lap.length) * DM };
+  // (a surveyed track for this circuit and season – trackedges.js –, used when this session's lap lies on the reference
+  // line the survey was fitted to: the feed's frame is then the data's)
+  const At = app(), vkT = venueOf({ circuitKey: At.circuitKey?.(), location: At.location?.() })?.key;
+  const TD = devTrack === false ? null : devTrack && typeof devTrack === "object" ? devTrack : trackFor(vkT, devYear || At.sessionYear?.() || null);
+  const onRef = TD ? lapOnRef(lap, TD.ref) : null, track = TD && onRef.ok ? TD : null;
   // Drop near-duplicates, then smooth into an evenly spaced closed curve (~2 m apart).
-  const raw = [];
-  for (const p of lap) { const v = toWorld(p, center); if (!raw.length || raw[raw.length - 1].distanceTo(v) > 3) raw.push(v); }
+  // (with a surveyed track: a position that lies BEHIND the one before it is left out. The feed has a sample out of
+  // order now and then – Zandvoort's 2025 race: one on the pit straight, 10.7 m back and then on again; the curve through
+  // it folds back for 2.8 m, the samples of the fold face the wrong way and meet no surveyed edge, and the track eased
+  // out to its estimated width for 50 m round it. No car turns back by more than a right angle between two positions
+  // 3 m apart. Only with a surveyed track – every other circuit's samples stay exactly as they were.)
+  const raw = []; let back = 0;
+  for (const p of lap) {
+    const v = toWorld(p, center); if (raw.length && !(raw[raw.length - 1].distanceTo(v) > 3)) continue;
+    if (track && raw.length > 1) { const a = raw[raw.length - 2], b = raw[raw.length - 1]; if ((v.x - b.x) * (b.x - a.x) + (v.z - b.z) * (b.z - a.z) < 0) { back++; continue; } }
+    raw.push(v);
+  }
   if (raw.length > 3 && raw[0].distanceTo(raw[raw.length - 1]) < 15) raw.pop();
   // The lap is one car's positions, each a metre or so off: a curve through them wiggles, and the edges, lines and
   // kerbs built along it wiggle too. So: 1 m steps, then a Gaussian of σ 4 m along the lap (it shifts the apex of a
@@ -968,7 +986,8 @@ function buildWorld(points) {
   }
   const grid = new SpatialGrid(40);
   samples.forEach((s) => grid.add(s.p.x, s.p.z, s));
-  measureWidth(samples, grid, center);
+  measureWidth(samples, grid, center, track);
+  const trackInfo = TD ? { used: !!track, ref: onRef, ...(back ? { back } : {}), ...(samples.track || {}) } : null;
   // the racing line (smooth.js) – where the cars are drawn, and where the tarmac is rubbered in
   const line = racingLine(samples);
   samples.forEach((s, i) => { s.line = line[i]; s.M = line[i]; });
@@ -997,7 +1016,18 @@ function buildWorld(points) {
   scene.fog.near = Math.max(size.x, size.z) * 0.6;
   scene.fog.far = Math.max(size.x, size.z) * 3.2;
   const frame = trackFrame({ samples, grid });
-  return { group, samples, grid, frame, center, size, box, n, lap, syn, laneZone, far, kerbMark: samples.kerbMark, street: !!style.street, width: samples.reduce((a, s) => a + (s.L - s.R), 0) / samples.length, farBase: far.material.color.clone(), road, lines, kerb };
+  // (a surveyed track's marks – the start line, the control line, the front line of pole's grid box: where each lies on
+  // this lap line – s along it, d across it (to the cars' right) – and its two ends in the scene)
+  let trackMarks = null;
+  if (track?.marks) {
+    trackMarks = {};
+    for (const [k, v] of Object.entries(track.marks)) {
+      if (!Array.isArray(v) || v.length !== 2) continue;
+      const a = [v[0][0] - center.x, -(v[0][1] - center.z)], b = [v[1][0] - center.x, -(v[1][1] - center.z)], pm = frame.project((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      if (pm && Math.abs(pm.d) < 25) trackMarks[k] = { s: pm.s, d: pm.d, a, b };
+    }
+  }
+  return { group, samples, grid, frame, center, size, box, n, lap, syn, laneZone, far, kerbMark: samples.kerbMark, street: !!style.street, track: trackInfo, trackFit: track?.fit || null, trackMarks, width: samples.reduce((a, s) => a + (s.L - s.R), 0) / samples.length, farBase: far.material.color.clone(), road, lines, kerb };
 }
 
 // Where the edges of the tarmac are, from where every car drove in the session: per ~10 m of track, the
@@ -1008,7 +1038,7 @@ function buildWorld(points) {
 // (Positions on the circuit's measured pit lane path – startdata.js – are the pit lane, not the track: left out. Where
 // the lane runs beside the track, cars leaving and joining it filled the 2.5 m gap and the lane was taken for tarmac –
 // Barcelona's main straight came out wide enough to reach past the pit lane's own line.)
-function measureWidth(samples, grid, center) {
+function measureWidth(samples, grid, center, track = null) {
   const n = samples.length, B = 5, nb = Math.ceil(n / B), half = TRACK_W / 2;
   const lat = Array.from({ length: nb }, () => []);
   const pts = app().carPoints?.() || [];
@@ -1072,6 +1102,8 @@ function measureWidth(samples, grid, center) {
   // (a stretch with its own width – localwidth.js: a corridor narrower than the circuit's usual width, Anderson Bridge)
   const vk = venueOf({ circuitKey: A.circuitKey?.(), location: A.location?.() })?.key;
   samples.localWidth = applyLocalWidths(samples, LOCAL_WIDTHS[vk], ([X, Y]) => [X - center.x, -(Y - center.z)], (s) => raw[Math.floor(s.i / B)]);
+  // (a circuit whose track is surveyed – trackedges.js: the edges are the real road's, read off imagery)
+  samples.track = track ? applyTrackEdges(samples, track, ([X, Y]) => [X - center.x, -(Y - center.z)]) : null;
   samples.pitDropped = dropped;
 }
 const ROAD_LIFT = 0.06;   // the asphalt over the lap line (roadMesh); cars and paint sit on it
@@ -1193,8 +1225,13 @@ function roadMesh(samples) {
 function edgeLines(samples) {
   const m = new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -3, side: THREE.DoubleSide });
   const grp = new THREE.Group();
-  grp.add(new THREE.Mesh(strip(samples, (s) => edgeOf(s, 1) - 0.25, (s) => edgeOf(s, 1) - 0.65, 0.08), m));
-  grp.add(new THREE.Mesh(strip(samples, (s) => edgeOf(s, -1) + 0.65, (s) => edgeOf(s, -1) + 0.25, 0.08), m));
+  // (a surveyed edge – trackedges.js, s.sv – is the white line's own outer side: the line lies from it 0.25 m inwards;
+  // a measured edge is the tarmac's, the line 0.25 … 0.65 m inside it)
+  // (no line along a step in a surveyed edge – trackedges.js edgeSteps: its width is nothing at the samples either side)
+  const sv = samples.map((s) => s.sv || 0), st = { 1: edgeSteps(samples.map((s) => edgeOf(s, 1)), sv), [-1]: edgeSteps(samples.map((s) => edgeOf(s, -1)), sv) };
+  const out = (s) => (s.sv ? 0.25 * (1 - s.sv) : 0.25), inn = (s, sd) => (st[sd][s.i] ? out(s) : s.sv ? 0.65 - 0.4 * s.sv : 0.65);
+  grp.add(new THREE.Mesh(strip(samples, (s) => edgeOf(s, 1) - out(s), (s) => edgeOf(s, 1) - inn(s, 1), 0.08), m));
+  grp.add(new THREE.Mesh(strip(samples, (s) => edgeOf(s, -1) + inn(s, -1), (s) => edgeOf(s, -1) + out(s), 0.08), m));
   return grp;
 }
 
@@ -1238,12 +1275,14 @@ function kerbs(samples, covered = null) {
   const pos = [], col = [], idx = [], uv = [];
   const red = new THREE.Color(0xd8262b), white = new THREE.Color(0xf4f4f4), green = new THREE.Color(0x2f7d4f);
   // one band beside the edge on side sd, from offset o0 to o1 beyond the edge, lifted lip0 → lip1
+  // (o0, o1: metres, or what they are at a sample)
   const band = (on, o0, o1, lip0, lip1, colourOf) => {
+    const O0 = typeof o0 === "function" ? o0 : () => o0, O1 = typeof o1 === "function" ? o1 : () => o1;
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n, sd = on[i];
       if (!sd || on[j] !== sd) continue;
       const v = pos.length / 3, c = colourOf(i);
-      for (const [k, s] of [[0, samples[i]], [1, samples[j]]]) for (const [o, lift] of [[o0, lip0], [o1, lip1]]) {
+      for (const [k, s] of [[0, samples[i]], [1, samples[j]]]) for (const [o, lift] of [[O0(s), lip0], [O1(s), lip1]]) {
         const off = edgeOf(s, sd) + sd * o;
         pos.push(s.p.x + s.nor.x * off, s.p.y + 0.07 + lift, s.p.z + s.nor.z * off); col.push(c.r, c.g, c.b);
         uv.push((i + k) / 0.25, o / 1.4);   // (ridges every 25 cm across the kerb – samples are ~1 m apart)
@@ -1255,7 +1294,9 @@ function kerbs(samples, covered = null) {
     }
   };
   const stripes = (i) => (i % 2 ? red : white);
-  band(mark.inside, -1.4, 0, 0.0, 0.06, stripes);          // apex kerbs sit just inside the white line
+  // apex kerbs sit just inside the measured edge (the tarmac's) – beyond a surveyed one (s.sv: the white line's outer
+  // side is the edge there, and a real kerb lies outside the line: inside it the road came out 1.4 m narrow at every apex)
+  band(mark.inside, (s) => (s.sv ? -1.4 * (1 - s.sv) : -1.4), (s) => (s.sv ? 1.4 * s.sv : 0), 0.0, 0.06, stripes);
   band(mark.outside, 0, 1.4, 0.0, 0.07, stripes);
   band(mark.strip, 1.4, 3.6, 0.0, 0.0, () => green);
   const g = new THREE.BufferGeometry();
@@ -3226,7 +3267,8 @@ async function loadGeo(w) {
   const off = window.api.geo.onProgress((step) => { if (job === geoJob) geoStatus(`실제 지도 · ${step}…`); });
   try {
     geoStatus("실제 지도 · 준비 중…");
-    const data = await window.api.geo.scene(location, w.lap);
+    // (a circuit with a surveyed track: the fit that survey was made with – the map then stands where the track's lines do)
+    const data = await window.api.geo.scene(location, w.lap, w.trackFit || null);
     if (job !== geoJob || world !== w) return;
     if (!data.ok) { geoStatus(`실제 지도를 못 만들었어요: ${data.reason}`, true); setTimeout(() => job === geoJob && geoStatus(""), 8000); return; }
     w.geoCenter = data.center;
@@ -3800,19 +3842,27 @@ function gridModelFor(src) {
   const maxGridPos = Math.max(0, ...Object.values(src0?.state.TimingAppData?.Lines || {}).map((l) => +l?.GridPos || 0));
   const count = slotCount({ drivers, maxGridPos, year });
   const model = { s1, pitch, slots: new Map() };
-  // pole's side: from a source where there is one; else the side the racing line takes there (an estimate)
+  // Where the boxes are DRAWN, at a circuit whose surveyed track carries pole's box (trackdata.js marks.pole): where the
+  // real ones are painted – the drawing only; the matching stays with the feed's own grid (grid.js surveyedBoxes).
+  const mk = world.trackMarks?.pole || null, qm = mk ? F.sampleAt(mk.s) : null;
+  const SB = surveyedBoxes(mk, s1, profileFor(year || null).FZ, L, qm ? (edgeOf(qm, 1) + edgeOf(qm, -1)) / 2 : 0), drawOff = SB.drawOff, boxOff = SB.off, mkSide = SB.side;
+  // pole's side: the surveyed box's; else from a source where there is one; else the side the racing line takes there
+  // (an estimate)
   const known = poleSideFor(venue?.key, year), p1 = F.sampleAt(slotS(model, 1, L));
-  const side = known ? known.side : (Math.sign((p1.M ?? 0) - (edgeOf(p1, 1) + edgeOf(p1, -1)) / 2) || 1);
-  model.side = side;
+  const side = mkSide || (known ? known.side : (Math.sign((p1.M ?? 0) - (edgeOf(p1, 1) + edgeOf(p1, -1)) / 2) || 1));
+  model.side = side; model.drawOff = drawOff; model.surveyed = SB.ok;
   const P = [0, 0, 0], D = [0, 0];
   for (let g = 1; g <= count.n; g++) {
-    const ss = slotS(model, g, L), smp = F.sampleAt(ss), lat = slotLat(g, edgeOf(smp, 1), edgeOf(smp, -1), side);
+    const ss = (((slotS(model, g, L) + drawOff) % L) + L) % L, smp = F.sampleAt(ss), lat = slotLat(g, edgeOf(smp, 1), edgeOf(smp, -1), side);
     F.at(ss, lat, P, D);
     model.slots.set(g, { g, s: ss, lat, x: P[0], y: P[1], z: P[2], yaw: Math.atan2(D[0], D[1]), tx: D[0], tz: D[1], nx: -D[1], nz: D[0] });
   }
   model.count = count;
-  model.info = { ok: true, source: from.kind, from, pitch: +pitch.toFixed(2), poleSide: side > 0 ? "left" : "right", poleSideFrom: known ? known.src : "estimate: the racing line's side at pole",
-    slots: count.n, slotsFrom: count.from, columns: "estimate: middle of each half of the tarmac", venue: venue?.key ?? null, year };
+  // (mkSide: + is the lap line's normal's side – the cars' right)
+  model.info = { ok: true, source: from.kind, from, pitch: +pitch.toFixed(2), poleSide: mkSide ? (mkSide > 0 ? "right" : "left") : side > 0 ? "left" : "right",
+    poleSideFrom: mkSide ? "the surveyed pole box (trackdata.js marks.pole), as the cars see it" : known ? known.src : "estimate: the racing line's side at pole",
+    slots: count.n, slotsFrom: count.from, columns: "estimate: middle of each half of the tarmac", venue: venue?.key ?? null, year,
+    ...(mk ? { boxes: drawOff || boxOff === 0 ? "drawn at the surveyed boxes" : "the surveyed box is too far from the feed's grid: drawn where the feed has the field", boxOff: +boxOff.toFixed(2) } : {}) };
   return model;
 }
 function addGrid() {
@@ -3851,10 +3901,17 @@ function paintGrid(m) {
     quad(front - SIDE, front - T, sl.lat + W / 2 - T, sl.lat + W / 2);
     quad(front - SIDE, front - T, sl.lat - W / 2, sl.lat - W / 2 + T);
   }
-  // start line across the tarmac, a metre ahead of pole's front line
-  const p1 = m.slots.get(1), startS = p1.s + fz + GRID_RULES.frontGap + GRID_RULES.startLine, smp = F.sampleAt(startS);
+  // start line across the tarmac, a metre ahead of pole's front line – at its surveyed place where the circuit's track
+  // is surveyed and the boxes are drawn at theirs (trackdata.js marks.start)
+  const p1 = m.slots.get(1), TM = m.surveyed ? world.trackMarks : null;
+  const startS = TM?.start ? TM.start.s : p1.s + fz + GRID_RULES.frontGap + GRID_RULES.startLine, smp = F.sampleAt(startS);
   const wl = edgeOf(smp, 1), wr = edgeOf(smp, -1);
   quad(startS, startS + 0.5, wr + 0.2, wl - 0.2);
+  // the control (finish) line where it is surveyed: two rows of chequers across the tarmac
+  if (TM?.control) {
+    const cs = TM.control.s, q = F.sampleAt(cs), l0 = edgeOf(q, -1) + 0.2, l1 = edgeOf(q, 1) - 0.2, n = Math.max(2, Math.round((l1 - l0) / 0.4)), w = (l1 - l0) / n;
+    for (let k = 0; k < n; k++) quad(cs + (k % 2 ? 0.4 : 0), cs + (k % 2 ? 0.8 : 0.4), l0 + k * w, l0 + (k + 1) * w);
+  }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
@@ -5079,6 +5136,15 @@ window.Map3D = {
   // development: the track's two edges at every sample within r metres of a place – [sample, [lat, lon] at the edge on
   // the sample normal's + side, [lat, lon] at the edge on its − side] (which of them is the cars' left depends on the
   // circuit's frame: tell them apart by where they lie)
+  // development: the track as built – whether a surveyed track was used (and how the lap lies on its reference line), and
+  // every sample's edges, cars' line (metres from the lap line) and surveyed share, with a checksum: for a before / after
+  // (no map needed: the same with the map switched off)
+  trackState(full = false) {
+    if (!world) return "null";
+    const S = world.samples, rows = S.map((s) => [+(s.R ?? -7).toFixed(3), +(s.L ?? 7).toFixed(3), +(s.line ?? 0).toFixed(3), +(s.sv || 0).toFixed(3)]);
+    let h = 2166136261; for (const r of rows) for (const v of r) { h ^= Math.round(v * 1000) & 0xffffffff; h = Math.imul(h, 16777619) >>> 0; }
+    return JSON.stringify({ n: S.length, track: world.track, fit: world.trackFit, width: +world.width.toFixed(3), hash: h.toString(16), rows: full ? rows : undefined });
+  },
   trackEdgesNear(lat, lon, r = 100) {
     const R = world?.real; if (!R) return JSON.stringify({ real: false });
     const [px, pz] = R.geo.fromLL(lat, lon), out = [], ll = (x, z) => R.geo.toLL(x, z).map((v) => +v.toFixed(7));
@@ -5976,6 +6042,8 @@ window.Map3D = {
     if ("carNear" in o) for (const c of cars.values()) c.model.userData.near.visible = o.carNear;
     if ("carMaps" in o) for (const c of cars.values()) c.model.traverse((m) => { const x = m.material; if (!x?.isMeshStandardMaterial) return; if (!o.carMaps) { x.userData.devMaps ??= [x.normalMap, x.roughnessMap]; x.normalMap = null; x.roughnessMap = null; } else if (x.userData.devMaps) { [x.normalMap, x.roughnessMap] = x.userData.devMaps; } x.needsUpdate = true; });
     if ("models" in o) devNoModels = !o.models;   // (for worlds built from now on)
+    // (track: the surveyed track – true: as shipped, false: none, an object: that entry; the circuit is built again at once)
+    if ("track" in o) { devTrack = o.track === true ? undefined : o.track === false ? false : o.track || undefined; if (world) world.sourceKey = ""; }
     if ("year" in o) devYear = o.year || null;
     if ("ratio" in o) { perf.lockRatio = o.ratio; renderer.setPixelRatio(o.ratio); resize(); }
     if ("cap" in o) perf.cap = o.cap;

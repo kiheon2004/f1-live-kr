@@ -504,12 +504,13 @@ export const FACILITIES = [
     status: "trial",
     // A dark lattice across the track 31 m past the start line, from beyond the track's far edge to the pit wall, 21.4 m;
     // its light panel hangs over the track on the grid's side – this app's five start lamps hang on it (`lights`).
-    // Moved 2.5 m along its beam towards the pits from the surveyed place: there its leg on the pit wall stood 2.05 m
-    // INSIDE this app's track (the track, drawn round the cars' line, lies 3.7 m nearer the pits here than the real
-    // tarmac); now it stands on this app's wall. ZAN_GANTRY_PLACE. `footprint`: its leg beyond the track only.
+    // At its surveyed place again (v0.70 had it 2.5 m nearer the pits: this app's track, drawn round the cars' line, lay
+    // 3.7 m nearer the pits than the real tarmac, and the leg on the pit wall stood inside it). With the track's edges
+    // surveyed (trackdata.js) that leg stands on the pit wall, 1.2 m outside the track's edge. ZAN_GANTRY_PLACE.
+    // `footprint`: its leg beyond the track only.
     replaces: { names: /^\(no map record makes way\)$/ },
-    model: { file: "zan_gantry.glb", anchor: [52.3897545, 4.541205], heading: 202.13, lights: { y: [5.9, 7.2], z: 0.9, face: 1 },
-      footprint: [[52.3897662, 4.5411969], [52.3897594, 4.5412241], [52.3897428, 4.5412131], [52.3897496, 4.5411859]] },
+    model: { file: "zan_gantry.glb", anchor: [52.389763, 4.541171], heading: 202.13, lights: { y: [5.9, 7.2], z: 0.9, face: 1 },
+      footprint: [[52.3897747, 4.5411629], [52.3897679, 4.5411901], [52.3897513, 4.5411791], [52.3897581, 4.5411519]] },
     sources: [
       "src/data/models/zan_gantry.glb – made for this app (2026-11-26): a dark lattice girder on two legs, 21.4 m between them, its underside 6.8 m up, a blank light panel over the track – its place and span after the PDOK aerial picture (its shadow shows), its heights estimated; no lettering; no outside asset",
     ],

@@ -114,9 +114,10 @@ app.whenReady().then(() => {
   handle("track:outline", (_e, location) => { const y = new Date().getFullYear(); return archive.findOutline(V.text(location, 80), [y, y - 1, y - 2]); });
   handle("track:circuit", (_e, key, year) => getCircuit(cacheDir, key, year));
   // Real-world 3D surroundings: fitted scene, map tiles (terrain heights, imagery), optional Google imagery.
-  handle("geo:scene", (e, location, lap) => {
+  // (fixed: a circuit's stored fit, for a track surveyed in latitude and longitude – renderer/trackedges.js; null: fitted here)
+  handle("geo:scene", (e, location, lap, fixed = null) => {
     if (!Array.isArray(lap) || lap.length < 2 || lap.length > 50000 || !lap.every((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))) throw new Error("bad lap");
-    return scenes.build(V.text(location, 80), lap, (step) => { if (!e.sender.isDestroyed()) e.sender.send("geo:progress", step); });
+    return scenes.build(V.text(location, 80), lap, (step) => { if (!e.sender.isDestroyed()) e.sender.send("geo:progress", step); }, V.fixedFit(fixed));
   });
   handle("geo:tile", (_e, source, z, x, y) => {
     [z, x, y] = V.tileArgs(z, x, y);

@@ -22,6 +22,11 @@ generated tables in `src/renderer/*data.js` were identified with the help of Ope
 substantial extract of the OpenStreetMap database it is © OpenStreetMap contributors and available under the Open Data
 Commons Open Database License (ODbL) 1.0 – https://www.openstreetmap.org/copyright – not under this project's terms.
 
+The surveyed track lines (a circuit's two edges, its start and finish lines and pole's grid box) in
+`src/renderer/trackdata.js` and `tools/track/` were measured on aerial photographs. Zandvoort: PDOK Luchtfoto 2026
+Ortho HR – source: Beeldmateriaal Nederland, CC BY 4.0 (https://www.beeldmateriaal.nl, served by https://www.pdok.nl) –,
+compared with Esri World Imagery (looked at only). No photograph is in the repository: only coordinates measured on them.
+
 ## Fetched at run time (not in the repository)
 
 Map data and imagery the app downloads while running – OpenStreetMap (ODbL), Overture Maps (ODbL / CDLA), Sentinel-2

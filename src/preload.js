@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld("api", {
     logout: () => ipcRenderer.invoke("auth:logout"),
   },
   geo: {
-    scene: (location, lap) => ipcRenderer.invoke("geo:scene", location, lap),
+    scene: (location, lap, fixed = null) => ipcRenderer.invoke("geo:scene", location, lap, fixed),
     tile: (source, z, x, y) => ipcRenderer.invoke("geo:tile", source, z, x, y),
     google: () => ipcRenderer.invoke("geo:google"),
     googleCheck: () => ipcRenderer.invoke("geo:googleCheck"),

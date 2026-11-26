@@ -115,3 +115,21 @@ test("the shipped data: every circuit's lines pair up, lie on its own reference 
     assert.ok(r.width[0] >= 6 && r.width[1] <= 30, key + ": widths " + r.width);
   }
 });
+
+test("v0.71: no edge line along a step in a surveyed edge – only there, and never at an unsurveyed circuit", async () => {
+  const { edgeSteps } = await import("../src/renderer/trackedges.js");
+  // a pit lane's line ends: 4.6 m within 5 m, samples 2 m apart
+  // (and the edge coming back in gently round the rest of the lap: no step)
+  const e = [7, 7, 7, 7.46, 9.3, 11.14, 11.6, 11.6, 10.6, 9.6, 8.6, 7.6], sv = e.map(() => 1);
+  // (the step itself lies between the samples 3 … 5; the line narrows over the sample before it and widens over the one after)
+  assert.deepStrictEqual([...edgeSteps(e, sv)], [0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]);
+  // an edge moving against the lap line in a corner (0.3 m a metre) is no step
+  assert.ok(![...edgeSteps([7, 7.6, 8.2, 8.8, 9.4, 8.8, 8.2, 7.6], [1, 1, 1, 1, 1, 1, 1, 1])].some(Boolean));
+  // not where either sample is unsurveyed (the measured edges of every other circuit: nothing changes there)
+  assert.ok(![...edgeSteps(e, e.map(() => 0))].some(Boolean));
+  assert.deepStrictEqual([...edgeSteps([7, 7, 12, 12], [1, 1, 0, 0])], [0, 0, 0, 0]);
+  // the lap closes: the last sample's neighbour is the first
+  assert.deepStrictEqual([...edgeSteps([12, 7, 7, 7, 7, 7], [1, 1, 1, 1, 1, 1])], [1, 1, 1, 0, 1, 1]);
+  // the one sample more is never an unsurveyed one
+  assert.deepStrictEqual([...edgeSteps([7, 7, 7, 12, 12, 12, 12, 7], [0, 1, 1, 1, 1, 0, 0, 0])], [0, 1, 1, 1, 1, 0, 0, 0]);
+});

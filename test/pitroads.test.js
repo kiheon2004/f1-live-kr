@@ -167,15 +167,19 @@ test("pitRoads: nothing is painted past this app's own wall; a road's own edge l
 
 test("Zandvoort's pit roads: the lane from the passage's mouth to the wall's end, the entry behind the fence, the exit round the inside of the Tarzanbocht", async () => {
   const { PIT_ROADS } = await import("../src/renderer/pitroads.js");
-  const P = PIT_ROADS[55]; assert.ok(P && /PDOK/.test(P.src));
+  // (carried over from the chat side's zandvoort_pitlane.json, version 2.1 – track/run/zan_roads2.py)
+  const P = PIT_ROADS[55]; assert.ok(P && /zandvoort_pitlane\.json, version 2\.1/.test(P.src));
   const KY = 111200, KX = 111320 * Math.cos((52.389 * Math.PI) / 180), xz = ([la, lo]) => [(lo - 4.5413) * KX, -(la - 52.389) * KY], d = (a, b) => Math.hypot(xz(a)[0] - xz(b)[0], xz(a)[1] - xz(b)[1]);
-  assert.ok(Math.abs(d(P.lane.doors[0], P.lane.doors[1]) - 155.6) < 1, "the old block's door line"); assert.strictEqual(P.lane.span, 155.6); assert.strictEqual(P.lane.width, 14.7);
-  assert.deepStrictEqual(P.lane.bands.map((b) => b[2]), ["concrete", "concrete", "red", "white"]);
-  assert.strictEqual(P.entry.left.length, 50); assert.strictEqual(P.entry.right.length, 50); assert.strictEqual(P.exit.left.length, 94); assert.strictEqual(P.exit.right.length, 94);
-  assert.ok(d(P.entry.left[0], P.entry.right[0]) < 0.6, "the entry lane opens from nothing behind the fence");
-  for (let i = 1; i < 94; i++) { const w = d(P.exit.left[i], P.exit.right[i]); assert.ok(w > 3.5 && w < 7, `exit ${i}: ${w.toFixed(1)} m wide`); assert.ok(d(P.exit.left[i], P.exit.left[i - 1]) < 4, String(i)); }
+  assert.ok(Math.abs(d(P.lane.doors[0], P.lane.doors[1]) - 155.6) < 1, "the old block's door line"); assert.strictEqual(P.lane.span, 155.6); assert.strictEqual(P.lane.width, 15.1);
+  assert.deepStrictEqual(P.lane.bands.map((b) => b[2]), ["concrete", "concrete", "red", "white", "white"]);
+  // the paint in its order out from the doors, none over another: the red line, the white one beside it, the fast lane's concrete, the white line
+  const [fastB, , redB, rwB, lineB] = P.lane.bands; assert.ok(redB[0] < redB[1] && redB[1] <= rwB[0] && rwB[1] <= fastB[0] && fastB[1] <= lineB[0] && lineB[1] < P.lane.width);
+  assert.deepStrictEqual(P.lane.fast, [fastB[0], fastB[1]]);
+  assert.strictEqual(P.entry.left.length, 73); assert.strictEqual(P.entry.right.length, 73); assert.strictEqual(P.exit.left.length, 49); assert.strictEqual(P.exit.right.length, 49);
+  assert.ok(d(P.entry.left[0], P.entry.right[0]) < 1.5, "the entry lane opens narrow: the wall's foot stands a metre behind the track's line, the lane's edge 0.25 m under the track");
+  for (let i = 1; i < 49; i++) { const w = d(P.exit.left[i], P.exit.right[i]); assert.ok(w > 3.5 && w < 7, `exit ${i}: ${w.toFixed(1)} m wide`); assert.ok(d(P.exit.left[i], P.exit.left[i - 1]) < 9, String(i)); }   // (5 m apart as surveyed; 8 m once, where its edge takes up the track's solid line)
   // the exit road comes back past its own start, 60 – 70 m to the side: round the inside of the corner
-  const back = d(P.exit.left[93], P.exit.left[0]); assert.ok(back > 55 && back < 75, String(back));
+  const back = d(P.exit.left[48], P.exit.left[0]); assert.ok(back > 55 && back < 75, String(back));
   assert.strictEqual(P.lines.length, 6); assert.ok(P.lines.filter((l) => l.onTrack && l.dash).length === 1);
 });
 

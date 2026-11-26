@@ -135,3 +135,17 @@ export function applyTrackEdges(samples, T, toScene, { reach = 30, ease = 25 } =
   }
   return { changed, full, missed, outside, folds, width: full ? [+wMin.toFixed(2), +wMax.toFixed(2)] : null };
 }
+
+// Where a surveyed edge steps sideways from one sample to the next – the end of a pit lane's line, past which the track is
+// the whole tarmac again (Zandvoort's pit exit: 4.6 m within 5 m): 1 at the samples either side of each such step and at
+// the surveyed sample before and after them. No edge line is drawn along a step: the real line ends there and the
+// tarmac's own begins further out. (The one sample more each way: a step spread over a few samples begins and ends with
+// a small move – 0.5 m – and a line narrowing to nothing over it would end in a hook; narrowing over the sample before
+// it, the line ends straight.)
+// e: the edge's offset per sample (m); sv: per sample, truthy where it is surveyed; min: metres from one sample to the next
+export function edgeSteps(e, sv, min = 1.2) {
+  const n = e.length, a = new Uint8Array(n), b = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; if (sv[i] && sv[j] && Math.abs(e[j] - e[i]) >= min) a[i] = a[j] = 1; }
+  for (let i = 0; i < n; i++) b[i] = a[i] || (sv[i] && (a[(i + n - 1) % n] || a[(i + 1) % n])) ? 1 : 0;
+  return b;
+}
