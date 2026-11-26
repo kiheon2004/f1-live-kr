@@ -736,3 +736,26 @@ test("v0.70: Monza – the pit building's storeys with the canopy, five more mod
   const lm2 = mk(); F.combine(lm2, fac([["monza-podium", "model"], ["monza-torre-sud", "model"], ["monza-torre-nord", "model"]])); assert.strictEqual(lm2.group.children.length, 0);
 });
 
+// v0.70: Zandvoort – the pit building's storeys (the old block, the round tower, the 2024 block) over the builder's garages,
+// the start gantry carrying the start lamps, 16 stand files on their front lines; the pit-lane roads from surveyed lines
+// (the exit road round the inside of the Tarzanbocht). No surveyed wall place: this app's track lies over it.
+test("v0.70: Zandvoort – the pit building's storeys, the start gantry with the lamps, 16 stand files; the surveyed fast lane, no wall place", async () => {
+  const F = await import("../src/renderer/facilities.js");
+  const { PIT_ROADS } = await import("../src/renderer/pitroads.js");
+  const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));
+  const zan = files.filter((f) => /^zan_/.test(f)).sort();
+  assert.strictEqual(zan.length, 18); assert.strictEqual(zan.filter((f) => /^zan_stand_/.test(f)).length, 16);
+  for (const f of ["zan_pit.glb", "zan_pitwall.glb", "zan_pitlane_entry.glb", "zan_pitlane_main.glb", "zan_pitlane_exit.glb"]) assert.ok(!files.includes(f), f + " is not shipped");
+  const readme = fs.readFileSync(path.join(__dirname, "..", "src", "data", "models", "README.md"), "utf8"); for (const f of zan) assert.ok(readme.includes("`" + f + "`"), f);
+  const U = F.PIT_UPPERS[55];
+  assert.ok(U.file === "zan_pit_upper.glb" && U.turned === true && U.alongFronts === true && U.fill === false && U.front === 12.0 && U.garageTop === 4.8 && U.maxDepth >= U.depth && !U.also);
+  assert.ok(Math.abs(U.span[1] - U.span[0] - U.length) < 0.05 && U.span[1] > -U.span[0], "the model reaches further at its south end: the annexe");
+  const g = F.FACILITIES.find((f) => f.id === "zandvoort-start-gantry");
+  assert.ok(g.model.file === "zan_gantry.glb" && g.venue[0] === 55 && !g.replaces.names.test("") && g.model.footprint.length === 4 && g.model.lights.face === 1 && g.model.lights.y[0] > 5, "the start lamps hang on the model's panel");
+  const st = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Zandvoort.stands;
+  assert.strictEqual(st.length, 16); assert.ok(st.every((s) => s.model && files.includes(s.model.file) && s.model.heading === 180 && Array.isArray(s.model.at) && Array.isArray(s.model.drape.along) && s.model.drape.along.length >= 2));
+  assert.strictEqual(new Set(st.map((s) => s.model.file)).size, 16);
+  // the lane: the surveyed fast lane for the cars; no wall place (this app's track lies over the surveyed wall)
+  const P = PIT_ROADS[55]; assert.deepStrictEqual(P.lane.fast, [9.4, 12.7]); assert.ok(!P.lane.wallAt); assert.deepStrictEqual(P.lane.u, [-36, 223]); assert.strictEqual(P.exit.edgeLine, 0.15); assert.strictEqual(P.edgeLine, 0);
+});
+

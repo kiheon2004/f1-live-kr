@@ -498,6 +498,24 @@ export const FACILITIES = [
     evidence: { confirmed: [], photo: ["a square glazed tower with a set-back top floor (photographs, compared only)"], map: ["the place: OpenStreetMap's point"], inferred: ["its exact place and its turn", "its size (9 × 9 m, 21 m)"] },
   },
   {
+    id: "zandvoort-start-gantry", name: "Zandvoort – the start lights' gantry over the main straight", kind: "tower",
+    venue: [55], loc: ["Zandvoort"], years: [2020, null],
+    status: "trial",
+    // A dark lattice across the track 31 m past the start line, from beyond the track's far edge to the pit wall, 21.4 m;
+    // its light panel hangs over the track on the grid's side – this app's five start lamps hang on it (`lights`).
+    // Moved 2.5 m along its beam towards the pits from the surveyed place: there its leg on the pit wall stood 2.05 m
+    // INSIDE this app's track (the track, drawn round the cars' line, lies 3.7 m nearer the pits here than the real
+    // tarmac); now it stands on this app's wall. ZAN_GANTRY_PLACE. `footprint`: its leg beyond the track only.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "zan_gantry.glb", anchor: [52.3897545, 4.541205], heading: 202.13, lights: { y: [5.9, 7.2], z: 0.9, face: 1 },
+      footprint: [[52.3897662, 4.5411969], [52.3897594, 4.5412241], [52.3897428, 4.5412131], [52.3897496, 4.5411859]] },
+    sources: [
+      "src/data/models/zan_gantry.glb – made for this app (2026-11-26): a dark lattice girder on two legs, 21.4 m between them, its underside 6.8 m up, a blank light panel over the track – its place and span after the PDOK aerial picture (its shadow shows), its heights estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place and span from the aerial picture; heights estimated)",
+    evidence: { confirmed: [], photo: ["a gantry across the track past the start line, its shadow on the tarmac (aerial picture, compared only)"], map: [], inferred: ["its heights (6.8 m under the girder)", "since when it stands"] },
+  },
+  {
     id: "interlagos-start-gantry", name: "Interlagos – the start lights' gantry over the main straight", kind: "tower",
     venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2018, null],
     status: "trial",
@@ -2940,6 +2958,17 @@ export const PIT_UPPERS = {
   39: { file: "mza_pit_upper.glb", garageTop: 5.0, front: 12.7, length: 230.4, depth: 25.4, maxDepth: 25.45, span: [-126.5, 126.5], along: -4.9, fill: false, turned: true, alongFronts: true,
     also: [{ file: "mza_pit_canopy.glb" }],
     src: "src/data/models/mza_pit_upper.glb + mza_pit_canopy.glb – Monza's Palazzina Box (1989) over the garages: a sloped silver band, two rows of dark glass leaning out over the lane in silver mullions, a white steel sun-screen, the terrace at 10 m behind a glass rail, a glazed drum at either end; on the terrace the long white canopy (eaves 13 m, crown 15.5 m) – made for this app (2026-11-26) after OpenStreetMap's outline (230.4 × 25.4 m), aerial imagery and Commons photographs compared by eye, nothing copied; every height, the glass's lean, the drums' place, the paddock side and the canopy's size estimated; no outside asset, no logo or lettering" },
+  // Zandvoort: the old pit building (its front 12 m one storey under a roof terrace, behind it two storeys with one long band
+  // of dark glass under a white roof edge, 8.8 m), the control tower at its north end (a blue-green glazed drum in white
+  // fins, a wood-clad top storey, 12.45 m), the six-bay block of 2024 beyond it (a dark box, a roof terrace under a timber
+  // pergola), a tiled annexe at the south end – one file, made with its +Z to the pit lane (`turned`), its door line
+  // (z +12.0) on the built garage fronts (`alongFronts`). The file of 2026-11-26 16:23 (the second issue: after Commons
+  // photographs of 2018 and the circuit's two renders of 2024-01; the first had no photograph). A winners' podium frame
+  // stands on the terrace south of the tower – its place after the 2020 extension is not confirmed. `along`: the garages
+  // this app builds follow the session's pit boxes (34 bays of 5.48 m, 186 m); the model stands at the map's place, its
+  // middle 10.2 m before theirs. ZAN_UPPER_PLACE
+  55: { file: "zan_pit_upper.glb", garageTop: 4.8, front: 12.0, length: 230.8, depth: 24.0, maxDepth: 24.05, span: [-107.25, 123.55], along: 10.2, fill: false, turned: true, alongFronts: true,
+    src: "src/data/models/zan_pit_upper.glb – Zandvoort's pit building over the garages: the old block (a roof terrace over the one-storey front, two storeys behind with a long band of dark glass under a white roof edge, a railing, twelve bare flagpoles and two cabins on the roof, 8.8 m), a podium frame on the terrace, the control tower (a blue-green glazed drum in white fins, a wood-clad top storey 12.45 m, a penthouse, a mast), the 2024 block (six wide glazed bays, a parapet, a roof terrace under a timber pergola, a two-storey glazed part with a wood-clad cube), a tiled annexe – made for this app (2026-11-26, second issue) after OpenStreetMap's outline, the PDOK aerial picture, Commons photographs of 2018-11-03 (before the 2020 extension) and the circuit's two renders of 2024-01, all compared by eye, nothing copied; the present colour and doors of the 2020 front, the tower's top-storey cladding, the podium's place and the terrace's depth are estimates; no outside asset, no logo or lettering" },
   14: { file: "spo_pit_upper.glb", garageTop: 5.0, front: 9.0, length: 291, depth: 18, backTo: 43.3, along: -6.35, span: [-140, 184.5], fill: false, platform: 36, turned: true,
     src: "src/data/models/spo_pit_upper.glb – Interlagos pit building over the garages with the Operations Centre at its pit-entry end: a terrace with a glass rail and a glass awning, one cream membrane cone over each of the 23 garages, a white mast leaning out over the pit lane at every bay line, a flatter membrane over the paddock street, the support strip behind; the Operations Centre in pale concrete and grey-blue glass (its mural is not shown) – made for this app (2026-11-22) from this app's research notes, OpenStreetMap's outlines (279 × 52 m), aerial imagery (one cone every 12.1 m) and Wikimedia Commons photos compared by eye, nothing copied; published: 23 boxes of 216 m², a six-storey operations centre; every height estimated; no outside asset, no logo or lettering" },
   // (Mexico City: made with its +Z to the pit lane – `turned`. As at Austin the garage doors are on the front of the map's

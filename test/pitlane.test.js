@@ -111,3 +111,15 @@ test("cross-section: fast lane the last 3.5 m before the wall, the box in the in
   // nothing known
   assert.strictEqual(crossSection({ wall: null, edge: null }).ok, false);
 });
+
+// v0.70: a surveyed fast lane (pitroads.js lane.fast) – the cars drive in it where it does not lie against the wall
+test("crossSection: a surveyed fast lane goes before the 3.5 m against the wall – where the lane is wide enough for it", async () => {
+  const { crossSection, laneSectionAt } = await import("../src/renderer/pitlane.js");
+  const z = crossSection({ wall: 14.7, fast: [9.4, 12.7] }); assert.ok(Math.abs(z.fastC - 11.05) < 1e-9 && z.inner === 9.4 && z.fast[1] === 12.7 && z.ok);
+  const w = crossSection({ wall: 14.7 }); assert.ok(Math.abs(w.fastC - 12.95) < 1e-9, "without it: 1.75 m from the wall");
+  const n = crossSection({ wall: 10.4, fast: [9.4, 12.7] }); assert.ok(Math.abs(n.fastC - 8.65) < 1e-9, "the wall nearer than the surveyed lane's far side: against the wall again");
+  const m = crossSection({ wall: 11.5, fast: [7.5, 11.5] }); assert.ok(Math.abs(m.fastC - 9.5) < 1e-9 && m.inner === 7.5);
+  const st = [0, 10].map((u) => ({ cs: crossSection({ wall: 14.7, fast: [9.4, 12.7] }), floor: 1, s: { along: [1, 0], inward: [0, 1], uc: u } }));
+  assert.ok(Math.abs(laneSectionAt(st, [0, 10], 5, () => 14.7, [9.4, 12.7]).fastC - 11.05) < 1e-9 && Math.abs(laneSectionAt(st, [0, 10], 5, () => 14.7).fastC - 12.95) < 1e-9);
+});
+

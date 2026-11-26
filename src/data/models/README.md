@@ -227,3 +227,21 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 | `mza_stand_trib_p08.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 2 rows, open) | the same |
 | `mza_stand_trib_p09.glb` (0.02 MB, 292 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 4 rows, open) | the same |
 | `mza_stand_pv_small.glb` (0.02 MB, 388 triangles) | Monza, grandstand: Prima Variante (small stand) (13 m, 7 rows, open) | the same |
+| `zan_pit_upper.glb` (0.15 MB, 3,130 triangles) | Zandvoort pit building over the garages (second issue): the old block with its roof terrace and glazed upper storey, the control tower, the 2024 block with its pergola terrace, the tiled annexe, a podium frame | made for this app, 2026-11-26: OpenStreetMap's outline, the PDOK aerial picture, Commons photographs of 2018 and the circuit's two renders of 2024-01, compared by eye – nothing copied, no outside asset, no logo or lettering; the 2020 front's present look, the tower's top storey, the podium's place estimated |
+| `zan_gantry.glb` (0.01 MB, 188 triangles) | Zandvoort, the start lights' gantry (a dark lattice, 21.4 m, blank panel) | made for this app, 2026-11-26: its place and span from the aerial picture; heights estimated |
+| `zan_stand_tarzan_in.glb` (0.52 MB, 11,800 triangles) | Zandvoort, grandstand: Tarzan-In (159 m, 35 rows, open) | made for this app, 2026-11-26: its plan this app's own outline (the map's for Main); rows and height worked out from its depth; seat strips, no single seats |
+| `zan_stand_pit.glb` (0.52 MB, 11,800 triangles) | Zandvoort, grandstand: Pit (161 m, 35 rows, open) | the same |
+| `zan_stand_main.glb` (0.26 MB, 5,838 triangles) | Zandvoort, grandstand: Main (77 m, 32 rows, roofed) | the same |
+| `zan_stand_ben_pon.glb` (0.50 MB, 11,212 triangles) | Zandvoort, grandstand: Ben Pon (151 m, 35 rows, open) | the same |
+| `zan_stand_arena_n.glb` (0.08 MB, 1,824 triangles) | Zandvoort, grandstand: Arena (north) (31 m, 25 rows, open) | the same |
+| `zan_stand_arena_ne.glb` (0.06 MB, 1,210 triangles) | Zandvoort, grandstand: Arena (north-east) (41 m, 11 rows, open) | the same |
+| `zan_stand_arena_nw.glb` (0.07 MB, 1,522 triangles) | Zandvoort, grandstand: Arena (north-west) (25 m, 29 rows, open) | the same |
+| `zan_stand_arena_w.glb` (0.09 MB, 1,920 triangles) | Zandvoort, grandstand: Arena (west) (30 m, 27 rows, open) | the same |
+| `zan_stand_arena_t12.glb` (0.46 MB, 10,414 triangles) | Zandvoort, grandstand: Arena (T12–T13) (172 m, 29 rows, open) | the same |
+| `zan_stand_arena_out.glb` (0.18 MB, 3,946 triangles) | Zandvoort, grandstand: Arena-Out (73 m, 24 rows, open) | the same |
+| `zan_stand_arena_in.glb` (0.18 MB, 3,946 triangles) | Zandvoort, grandstand: Arena-In (71 m, 24 rows, open) | the same |
+| `zan_stand_eastside_1.glb` (0.42 MB, 9,440 triangles) | Zandvoort, grandstand: Eastside 1 (164 m, 27 rows, open) | the same |
+| `zan_stand_eastside_2.glb` (0.18 MB, 4,054 triangles) | Zandvoort, grandstand: Eastside 2 (69 m, 25 rows, open) | the same |
+| `zan_stand_eastside_3.glb` (0.15 MB, 3,414 triangles) | Zandvoort, grandstand: Eastside 3 (59 m, 28 rows, open) | the same |
+| `zan_stand_eastside_4.glb` (0.11 MB, 2,428 triangles) | Zandvoort, grandstand: Eastside 4 (49 m, 22 rows, open) | the same |
+| `zan_stand_hairpin.glb` (0.17 MB, 3,730 triangles) | Zandvoort, grandstand: Hairpin (75 m, 23 rows, open) | the same |
