@@ -76,6 +76,9 @@ export function trackFrame(world) {
     },
     // the sample at or just before s
     sampleAt(s) { return S[locate(s)[0]]; },
+    // the track's edges at s (m from the lap line: o.L, o.R), straight between the sample at or just before s and the next;
+    // o.sv: both are surveyed edges (trackedges.js)
+    edgesAt(s, o) { const [i, t] = locate(s), a = S[i], b = S[(i + 1) % n], aL = a.L ?? 7, aR = a.R ?? -7; o.L = aL + ((b.L ?? 7) - aL) * t; o.R = aR + ((b.R ?? -7) - aR) * t; o.sv = a.sv && b.sv ? 1 : 0; return o; },
     // the racing line's offset at s (samples' .line, metres left of the lap line; 0 without one), cubic
     lineAt(s) {
       const [i, t] = locate(s), v = (k) => S[(i + k + n) % n].line || 0;

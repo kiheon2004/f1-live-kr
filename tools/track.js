@@ -171,11 +171,15 @@ function buildEntry(C, survey) {
     if (tx * r[0] + ty * r[1] > 0) withCars++; else against++;
   }
   const reversed = against > withCars;
-  if (reversed) { const l = left; left = right.reverse(); right = l.reverse(); low = low.map(([a, b]) => [n - 1 - b, n - 1 - a]); }
+  // (C.broken: stretches where the real edge line is broken – a pit entry's mouth: { right | left: [[from section, to section,
+  // painted m, bare m] …] }, sides and sections as in the survey file)
+  let broken = null;
+  for (const key of ["left", "right"]) { const R = (C.broken?.[key] || []).filter((r) => Array.isArray(r) && r.length >= 2 && r[0] >= 0 && r[1] > r[0] && r[1] <= n - 1); if (R.length) (broken ||= {})[key] = R.map(([a, b, on = 1, off = 1]) => [a, b, on, off]); }
+  if (reversed) { const l = left; left = right.reverse(); right = l.reverse(); low = low.map(([a, b]) => [n - 1 - b, n - 1 - a]); if (broken) { const f = (R) => R.map(([a, b, on, off]) => [n - 1 - b, n - 1 - a, on, off]); broken = { ...(broken.right ? { left: f(broken.right) } : {}), ...(broken.left ? { right: f(broken.left) } : {}) }; } }
   const r2 = (p) => [+p[0].toFixed(2), +p[1].toFixed(2)];
   const marks = {}; for (const [k, v] of Object.entries(survey.marks || {})) marks[k] = v.map((p) => r2(llToFeed(F, p)));
   const entry = { on: !!C.on, yr: C.yr || null, fit: { centre: F.centre, c: F.c, s: F.s, tx: F.tx, ty: F.ty }, ref: C.ref.pts,
-    edges: { left: left.map(r2), right: right.map(r2), ...(E.open ? { open: true } : {}) }, low, marks,
+    edges: { left: left.map(r2), right: right.map(r2), ...(E.open ? { open: true } : {}) }, low, ...(broken ? { broken } : {}), marks,
     src: { survey: survey.src || null, ref: C.ref.from || null, fit: F.from || null } };
   return { entry, report: { sections: n, reversed, withCars, against } };
 }

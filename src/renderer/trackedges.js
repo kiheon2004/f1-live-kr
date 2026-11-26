@@ -63,7 +63,7 @@ function cast(s, P, closed, reach) {
     const t = (wx * nz - wz * nx) / den; if (t < -1e-6 || t > 1 + 1e-6) continue;
     const d = (wx * ez - wz * ex) / den; if (Math.abs(d) > reach) continue;
     if (ex * tx + ez * tz < 0.5 * Math.hypot(ex, ez)) continue;
-    if (!best || Math.abs(d) < Math.abs(best.d)) best = { d, k };
+    if (!best || Math.abs(d) < Math.abs(best.d)) best = { d, k, t };
   }
   return best;
 }
@@ -79,15 +79,17 @@ export function edgeOffsets(samples, T, toScene, reach = 30) {
   for (const r of T.low || []) for (let i = Math.max(0, r[0]); i <= Math.min(n - 1, r[1]); i++) low[i] = 1;
   const isLow = (k) => low[k] || low[(k + 1) % n];
   const N = samples.length, dP = new Float64Array(N), dM = new Float64Array(N), raw = new Uint8Array(N);
+  // (where along each surveyed line a sample meets it: the section's number and how far on to the next – for `broken`)
+  const kP = new Float64Array(N).fill(NaN), kM = new Float64Array(N).fill(NaN);
   let missed = 0;
   for (let i = 0; i < N; i++) {
     const s = samples[i], a = cast(s, Rp, closed, reach), b = cast(s, Lp, closed, reach);
     if (!a && !b) continue;
     if (!a || !b || !(a.d - b.d > 3) || a.d - b.d > 45) { missed++; continue; }
     if (isLow(a.k) || isLow(b.k)) continue;
-    dP[i] = a.d; dM[i] = b.d; raw[i] = 1;
+    dP[i] = a.d; dM[i] = b.d; raw[i] = 1; kP[i] = a.k + Math.max(0, Math.min(1, a.t)); kM[i] = b.k + Math.max(0, Math.min(1, b.t));
   }
-  return { dP, dM, raw, missed };
+  return { dP, dM, raw, missed, kP, kM };
 }
 
 // samples: [{ p: { x, z }, nor: { x, z }, L, R, M? }] (scene metres; nor to the cars' right; L the edge on the normal's
@@ -101,7 +103,7 @@ export function edgeOffsets(samples, T, toScene, reach = 30) {
 export function applyTrackEdges(samples, T, toScene, { reach = 30, ease = 25 } = {}) {
   const none = { changed: 0, full: 0, missed: 0, outside: 0, folds: 0, width: null };
   const O = edgeOffsets(samples, T, toScene, reach); if (!O) return none;
-  const N = samples.length, { dP, dM, raw, missed } = O;
+  const N = samples.length, { dP, dM, raw, missed, kP, kM } = O;
   // how far each surveyed sample is from the nearest one that is not (in samples, round the lap)
   const dist = new Float64Array(N).fill(Infinity);
   let any0 = false;
@@ -133,7 +135,17 @@ export function applyTrackEdges(samples, T, toScene, { reach = 30, ease = 25 } =
       if (ex * tx + ez * tz < 0) folds++;
     }
   }
-  return { changed, full, missed, outside, folds, width: full ? [+wMin.toFixed(2), +wMax.toFixed(2)] : null };
+  // (stretches where the real edge line is broken – a pit entry's mouth: T.broken = { right | left: [[from section, to
+  // section, painted m, bare m] …] } – per side a mask of the samples whose edge lies there: 1 + the stretch's number)
+  let broken = null;
+  for (const [key, K] of [["right", kP], ["left", kM]]) {
+    const R = T.broken?.[key]; if (!R?.length) continue;
+    const mask = new Uint8Array(N); let any = false;
+    for (let i = 0; i < N; i++) { if (!(samples[i].sv >= 1) || !Number.isFinite(K[i])) continue; const j = R.findIndex((r) => K[i] >= r[0] && K[i] <= r[1]); if (j >= 0) { mask[i] = j + 1; any = true; } }
+    if (any) (broken ||= {})[key] = { mask, ranges: R };
+  }
+
+  return { changed, full, missed, outside, folds, ...(broken ? { broken } : {}), width: full ? [+wMin.toFixed(2), +wMax.toFixed(2)] : null };
 }
 
 // Where a surveyed edge steps sideways from one sample to the next – the end of a pit lane's line, past which the track is
@@ -148,4 +160,18 @@ export function edgeSteps(e, sv, min = 1.2) {
   for (let i = 0; i < n; i++) { const j = (i + 1) % n; if (sv[i] && sv[j] && Math.abs(e[j] - e[i]) >= min) a[i] = a[j] = 1; }
   for (let i = 0; i < n; i++) b[i] = a[i] || (sv[i] && (a[(i + n - 1) % n] || a[(i + 1) % n])) ? 1 : 0;
   return b;
+}
+
+// The painted pieces of a broken line laid along a path of straight pieces: lengths – each piece's length (m), on / off –
+// painted and bare metres, beginning painted at the path's start. → [[piece, from, to] …] (from, to: 0 … 1 along that
+// piece); a painted stretch running over a joint comes as two.
+export function dashPieces(lengths, on, off) {
+  const out = [], per = on + off; if (!(on > 0) || !(per > 0)) return out;
+  let s0 = 0;
+  for (let j = 0; j < lengths.length; j++) {
+    const len = lengths[j], s1 = s0 + len; if (!(len > 0)) continue;
+    for (let k = Math.floor(s0 / per); k * per < s1; k++) { const a = Math.max(s0, k * per), b = Math.min(s1, k * per + on); if (b - a > 1e-6) out.push([j, (a - s0) / len, (b - s0) / len]); }
+    s0 = s1;
+  }
+  return out;
 }

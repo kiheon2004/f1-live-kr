@@ -180,6 +180,6 @@ test("Zandvoort's pit roads: the lane from the passage's mouth to the wall's end
   for (let i = 1; i < 49; i++) { const w = d(P.exit.left[i], P.exit.right[i]); assert.ok(w > 3.5 && w < 7, `exit ${i}: ${w.toFixed(1)} m wide`); assert.ok(d(P.exit.left[i], P.exit.left[i - 1]) < 9, String(i)); }   // (5 m apart as surveyed; 8 m once, where its edge takes up the track's solid line)
   // the exit road comes back past its own start, 60 – 70 m to the side: round the inside of the corner
   const back = d(P.exit.left[48], P.exit.left[0]); assert.ok(back > 55 && back < 75, String(back));
-  assert.strictEqual(P.lines.length, 6); assert.ok(P.lines.filter((l) => l.onTrack && l.dash).length === 1);
+  assert.strictEqual(P.lines.length, 6); assert.ok(P.lines.filter((l) => l.onTrack && !l.dash && l.width === 0.25).length === 1, "the line inside the track before the entry: solid on the 2026 photograph");
 });
 

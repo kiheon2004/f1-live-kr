@@ -133,3 +133,24 @@ test("v0.71: no edge line along a step in a surveyed edge – only there, and ne
   // the one sample more is never an unsurveyed one
   assert.deepStrictEqual([...edgeSteps([7, 7, 7, 12, 12, 12, 12, 7], [0, 1, 1, 1, 1, 0, 0, 0])], [0, 1, 1, 1, 1, 0, 0, 0]);
 });
+
+test("v0.71: a broken edge line – the painted pieces along a path, and which samples lie on the broken stretch", async () => {
+  const { dashPieces, applyTrackEdges } = await import("../src/renderer/trackedges.js");
+  // 1.1 m painted, 0.9 m bare along three pieces of 2 m: painted 0 … 1.1, 2 … 3.1, 4 … 5.1
+  const r = dashPieces([2, 2, 2], 1.1, 0.9).map(([j, a, b]) => [j, +a.toFixed(3), +b.toFixed(3)]);
+  assert.deepStrictEqual(r, [[0, 0, 0.55], [1, 0, 0.55], [2, 0, 0.55]]);
+  // a painted stretch running over a joint comes in two; the paint adds up to its share of the path
+  const q = dashPieces([1.5, 1.5, 3], 2, 1); const painted = [1.5, 1.5, 3].map((len, j) => q.filter((x) => x[0] === j).reduce((a, x) => a + (x[2] - x[1]) * len, 0));
+  assert.ok(Math.abs(painted[0] - 1.5) < 1e-9 && Math.abs(painted[1] - 0.5) < 1e-9 && Math.abs(painted[2] - 2) < 1e-9, JSON.stringify(q));
+  assert.deepStrictEqual(dashPieces([2, 2], 0, 1), []);
+  // a straight track 100 m long, 12 m wide, sections every 5 m; the right line broken between sections 4 and 8 (20 … 40 m)
+  const T = { edges: { left: [], right: [], open: true }, low: [], broken: { right: [[4, 8, 1.1, 0.9]] } };
+  for (let i = 0; i <= 20; i++) { T.edges.left.push([i * 5, 6]); T.edges.right.push([i * 5, -6]); }
+  const S = []; for (let i = 0; i < 50; i++) S.push({ i, p: { x: i * 2, z: 0 }, nor: { x: 0, z: 1 }, L: 7, R: -7 });
+  const out = applyTrackEdges(S, T, ([X, Y]) => [X, -Y], { ease: 0 });
+  assert.ok(out.broken && out.broken.right && !out.broken.left, JSON.stringify(Object.keys(out.broken || {})));
+  const on = [...out.broken.right.mask].map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
+  assert.deepStrictEqual(on, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);   // the samples at 20 … 40 m
+  // no `broken` in the data: nothing in the result
+  assert.ok(!("broken" in applyTrackEdges(S.map((s) => ({ ...s, L: 7, R: -7, sv: 0 })), { ...T, broken: undefined }, ([X, Y]) => [X, -Y], { ease: 0 })));
+});

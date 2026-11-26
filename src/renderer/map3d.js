@@ -14,7 +14,7 @@ import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, BLEND, fitGrid, slotS, slotLat, gridWeight, leaveBase, assignSlots, poleSideFor, surveyedGrid, slotCount, surveyedBoxes } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { LOCAL_WIDTHS, applyLocalWidths } from "./localwidth.js";
-import { trackFor, lapOnRef, applyTrackEdges, edgeSteps } from "./trackedges.js";
+import { trackFor, lapOnRef, applyTrackEdges, edgeSteps, dashPieces } from "./trackedges.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch, departsFromFeed } from "./startplan.js";
 import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
@@ -1104,6 +1104,8 @@ function measureWidth(samples, grid, center, track = null) {
   samples.localWidth = applyLocalWidths(samples, LOCAL_WIDTHS[vk], ([X, Y]) => [X - center.x, -(Y - center.z)], (s) => raw[Math.floor(s.i / B)]);
   // (a circuit whose track is surveyed – trackedges.js: the edges are the real road's, read off imagery)
   samples.track = track ? applyTrackEdges(samples, track, ([X, Y]) => [X - center.x, -(Y - center.z)]) : null;
+  // (where the real edge line is broken – kept beside the report, not in it: a mask per sample)
+  samples.broken = samples.track?.broken || null; if (samples.track?.broken) { samples.track = { ...samples.track, broken: Object.fromEntries(Object.entries(samples.broken).map(([k, v]) => [k, v.mask.reduce((a, x) => a + (x ? 1 : 0), 0)])) }; }
   samples.pitDropped = dropped;
 }
 const ROAD_LIFT = 0.06;   // the asphalt over the lap line (roadMesh); cars and paint sit on it
@@ -1127,7 +1129,7 @@ class SpatialGrid {
 }
 
 // A strip alongside the centre line between lateral offsets a and b (metres, + = left).
-function strip(samples, a, b, lift, colorAt) {
+function strip(samples, a, b, lift, colorAt, skip = null) {   // (skip(i): no piece from sample i to the next)
   const pos = [], col = [], idx = [];
   const c = new THREE.Color();
   const A = typeof a === "function" ? a : () => a, Bf = typeof b === "function" ? b : () => b;
@@ -1139,6 +1141,7 @@ function strip(samples, a, b, lift, colorAt) {
   });
   const n = samples.length;
   for (let i = 0; i < n; i++) {
+    if (skip && skip(i)) continue;
     const j = (i + 1) % n, v = i * 2, w = j * 2;
     idx.push(v, w, v + 1, v + 1, w, w + 1);
   }
@@ -1230,8 +1233,26 @@ function edgeLines(samples) {
   // (no line along a step in a surveyed edge – trackedges.js edgeSteps: its width is nothing at the samples either side)
   const sv = samples.map((s) => s.sv || 0), st = { 1: edgeSteps(samples.map((s) => edgeOf(s, 1)), sv), [-1]: edgeSteps(samples.map((s) => edgeOf(s, -1)), sv) };
   const out = (s) => (s.sv ? 0.25 * (1 - s.sv) : 0.25), inn = (s, sd) => (st[sd][s.i] ? out(s) : s.sv ? 0.65 - 0.4 * s.sv : 0.65);
-  grp.add(new THREE.Mesh(strip(samples, (s) => edgeOf(s, 1) - out(s), (s) => edgeOf(s, 1) - inn(s, 1), 0.08), m));
-  grp.add(new THREE.Mesh(strip(samples, (s) => edgeOf(s, -1) + inn(s, -1), (s) => edgeOf(s, -1) + out(s), 0.08), m));
+  // (where the real edge line is broken – a pit entry's mouth, trackedges.js `broken` –, no solid line between two such
+  // samples nor to the one before and after them: painted pieces along that stretch instead)
+  const n = samples.length, BR = samples.broken || {}, brk = { 1: BR.right || null, [-1]: BR.left || null };
+  const skip = (sd) => (brk[sd] ? (i) => brk[sd].mask[i] || brk[sd].mask[(i + 1) % n] : null);
+  const lineA = { 1: (s) => edgeOf(s, 1) - out(s), [-1]: (s) => edgeOf(s, -1) + inn(s, -1) }, lineB = { 1: (s) => edgeOf(s, 1) - inn(s, 1), [-1]: (s) => edgeOf(s, -1) + out(s) };
+  for (const sd of [1, -1]) {
+    grp.add(new THREE.Mesh(strip(samples, lineA[sd], lineB[sd], 0.08, null, skip(sd)), m));
+    if (!brk[sd]) continue;
+    // each run of broken samples with the sample before and after it: its painted pieces as quads
+    const pos = [], idx = [], P = (s, off) => [s.p.x + s.nor.x * off, s.p.y + 0.08, s.p.z + s.nor.z * off];
+    for (let i = 0; i < n; i++) {
+      if (!brk[sd].mask[i] || brk[sd].mask[(i - 1 + n) % n]) continue;
+      const run = [samples[(i - 1 + n) % n]]; let j = i; while (brk[sd].mask[j % n] && j - i < n) run.push(samples[j++ % n]); run.push(samples[j % n]);
+      const [, , on, off] = brk[sd].ranges[brk[sd].mask[i] - 1], A = run.map((s) => P(s, lineA[sd](s))), B = run.map((s) => P(s, lineB[sd](s)));
+      const len = run.slice(1).map((_, k) => Math.hypot((A[k + 1][0] + B[k + 1][0] - A[k][0] - B[k][0]) / 2, (A[k + 1][2] + B[k + 1][2] - A[k][2] - B[k][2]) / 2));
+      const lerp = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+      for (const [k, t0, t1] of dashPieces(len, on || 1, off || 1)) { const v = pos.length / 3; pos.push(...lerp(A[k], A[k + 1], t0), ...lerp(B[k], B[k + 1], t0), ...lerp(A[k], A[k + 1], t1), ...lerp(B[k], B[k + 1], t1)); idx.push(v, v + 2, v + 1, v + 1, v + 2, v + 3); }
+    }
+    if (pos.length) { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals(); grp.add(new THREE.Mesh(g, m)); }
+  }
   return grp;
 }
 
@@ -1611,7 +1632,11 @@ function traffic(sm, F, t, dt, pos, grid = null) {
   if (traf.sm !== sm) { resetTraffic(traf.S); traf.sm = sm; }   // (another session or circuit: nothing carried over)
   const env = traf.env || (traf.env = {
     L: 0, live: false,
-    edges(s) { const q = traf.F.sampleAt(s); trafEdge.L = q.L ?? 7; trafEdge.R = q.R ?? -7; return trafEdge; },
+    // (surveyed edges – trackedges.js – come towards the cars' line by up to 0.15 m a metre into a corner: taken sample by
+    // sample, 2 m apart, the room traffic.js works with moved in steps of 0.1 … 0.4 m, and a car held at its limit was moved
+    // with them frame by frame – its heading swinging 15 … 20° in the first-corner pack. Between two surveyed samples the
+    // edges are taken straight from one to the next. Every other circuit: the sample's own, as before.)
+    edges(s) { const q = traf.F.sampleAt(s); if (q.sv && traf.F.edgesAt(s, trafEdge).sv) return trafEdge; trafEdge.L = q.L ?? 7; trafEdge.R = q.R ?? -7; return trafEdge; },
     // (the next 200 m's turning: > 0 the next corner goes left)
     turnAhead(s) { const i = traf.F.sampleAt(s).i; let x = 0; for (let k = 0; k < 100; k++) x += world.samples[(i + k) % world.n].turn; return x; },
     kappa(s) { traf.F.at(s - 4, 0, KA2, KD1); traf.F.at(s + 4, 0, KB2, KD2); return Math.atan2(KD1[0] * KD2[1] - KD1[1] * KD2[0], KD1[0] * KD2[0] + KD1[1] * KD2[1]) / 8; },
