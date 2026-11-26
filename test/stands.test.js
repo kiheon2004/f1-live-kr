@@ -36,6 +36,24 @@ test("a map building under a listed stand's name (OSM's 'V1' at Suzuka) becomes 
   assert.deepStrictEqual(twin.map((x) => [x.kind, x.name, !!x.underTraced]), [["grandstand", "Club Corner", false], ["grandstand", null, true]]);
 });
 
+test("v0.70: a map building under a stand's traced plan keeps what it is on the map and the plans' seasons (a plan listed for some seasons swallows it in those only)", () => {
+  const { standBuildings } = require("../src/main/scene.js");
+  // one stand rebuilt between two seasons: a block up to 2025, the whole stand from 2026 – and a plan without seasons
+  const list = [{ n: "Lando", poly: box(0, 20, 40, 40), yr: [2018, 2025] }, { n: "Lando", poly: box(0, 20, 200, 50), yr: [2026, null] }, { n: "Other", poly: box(300, 20, 360, 40) }];
+  const b = (name, x0, x1, kind = "block") => ({ kind, name, h: 8, min: 0, pts: box(x0, 22, x1, 38) });
+  const blds = [b("Stowe A", 100, 180), b("Stowe C", 5, 35), b("shed", 310, 350, "shed"), b("far", 500, 540)];
+  standBuildings(blds, list);
+  assert.deepStrictEqual(blds.map((x) => [x.kind, !!x.underTraced, x.kindOwn || null]), [["grandstand", true, "block"], ["grandstand", true, "block"], ["grandstand", true, "shed"], ["block", false, null]]);
+  assert.deepStrictEqual(blds[0].underTracedYr, [[[2026, null], 1]], "under the 2026 plan only: in 2025 it is the map's building again (scenery.js)");
+  assert.deepStrictEqual(blds[1].underTracedYr.map(([yr, share]) => JSON.stringify(yr) + " " + share).sort(), ["[2018,2025] 1", "[2026,null] 1"], "under both seasons' plans (each counted, not only the first found): never a building");
+  assert.deepStrictEqual(blds[2].underTracedYr, [[null, 1]], "a plan without seasons: every season");
+  // the rule scenery.js applies with the session's season: the plans of that season cover 0.4 of it or more
+  const yrOn = (year) => (yr) => !yr || !year || !(year < yr[0] || (yr[1] != null && year > yr[1]));
+  const kindIn = (x, year) => (x.underTracedYr.reduce((a, [yr, share]) => a + (yrOn(year)(yr) ? share : 0), 0) >= 0.4 ? "grandstand" : x.kindOwn);
+  assert.deepStrictEqual([2024, 2025, 2026, 2030, null].map((y) => kindIn(blds[0], y)), ["block", "block", "grandstand", "grandstand", "grandstand"]);
+  assert.deepStrictEqual([2024, 2026].map((y) => kindIn(blds[1], y)), ["grandstand", "grandstand"]); assert.strictEqual(kindIn(blds[2], 2019), "grandstand");
+});
+
 test("grandstands: outlines are built as deep as they are; a stand in the way of a big building says which", async () => {
   const { buildStands, rayCross } = await import("../src/renderer/stands.js");
   assert.deepStrictEqual(rayCross(0, 0, 0, 1, box(-5, 10, 5, 22)), [10, 22]);
@@ -72,4 +90,24 @@ test("grandstands: a listed stand's side L / R is left / right in the race's dir
   const zOf = (n) => { const s = r.info.list.find((x) => x.n === n); return s.outline.reduce((a, p) => a + p[1], 0) / s.outline.length; };
   assert.ok(zOf("Right") > 7, "R: on the cars' right (+z running east)");
   assert.ok(zOf("Left") < -7, "L: on their left");
+});
+
+// v0.70: stands of one name, each with its own listed entry (and model): an entry marked on its stand's front edge belongs
+// to that stand – not to the neighbour whose corner is nearer (Monza's three 6 Alta Velocità blocks). F1 metres, as the
+// renderer gets them from main/scene.js.
+test("listedEntry: of several entries with one name, the one marked on (or nearest to) this outline's edge", async () => {
+  const { listedEntry } = await import("../src/renderer/stands.js");
+  // three stands in a row, each 90 m long and 12 m deep, 10 m apart; each entry marked a metre in front of its stand's
+  // front edge, at its middle – far from any corner (45 m), while a neighbour's corner…
+  const stand = (i) => { const y = 1350 + i * 100; return [[y, 800], [y + 90, 800], [y + 90, 812], [y, 812]]; };
+  const entries = [0, 1, 2].map((i) => ({ n: "6 Alta", osmAt: [1350 + i * 100 + 45, 799], id: i }));
+  for (const i of [0, 1, 2]) assert.strictEqual(listedEntry(entries, stand(i)).id, i);
+  // …is nearer than its own for a mark near a stand's end: the mark 9 m past stand 0's end (1 m before stand 1's start)
+  // is 1 m from stand 1's edge and 9 m from stand 0's
+  const e2 = [{ n: "A", osmAt: [1395, 818], id: 0 }, { n: "A", osmAt: [1449, 806], id: 1 }];
+  assert.strictEqual(listedEntry(e2, stand(0)).id, 0, "6 m behind its own stand's back edge: nearer than the other's mark 9 m past the end");
+  assert.strictEqual(listedEntry(e2, stand(1)).id, 1);
+  // the first corner's coordinate is no latitude: the result does not depend on where the stands lie
+  const far = (i) => stand(i).map(([a, b]) => [a + 7777, b - 3333]), eFar = entries.map((e) => ({ ...e, osmAt: [e.osmAt[0] + 7777, e.osmAt[1] - 3333] }));
+  for (const i of [0, 1, 2]) assert.strictEqual(listedEntry(eFar, far(i)).id, i);
 });

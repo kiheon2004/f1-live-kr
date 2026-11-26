@@ -529,3 +529,26 @@ test("pit builder: maxDepth cuts an outline's wing behind the body, measured fro
   assert.strictEqual(villas.length, 4); assert.ok(villas.every((v) => v.model.file === "lus_villas.glb" && v.replaces.within <= 5 && v.venue[0] === 150));
   assert.strictEqual(F.FACILITIES.find((f) => f.id === "yas-marina-pits").upper.file, "yas_pit_upper.glb");
 });
+
+// v0.70: a pit building's model that is the whole building over the garages (Silverstone's Wing)
+test("pit builder under a model that is the whole building (upper.flat): every part stops at the garages' top, no blade; upper.trial follows the setting; an unreadable file leaves the builder's building", async () => {
+  const F = await load();
+  const UP = { file: "wing-upper.glb", garageTop: 4.7, front: 15, length: 370, depth: 30, turned: true, flat: true, fill: false, trial: true };
+  let reads = 0; const read = async () => { reads++; return boxGlb({ w: 370, h: 20, d: 30 }); };
+  // the highest point of what the builder itself made (the model aside)
+  const ownTop = (r) => { let y = -Infinity; (function walk(o) { if (o.name === "upperModel") return; if (o.isMesh) { const p = o.geometry.attributes.position; for (let k = 0; k < p.count; k++) y = Math.max(y, p.getY(k)); } o.children.forEach(walk); })(r.group); return y; };
+  const spec = (upper) => SPEC({ status: "permanent", checked: "test", upper });
+  const flat = await F.buildFacilities(base([spec(UP)], { readModel: read })), i = flat.info[0];
+  assert.strictEqual(i.how, "builder+model"); assert.strictEqual(i.upper, "wing-upper.glb"); assert.strictEqual(i.garages, 41);
+  assert.ok(ownTop(flat) < 100 + 4.8 + 0.25 + 0.1, `under the model the builder stops at the garages (${ownTop(flat).toFixed(2)})`);
+  assert.ok(i.profile.every((p) => p[1] <= 5.1) && i.bladeRoot <= 5.1, "every part – measured height or not – at the garages' top; no blade");
+  const { flat: _f, ...NOT_FLAT } = UP;
+  const tall = await F.buildFacilities(base([spec(NOT_FLAT)], { readModel: read }));
+  assert.ok(Math.abs(ownTop(tall) - 130) < 0.01 && Math.max(...tall.info[0].profile.map((p) => p[1])) > 26.9, "(without `flat` the measured parts and the blade stand up through the model)");
+  // upper.trial on a verified entry: with the setting off the builder builds the whole building and the file is not read
+  const before = reads, off = await F.buildFacilities(base([spec(UP)], { readModel: read, trial: false }));
+  assert.strictEqual(off.info[0].how, "builder"); assert.strictEqual(reads, before); assert.ok(Math.abs(ownTop(off) - 130) < 0.01 && !off.group.getObjectByName("upperModel"));
+  // a file that cannot be read: the builder's whole building, and the reason
+  const gone = await F.buildFacilities(base([spec({ ...UP, file: "wing-gone.glb" })], { readModel: async () => { throw new Error("모델 파일이 없어요"); } }));
+  assert.strictEqual(gone.info[0].how, "builder"); assert.match(gone.info[0].modelError, /없어요/); assert.ok(Math.abs(ownTop(gone) - 130) < 0.01);
+});

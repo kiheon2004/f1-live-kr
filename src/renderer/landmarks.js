@@ -244,7 +244,11 @@ const SPECS = [
   // tubular ring round the deck's edge and a steel railing (Commons "Podio Monza 2011.jpg" – H for the shape). The
   // deck's height, ~9.5 m (about level with the pit building's terrace), the column and the backdrop are read off
   // photos – L. (No sponsor panels: a plain backdrop.)
-  { venue: [39], loc: ["Monza"], match: (b) => /^podio$/i.test(b.name || ""), build({ pts, base, groundAt, add, toTrack }) {
+  // (givesWayTo: built as below only where the facility of that id has not come as a model – facilities.js combine.
+  // No such model stands yet: the one made in 2026-11 had its deck at 6.0 m; Commons 'Podio Monza 2011.jpg' shows the deck
+  // about level with the pit building's roof terrace – people behind its glass rail under the canopy –, as the 9.5 m here.
+  // It was held back; one at 9–10 m takes this one's place under the id below.)
+  { venue: [39], loc: ["Monza"], givesWayTo: "monza-podium", match: (b) => /^podio$/i.test(b.name || ""), build({ pts, base, groundAt, add, toTrack }) {
     const [cx, cz] = centroid(pts); let rad = 0; for (const [x, z] of pts) rad = Math.max(rad, Math.hypot(x - cx, z - cz));
     rad = Math.min(7, Math.max(4.5, rad));
     const [tx, tz] = toTrack(cx, cz), g = Math.max(base, groundAt(cx, cz)), deck = g + 9.5;
@@ -270,7 +274,7 @@ const SPECS = [
   // 2026 – H): Torre Sud by the finish line, Torre Nord towards the first chicane (OSM nodes 2396630532 / 2396630508 –
   // points only). A square tower with rounded corners: a concrete pier at the foot, a grey metal band, three storeys of
   // continuous blue-green curtain wall, a recessed glazed top floor, a flat roof (photos – M); ~9 × 9 m, ~21 m high – L.
-  ...[["sud", [45.6162, 9.28064]], ["nord", [45.62144, 9.28133]]].map(([, at]) => ({ venue: [39], loc: ["Monza"], at, clear: 6, build({ x, z, base, add }) {
+  ...[["sud", [45.6162, 9.28064]], ["nord", [45.62144, 9.28133]]].map(([k, at]) => ({ venue: [39], loc: ["Monza"], at, clear: 6, givesWayTo: "monza-torre-" + k, build({ x, z, base, add }) {
     const glass = std({ color: 0x5f8f8c, roughness: 0.15, metalness: 0.5 }), conc = std({ color: 0xbdb9b1, roughness: 0.8 }), band = std({ color: 0x8e9398, roughness: 0.5, metalness: 0.4 });
     const block = (y0, h, w, m, r = 1.6) => { const sh = new THREE.Shape(), a = w / 2 - r; sh.moveTo(-a, -w / 2); sh.lineTo(a, -w / 2); sh.absarc(a, -a, r, -Math.PI / 2, 0); sh.lineTo(w / 2, a); sh.absarc(a, a, r, 0, Math.PI / 2); sh.lineTo(-a, w / 2); sh.absarc(-a, a, r, Math.PI / 2, Math.PI); sh.lineTo(-w / 2, -a); sh.absarc(-a, -a, r, Math.PI, Math.PI * 1.5);
       const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 4 }); g.rotateX(-Math.PI / 2); const m3 = new THREE.Mesh(g, m); m3.position.set(x, y0, z); add(m3); };
@@ -292,6 +296,7 @@ export function buildLandmarks({ scene, gf, groundAt, location, venue = null, to
   const item = (b) => { let pts = b.pts.map(gf.xz); if (pts.length > 2 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts = pts.slice(0, -1); return { b, pts, area: Math.abs(polyArea(pts)) }; };
   for (const spec of SPECS) {
     if (!entryAt(spec, venue, location)) continue;
+    const n0 = group.children.length;
     try {
       if (spec.at) {
         const [x, z] = gf.fromLL(spec.at[0], spec.at[1]), base = groundAt(x, z);
@@ -321,8 +326,13 @@ export function buildLandmarks({ scene, gf, groundAt, location, venue = null, to
         }
       }
     } catch (e) { console.warn("landmark", e); }
+    // (a landmark that gives way to a facility's model – spec.givesWayTo: its meshes marked, taken out by giveWay)
+    if (spec.givesWayTo) for (const m of group.children.slice(n0)) m.userData.givesWayTo = spec.givesWayTo;
   }
   return {
+    // giveWay(ids): the landmarks built here that a facility model now stands for (ids: the facilities placed as models)
+    // are taken out again – what they replaced on the map stays replaced. → how many meshes went
+    giveWay: (ids) => { let n = 0; for (const m of [...group.children]) if (m.userData.givesWayTo && ids.has(m.userData.givesWayTo)) { group.remove(m); m.geometry?.dispose(); for (const mt of [].concat(m.material || [])) mt.dispose?.(); n++; } return n; },
     group: group.children.length ? group : null, skip: (b) => skip.has(b), restyle: (b) => restyle.get(b) || null,
     keepOut: (x, z) => zones.some(([zx, zz, r]) => Math.hypot(x - zx, z - zz) < r),
     count: group.children.length, spots,

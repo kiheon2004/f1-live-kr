@@ -103,14 +103,16 @@ export const FACILITIES = [
       // lounges on the 1st floor with inclined glazing and loggias, aluminium-glass facade – nextroom (Domenig &
       // Wallner, 2011); 30 boxes – auto motor und sport (2025); the glazing leaning out over the pit lane under a
       // white roof – photo 2021. estimated (photo): ~12 m to the roof, the glazing's lean, the roof's overhang.
-      // (up to 2025; from 2026 a model stands on the garages – `upper` below)
+      // (the storeys over the garages are a model in every season – `upper` below; this is what stands if it cannot be read)
       garages: 30, height: 12, slopedGlass: { y0: 5.8, y1: 10.4, lean: 2.6 },
       plate: 0.9, overhang: { pit: 5, paddock: 1.5, end: 2 },
       facade: { pit: "pitGlass", paddock: "paddockPanels" }, roofTop: "#e9ecee", fascia: "fasciaWhite",
     },
-    // From 2026 the storeys over the garages are a model – the building as it stands since it was lengthened east for
-    // 2026 (four more boxes, a medical centre), made with its +Z to the pit lane (`turned`); before 2026 the builder's own
-    // building above stays (`from`). The map's outline ends, on the pit lane, at the noses of the white fins between the
+    // The storeys over the garages are a model, made with its +Z to the pit lane (`turned`): from 2026 the building as
+    // it stands since it was lengthened east (four more boxes, a medical centre); up to 2025 the building before that –
+    // the 30 boxes and the wedge of race control, a file of its own in the same frame (`seasons`: it ends 58 m short of
+    // the pit-entry end, with nothing to fill under – `fill: false`, `span`; the old medical centre that stood east of
+    // the wedge until autumn 2025 is not in it: there the builder's garage level stands alone). The map's outline ends, on the pit lane, at the noses of the white fins between the
     // garages (the roof deck's edge in aerial imagery) – the real doors stand 2 m behind them – and the builder puts its
     // garage fronts on that edge: the model's fin noses (z +12.8) stand on the built front line (`front`), which puts it
     // on its real place (2026 race: 0.3 m off); with its door line there instead it stood 2.25 m nearer the track. The
@@ -118,19 +120,21 @@ export const FACILITIES = [
     // pit-entry end – the map does not have them yet – get plain walls under them (`along`: the model's middle is 15.85 m
     // towards the pit entry from the map outline's). `maxDepth`: the garage level is cut to the model's depth (the
     // builder's own building is 27 m deep after the outline, the model 23.6 m from the fins' noses to its paddock face).
-    // `also`: what stands on the roof deck – four white marquees in 2026 (sold that autumn), from 2027 the roofed, glazed
+    // `also`: what stands on the roof deck – four white marquees up to 2026 (sold that autumn), from 2027 the roofed, glazed
     // roof storey announced for the July 2027 race (its look is a guess: no picture of it is published).
-    upper: { file: "rbr_pit_upper.glb", garageTop: 4.2, front: 12.8, length: 338, depth: 21.6, maxDepth: 23.6, along: -15.85, turned: true, from: 2026,
+    upper: { file: "rbr_pit_upper.glb", garageTop: 4.2, front: 12.8, length: 338, depth: 21.6, maxDepth: 23.6, along: -15.85, turned: true,
+      seasons: [{ to: 2025, file: "rbr_pit_upper_2025.glb", fill: false, span: [-111, 169.5] }],
       also: [{ file: "rbr_pit_tents2026.glb", to: 2026 }, { file: "rbr_pit_roof2027.glb", from: 2027 }] },
     sources: [
       "src/data/models/rbr_pit_upper.glb – made for this app (2026-11-24): the building over the garages as it stands since 2026 – the first floor behind glass leaning out over the pit lane, white fins up to the roof deck, the podium platform, the grey wedge of race control at the pit-entry end of the old building, the 2026 section (a set-back glass floor under a thick roof slab) and the medical centre – its plan after OpenStreetMap's outline and aerial imagery, press and Wikimedia Commons photos compared by eye, nothing copied; published: boxes 17 × 7 × 4.2 m, four more boxes and a medical centre for 2026; the 2026 section's length (59 m) and every height estimated; no outside asset, no logo or lettering",
+      "src/data/models/rbr_pit_upper_2025.glb – made for this app (2026-11-24): the same building as it stood up to 2025, before the extension – the 30 boxes and the wedge of race control, its east end a closed wall; the same sources; the old medical centre east of it (pulled down in autumn 2025) is not shown – no plan or photo of it was found; no outside asset, no logo or lettering",
       "src/data/models/rbr_pit_tents2026.glb – made for this app (2026-11-24): the four white marquees on the roof deck up to 2026 (aerial imagery, photos compared by eye); no outside asset",
       "src/data/models/rbr_pit_roof2027.glb – made for this app (2026-11-24): the roofed, fully glazed roof storey reported for the 2027 race (Kleine Zeitung via laola1.at 2026-09-30, leadersnet.at 2026-10-01, meinbezirk.at 2026-10-09: about 250 m, ready for 9–11 July 2027) – 231 m of glass under a flat white roof; its look is a guess, no picture is published; no outside asset",
       "https://www.nextroom.at/building.php?id=36412&inc=datenblatt – Domenig & Wallner 2011: Werkstättengebäude, EG boxes with lift gates to the pit lane, 1. OG VIP lounges with inclined glazing and loggias; aluminium-glass facade",
       "https://www.auto-motor-und-sport.de/formel-1/umbau-red-bull-ring-spielberg-boxengebaeude/ – 30 boxes (2025), extension east",
       "Photo: '2021 4 Hours of Red Bull Ring – Paddock' (United Autosports, Wikimedia Commons, CC BY-SA 2.0)",
     ],
-    checked: "2026-11-24: trial (up to 2025 the builder's building – height and the glazing's lean estimated from a photo; from 2026 a model – heights and the 2026 section's length estimated, the 2027 roof storey a guess)",
+    checked: "2026-11-26: trial (a model over the garages in every season – up to 2025 the building before its extension, from 2026 the lengthened one; heights and the 2026 section's length estimated, the 2027 roof storey a guess)",
     evidence: {
       confirmed: ["workshop boxes with lift gates, VIP lounges with inclined glazing (nextroom, 2011)", "30 boxes (auto motor und sport, 2025)", "four more boxes and a medical centre for 2026 (redbullring.com)", "a roofed, glazed roof storey for the 2027 race (press, autumn 2026)"],
       photo: ["~12 m to the roof, the glazing's lean, the roof's overhang (2021 photo, CC BY-SA 2.0)", "the 2026 section's pit-lane side (press photos of April 2026, compared only)"],
@@ -147,7 +151,9 @@ export const FACILITIES = [
     // this app draws it (13.9 m) passes between them. Below the beam (6.6 m) only the lights' panel hangs lower, at 5.6 m.
     // `footprint`: its leg on the pit wall only – the beam lies over the track, and rain must fall under it.
     replaces: { names: /^\(no map record makes way\)$/ },
-    model: { file: "rbr_gantry.glb", anchor: [47.220051, 14.76484], heading: 254.85,
+    // `lights`: its dark panel hangs under the beam on the side the cars drive away to; the lamps hang before it, under
+    // the beam, looking back at the grid.
+    model: { file: "rbr_gantry.glb", anchor: [47.220051, 14.76484], heading: 254.85, lights: { y: [5.6, 6.5], z: 0.35, face: -1 },
       footprint: [[47.2200564, 14.7648488], [47.2200494, 14.7648516], [47.2200456, 14.7648312], [47.2200526, 14.7648284]] },
     sources: [
       "src/data/models/rbr_gantry.glb – made for this app (2026-11-24): a plain white portal over the track west of the grid, 22.9 m between its legs, its underside 6.6 m up – its place after aerial imagery, its heights estimated; no lettering; no outside asset",
@@ -387,6 +393,151 @@ export const FACILITIES = [
       photo: ["a white footbridge across the straight's south end (aerial imagery, compared only)"],
       map: ["the place: OpenStreetMap's footway"],
       inferred: ["its look", "its height (6.2 m under the deck)", "no pier at the pit wall"],
+    },
+  },
+  {
+    id: "spa-start-gantry", name: "Spa-Francorchamps – the start lights' gantry over the pit straight", kind: "tower",
+    venue: [7], loc: ["Spa-Francorchamps"], years: [2007, null],
+    status: "trial",
+    // A pale lattice across the track at the start line, from beyond the track's far edge to the platform behind the pit
+    // wall, 22.7 m; its light panel hangs over the track on the side the grid looks at. SPA_GANTRY_PLACE
+    // `footprint`: its outer leg only – the beam lies over the track, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spa_gantry.glb", anchor: [50.444189, 5.96487], heading: 150.07, lights: { y: [5.7, 7.0], z: 0.9, face: 1 },
+      footprint: [[50.4441927, 5.9648602], [50.4441962, 5.96487], [50.4441838, 5.9648812], [50.4441802, 5.9648714]] },
+    sources: [
+      "src/data/models/spa_gantry.glb – made for this app (2026-11-26): a pale grey lattice girder on two legs, 22.7 m between them, its underside 6.6 m up, a blank light panel over the track – its place after aerial imagery (the track line's first point lies under it), its heights estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place from aerial imagery; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a pale lattice gantry at the start line (aerial imagery, compared only)"],
+      map: [],
+      inferred: ["its heights (6.6 m under the girder)", "since when it stands"],
+    },
+  },
+  {
+    id: "monza-hospitality", name: "Monza – the Hospitality Building at the pit exit", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [2018, null],
+    status: "trial",
+    // On the map's outline (90.5 × 28.4 m) north of the garages; its track face stands 4.2 m OUT from the door line, towards
+    // the track (pit frame v +4.2 over u 244 … 334, its roof edge 5.55 m): the lane's working strip ends at the building
+    // (the concrete band stops at u 238), the fast lane (7.5 … 11.5 m) runs on past it. The map's block, drawn with ribbon
+    // glazing (landmarks.js), makes way.
+    replaces: { names: /^hospitality building$/i },
+    model: { file: "mza_hospitality.glb", anchor: [45.618827, 9.281646], heading: 276.13 },
+    sources: [
+      "src/data/models/mza_hospitality.glb – made for this app (2026-11-26): three glazed floors between white slab edges, a terrace, a thin wide white roof in three shallow ridges on slim columns (17.2–17.8 m) – its plan after OpenStreetMap's outline (way 194458105), its look after one photograph and aerial imagery compared by eye, nothing copied; floor heights and the roof estimated; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; look and heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["glazed floors under a thin white roof (one photograph and aerial imagery, compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the floor heights (4.6 / 9.0 / 13.4 m)", "the roof (17.2–17.8 m)", "since when it stands"],
+    },
+  },
+  {
+    id: "monza-centro-medico", name: "Monza – the Centro Medico south of the garages", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [2018, null],
+    status: "trial",
+    replaces: { names: /^centro medico$/i },
+    model: { file: "mza_medical.glb", anchor: [45.615965, 9.281697], heading: 276.13 },
+    sources: [
+      "src/data/models/mza_medical.glb – made for this app (2026-11-26): two low white blocks (4.6 m) under a flat roof with a dark edge – its plan after OpenStreetMap's outline (way 194458108); its look an estimate; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; look estimated)",
+    evidence: { confirmed: [], photo: [], map: ["the plan and the place: OpenStreetMap's outline"], inferred: ["its look and height (4.6 m)", "since when it stands"] },
+  },
+  {
+    id: "monza-finish-gantry", name: "Monza – the gantry before the control line, over the track and the pit lane", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [2018, null],
+    status: "trial",
+    // A lattice from beyond the track's far edge across the track, the pit wall and the pit lane to the paddock side, 47 m,
+    // on three legs, 20 m before the control (finish) line – which at Monza lies 310 m before the start line. Not the start
+    // lights' gantry: the grid's lamps stay on this app's own gantry at the start line (no `lights`).
+    // Moved 1 m along its beam towards the paddock from the surveyed place: there its leg on the pit wall stood 0.4 m from
+    // this app's track edge (the track, drawn round the cars' line, lies 5 m nearer the pits here than the real tarmac);
+    // now 1.4 m. MZA_FGANTRY_PLACE. `footprint`: its leg beyond the track only.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "mza_finish_gantry.glb", anchor: [45.616015, 9.2805557], heading: 186.13,
+      footprint: [[45.6160249, 9.2805443], [45.616023, 9.2805698], [45.6160051, 9.2805671], [45.616007, 9.2805416]] },
+    sources: [
+      "src/data/models/mza_finish_gantry.glb – made for this app (2026-11-26): a lattice girder 2 m wide on three legs, 47 m, its underside 7.4 m up, a blank board over the track – its place and span after aerial imagery (corrected for the picture's lean), its heights and the board estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place and span from aerial imagery; heights estimated)",
+    evidence: { confirmed: [], photo: ["a lattice gantry across the track and the pit lane before the control line (aerial imagery, compared only)"], map: [], inferred: ["its heights (7.4 m under the girder)", "the board", "since when it stands"] },
+  },
+  {
+    id: "monza-torre-sud", name: "Monza – Torre Sud, one of the two 1955 towers on the main straight", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [1955, null],
+    status: "trial",
+    // The map has a point only (node 2396630532); the model stands 4 m west of it – at the point its face met the track's verge. The tower built in code at the point (landmarks.js) makes way.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "mza_tower.glb", anchor: [45.616199, 9.28059], heading: 6.13 },
+    sources: [
+      "src/data/models/mza_tower.glb – made for this app (2026-11-26): a concrete core with an outside stair, a grey band, three floors of blue-green glass in a silver grid, a set-back top floor; 9 × 9 m with cut corners, 21 m – after this app's research note (docs/research/monza_buildings.md) and photographs compared by eye, nothing copied; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the tower's point (the place; no outline is mapped)",
+    ],
+    checked: "2026-11-26: trial (place from a map point – low confidence; look from the research note)",
+    evidence: { confirmed: [], photo: ["a square glazed tower with a set-back top floor (photographs, compared only)"], map: ["the place: OpenStreetMap's point"], inferred: ["its exact place and its turn", "its size (9 × 9 m, 21 m)"] },
+  },
+  {
+    id: "monza-torre-nord", name: "Monza – Torre Nord, one of the two 1955 towers on the main straight", kind: "tower",
+    venue: [39], loc: ["Monza"], years: [1955, null],
+    status: "trial",
+    // At the map's point (node 2396630508), 0.8 m from this app's track edge at its nearest; the tower built in code there (landmarks.js) makes way.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "mza_tower.glb", anchor: [45.621444, 9.281328], heading: 6.13 },
+    sources: [
+      "src/data/models/mza_tower.glb – made for this app (2026-11-26): a concrete core with an outside stair, a grey band, three floors of blue-green glass in a silver grid, a set-back top floor; 9 × 9 m with cut corners, 21 m – after this app's research note (docs/research/monza_buildings.md) and photographs compared by eye, nothing copied; no lettering, no outside asset",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the tower's point (the place; no outline is mapped)",
+    ],
+    checked: "2026-11-26: trial (place from a map point – low confidence; look from the research note)",
+    evidence: { confirmed: [], photo: ["a square glazed tower with a set-back top floor (photographs, compared only)"], map: ["the place: OpenStreetMap's point"], inferred: ["its exact place and its turn", "its size (9 × 9 m, 21 m)"] },
+  },
+  {
+    id: "zandvoort-start-gantry", name: "Zandvoort – the start lights' gantry over the main straight", kind: "tower",
+    venue: [55], loc: ["Zandvoort"], years: [2020, null],
+    status: "trial",
+    // A dark lattice across the track 31 m past the start line, from beyond the track's far edge to the pit wall, 21.4 m;
+    // its light panel hangs over the track on the grid's side – this app's five start lamps hang on it (`lights`).
+    // Moved 2.5 m along its beam towards the pits from the surveyed place: there its leg on the pit wall stood 2.05 m
+    // INSIDE this app's track (the track, drawn round the cars' line, lies 3.7 m nearer the pits here than the real
+    // tarmac); now it stands on this app's wall. ZAN_GANTRY_PLACE. `footprint`: its leg beyond the track only.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "zan_gantry.glb", anchor: [52.3897545, 4.541205], heading: 202.13, lights: { y: [5.9, 7.2], z: 0.9, face: 1 },
+      footprint: [[52.3897662, 4.5411969], [52.3897594, 4.5412241], [52.3897428, 4.5412131], [52.3897496, 4.5411859]] },
+    sources: [
+      "src/data/models/zan_gantry.glb – made for this app (2026-11-26): a dark lattice girder on two legs, 21.4 m between them, its underside 6.8 m up, a blank light panel over the track – its place and span after the PDOK aerial picture (its shadow shows), its heights estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place and span from the aerial picture; heights estimated)",
+    evidence: { confirmed: [], photo: ["a gantry across the track past the start line, its shadow on the tarmac (aerial picture, compared only)"], map: [], inferred: ["its heights (6.8 m under the girder)", "since when it stands"] },
+  },
+  {
+    id: "interlagos-start-gantry", name: "Interlagos – the start lights' gantry over the main straight", kind: "tower",
+    venue: [14], loc: ["São Paulo", "Sao Paulo"], years: [2018, null],
+    status: "trial",
+    // A black truss across the track before the Pit Stop Club, 51 m south of the pit building's north end (aerial imagery:
+    // the truss and its shadow). Along the track it stands where it really does; across it, on this app's own edges – the
+    // track is drawn 2.3 m further west than the real one here: its leg on the pit side 1.5 m behind the track's edge,
+    // the other 1.5 m beyond the far edge (the model is 17 m between its legs for this app's 14 m track; the real legs
+    // stand 15.6 m apart). As placed (2025 race): 1.5 m outside either edge; below 6 m only its light panel hangs over the track.
+    // `footprint`: its leg on the pit side only – the truss lies over the track, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "spo_gantry.glb", anchor: [-23.7040078, -46.6998112], heading: 345.77, lights: { y: [5.7, 6.9], z: 0.8, face: 1 },
+      footprint: [[-23.7040124, -46.6998069], [-23.7040137, -46.6998126], [-23.7040015, -46.699816], [-23.7040001, -46.6998103]] },
+    sources: [
+      "src/data/models/spo_gantry.glb – made for this app (2026-11-26): a black truss on two legs, 17 m between them, its underside 6.5 m up, a blank light panel over the track on the side the grid looks at – its place along the track after aerial imagery of April 2025 (a dark truss and its shadow) and photographs compared by eye; its heights and its length estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place along the track from aerial imagery; across it on this app's edges; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a black truss across the main straight near the Pit Stop Club (aerial imagery and race photos, compared only)"],
+      map: [],
+      inferred: ["its heights (6.5 m under the truss)", "its length (the real legs stand 15.6 m apart)", "since when it stands"],
     },
   },
   {
@@ -1024,6 +1175,8 @@ export const FACILITIES = [
       // catch fence over the wall (photo 2011, geograph 2542970); the walkway ~8 m wide (the mapped footway band,
       // 26.6–36 m out from the Wing's axis). Heights estimated from the photo.
       pitWall: { height: 1.1, thick: 0.5, fence: 3.0, walk: 8, deck: 1.0 },
+      // (with the setting "정밀 시설 모델" on, everything above the garages is the model – `upper` below; the blade, the
+      // roofline and the facades here are what stands with it off, or when the file cannot be read)
       // the paddock at the 2026 British GP (photos 3 July 2026): black awnings along the garages' back, two-storey
       // hospitality units across the paddock street. Their sizes and spacing are estimates; which team's is where isn't
       // known, so they're neutral.
@@ -1032,7 +1185,24 @@ export const FACILITIES = [
           sources: ["Flickr 55383877828", "Flickr 55382810457", "Flickr 55382810427"],
           uncertain: "the units' size, spacing and count are read off photos (±30 %); which team's unit is where isn't known (drawn neutral); no team's vehicles, motorhomes, equipment or logos are reproduced" } },
     },
+    // The storeys over the garages as a model (a trial on a verified entry – `trial`): the white terrace band over the pit
+    // lane, the hall floor behind glass leaning out to the eaves, the roof in four planes, the five cores, the mast, and at
+    // the Club end the blade, the leaning fin and the podium terrace. Made with its +Z to the pit lane (`turned`). The
+    // map's outline ends, on the pit lane, at the terrace's and the eaves' edge; the builder puts its garage fronts on
+    // that edge, so the model's terrace edge (z +15.0) stands on the built front line (`front`) – the doors it was made
+    // with are 2.5 m behind it and are not used: the garages are the builder's, after the FIA drawing. As built (2026
+    // race): its origin 0.6 m towards Club and 0.2 m towards the track from the place it was made for, its long axis 0.4°
+    // off that place's – the map outline's edge as this app reads it: about a metre at either end. The terrace edge is
+    // 20 m from the track's edge at the middle of the building, 14 m at the Abbey end and 28 m at the blade (the track
+    // runs 2.5° off the Wing); the feed's pit-lane line lies 0.9 m before it – the cars are drawn in the lane, as before.
+    // `flat`: the map has this building as 21 parts with their heights – under the model each stops at the garages' top,
+    // and the builder's own blade is left out. `fill: false`: the model's ends stand over the built ground floor.
+    // `alongFronts`: the builder's own axis – through all 21 parts, the blade's among them – lies off the outline's long
+    // edge; the model stands along the garages' fronts instead. `maxDepth`: the garage level ends at the model's paddock
+    // face (the map's outline is 1.1 m deeper: a ledge at the garages' height ran along the back).
+    upper: { file: "sil_wing_upper.glb", garageTop: 4.7, front: 15.0, length: 375.9, depth: 25, maxDepth: 27.5, turned: true, flat: true, fill: false, trial: true, alongFronts: true },
     sources: [
+      "src/data/models/sil_wing_upper.glb – made for this app (2026-11-24): the Wing above the garage level – the white terrace band over the pit lane, a glass floor, the tall hall floor behind glass that leans out to the eaves, a dark roof in four planes with thick white fascias and a red line under the eaves, solar panels, the five cores, the lattice mast with a blank screen, and at the Club end the blade (30 m at its tip), the dark body under it with the glass box of race control, the leaning dark fin and the podium terrace – its plan after OpenStreetMap's outline and its parts with heights, aerial imagery, three Wikimedia Commons photographs compared by eye, nothing copied; published: 390 m long, the blade's tip 30 m, 41 garages, four blocks between the cores; the roof's planes, the door line and nearly every height estimated; no outside asset, no logo or lettering",
       "New Steel Construction, 'Wing heralds new era for famous circuit' (2011): 390 m long; blade 16.5 m at 40°, tip 30 m; 41 garages",
       "Motor Sport magazine, August 2011, 'A Wing-win situation': 390 m long, 30 m high",
       "WikiArquitectura, Silverstone Wing: garages on the ground floor, hospitality and media on the two floors above, glass facade",
@@ -1044,12 +1214,237 @@ export const FACILITIES = [
     // published 390 m); the blade's 30 m tip, 40° and 16.5 m from the published figures; the roofline (blade, a low
     // stretch, the peak about 40 % along, the long low end) and the facades match photos 1–3 from the same viewpoints;
     // the map's parts drew it as blocks of different heights with office windows and a black wedge
-    checked: "2026-10-08: permanent",
+    checked: "2026-10-08: permanent (the builder's building); 2026-11-26: the storeys over the garages from the model file – a trial (the roof's planes and nearly every height estimated)",
     evidence: {
       confirmed: ["390 m long, 30 m high; the blade 16.5 m at 40°, its tip 30 m; 41 garages (New Steel Construction 2011, Motor Sport 2011)"],
       photo: ["the roofline and facades (photos 1–3)", "the pit wall's and walkway's heights (2011 photo)", "the 2026 paddock: awnings and hospitality units – sizes, spacing and count (3 July 2026 photos)"],
       map: ["the footprint and the parts' heights (the map's 21 'Silverstone Wing' parts)", "the walkway's width (the mapped footway band)"],
-      inferred: ["the pit wall's line, from the track's measured edge in the session's position data"],
+      inferred: ["the pit wall's line, from the track's measured edge in the session's position data", "the model's roof planes, its door line and nearly every height"],
+    },
+  },
+  {
+    id: "silverstone-hotel", name: "Silverstone – the Hilton Garden Inn across the Hamilton Straight from the Wing", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2022, null],
+    status: "trial",
+    // On the map's outline (122 × 20 m), its long side to the track; the stand before it (Hamilton Straight B) and the sky
+    // bridge are entries of their own. Its track face stands 30 m from the track's edge (2026 race).
+    // `level: "mid"`: the elevation data has 1.5 m of fall along its 122 m – a terrace at the middle height is laid first.
+    replaces: { near: [52.069527, -1.022819], within: 3 },
+    model: { file: "sil_hotel.glb", anchor: [52.069527, -1.022819], heading: 129.0, level: "mid",
+      footprint: [[52.0691558, -1.0234951], [52.0700114, -1.0223699], [52.0698982, -1.0221429], [52.0690426, -1.0232681]] },
+    sources: [
+      "src/data/models/sil_hotel.glb – made for this app (2026-11-24): a glazed ground floor on white V columns on the entrance side, a charcoal band, three floors of rooms with balconies to the track, a dark stair core, a plant screen and the roof bar under white sails at the Club end – its plan after OpenStreetMap's outline (122 × 20 m), photographs compared by eye, nothing copied; published: 197 rooms on five storeys; the track face (balconies) is assumed – few photographs show it; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; the entrance side from photographs, the track face assumed; heights estimated)",
+    evidence: {
+      confirmed: ["197 rooms on five storeys (Hilton)"],
+      photo: ["the entrance side: white V columns, sand-coloured panels, a dark stair core (compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the track face (balconies)", "the heights (roof 18.1 m, sails 22.3 m)", "open since 2022, with the sky bridge"],
+    },
+  },
+  {
+    id: "silverstone-skybridge", name: "Silverstone – the sky bridge from the hotel over the Hamilton Straight to the Wing (2022)", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2022, null],
+    status: "trial",
+    // From the hotel's track face 69.6 m across the track and the pit lane to the Wing's eaves, its deck 10 m up; its V pier
+    // stands in the grass strip between the track and the pit lane. As placed (2026 race) the pier stands 6.1 m beyond
+    // the track's pit-side edge – on this app's walkway behind the pit wall, before the Wing's big core where no team has
+    // its stand – and the bridge ends on the Wing's terrace edge. The map has the bridge between 14.5 and 18.5 m up; the
+    // model's deck is at 10 m (its legs and pier are made for that height): kept as made, said to its maker.
+    // `replaces`: the map's own record of the bridge, a raised building across the track, makes way.
+    // `footprint`: its legs by the hotel only – the span lies over the track and the pit lane, and rain must fall under it.
+    replaces: { near: [52.0692549, -1.0223217], within: 4 },
+    model: { file: "sil_skybridge.glb", anchor: [52.069447, -1.022745], heading: 216.39,
+      footprint: [[52.0694367, -1.0226484], [52.0693833, -1.0225309], [52.0693399, -1.0225829], [52.0693933, -1.0227004]] },
+    sources: [
+      "src/data/models/sil_skybridge.glb – made for this app (2026-11-24): an enclosed footbridge, a white deck and roof with glazed sides, two pairs of raking legs by the hotel and a V pier in the grass strip – its line after OpenStreetMap and aerial imagery; published: opened 2022, about 80 m, 'from the hotel's fourth floor'; heights estimated (deck 10.0 m, top 13.9 m); no banners; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the bridge's line",
+    ],
+    checked: "2026-11-26: trial (line from the map and aerial imagery; heights estimated)",
+    evidence: {
+      confirmed: ["opened 2022, from the hotel to the Wing (Silverstone)"],
+      photo: ["a glazed white bridge on raking legs (compared only)"],
+      map: ["its line: OpenStreetMap"],
+      inferred: ["the heights (deck 10 m)", "the pier's place in the grass strip"],
+    },
+  },
+  {
+    id: "silverstone-start-gantry", name: "Silverstone – the start lights' gantry over the Hamilton Straight", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2011, null],
+    status: "trial",
+    // Just beyond the sky bridge: a dark lattice from the hotel side of the track across it and the grass strip to the pit
+    // wall, 37.3 m; its light panel hangs over the track on the side the grid looks at. It stands 8.9 m towards the
+    // hotel from its place in aerial imagery: there its pit-side leg stood in this app's pit lane, 5.9 m before the
+    // garage fronts (here the lane is 12 m wide, then comes the 8 m walkway behind the pit wall at the track's edge –
+    // this app draws the track 14 m wide, the real one is 20 m). As placed (2026 race): the pit-side leg on the walkway,
+    // 5.9 m behind the track's edge; the other 17.4 m beyond the far edge, 2.4 m before the front of the stand there.
+    // `footprint`: its leg on the hotel side only – the beam lies over the track, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "sil_gantry.glb", anchor: [52.0694701, -1.0224063], heading: 215.14, lights: { y: [6.1, 7.4], z: 0.9, face: 1 },
+      footprint: [[52.0694781, -1.0224044], [52.0694739, -1.0223948], [52.0694621, -1.0224082], [52.0694663, -1.0224178]] },
+    sources: [
+      "src/data/models/sil_gantry.glb – made for this app (2026-11-24): a dark lattice box girder on two legs, 37.3 m between them, its underside 7.0 m up, a blank light panel over the track – its place after aerial imagery, its heights estimated; no lettering; no outside asset",
+    ],
+    checked: "2026-11-26: trial (place from aerial imagery; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["a dark lattice gantry over the grid (aerial imagery and race photos, compared only)"],
+      map: [],
+      inferred: ["its heights (7.0 m under the girder)", "since when it stands"],
+    },
+  },
+  {
+    id: "silverstone-brdc", name: "Silverstone – the BRDC clubhouse at Brooklands / Woodcote", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2011, null],
+    status: "trial",
+    // On the map's outline (37 × 17 m), its terraces to Brooklands and Luffield; the Jim Clark stand beside it is a listed stand.
+    replaces: { near: [52.077827, -1.019162], within: 3 },
+    model: { file: "sil_brdc.glb", anchor: [52.077827, -1.019162], heading: 223.5,
+      footprint: [[52.0779982, -1.0192747], [52.0777667, -1.0188783], [52.0776558, -1.0190493], [52.0778873, -1.0194457]] },
+    sources: [
+      "src/data/models/sil_brdc.glb – made for this app (2026-11-24): three white floors, each set back behind a terrace, white sails over the roof terrace (14.9 m) – its plan after OpenStreetMap's outline (37.4 × 17 m), 2026 photographs compared by eye, nothing copied; heights estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; look from 2026 photographs; heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["three white floors with terraces, sails on the roof (2026 photographs, compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the heights (14.9 m)"],
+    },
+  },
+  {
+    id: "silverstone-national-pits-west", name: "Silverstone – the National pits, the west garage block", kind: "paddock",
+    venue: [2], loc: ["Silverstone"], years: [2011, null],
+    status: "trial",
+    // The old pits on the National Pits Straight – on the map's outline, their doors to the old pit lane. Their look is taken
+    // from one photograph: the number of bays and the heights are estimates.
+    // `ground: "lowest"`: beside the track the ground follows the track's own height and falls up to 1.2 m along a
+    // block – it stands on the lowest ground under it, a little dug in at its other end, never in the air.
+    replaces: { near: [52.078476, -1.016011], within: 3 },
+    model: { file: "sil_national_pits_w.glb", anchor: [52.078476, -1.016011], heading: 354.5, ground: "lowest",
+      footprint: [[52.0784424, -1.0151375], [52.0783404, -1.016858], [52.0785096, -1.0168845], [52.0786116, -1.015164]] },
+    sources: [
+      "src/data/models/sil_national_pits_w.glb – made for this app (2026-11-24): a row of garage doors under a glazed floor with a terrace over the pit lane (4.5 m), the roof at 7.9 m (118.3 × 18.9 m, 19 bays) – its plan after OpenStreetMap's outline, one 2026 photograph of the old pits compared by eye, nothing copied; the number of bays and the look are estimates; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; look from one photograph – bays and heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["garage doors under a glazed floor with a terrace (one 2026 photograph, compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the number of bays", "the heights (7.9 m)"],
+    },
+  },
+  {
+    id: "silverstone-national-pits-east", name: "Silverstone – the National pits, the east garage block", kind: "paddock",
+    venue: [2], loc: ["Silverstone"], years: [2011, null],
+    status: "trial",
+    // The old pits on the National Pits Straight – on the map's outline, their doors to the old pit lane. Their look is taken
+    // from one photograph: the number of bays and the heights are estimates.
+    // `ground: "lowest"`: beside the track the ground follows the track's own height and falls up to 1.2 m along a
+    // block – it stands on the lowest ground under it, a little dug in at its other end, never in the air.
+    replaces: { near: [52.078585, -1.013825], within: 3 },
+    model: { file: "sil_national_pits_e.glb", anchor: [52.078585, -1.013825], heading: 355.5, ground: "lowest",
+      footprint: [[52.0785479, -1.0129233], [52.0784616, -1.0147062], [52.0786221, -1.0147267], [52.0787084, -1.0129438]] },
+    sources: [
+      "src/data/models/sil_national_pits_e.glb – made for this app (2026-11-24): a row of garage doors under a glazed floor with a terrace over the pit lane (4.5 m), the roof at 7.9 m (122.4 × 17.9 m, 20 bays) – its plan after OpenStreetMap's outline, one 2026 photograph of the old pits compared by eye, nothing copied; the number of bays and the look are estimates; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; look from one photograph – bays and heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: ["garage doors under a glazed floor with a terrace (one 2026 photograph, compared only)"],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["the number of bays", "the heights (7.9 m)"],
+    },
+  },
+  // Silverstone: the Escapade trackside residences (2024) on the bund outside Maggotts and Becketts – one entry each, the
+  // same model file, each on the map's own outline of its unit, its glazed end to the track. Published: 15 units – the map
+  // has 14.
+  ...[[[52.076413, -1.009684], 318.5], [[52.076139, -1.009603], 287.0], [[52.07589, -1.009594], 299.0], [[52.075681, -1.009567], 284.0], [[52.07544, -1.009549], 286.0], [[52.075212, -1.009537], 284.5], [[52.074985, -1.009535], 278.5], [[52.074754, -1.00953], 269.5], [[52.074532, -1.009487], 271.0], [[52.0743, -1.009399], 280.0], [[52.074124, -1.009258], 257.0], [[52.073916, -1.009069], 259.0], [[52.073752, -1.008888], 249.0], [[52.073377, -1.0085], 265.0]].map(([at, heading], i) => ({
+    id: "silverstone-escapade-" + (i + 1), name: "Silverstone – an Escapade trackside residence (" + (i + 1) + " of 14)", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2024, null],
+    status: "trial",
+    replaces: { near: at, within: 2 },
+    model: { file: "sil_escapade_unit.glb", anchor: at, heading },
+    sources: [
+      "src/data/models/sil_escapade_unit.glb – made for this app (2026-11-24): one unit: a concrete garage box set in the bund, the long timber-clad upper floor (12.8 × 28.5 m, 7 m) turned 8° on it and out over the bank, a glazed end with a terrace to the track – the places after OpenStreetMap's 14 outlines, the look after the published description (RIBA Journal 2024: two-storey blocks, the upper one turned and cantilevered over a bund, timber-clad), nothing copied; heights estimated; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the units' outlines (their places)",
+    ],
+    checked: "2026-11-26: trial (places from the map; look from the published description; heights estimated)",
+    evidence: {
+      confirmed: ["two-storey timber-clad blocks, the upper one turned and cantilevered over a bund (RIBA Journal, 2024)"],
+      photo: [],
+      map: ["the places: OpenStreetMap's 14 outlines"],
+      inferred: ["the heights (7 m)", "the 8° turn", "the fifteenth unit's place (published: 15; the map has 14)"],
+    },
+  })),
+  {
+    id: "silverstone-escapade-clubhouse", name: "Silverstone – the Escapade clubhouse beside the Becketts stand", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2024, null],
+    status: "trial",
+    // On the map's outline (30 × 26 m). Its look is a guess from the published description of the scheme.
+    replaces: { near: [52.073134, -1.008407], within: 3 },
+    model: { file: "sil_escapade_club.glb", anchor: [52.073134, -1.008407], heading: 262.0 },
+    sources: [
+      "src/data/models/sil_escapade_club.glb – made for this app (2026-11-24): a glazed ground floor under a wide roof terrace, a smaller timber floor on top (30.3 × 25.9 m, 9.2 m) – its plan after OpenStreetMap's outline; its look is a guess, no photograph was compared; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the building's outline (the model's plan and place)",
+    ],
+    checked: "2026-11-26: trial (plan and place from the map; the look a guess)",
+    evidence: {
+      confirmed: [],
+      photo: [],
+      map: ["the plan and the place: OpenStreetMap's outline"],
+      inferred: ["its look", "its heights"],
+    },
+  },
+  {
+    id: "silverstone-wellington-bridge", name: "Silverstone – the service road bridge over the Wellington Straight", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2011, null],
+    status: "trial",
+    // A plain concrete deck with solid parapets, 26.2 m between its abutments, its underside 5.4 m over the ground; the
+    // map has the road on it as a bridge, no building. At its place on the map (2026 race) its abutments stand 3.0 m and
+    // 12.2 m from the track's edges – the track passes nearer its north-east end; the ground is level under it.
+    // `footprint`: one abutment only – the deck lies over the track, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "sil_bridge_wellington.glb", anchor: [52.075147, -1.015497], heading: 132.35,
+      footprint: [[52.0751561, -1.0155784], [52.0751761, -1.0155488], [52.0751179, -1.0154452], [52.075098, -1.0154747]] },
+    sources: [
+      "src/data/models/sil_bridge_wellington.glb – made for this app (2026-11-24): a plain concrete deck 9 m wide with solid parapets on two abutments, 26.2 m across the Wellington Straight, its underside 5.4 m up – its place after OpenStreetMap's road; its look and its heights are estimates; blank: no advertising; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the road over the track (the place)",
+    ],
+    checked: "2026-11-26: trial (place from the map; look and heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: [],
+      map: ["the place: OpenStreetMap's road bridge"],
+      inferred: ["its look", "its heights (5.4 m under the deck)"],
+    },
+  },
+  {
+    id: "silverstone-hangar-bridge", name: "Silverstone – the service road bridge over the Hangar Straight", kind: "tower",
+    venue: [2], loc: ["Silverstone"], years: [2011, null],
+    status: "trial",
+    // A plain concrete deck with solid parapets, 48.0 m between its abutments, its underside 5.4 m over the ground; the
+    // map has the road on it as a bridge, no building. At its place on the map (2026 race) its abutments stand 19.4 m and
+    // 17.7 m from the track's edges; the track under it lies 0.4 m below the ground at its ends.
+    // `footprint`: one abutment only – the deck lies over the track, and rain must fall under it.
+    replaces: { names: /^\(no map record makes way\)$/ },
+    model: { file: "sil_bridge_hangar.glb", anchor: [52.067574, -1.013553], heading: 208.39,
+      footprint: [[52.0676248, -1.0135582], [52.067612, -1.0135197], [52.067536, -1.0135863], [52.0675488, -1.0136249]] },
+    sources: [
+      "src/data/models/sil_bridge_hangar.glb – made for this app (2026-11-24): a plain concrete deck 9 m wide with solid parapets on two abutments, 48.0 m across the Hangar Straight, its underside 5.4 m up – its place after OpenStreetMap's road; its look and its heights are estimates; blank: no advertising; no outside asset, no logo or lettering",
+      "OpenStreetMap (© OpenStreetMap contributors, ODbL) – the road over the track (the place)",
+    ],
+    checked: "2026-11-26: trial (place from the map; look and heights estimated)",
+    evidence: {
+      confirmed: [],
+      photo: [],
+      map: ["the place: OpenStreetMap's road bridge"],
+      inferred: ["its look", "its heights (5.4 m under the deck)"],
     },
   },
 ];
@@ -1059,7 +1454,8 @@ export const FACILITIES = [
 // (clockwise) that the model's +Z axis points to, units: "m" | "cm" | "mm" | "ft", scale: 1, origin: "base-centre"
 // (the origin is on the ground at the model's centre) | "bbox" (place the bounding box's bottom centre at the anchor),
 // ground: "anchor" (terrain height at the anchor) | "lowest" (lowest terrain under the footprint), lift: metres,
-// drape: true (a long model on sloping ground: each vertex follows the terrain under it – drapeModel),
+// drape: true (a long model on sloping ground: each vertex follows the terrain under it – drapeModel; { along: [[x, z] …] }:
+// the terrain read along that line of the model's own instead),
 // footprint: [[lat, lon] …] (its outline on the ground where the model's box is not it),
 // level: true (with footprint: the ground under it is levelled first – a building the elevation model shows as a hill) }.
 // The model is never tilted to the terrain. `replaces` then also needs `within` (metres around the anchor) so only
@@ -1363,6 +1759,11 @@ function pitBuilding(ctx, p) {
   const inBlade = (q) => bladeParts.includes(q);
   // a dark slab: a part coloured (near) black at the high end (the data's dark element under the blade)
   const darkParts = bl ? parts.filter((q) => !inBlade(q) && /^#[0-2][0-9a-f][0-2][0-9a-f][0-2][0-9a-f]$/i.test(q.b.colour || "") && Math.max(...q.uv.map((w) => w[0])) < uRoot + 1) : [];
+  // (p.flat – under a model that is the whole building over the garages, Silverstone's Wing: the map knows that building
+  // part by part with measured heights, so p.height alone does not stop it at the garages' top. Once the building's
+  // direction is read off the parts – the blade's end first –, every part stops at p.height; the blade and the dark slab
+  // under it are the model's, none is built here)
+  if (p.flat && p.height) { for (const q of parts) { q.h = p.height; q.rh = 0; } if (bl) rootH = p.height; }
 
   // stations along the building: the footprint's span, the ground, the base block's height and the top layer
   const STEP = 1.5, stations = [];
@@ -1617,7 +2018,7 @@ function pitBuilding(ctx, p) {
     }
   }
   // the blade: its top rising at the given angle from the roof to the tip; under it, clad down to the base block
-  if (bl) {
+  if (bl && !p.flat) {
     const st0 = stations.reduce((a, s2) => (Math.abs(s2.u - uRoot) < Math.abs(a.u - uRoot) ? s2 : a)), lo = st0.v0 - 0.5, hi = st0.v1 + 0.5;
     const g0 = baseAt(uRoot), baseB = g0 + (stations.find((s2) => s2.u >= uTip)?.baseTop || 11.5);
     const yRoot = g0 + rootH, yTip = g0 + bl.tip, d = bl.depth, run = uRoot - uTip;
@@ -1632,7 +2033,7 @@ function pitBuilding(ctx, p) {
     F.poly("checker", [S(uTip, lo, baseB), S(uTip, hi, baseB), S(uTip, hi, yTip), S(uTip, lo, yTip)], [[0, 0], [(hi - lo) / 6, 0], [(hi - lo) / 6, (yTip - baseB) / 6], [0, (yTip - baseB) / 6]], [-u[0], 0, -u[1]]);
   }
   // the dark slab(s) from the data: a wedge (its roof slopes down away from the blade), checkered cladding
-  for (const q of darkParts) {
+  for (const q of p.flat ? [] : darkParts) {
     const us = q.uv.map((w) => w[0]), vs = q.uv.map((w) => w[1]), u0 = Math.min(...us), u1 = Math.max(...us), v0 = Math.min(...vs), v1 = Math.max(...vs);
     const g = baseAt(u0), yHi = g + q.h, yLo = g + Math.max(q.min + 4, q.h - (q.rh || 0) * 0.5);
     const S = (uu, vv, y) => { const [x, z] = P(uu, vv); return [x, y, z]; };
@@ -2170,13 +2571,39 @@ function holdModel(file, read) {
 // its ends, its back – gets plain ground-floor walls.
 // Whether a file of upper.also stands in a season ({ from, to }, either may be missing; no season: the newest state).
 export const upperAlsoIn = (a, year) => { const y = year || Infinity; return !((a.from && y < a.from) || (a.to && y > a.to)); };
+// upper.seasons: [{ from, to, file, … }] – in those seasons the model is another file, with whatever else the entry gives
+// for it (fill, span): the building as it stood then (Red Bull Ring before it was lengthened for 2026). The first whose
+// seasons hold; without a season – the newest state – none of them: the entry's own file.
+export const upperFor = (U, year) => {
+  const s = year ? (U?.seasons || []).find((a) => upperAlsoIn(a, year)) : null; if (!s) return U;
+  const { from, to, ...own } = s; return { ...U, ...own };
+};
 export function addUpper(g, r, root, U, also = []) {
   const G = r.garages, S = G?.slots || [];
   if (S.length < 2) throw new Error("upper model: no garages to stand on");
-  const iw = S[0].inward, yaw = Math.atan2(iw[0], iw[1]), ax = [iw[1], -iw[0]];
+  // (upper.alongFronts: the model's long axis along the straight line through the garages' fronts, not along the builder's
+  // own axis – the principal axis of every map part, which a building wider at one end pulls off its own front line. The
+  // garages' fronts follow the map outline's edge whatever that axis is; a rigid model 376 m long turned half a degree from
+  // them stands 1.6 m before the garages at one end and as far behind them at the other – Silverstone's Wing)
+  let iw = S[0].inward, fit = null;
+  if (U.alongFronts && S.length > 2) {
+    // (…through the garages that stand on one line: a stretch of the outline set further out – Spa's roof reaches 3 m over
+    // the lane along its middle 78 m, and the map draws it – is left out of the fit: the line through all of them, then
+    // again through those within 1.5 m of it, twice)
+    const a0 = [iw[1], -iw[0]], XY = S.map((sl) => [sl.front[0] * a0[0] + sl.front[1] * a0[1], sl.front[0] * iw[0] + sl.front[1] * iw[1]]);
+    const lsq = (P) => { let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (const [x, y] of P) { n++; sx += x; sy += y; sxx += x * x; sxy += x * y; } const k = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1); return [k, (sy - k * sx) / n]; };
+    let [k, c] = lsq(XY);
+    for (let it = 0; it < 2; it++) { const res = XY.map(([x, y]) => y - k * x - c).sort((p, q) => p - q), med = res[Math.floor(res.length / 2)], keep = XY.filter(([x, y]) => Math.abs(y - k * x - c - med) < 1.5); if (keep.length >= 3 && keep.length > XY.length / 2) [k, c] = lsq(keep); }
+    const l = Math.hypot(1, k);   // (the fronts' line: inward = k × along + c)
+    fit = { a0, iw0: iw, k, c }; iw = [(iw[0] - k * a0[0]) / l, (iw[1] - k * a0[1]) / l];
+  }
+  const yaw = Math.atan2(iw[0], iw[1]), ax = [iw[1], -iw[0]];
   const sOf = ([x, z]) => x * ax[0] + z * ax[1], dOf = ([x, z]) => x * iw[0] + z * iw[1];
   let s0 = Infinity, s1 = -Infinity, dBack = -Infinity; for (const q of r.footprint) { const sv = sOf(q); s0 = Math.min(s0, sv); s1 = Math.max(s1, sv); dBack = Math.max(dBack, dOf(q)); }
-  const sc = (s0 + s1) / 2, f0 = S[Math.floor(S.length / 2)].front, dFront = dOf(f0);
+  let f0 = S[Math.floor(S.length / 2)].front;
+  // (…its front on that line, not on the middle garage's own front)
+  if (fit) { const x = f0[0] * fit.a0[0] + f0[1] * fit.a0[1], y = f0[0] * fit.iw0[0] + f0[1] * fit.iw0[1], e = fit.k * x + fit.c - y; f0 = [f0[0] + fit.iw0[0] * e, f0[1] + fit.iw0[1] * e]; }
+  const sc = (s0 + s1) / 2, dFront = dOf(f0);
   // (the floors along the building: a least-squares line through the garages' floors)
   let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0; for (const sl of S) { const x = sOf(sl.front) - sc; n++; sx += x; sy += sl.floor; sxx += x * x; sxy += x * sl.floor; }
   const m = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1), a = (sy - m * sx) / n;
@@ -2216,7 +2643,14 @@ export function addUpper(g, r, root, U, also = []) {
   // (upper.span: the model's own ends along this frame's +X, where it reaches further at one end than at the other –
   // Interlagos: the Operations Centre stands at the pit-entry end of the garages; without it ± length / 2)
   const [XA, XB] = Array.isArray(U.span) ? U.span : [-HL, HL];
-  return { footprint: [corner(XA, -HD), corner(XB, -HD), corner(XB, zBack), corner(XA, zBack)], top: box.max.y, info: { upper: U.file, upperBase: +oy.toFixed(2), upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)] }, origin: [ox, oz], inward: iw };
+  // (the footprint – the facility's cover against rain, the trees' keep-out – is the model and the garage level it stands
+  // on: from the garages' front line where the model's own box begins behind it (Silverstone's Wing: its terrace edge is
+  // on that line, its box 2.5 m in – rain fell into the garages' mouths), and over the built garages where the model is
+  // the shorter – Red Bull Ring's building before its extension)
+  const zF = -Math.max(HD, U.front), XA2 = Math.min(XA, xs[0]), XB2 = Math.max(XB, xs[1]);
+  return { footprint: [corner(XA2, zF), corner(XB2, zF), corner(XB2, zBack), corner(XA2, zBack)], top: box.max.y, info: { upper: U.file, upperBase: +oy.toFixed(2), upperTilt: +(m * 100).toFixed(2), upperDrop: +(U.garageTop - G.top).toFixed(2), upperPast: [+(xs[0] + HL).toFixed(1), +(HL - xs[1]).toFixed(1), +(HD - zb).toFixed(1)],
+    // (development: the first and the last garage's front against the model's front line – [metres along from the model's origin, metres behind (+) or before (−) the line])
+    upperFronts: [S[0], S[S.length - 1]].map((sl) => [+(sOf(sl.front) - sOf([ox, oz])).toFixed(1), +(dOf(sl.front) - dOf([ox, oz]) + U.front).toFixed(2)]) }, origin: [ox, oz], inward: iw };
 }
 // A model file stood at a place given in scene coordinates (a listed grandstand's own model – stands.js `swaps`): the
 // model's origin at (x, y, z), its +Z turned to the scene direction dir ([dx, dz]). Held as the facilities' models are
@@ -2313,16 +2747,29 @@ export function tiltModel(holder, groundAt, z = 0, lift = 0) {
 // top follows the slope. For a wall along a street that climbs (Baku's Old City wall: 236 m, the ground under it rises
 // 17 m – placed level, its west half stood under the ground and its east end 3.5 m in the air). The geometries become
 // this placement's own (not the cache's shared ones) and are freed with the world.
-export function drapeModel(holder, groundAt, y0) {
+// along ([[x, z] …], drape: { along }): a line in the model's own frame – its front edge. The ground is then read on that
+// line, at the point of it nearest each vertex, not under the vertex: the model follows the ground along the line and keeps
+// its own rise across it. For steps cut into a bank that the elevation data already holds – read under each vertex, the
+// bank would be built twice (Interlagos' sector A: concrete steps on the bank beside the climb to the main straight).
+export function drapeModel(holder, groundAt, y0, along = null) {
   holder.updateMatrixWorld(true);
   const v = new THREE.Vector3(), inv = new THREE.Matrix4();
+  const line = Array.isArray(along) && along.length > 1 ? along : null, own = line ? new THREE.Matrix4().copy(holder.matrixWorld).invert() : null, q = new THREE.Vector3();
+  const onLine = (p) => {
+    q.copy(p).applyMatrix4(own); let bx = 0, bz = 0, bd = Infinity;
+    for (let i = 0; i + 1 < line.length; i++) {
+      const [x0, z0] = line[i], [x1, z1] = line[i + 1], dx = x1 - x0, dz = z1 - z0, k = Math.max(0, Math.min(1, ((q.x - x0) * dx + (q.z - z0) * dz) / (dx * dx + dz * dz || 1)));
+      const x = x0 + dx * k, z = z0 + dz * k, d = (q.x - x) ** 2 + (q.z - z) ** 2; if (d < bd) { bd = d; bx = x; bz = z; }
+    }
+    return q.set(bx, 0, bz).applyMatrix4(holder.matrixWorld);
+  };
   holder.traverse((o) => {
     const src = o.isMesh && !o.isInstancedMesh && o.geometry?.attributes?.position; if (!src) return;
     const g = o.geometry.clone(); g.userData = { ...g.userData, shared: false };
     const arr = new Float32Array(src.count * 3); inv.copy(o.matrixWorld).invert();
     for (let i = 0; i < src.count; i++) {
       v.fromBufferAttribute(src, i).applyMatrix4(o.matrixWorld);
-      const gy = groundAt(v.x, v.z); if (Number.isFinite(gy)) v.y += gy - y0;
+      const at = line ? onLine(v) : v, gy = groundAt(at.x, at.z); if (Number.isFinite(gy)) v.y += gy - y0;
       v.applyMatrix4(inv); arr[i * 3] = v.x; arr[i * 3 + 1] = v.y; arr[i * 3 + 2] = v.z;
     }
     g.setAttribute("position", new THREE.BufferAttribute(arr, 3)); g.computeBoundingBox(); g.computeBoundingSphere(); o.geometry = g;
@@ -2339,14 +2786,34 @@ function placeModel(root, m, gf, groundAt) {
   holder.position.set(...pl.position); holder.rotation.y = pl.rotationY; holder.scale.setScalar(pl.scale);
   holder.updateMatrixWorld(true);
   holder.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  if (m.drape) drapeModel(holder, groundAt, pl.position[1] - (m.lift || 0));
+  if (m.drape) drapeModel(holder, groundAt, pl.position[1] - (m.lift || 0), m.drape.along || null);
   // its footprint on the ground (scene x, z): a footprint given with the entry ([lat, lon] corners, checked against the
   // real building), else the model's own box turned and scaled with it – a turned building's world box would take in
   // the empty ground at its corners (and the neighbours standing there)
   const footprint = m.footprint?.length >= 3 ? m.footprint.map(([la, lo]) => gf.fromLL(la, lo))
     : [[box.min.x, box.min.z], [box.max.x, box.min.z], [box.max.x, box.max.z], [box.min.x, box.max.z]].map(([x, z]) => { const v = new THREE.Vector3(x, 0, z).applyMatrix4(holder.matrixWorld); return [v.x, v.z]; });
   const wb = new THREE.Box3().setFromObject(holder);
+  // (a start-lights gantry – model.lights: a mark where this app's five start lamps hang on it; with it in the scene
+  // map3d.js builds no gantry of its own – two portals stood some metres apart, review of v0.70's Silverstone pictures)
+  if (m.lights) {
+    const L = m.lights, face = L.face < 0 ? -1 : 1, mk = new THREE.Object3D(); mk.name = "startLightPanel";
+    mk.position.set(0, (L.y[0] + L.y[1]) / 2, L.z + face * 0.19); mk.userData = { h: L.y[1] - L.y[0], face, x0: box.min.x, x1: box.max.x };
+    holder.add(mk); holder.updateMatrixWorld(true);
+  }
   return { object: holder, footprint, top: wb.max.y };
+}
+// Where the five start lamps hang on a gantry model: on the face the entry names (model.lights: { y: [from, to] – the
+// lamps' height –, z – the face they hang on –, face: 1 | −1 – the way they look along the model's +Z }), 1.4 m apart,
+// over the track's middle (`centre` [x, z], the lap line's middle near the gantry) – kept on the beam, 3.6 m inside its
+// ends. marker: the "startLightPanel" mark placeModel leaves. → { pos: five [x, y, z], yaw, h: a lamp box's height }
+export function lampsOnModel(marker, centre = null) {
+  marker.updateWorldMatrix(true, false);
+  const e = marker.matrixWorld.elements, sc = Math.hypot(e[0], e[1], e[2]) || 1, O = [e[12], e[13], e[14]], X = [e[0] / sc, e[2] / sc], f = marker.userData.face;
+  const x0 = marker.userData.x0 * sc, x1 = marker.userData.x1 * sc, lo = Math.min(x0 + 3.6, (x0 + x1) / 2), hi = Math.max(x1 - 3.6, (x0 + x1) / 2);
+  const t = Math.max(lo, Math.min(hi, centre ? (centre[0] - O[0]) * X[0] + (centre[1] - O[2]) * X[1] : (x0 + x1) / 2));
+  // (in the order the grid sees them from left to right – the reds come on in that order: on the model's −Z face the
+  // model's +X is on the viewers' left)
+  return { pos: [-2, -1, 0, 1, 2].map((i) => [O[0] + X[0] * (t + i * 1.4 * f), O[1], O[2] + X[1] * (t + i * 1.4 * f)]), yaw: Math.atan2((e[8] / sc) * f, (e[10] / sc) * f), h: Math.max(0.5, Math.min(1.6, marker.userData.h * sc - 0.1)) };
 }
 
 // ---------- the facilities of one circuit ----------
@@ -2478,6 +2945,34 @@ export const PIT_UPPERS = {
   // wall): the terrain under the roofed street – as far back as the support strip's front, z −36 – is laid at the garages'
   // floor, so the street is level and the strip's walls (down to −10 m; the natural ground at its back was 9.9 m down at
   // the lowest) stand in ground that is never lower than it was.)
+  // Spa-Francorchamps: made with its +Z to the pit lane (`turned`); its door line (z +11.75) on the built garage fronts – on
+  // the line through those that stand on the door line (`alongFronts`): along the middle 78 m the map's outline, and with
+  // it this app's garages, stands 3 m further out, under the model's roof and deck, which reach 5.2 m over the lane there.
+  // The model reaches 12.4 m further at its La Source end (a low annexe) than at the other (`span`); the garage level is
+  // cut to its depth (`maxDepth`: the map's outline takes in the stair towers behind). SPA_UPPER_PLACE
+  7: { file: "spa_pit_upper.glb", garageTop: 4.8, front: 11.75, length: 312.7, depth: 23.5, maxDepth: 23.55, span: [-150.4, 162.3], along: -5.8, fill: false, turned: true, alongFronts: true,
+    src: "src/data/models/spa_pit_upper.glb – Spa-Francorchamps' F1 pit building (2007) over the garages: a dark walkway deck 2.3 m out over the pit lane with tall pale posts at its edge, a glazed first floor, a white roof (9.45 m) – deck and roof 5.2 m out along the middle 78 m –, a dark-roofed south block, a glazed bay under a rising dark roof at the La Source end, five stair towers and a low annexe behind; made for this app (2026-11-26) after OpenStreetMap's outline, aerial imagery and one 2022 photograph compared by eye, nothing copied; every height, the south block's look, the paddock side estimated; no outside asset, no logo or lettering" },
+  // Monza: the Palazzina Box (1989) as raced to 2026 – not the 2027 rebuild (no drawings). Made with its +Z to the pit lane
+  // (`turned`), its door line (z +12.7) on the built garage fronts (`alongFronts`); a glazed drum stands at either end,
+  // 6.5 m past the end wall (`span`: the model from drum to drum); the long white canopy on the terrace is a file of its
+  // own (`also`) – it stands through the season. `along`: the garages this app builds follow the session's pit boxes – 58
+  // bays of 4.07 m, 236 m, their middle 4.9 m further on than the map's building (230.4 m): the model stands at the map's
+  // place, so the garage row runs 7.4 m on past its north end wall. MZA_UPPER_PLACE
+  39: { file: "mza_pit_upper.glb", garageTop: 5.0, front: 12.7, length: 230.4, depth: 25.4, maxDepth: 25.45, span: [-126.5, 126.5], along: -4.9, fill: false, turned: true, alongFronts: true,
+    also: [{ file: "mza_pit_canopy.glb" }],
+    src: "src/data/models/mza_pit_upper.glb + mza_pit_canopy.glb – Monza's Palazzina Box (1989) over the garages: a sloped silver band, two rows of dark glass leaning out over the lane in silver mullions, a white steel sun-screen, the terrace at 10 m behind a glass rail, a glazed drum at either end; on the terrace the long white canopy (eaves 13 m, crown 15.5 m) – made for this app (2026-11-26) after OpenStreetMap's outline (230.4 × 25.4 m), aerial imagery and Commons photographs compared by eye, nothing copied; every height, the glass's lean, the drums' place, the paddock side and the canopy's size estimated; no outside asset, no logo or lettering" },
+  // Zandvoort: the old pit building (its front 12 m one storey under a roof terrace, behind it two storeys with one long band
+  // of dark glass under a white roof edge, 8.8 m), the control tower at its north end (a blue-green glazed drum in white
+  // fins, a wood-clad top storey, 12.45 m), the six-bay block of 2024 beyond it (a dark box, a roof terrace under a timber
+  // pergola), a tiled annexe at the south end – one file, made with its +Z to the pit lane (`turned`), its door line
+  // (z +12.0) on the built garage fronts (`alongFronts`). The file of 2026-11-26 16:23 (the second issue: after Commons
+  // photographs of 2018 and the circuit's two renders of 2024-01; the first had no photograph). A winners' podium frame
+  // stands on the terrace south of the tower – its place after the 2020 extension is not confirmed. `span`: the turned
+  // model's ends in this frame – the annexe at −X (the pit-entry end), the 2024 block at +X. `along`: the garages this app
+  // builds follow the session's pit boxes (34 bays of 5.48 m, 186 m); the model stands at the map's place, its origin
+  // 10.2 m along this frame's +X from the built garage level's middle. ZAN_UPPER_PLACE
+  55: { file: "zan_pit_upper.glb", garageTop: 4.8, front: 12.0, length: 230.8, depth: 24.0, maxDepth: 24.05, span: [-123.55, 107.25], along: 10.2, fill: false, turned: true, alongFronts: true,
+    src: "src/data/models/zan_pit_upper.glb – Zandvoort's pit building over the garages: the old block (a roof terrace over the one-storey front, two storeys behind with a long band of dark glass under a white roof edge, a railing, twelve bare flagpoles and two cabins on the roof, 8.8 m), a podium frame on the terrace, the control tower (a blue-green glazed drum in white fins, a wood-clad top storey 12.45 m, a penthouse, a mast), the 2024 block (six wide glazed bays, a parapet, a roof terrace under a timber pergola, a two-storey glazed part with a wood-clad cube), a tiled annexe – made for this app (2026-11-26, second issue) after OpenStreetMap's outline, the PDOK aerial picture, Commons photographs of 2018-11-03 (before the 2020 extension) and the circuit's two renders of 2024-01, all compared by eye, nothing copied; the present colour and doors of the 2020 front, the tower's top-storey cladding, the podium's place and the terrace's depth are estimates; no outside asset, no logo or lettering" },
   14: { file: "spo_pit_upper.glb", garageTop: 5.0, front: 9.0, length: 291, depth: 18, backTo: 43.3, along: -6.35, span: [-140, 184.5], fill: false, platform: 36, turned: true,
     src: "src/data/models/spo_pit_upper.glb – Interlagos pit building over the garages with the Operations Centre at its pit-entry end: a terrace with a glass rail and a glass awning, one cream membrane cone over each of the 23 garages, a white mast leaning out over the pit lane at every bay line, a flatter membrane over the paddock street, the support strip behind; the Operations Centre in pale concrete and grey-blue glass (its mural is not shown) – made for this app (2026-11-22) from this app's research notes, OpenStreetMap's outlines (279 × 52 m), aerial imagery (one cone every 12.1 m) and Wikimedia Commons photos compared by eye, nothing copied; published: 23 boxes of 216 m², a six-storey operations centre; every height estimated; no outside asset, no logo or lettering" },
   // (Mexico City: made with its +Z to the pit lane – `turned`. As at Austin the garage doors are on the front of the map's
@@ -2628,11 +3123,13 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
     // (upper.from: the model from that season on – before it the builder's own building; upper.also: [{ file, from, to }] –
     // more files in the model's frame, each in its seasons only (without a season: the newest state); one that does not
     // load is left out)
-    let upperRoot = null, upperHold = null; const also = [];
-    if (spec.upper?.file && spec.builder && readModel && !(year && spec.upper.from && year < spec.upper.from)) {
-      const hold = holdModel(spec.upper.file, readModel); own.holds.add(hold);
+    // (upper.seasons: another file in some seasons – upperFor; upper.trial: on an entry that is itself verified
+    // (`permanent`) the model is still a trial – with the setting off the builder's whole building stands, as before it had one)
+    let upperRoot = null, upperHold = null; const also = [], U = upperFor(spec.upper, year);
+    if (U?.file && spec.builder && readModel && !(year && U.from && year < U.from) && !(U.trial && !trial)) {
+      const hold = holdModel(U.file, readModel); own.holds.add(hold);
       try { upperRoot = await hold.job; if (!isCurrent()) return null; upperHold = hold; } catch (e) { reason = e.message; own.holds.delete(hold); hold.release(); }
-      if (upperRoot) for (const a of spec.upper.also || []) {
+      if (upperRoot) for (const a of U.also || []) {
         if (!upperAlsoIn(a, year)) continue;
         const h = holdModel(a.file, readModel); own.holds.add(h);
         try { const root = await h.job; if (!isCurrent()) return null; also.push({ file: a.file, root, hold: h }); } catch (e) { own.holds.delete(h); h.release(); }
@@ -2660,9 +3157,12 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         let params = spec.kind === "pit-building" && !spec.params?.pitWall ? { ...(spec.params || {}), pitWall: PLAIN_PIT_WALL, pitWallFrom: "estimate (plain wall)" } : spec.params || {};
         // (the FIA drawing's garages for this event, placed along the pit lane – garageplans.js: the pit building's bays)
         if (spec.kind === "pit-building" && bays?.list?.length) params = { ...params, bays };
-        // (under an upper model the builder stops at the garages' top: no storeys, balconies or eaves of its own)
+        // (under an upper model the builder stops at the garages' top: no storeys, balconies or eaves of its own – nor its
+        // leaning glass or columns: Red Bull Ring's glass band stood on under the model, and in the seasons of the shorter
+        // building – up to 2025 – it hung in the open past the model's end)
         // (upper.maxDepth on an entry: the garage level no deeper than that from its pit-lane side – only under the model)
-        if (upperRoot) params = { ...params, height: (GARAGE_TOP[params.facade?.pit] || 4.8) + 0.25, plate: 0.25, overhang: { pit: 0.05, paddock: 0.05, end: 0.05 }, balconies: [], roofRail: 0, tents: null, ...(spec.upper.maxDepth ? { maxDepth: spec.upper.maxDepth } : {}) };
+        // (upper.flat: the builder's every part stops there too, whatever height the map gives it – pitBuilding p.flat)
+        if (upperRoot) params = { ...params, height: (GARAGE_TOP[params.facade?.pit] || 4.8) + 0.25, plate: 0.25, overhang: { pit: 0.05, paddock: 0.05, end: 0.05 }, balconies: [], roofRail: 0, tents: null, slopedGlass: null, columns: null, ...(U.maxDepth ? { maxDepth: U.maxDepth } : {}), ...(U.flat ? { flat: true } : {}) };
         // (an entry with its own side of the lane – a venue's layout, genericPitSpec – builds its garages facing that way: the
         // nearest track is not always the lane's side – Monaco, the straight behind the garages had them face away from the
         // lane, every car 22 m in front of them and never "in box", v0.35)
@@ -2671,11 +3171,11 @@ async function facilitiesFor({ scene, gf, groundAt, surfaceAt = null, trackEdge 
         if (r.garages) g.userData.garages = { ...r.garages, facility: spec.id };
         made = { object: g, footprint: r.footprint, occupancy: r.occupancy, top: r.top, info: { ...r.info, garages: r.garages?.slots.length || 0 } }; how = "builder";
         if (upperRoot) {
-          const up = addUpper(g, r, upperRoot, spec.upper, also.map((a) => a.root));
+          const up = addUpper(g, r, upperRoot, U, also.map((a) => a.root));
           made.footprint = up.footprint; made.top = up.top; made.info = { ...made.info, ...up.info, ...(also.length ? { upperAlso: also.map((a) => a.file) } : {}) }; how = "builder+model";
           // (upper.platform: the ground behind the garages, under the model, is laid at the garages' floor as far back as
           // that many metres behind the model's origin – scenery.js: a paddock on a platform over falling ground, Interlagos)
-          if (Number.isFinite(spec.upper.platform) && g.userData.garages) g.userData.garages.platformBack = spec.upper.front + spec.upper.platform;
+          if (Number.isFinite(U.platform) && g.userData.garages) g.userData.garages.platformBack = U.front + U.platform;
           // (development: where the model's origin stands and the bearing its +Z – the paddock side – points to, for
           // placing a neighbour by the pit building as built)
           if (gf.toLL) { const a = gf.toLL(up.origin[0], up.origin[1]), b = gf.toLL(up.origin[0] + up.inward[0] * 50, up.origin[1] + up.inward[1] * 50); made.info.upperAt = a.map((v) => +v.toFixed(6)); made.info.upperFacing = +(((Math.atan2((b[1] - a[1]) * Math.cos((a[0] * Math.PI) / 180), b[0] - a[0]) * 180) / Math.PI + 360) % 360).toFixed(1); }
@@ -2760,7 +3260,9 @@ function near(x, z, pts, d) {
 // meshes go in the landmarks group (one group named "landmarks": its night lighting is switched there).
 export function combine(lm, fac) {
   if (!fac) return lm;
-  let group = lm?.group || null;
+  // (a landmark built in code that a facility's model now stands for – Monza's podium and towers – gives way to it)
+  if (lm?.giveWay) lm.giveWay(new Set((fac.info || []).filter((i) => i.how === "model").map((i) => i.id)));
+  let group = lm?.group?.children.length ? lm.group : null;
   if (fac.group) { if (!group) { group = new THREE.Group(); group.name = "landmarks"; } group.add(fac.group); }
   return {
     group, skip: (b) => !!lm?.skip(b) || fac.skip(b), restyle: (b) => lm?.restyle(b) || null,

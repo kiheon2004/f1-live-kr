@@ -116,6 +116,7 @@
 **Three further GL events stands (2026, location unknown):** GL events also delivered "three temporary grandstands at Silverstone for 2026, providing over 5,650 seats". Which named stands these are is not stated.
 
 ### Differences from the app's list (Silverstone)
+- **As of v0.70 (2026-11-26):** the app has the stands listed under "Missing" below except The Loop, the Boxpark Hangar stand, Garage and Woodcote C; the Landostand is one stand from 2026 (the four blocks up to 2025); the George Russell Grandstand is the Farm Curve stand's entry from 2027; Hamilton Straight B is two stands (one before the hotel, one north of it). The rest of this section is the state of 2026-10-16.
 - **Landostand:** the 2026 stand is a **new, larger structure**, not a rename. It is one wrap-around stand of 16,373 seats around Stowe, replacing the four 2025 blocks (A–D). Shape and size must change.
 - **Hangar:** in 2026 this is the **BOXPARK "Hangar Straight" grandstand** on the inner Hangar Straight. Its exact position is not published.
 - **Lakeside:** confirmed **only for 2025**. Unverified for 2026.

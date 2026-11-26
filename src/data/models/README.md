@@ -100,7 +100,7 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 | `spo_footbridge.glb` (0.03 MB, 688 triangles) | Interlagos, the footbridge over the track at the south end of the main straight | made for this app, 2026-11-22: its place from OpenStreetMap and aerial imagery; its look and height estimated |
 | `spo_tower.glb` (0.03 MB, 720 triangles) | Interlagos, a white hourglass lattice tower (15 m) – seven stand on the infield lawn east of the Hospitality Center | made for this app, 2026-11-22: places from aerial imagery (± 6 m); height and lattice estimated |
 | `rbr_pit_upper.glb` (0.06 MB, 1,152 triangles) | Red Bull Ring pit building over the garages (from 2026): the first floor behind glass leaning out over the pit lane, white fins, the roof deck, the podium, the grey wedge of race control, the 2026 section and the medical centre | made for this app, 2026-11-24: OpenStreetMap's outline, aerial imagery, press and Wikimedia Commons photos compared by eye – nothing copied, no outside asset, no logo or lettering; the 2026 section's length and every height estimated |
-| `rbr_pit_tents2026.glb` (0.01 MB, 192 triangles) | Red Bull Ring, the four white marquees on the pit building's roof deck (2026 only) | the same |
+| `rbr_pit_tents2026.glb` (0.01 MB, 192 triangles) | Red Bull Ring, the four white marquees on the pit building's roof deck (up to 2026) | the same |
 | `rbr_pit_roof2027.glb` (0.04 MB, 852 triangles) | Red Bull Ring, the glazed roof storey on the pit building (from 2027) | the same; reported for the July 2027 race – its look is a guess, no picture is published |
 | `rbr_gantry.glb` (0.004 MB, 44 triangles) | Red Bull Ring, the start gantry over the main straight (blank) | made for this app, 2026-11-24: its place from aerial imagery; heights estimated |
 | `rbr_sz_centre_c.glb` (0.16 MB, 3,454 triangles) | Red Bull Ring, Start-Ziel grandstand: the middle (sector K) under the wing, with the welcome centre behind | made for this app, 2026-11-24: OpenStreetMap's outline (92 × 37 m), published sizes (wing 92 × 20 m), photos compared by eye – nothing copied; its back and its heights are less sure |
@@ -114,6 +114,134 @@ Self-contained GLB files (glTF 2.0 binary, buffers and images embedded) for `src
 | `rbr_open_t9.glb` (0.20 MB, 4,422 triangles) | Red Bull Ring, open steel stand: T9 (60 m, five blocks) | the same |
 | `rbr_open_t10.glb` (0.30 MB, 6,692 triangles) | Red Bull Ring, open steel stand: T10 (141 m, seven blocks) | the same |
 | `rbr_open_t8.glb` (0.11 MB, 2,396 triangles) | Red Bull Ring, open steel stand: T8 (85 m, 16 rows) | the same |
-| `rbr_open_mitte_ne.glb` (0.25 MB, 5,522 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the half facing north-east | the same |
-| `rbr_open_mitte_sw.glb` (0.17 MB, 3,818 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the half facing south-west | the same |
 | `rbr_open_schoenberg.glb` (0.13 MB, 2,942 triangles) | Red Bull Ring, open steel stand: Schönberg (101 m, 18 rows) | the same |
+| `sil_wing_upper.glb` (0.18 MB, 3,806 triangles) | Silverstone Wing over the garages: the terrace band, the hall floor behind leaning glass, the roof in four planes, the five cores, the mast, the blade, the fin and the podium terrace | made for this app, 2026-11-24: OpenStreetMap's outline and its parts with heights, aerial imagery, three Wikimedia Commons photographs compared by eye – nothing copied, no outside asset, no logo or lettering; the roof's planes, the door line and nearly every height estimated |
+| `sil_hotel.glb` (0.14 MB, 2,938 triangles) | Silverstone, the Hilton Garden Inn opposite the Wing (122 × 20 m, the roof bar under white sails) | made for this app, 2026-11-24: OpenStreetMap's outline, photographs compared by eye; the track face assumed |
+| `sil_skybridge.glb` (0.02 MB, 408 triangles) | Silverstone, the sky bridge from the hotel over the track to the Wing (69.6 m, deck 10 m up) | made for this app, 2026-11-24: its line from OpenStreetMap and aerial imagery; heights estimated; no banners |
+| `sil_gantry.glb` (0.01 MB, 260 triangles) | Silverstone, the start lights' gantry (a dark lattice, 37.3 m, blank panel) | made for this app, 2026-11-24: its place from aerial imagery; heights estimated |
+| `sil_brdc.glb` (0.02 MB, 394 triangles) | Silverstone, the BRDC clubhouse (three white floors with terraces, sails on the roof) | made for this app, 2026-11-24: OpenStreetMap's outline, 2026 photographs compared by eye; heights estimated |
+| `sil_national_pits_w.glb` (0.03 MB, 510 triangles) | Silverstone, the National pits' west garage block (118 m, 19 bays) | made for this app, 2026-11-24: OpenStreetMap's outline, one photograph compared by eye; bays and look estimated |
+| `sil_national_pits_e.glb` (0.03 MB, 532 triangles) | Silverstone, the National pits' east garage block (122 m, 20 bays) | the same |
+| `sil_escapade_unit.glb` (0.01 MB, 162 triangles) | Silverstone, one Escapade trackside residence – stood at 14 places outside Maggotts and Becketts | made for this app, 2026-11-24: OpenStreetMap's 14 outlines (the places), the published description (RIBA Journal 2024); heights estimated |
+| `sil_escapade_club.glb` (0.01 MB, 94 triangles) | Silverstone, the Escapade clubhouse beside the Becketts stand | made for this app, 2026-11-24: OpenStreetMap's outline; its look is a guess |
+| `sil_bridge_wellington.glb` (0.004 MB, 56 triangles) | Silverstone, the service road bridge over the Wellington Straight (26 m, blank) | made for this app, 2026-11-24: its place from OpenStreetMap's road; look and heights estimated |
+| `sil_bridge_hangar.glb` (0.004 MB, 56 triangles) | Silverstone, the service road bridge over the Hangar Straight (48 m, blank) | the same |
+| `sil_stand_hamilton_a.glb` (0.34 MB, 7,630 triangles) | Silverstone, grandstand: Hamilton Straight A (117 m, 26 rows, roofed) | made for this app, 2026-11-24: its plan from OpenStreetMap's outline or one traced from aerial imagery (Esri World Imagery 2025-06-18); rows and height worked out from its depth; navy seat strips, no single seats |
+| `sil_stand_hamilton_b1.glb` (0.11 MB, 2,376 triangles) | Silverstone, grandstand: Hamilton Straight B, the stand in front of the hotel (65 m, 15 rows, open) | the same |
+| `sil_stand_hamilton_b2.glb` (0.15 MB, 3,316 triangles) | Silverstone, grandstand: Hamilton Straight B, the stand north of the hotel (70 m, 20 rows, open) | the same |
+| `sil_stand_abbey.glb` (0.28 MB, 6,376 triangles) | Silverstone, grandstand: Abbey (141 m, 16 rows, roofed) | the same |
+| `sil_stand_farm.glb` (0.21 MB, 4,720 triangles) | Silverstone, grandstand: Farm Curve (from 2027 the George Russell Grandstand) (164 m, 11 rows, open) | the same |
+| `sil_stand_village_a.glb` (0.12 MB, 2,720 triangles) | Silverstone, grandstand: Village A (78 m, 13 rows, open) | the same |
+| `sil_stand_village_b.glb` (0.15 MB, 3,316 triangles) | Silverstone, grandstand: Village B (73 m, 17 rows, roofed) | the same |
+| `sil_stand_the_view.glb` (0.11 MB, 2,472 triangles) | Silverstone, grandstand: The View (67 m, 16 rows, open) | the same |
+| `sil_stand_int_paddock.glb` (0.17 MB, 3,862 triangles) | Silverstone, grandstand: International Paddock (100 m, 12 rows, roofed) | the same |
+| `sil_stand_wellington.glb` (0.06 MB, 1,210 triangles) | Silverstone, grandstand: Wellington (40 m, 11 rows, open) | the same |
+| `sil_stand_luffield_corner.glb` (0.28 MB, 6,248 triangles) | Silverstone, grandstand: Luffield Corner (125 m, 18 rows, roofed) | the same |
+| `sil_stand_luffield_corner_front.glb` (0.15 MB, 3,388 triangles) | Silverstone, grandstand: Luffield Corner (rows in front) (140 m, 8 rows, open) | the same |
+| `sil_stand_luffield.glb` (0.34 MB, 7,684 triangles) | Silverstone, grandstand: Luffield (171 m, 17 rows, roofed) | the same |
+| `sil_stand_luffield_front.glb` (0.14 MB, 3,040 triangles) | Silverstone, grandstand: Luffield (rows in front) (163 m, 6 rows, open) | the same |
+| `sil_stand_woodcote_a.glb` (0.30 MB, 6,824 triangles) | Silverstone, grandstand: Woodcote A (125 m, 21 rows, roofed) | the same |
+| `sil_stand_woodcote_b.glb` (0.21 MB, 4,704 triangles) | Silverstone, grandstand: Woodcote B (87 m, 21 rows, roofed) | the same |
+| `sil_stand_jim_clark.glb` (0.12 MB, 2,504 triangles) | Silverstone, grandstand: Jim Clark (BRDC) (31 m, 16 rows, roofed) | the same |
+| `sil_stand_national.glb` (0.17 MB, 3,832 triangles) | Silverstone, grandstand: National Pits Straight (94 m, 13 rows, roofed) | the same |
+| `sil_stand_stirling_a.glb` (0.04 MB, 784 triangles) | Silverstone, grandstand: Stirling A (29 m, 8 rows, open) | the same |
+| `sil_stand_stirling_b.glb` (0.09 MB, 2,008 triangles) | Silverstone, grandstand: Stirling B (61 m, 9 rows, roofed) | the same |
+| `sil_stand_copse_a.glb` (0.13 MB, 2,884 triangles) | Silverstone, grandstand: Copse A (73 m, 13 rows, roofed) | the same |
+| `sil_stand_copse_a_front.glb` (0.08 MB, 1,780 triangles) | Silverstone, grandstand: Copse A (rows in front) (83 m, 7 rows, open) | the same |
+| `sil_stand_copse_b.glb` (0.09 MB, 2,014 triangles) | Silverstone, grandstand: Copse B (56 m, 11 rows, roofed) | the same |
+| `sil_stand_copse_c.glb` (0.12 MB, 2,578 triangles) | Silverstone, grandstand: Copse C (69 m, 11 rows, roofed) | the same |
+| `sil_stand_copse_c_front.glb` (0.17 MB, 3,694 triangles) | Silverstone, grandstand: Copse C / D (rows in front) (170 m, 7 rows, open) | the same |
+| `sil_stand_copse_d.glb` (0.07 MB, 1,560 triangles) | Silverstone, grandstand: Copse D (38 m, 16 rows, open) | the same |
+| `sil_stand_silverstone_six.glb` (0.10 MB, 2,270 triangles) | Silverstone, grandstand: Silverstone Six (BRDC) (38 m, 25 rows, open) | the same |
+| `sil_stand_becketts.glb` (0.46 MB, 10,440 triangles) | Silverstone, grandstand: Becketts (208 m, 19 rows, roofed) | the same |
+| `sil_stand_chapel.glb` (0.13 MB, 2,988 triangles) | Silverstone, grandstand: Chapel (86 m, 13 rows, open) | the same |
+| `sil_stand_club_a.glb` (0.13 MB, 2,856 triangles) | Silverstone, grandstand: Club A (65 m, 19 rows, open) | the same |
+| `sil_stand_club_corner.glb` (0.38 MB, 8,520 triangles) | Silverstone, grandstand: Club Corner (161 m, 21 rows, roofed) | the same |
+| `sil_stand_vale.glb` (0.30 MB, 6,728 triangles) | Silverstone, grandstand: Vale (149 m, 19 rows, open) | the same |
+| `sil_stand_landostand.glb` (1.54 MB, 34,790 triangles) | Silverstone, grandstand: the Landostand as rebuilt for 2026 (323 m, 11–40 rows, open) | the same; its plan is not published – the 2025 blocks' fronts joined: an estimate |
+| `rbr_pit_upper_2025.glb` (0.05 MB, 1,032 triangles) | Red Bull Ring pit building over the garages as it stood up to 2025: the 30 boxes and the wedge of race control, before the 2026 extension | made for this app, 2026-11-24: the same sources as rbr_pit_upper.glb; the old medical centre east of it is not shown |
+| `rbr_open_mitte_abc.glb` (0.17 MB, 3,842 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the north-western block (sectors A–C, 56 rows) – facing south-west | made for this app, 2026-11-24 (second version): its plan from the outline and aerial imagery, rows and facing after the spectator guide (oversteer48.com); heights worked out from its depth |
+| `rbr_open_mitte_def.glb` (0.14 MB, 3,050 triangles) | Red Bull Ring, open steel stand: Center (Mitte), the south-eastern block (sectors D–F, 44 rows) – facing south-west | the same |
+| `spo_gantry.glb` (0.01 MB, 284 triangles) | Interlagos, the start lights' gantry over the main straight (a black truss, 17 m, blank panel) | made for this app, 2026-11-26: its place along the track from aerial imagery of April 2025; heights and length estimated |
+| `spo_stand_a_1.glb` (0.16 MB, 3,494 triangles) | Interlagos, sector A, piece 1 of 5 from the south: bare concrete steps on the bank (92.7 m, 14–24 steps) | made for this app, 2026-11-26: its front line from OpenStreetMap's outline (the northern 251 m) and Esri World Imagery of April 2025 (the southern 213 m, ± 4 m); steps and heights worked out from its depth |
+| `spo_stand_a_2.glb` (0.11 MB, 2,438 triangles) | Interlagos, sector A, piece 2 of 5 from the south: bare concrete steps on the bank (92.7 m, 12–14 steps) | the same |
+| `spo_stand_a_3.glb` (0.10 MB, 2,258 triangles) | Interlagos, sector A, piece 3 of 5 from the south: bare concrete steps on the bank (92.7 m, 11–12 steps) | the same |
+| `spo_stand_a_4.glb` (0.10 MB, 2,210 triangles) | Interlagos, sector A, piece 4 of 5 from the south: bare concrete steps on the bank (92.7 m, 11 steps) | the same |
+| `spo_stand_a_5.glb` (0.10 MB, 2,210 triangles) | Interlagos, sector A, piece 5 of 5 from the south: bare concrete steps on the bank (92.7 m, 11 steps) | the same |
+| `spa_pit_upper.glb` (0.07 MB, 1,416 triangles) | Spa-Francorchamps pit building over the garages: the walkway deck over the pit lane, a glazed floor under a white roof, the south block, five stair towers | made for this app, 2026-11-26: OpenStreetMap's outline, aerial imagery and one 2022 photograph compared by eye – nothing copied, no outside asset, no logo or lettering; every height and the south block estimated |
+| `spa_gantry.glb` (0.01 MB, 200 triangles) | Spa-Francorchamps, the start lights' gantry (a pale lattice, 22.7 m, blank panel) | made for this app, 2026-11-26: its place from aerial imagery; heights estimated |
+| `spa_stand_trib_f1.glb` (0.24 MB, 5,474 triangles) | Spa-Francorchamps, grandstand: Gold 1 : Pit (90 m, 25 rows, roofed) | made for this app, 2026-11-26: its plan from OpenStreetMap's outline or this app's traced one and aerial imagery (Esri World Imagery 2025-06-22); rows and height worked out from its depth; seat strips, no single seats |
+| `spa_stand_trib_end.glb` (0.36 MB, 8,152 triangles) | Spa-Francorchamps, grandstand: Gold 2 : GP2 (101 m, 34 rows, roofed) | the same |
+| `spa_stand_silver1.glb` (0.16 MB, 3,550 triangles) | Spa-Francorchamps, grandstand: Silver 1 (121 m, 11 rows, open) | the same |
+| `spa_stand_raidillon.glb` (0.33 MB, 7,368 triangles) | Spa-Francorchamps, grandstand: Gold 3 : Eau-Rouge (130 m, 23 rows, roofed) | the same |
+| `spa_stand_gold8.glb` (0.09 MB, 1,872 triangles) | Spa-Francorchamps, grandstand: Gold 8 (33 m, 23 rows, roofed) | the same |
+| `spa_stand_gold7.glb` (0.04 MB, 864 triangles) | Spa-Francorchamps, grandstand: Gold 7 (20 m, 20 rows, roofed) | the same |
+| `spa_stand_gold7bis.glb` (0.02 MB, 460 triangles) | Spa-Francorchamps, grandstand: Gold 7 Bis (17 m, 10 rows, open) | the same |
+| `spa_stand_gold7ter.glb` (0.11 MB, 2,472 triangles) | Spa-Francorchamps, grandstand: Gold 7 ter : Endurance (67 m, 16 rows, open) | the same |
+| `spa_stand_fanzone.glb` (0.25 MB, 5,656 triangles) | Spa-Francorchamps, grandstand: Fanzone Grandstand (190 m, 11 rows, open) | the same |
+| `spa_stand_gold4a.glb` (0.06 MB, 1,270 triangles) | Spa-Francorchamps, grandstand: Gold 4 : Eau-Rouge (22 m, 23 rows, open) | the same |
+| `spa_stand_gold4b.glb` (0.08 MB, 1,776 triangles) | Spa-Francorchamps, grandstand: Gold 4 : Eau-Rouge (2) (35 m, 24 rows, open) | the same |
+| `spa_stand_gold6.glb` (0.12 MB, 2,578 triangles) | Spa-Francorchamps, grandstand: Gold 6 : Chicane (69 m, 11 rows, roofed) | the same |
+| `spa_stand_speed_corner.glb` (0.21 MB, 4,600 triangles) | Spa-Francorchamps, grandstand: Speed Corner (120 m, 16 rows, open) | the same |
+| `mza_pit_upper.glb` (0.18 MB, 3,952 triangles) | Monza, the Palazzina Box over the garages: leaning dark glass in silver mullions, a white sun-screen, the terrace, a glazed drum at either end | made for this app, 2026-11-26: OpenStreetMap's outline, aerial imagery and Commons photographs compared by eye – nothing copied, no outside asset, no logo or lettering; heights, the glass's lean, the drums' place estimated |
+| `mza_pit_canopy.glb` (0.13 MB, 2,892 triangles) | Monza, the long white canopy on the pit building's terrace (21 frames, eaves 13 m, crown 15.5 m) | made for this app, 2026-11-26: aerial imagery and one photograph compared by eye; sizes estimated |
+| `mza_hospitality.glb` (0.07 MB, 1,510 triangles) | Monza, the Hospitality Building: three glazed floors, a terrace, a thin white roof in three ridges | made for this app, 2026-11-26: its plan from OpenStreetMap; look and heights estimated |
+| `mza_medical.glb` (0.01 MB, 158 triangles) | Monza, the Centro Medico: two low white blocks | made for this app, 2026-11-26: its plan from OpenStreetMap; look estimated |
+| `mza_finish_gantry.glb` (0.10 MB, 2,190 triangles) | Monza, the lattice gantry before the control line (47 m on three legs, a blank board) | made for this app, 2026-11-26: place and span from aerial imagery; heights estimated |
+| `mza_tower.glb` (0.04 MB, 736 triangles) | Monza, a 1955 tower (Torre Sud / Torre Nord: the same file at two places): glazed floors in a silver grid, 9 × 9 m, 21 m | made for this app, 2026-11-26: after this app's research note and photographs compared by eye; place from a map point |
+| `mza_stand_laterale_destra.glb` (0.63 MB, 14,210 triangles) | Monza, grandstand: 26A/26B/26C Laterale Destra (220 m, 28 rows, roofed) | made for this app, 2026-11-26: its plan the map's rectangle (OpenStreetMap); rows and height worked out from its depth; blue seat strips, no single seats |
+| `mza_stand_centrale.glb` (0.18 MB, 4,034 triangles) | Monza, grandstand: 1 Centrale (68 m, 27 rows, roofed) | the same |
+| `mza_stand_laterale_sinistra.glb` (0.20 MB, 4,310 triangles) | Monza, grandstand: 4 Laterale Sinistra (74 m, 25 rows, roofed) | the same |
+| `mza_stand_piscina.glb` (0.11 MB, 2,380 triangles) | Monza, grandstand: 5 Piscina (83 m, 11 rows, open) | the same |
+| `mza_stand_vedano.glb` (0.27 MB, 5,966 triangles) | Monza, grandstand: 24 Vedano (145 m, 16 rows, roofed) | the same |
+| `mza_stand_parabolica_int_a.glb` (0.07 MB, 1,510 triangles) | Monza, grandstand: 23 Parabolica Interna (59 m, 10 rows, open) | the same |
+| `mza_stand_parabolica_int_b.glb` (0.05 MB, 970 triangles) | Monza, grandstand: 23 Parabolica Interna (38 m, 8 rows, open) | the same |
+| `mza_stand_garden.glb` (0.10 MB, 2,146 triangles) | Monza, grandstand: Tribuna Garden (72 m, 11 rows, open) | the same |
+| `mza_stand_biassono.glb` (0.06 MB, 1,300 triangles) | Monza, grandstand: 7 Biassono (50 m, 10 rows, open) | the same |
+| `mza_stand_alta_a.glb` (0.12 MB, 2,746 triangles) | Monza, grandstand: 6 Alta Velocità (91 m, 12 rows, open) | the same |
+| `mza_stand_alta_b.glb` (0.12 MB, 2,746 triangles) | Monza, grandstand: 6 Alta Velocità (90 m, 12 rows, open) | the same |
+| `mza_stand_alta_c.glb` (0.07 MB, 1,516 triangles) | Monza, grandstand: 6 Alta Velocità (51 m, 12 rows, open) | the same |
+| `mza_stand_prima_variante.glb` (0.43 MB, 9,760 triangles) | Monza, grandstand: 8A/8B Prima Variante Esterna (146 m, 31 rows, open) | the same |
+| `mza_stand_parabolica.glb` (0.15 MB, 3,238 triangles) | Monza, grandstand: 22 Parabolica (82 m, 15 rows, roofed) | the same |
+| `mza_stand_lat_parabolica_a.glb` (0.11 MB, 2,452 triangles) | Monza, grandstand: 21E Laterale Parabolica (71 m, 13 rows, open) | the same |
+| `mza_stand_lat_parabolica_b.glb` (0.07 MB, 1,516 triangles) | Monza, grandstand: 21D Laterale Parabolica (52 m, 12 rows, open) | the same |
+| `mza_stand_lat_parabolica_c.glb` (0.05 MB, 1,112 triangles) | Monza, grandstand: 21C Laterale Parabolica (34 m, 13 rows, open) | the same |
+| `mza_stand_lat_parabolica_d.glb` (0.05 MB, 1,024 triangles) | Monza, grandstand: 21B Laterale Parabolica (34 m, 12 rows, open) | the same |
+| `mza_stand_lat_parabolica_e.glb` (0.06 MB, 1,380 triangles) | Monza, grandstand: 21A Laterale Parabolica (37 m, 13 rows, open) | the same |
+| `mza_stand_uscita_ascari_a.glb` (0.07 MB, 1,418 triangles) | Monza, grandstand: 18 Uscita Ascari A (48 m, 9 rows, roofed) | the same |
+| `mza_stand_uscita_ascari_b.glb` (0.04 MB, 832 triangles) | Monza, grandstand: Uscita Ascari B (31 m, 9 rows, open) | the same |
+| `mza_stand_ascari.glb` (0.07 MB, 1,624 triangles) | Monza, grandstand: 16 Ascari (60 m, 9 rows, open) | the same |
+| `mza_stand_ascari_uno.glb` (0.02 MB, 412 triangles) | Monza, grandstand: Ascari Uno (20 m, 8 rows, open) | the same |
+| `mza_stand_amici.glb` (0.03 MB, 634 triangles) | Monza, grandstand: Amici Autodromo (21 m, 9 rows, open) | the same |
+| `mza_stand_ascari_due.glb` (0.03 MB, 544 triangles) | Monza, grandstand: 14 Ascari 2 (31 m, 4 rows, open) | the same |
+| `mza_stand_ascari_tre.glb` (0.04 MB, 784 triangles) | Monza, grandstand: 12 Ascari 3 (32 m, 8 rows, open) | the same |
+| `mza_stand_seconda_variante.glb` (0.04 MB, 832 triangles) | Monza, grandstand: 9 Seconda Variante (28 m, 9 rows, open) | the same |
+| `mza_stand_roggia.glb` (0.03 MB, 598 triangles) | Monza, grandstand: 10 Roggia (27 m, 8 rows, open) | the same |
+| `mza_stand_trib_p01.glb` (0.01 MB, 248 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 3 rows, open) | the same |
+| `mza_stand_trib_p02.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (15 m, 2 rows, open) | the same |
+| `mza_stand_trib_p03.glb` (0.01 MB, 248 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (19 m, 3 rows, open) | the same |
+| `mza_stand_trib_p04.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 2 rows, open) | the same |
+| `mza_stand_trib_p05.glb` (0.01 MB, 248 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 3 rows, open) | the same |
+| `mza_stand_trib_p06.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (17 m, 2 rows, open) | the same |
+| `mza_stand_trib_p07.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (19 m, 2 rows, open) | the same |
+| `mza_stand_trib_p08.glb` (0.01 MB, 224 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 2 rows, open) | the same |
+| `mza_stand_trib_p09.glb` (0.02 MB, 292 triangles) | Monza, grandstand: GF Gradinate Interno Parabolica (18 m, 4 rows, open) | the same |
+| `mza_stand_pv_small.glb` (0.02 MB, 388 triangles) | Monza, grandstand: Prima Variante (small stand) (13 m, 7 rows, open) | the same |
+| `zan_pit_upper.glb` (0.15 MB, 3,130 triangles) | Zandvoort pit building over the garages (second issue): the old block with its roof terrace and glazed upper storey, the control tower, the 2024 block with its pergola terrace, the tiled annexe, a podium frame | made for this app, 2026-11-26: OpenStreetMap's outline, the PDOK aerial picture, Commons photographs of 2018 and the circuit's two renders of 2024-01, compared by eye – nothing copied, no outside asset, no logo or lettering; the 2020 front's present look, the tower's top storey, the podium's place estimated |
+| `zan_gantry.glb` (0.01 MB, 188 triangles) | Zandvoort, the start lights' gantry (a dark lattice, 21.4 m, blank panel) | made for this app, 2026-11-26: its place and span from the aerial picture; heights estimated |
+| `zan_stand_tarzan_in.glb` (0.52 MB, 11,800 triangles) | Zandvoort, grandstand: Tarzan-In (159 m, 35 rows, open) | made for this app, 2026-11-26: its plan this app's own outline (the map's for Main); rows and height worked out from its depth; seat strips, no single seats |
+| `zan_stand_pit.glb` (0.52 MB, 11,800 triangles) | Zandvoort, grandstand: Pit (161 m, 35 rows, open) | the same |
+| `zan_stand_main.glb` (0.26 MB, 5,838 triangles) | Zandvoort, grandstand: Main (77 m, 32 rows, roofed) | the same |
+| `zan_stand_ben_pon.glb` (0.50 MB, 11,212 triangles) | Zandvoort, grandstand: Ben Pon (151 m, 35 rows, open) | the same |
+| `zan_stand_arena_n.glb` (0.08 MB, 1,824 triangles) | Zandvoort, grandstand: Arena (north) (31 m, 25 rows, open) | the same |
+| `zan_stand_arena_ne.glb` (0.06 MB, 1,210 triangles) | Zandvoort, grandstand: Arena (north-east) (41 m, 11 rows, open) | the same |
+| `zan_stand_arena_nw.glb` (0.07 MB, 1,522 triangles) | Zandvoort, grandstand: Arena (north-west) (25 m, 29 rows, open) | the same |
+| `zan_stand_arena_w.glb` (0.09 MB, 1,920 triangles) | Zandvoort, grandstand: Arena (west) (30 m, 27 rows, open) | the same |
+| `zan_stand_arena_t12.glb` (0.46 MB, 10,414 triangles) | Zandvoort, grandstand: Arena (T12–T13) (172 m, 29 rows, open) | the same |
+| `zan_stand_arena_out.glb` (0.18 MB, 3,946 triangles) | Zandvoort, grandstand: Arena-Out (73 m, 24 rows, open) | the same |
+| `zan_stand_arena_in.glb` (0.18 MB, 3,946 triangles) | Zandvoort, grandstand: Arena-In (71 m, 24 rows, open) | the same |
+| `zan_stand_eastside_1.glb` (0.42 MB, 9,440 triangles) | Zandvoort, grandstand: Eastside 1 (164 m, 27 rows, open) | the same |
+| `zan_stand_eastside_2.glb` (0.18 MB, 4,054 triangles) | Zandvoort, grandstand: Eastside 2 (69 m, 25 rows, open) | the same |
+| `zan_stand_eastside_3.glb` (0.15 MB, 3,414 triangles) | Zandvoort, grandstand: Eastside 3 (59 m, 28 rows, open) | the same |
+| `zan_stand_eastside_4.glb` (0.11 MB, 2,428 triangles) | Zandvoort, grandstand: Eastside 4 (49 m, 22 rows, open) | the same |
+| `zan_stand_hairpin.glb` (0.17 MB, 3,730 triangles) | Zandvoort, grandstand: Hairpin (75 m, 23 rows, open) | the same |
