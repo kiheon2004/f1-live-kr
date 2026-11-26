@@ -142,12 +142,12 @@ export function listedEntry(entries, pts = null) {
   if (!entries?.length) return undefined;
   const marked = entries.filter((L) => L.osmAt);
   if (entries.length < 2 || !pts?.length || !marked.length) return entries[entries.length - 1];
-  // (to the outline's nearest EDGE, lat and lon in the same metres: a point given on a long stand's front edge lies far from
-  // its corners, and a degree of longitude is shorter than one of latitude – v0.70, Monza: three stands named 6 Alta
-  // Velocità, each with a model of its own; the middle one took its neighbour's entry by the nearest corner in degrees)
-  const k = Math.cos((pts[0][0] * Math.PI) / 180), edge = (x, y) => {
+  // (to the outline's nearest EDGE, not its nearest corner: a point given on a long stand's front edge lies far from its
+  // corners – v0.70, Monza: three stands named 6 Alta Velocità, each with a model of its own; the middle one took its
+  // neighbour's entry by the nearest corner. Outline and marks are F1 metres here – main/scene.js)
+  const edge = (x, y) => {
     let m = Infinity;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const ax = pts[j][0], ay = pts[j][1] * k, bx = pts[i][0], by = pts[i][1] * k, dx = bx - ax, dy = by - ay, f = Math.max(0, Math.min(1, ((x - ax) * dx + (y * k - ay) * dy) / (dx * dx + dy * dy || 1))); m = Math.min(m, Math.hypot(ax + dx * f - x, ay + dy * f - y * k)); }
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const ax = pts[j][0], ay = pts[j][1], dx = pts[i][0] - ax, dy = pts[i][1] - ay, f = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1))); m = Math.min(m, Math.hypot(ax + dx * f - x, ay + dy * f - y)); }
     return m;
   };
   let best = null, bd = Infinity;

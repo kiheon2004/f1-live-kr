@@ -112,14 +112,17 @@ test("cross-section: fast lane the last 3.5 m before the wall, the box in the in
   assert.strictEqual(crossSection({ wall: null, edge: null }).ok, false);
 });
 
-// v0.70: a surveyed fast lane (pitroads.js lane.fast) – the cars drive in it where it does not lie against the wall
-test("crossSection: a surveyed fast lane goes before the 3.5 m against the wall – where the lane is wide enough for it", async () => {
+// v0.70: a surveyed fast lane (pitroads.js lane.fast) – the cars drive in it as far as this app's lane reaches
+test("crossSection: a surveyed fast lane goes before the 3.5 m against the lane's far side – where 3 m of it lies in the lane", async () => {
   const { crossSection, laneSectionAt } = await import("../src/renderer/pitlane.js");
-  const z = crossSection({ wall: 14.7, fast: [9.4, 12.7] }); assert.ok(Math.abs(z.fastC - 11.05) < 1e-9 && z.inner === 9.4 && z.fast[1] === 12.7 && z.ok);
-  const w = crossSection({ wall: 14.7 }); assert.ok(Math.abs(w.fastC - 12.95) < 1e-9, "without it: 1.75 m from the wall");
-  const n = crossSection({ wall: 10.4, fast: [9.4, 12.7] }); assert.ok(Math.abs(n.fastC - 8.65) < 1e-9, "the wall nearer than the surveyed lane's far side: against the wall again");
-  const m = crossSection({ wall: 11.5, fast: [7.5, 11.5] }); assert.ok(Math.abs(m.fastC - 9.5) < 1e-9 && m.inner === 7.5);
-  const st = [0, 10].map((u) => ({ cs: crossSection({ wall: 14.7, fast: [9.4, 12.7] }), floor: 1, s: { along: [1, 0], inward: [0, 1], uc: u } }));
-  assert.ok(Math.abs(laneSectionAt(st, [0, 10], 5, () => 14.7, [9.4, 12.7]).fastC - 11.05) < 1e-9 && Math.abs(laneSectionAt(st, [0, 10], 5, () => 14.7).fastC - 12.95) < 1e-9);
+  const m = crossSection({ wall: 11.5, fast: [7.5, 11.5] }); assert.ok(Math.abs(m.fastC - 9.5) < 1e-9 && m.inner === 7.5 && m.fast[1] === 11.5 && m.ok);
+  // the lane's far side a little short of, or beyond, the surveyed one (Monza: 11.4 … 12.1 m): no jump between garages
+  const a = crossSection({ wall: 11.4, fast: [7.5, 11.5] }), b = crossSection({ wall: 12.1, fast: [7.5, 11.5] });
+  assert.ok(Math.abs(a.fastC - 9.45) < 1e-9 && Math.abs(b.fastC - 9.5) < 1e-9 && a.fast[1] === 11.4 && b.fast[1] === 11.5);
+  assert.ok(Math.abs(crossSection({ wall: 11.5 }).fastC - 9.75) < 1e-9, "without it: 1.75 m from the lane's far side");
+  // a lane much narrower than the surveyed one (Zandvoort: 11.5 … 8.2 m for a fast lane of 9.4 … 12.7): the rule again
+  const n = crossSection({ wall: 11.5, fast: [9.4, 12.7] }); assert.ok(Math.abs(n.fastC - 9.75) < 1e-9 && n.inner === 8);
+  assert.ok(Math.abs(crossSection({ wall: 8.2, fast: [9.4, 12.7] }).fastC - 6.45) < 1e-9);
+  const st = [0, 10].map((u) => ({ cs: crossSection({ wall: 11.5, fast: [7.5, 11.5] }), floor: 1, s: { along: [1, 0], inward: [0, 1], uc: u } }));
+  assert.ok(Math.abs(laneSectionAt(st, [0, 10], 5, () => 11.5, [7.5, 11.5]).fastC - 9.5) < 1e-9 && Math.abs(laneSectionAt(st, [0, 10], 5, () => 11.5).fastC - 9.75) < 1e-9);
 });
-

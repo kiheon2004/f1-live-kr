@@ -93,18 +93,21 @@ test("grandstands: a listed stand's side L / R is left / right in the race's dir
 });
 
 // v0.70: stands of one name, each with its own listed entry (and model): an entry marked on its stand's front edge belongs
-// to that stand – not to the neighbour whose corner is nearer in degrees (Monza's three 6 Alta Velocità blocks)
+// to that stand – not to the neighbour whose corner is nearer (Monza's three 6 Alta Velocità blocks). F1 metres, as the
+// renderer gets them from main/scene.js.
 test("listedEntry: of several entries with one name, the one marked on (or nearest to) this outline's edge", async () => {
   const { listedEntry } = await import("../src/renderer/stands.js");
-  // three stands in a row along a meridian at 45.6° N, each 90 m long (lat) and 12 m deep (lon); each entry marked a metre
-  // in front of its stand's front edge, at its middle
-  const m = 1 / 111200, mx = 1 / (111320 * Math.cos((45.6 * Math.PI) / 180));
-  const stand = (i) => { const la = 45.62 + i * 100 * m; return [[la, 9.28], [la + 90 * m, 9.28], [la + 90 * m, 9.28 + 12 * mx], [la, 9.28 + 12 * mx]]; };
-  const entries = [0, 1, 2].map((i) => ({ n: "6 Alta", osmAt: [45.62 + (i * 100 + 45) * m, 9.28 - 1 * mx], id: i }));
+  // three stands in a row, each 90 m long and 12 m deep, 10 m apart; each entry marked a metre in front of its stand's
+  // front edge, at its middle – far from any corner (45 m), while a neighbour's corner…
+  const stand = (i) => { const y = 1350 + i * 100; return [[y, 800], [y + 90, 800], [y + 90, 812], [y, 812]]; };
+  const entries = [0, 1, 2].map((i) => ({ n: "6 Alta", osmAt: [1350 + i * 100 + 45, 799], id: i }));
   for (const i of [0, 1, 2]) assert.strictEqual(listedEntry(entries, stand(i)).id, i);
-  // …and one marked just past its own stand's end, nearer a neighbour's corner in degrees than its own corner
-  const e2 = [{ n: "A", osmAt: [45.62 + 45 * m, 9.28 + 18 * mx], id: 0 }, { n: "A", osmAt: [45.62 + 99 * m, 9.28 + 6 * mx], id: 1 }];
+  // …is nearer than its own for a mark near a stand's end: the mark 9 m past stand 0's end (1 m before stand 1's start)
+  // is 1 m from stand 1's edge and 9 m from stand 0's
+  const e2 = [{ n: "A", osmAt: [1395, 818], id: 0 }, { n: "A", osmAt: [1449, 806], id: 1 }];
   assert.strictEqual(listedEntry(e2, stand(0)).id, 0, "6 m behind its own stand's back edge: nearer than the other's mark 9 m past the end");
   assert.strictEqual(listedEntry(e2, stand(1)).id, 1);
+  // the first corner's coordinate is no latitude: the result does not depend on where the stands lie
+  const far = (i) => stand(i).map(([a, b]) => [a + 7777, b - 3333]), eFar = entries.map((e) => ({ ...e, osmAt: [e.osmAt[0] + 7777, e.osmAt[1] - 3333] }));
+  for (const i of [0, 1, 2]) assert.strictEqual(listedEntry(eFar, far(i)).id, i);
 });
-

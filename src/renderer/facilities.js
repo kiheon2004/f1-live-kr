@@ -19,7 +19,6 @@ import { disposeGroup } from "./dispose.js";
 import { entryAt } from "./venues.js";
 import { bayDepths } from "./garagespace.js";
 import { pathFrame, garageLine, garageRun, genericOutline, fitLine, rayRing, GENERIC, PICK } from "./pitlane.js";
-import { PIT_ROADS } from "./pitroads.js";
 
 // ---------- registry ----------
 export const FACILITIES = [
@@ -2810,7 +2809,9 @@ export function lampsOnModel(marker, centre = null) {
   const e = marker.matrixWorld.elements, sc = Math.hypot(e[0], e[1], e[2]) || 1, O = [e[12], e[13], e[14]], X = [e[0] / sc, e[2] / sc], f = marker.userData.face;
   const x0 = marker.userData.x0 * sc, x1 = marker.userData.x1 * sc, lo = Math.min(x0 + 3.6, (x0 + x1) / 2), hi = Math.max(x1 - 3.6, (x0 + x1) / 2);
   const t = Math.max(lo, Math.min(hi, centre ? (centre[0] - O[0]) * X[0] + (centre[1] - O[2]) * X[1] : (x0 + x1) / 2));
-  return { pos: [-2, -1, 0, 1, 2].map((i) => [O[0] + X[0] * (t + i * 1.4), O[1], O[2] + X[1] * (t + i * 1.4)]), yaw: Math.atan2((e[8] / sc) * f, (e[10] / sc) * f), h: Math.max(0.5, Math.min(1.6, marker.userData.h * sc - 0.1)) };
+  // (in the order the grid sees them from left to right – the reds come on in that order: on the model's −Z face the
+  // model's +X is on the viewers' left)
+  return { pos: [-2, -1, 0, 1, 2].map((i) => [O[0] + X[0] * (t + i * 1.4 * f), O[1], O[2] + X[1] * (t + i * 1.4 * f)]), yaw: Math.atan2((e[8] / sc) * f, (e[10] / sc) * f), h: Math.max(0.5, Math.min(1.6, marker.userData.h * sc - 0.1)) };
 }
 
 // ---------- the facilities of one circuit ----------
@@ -3071,10 +3072,7 @@ export function genericPitSpec({ venue, location, year, pit, toScene, toTrack, t
       // 86 m – limits the building to its own depth: upper.maxDepth)
       ...(venue && PIT_UPPERS[venue.key]?.maxDepth && !(year && PIT_UPPERS[venue.key].from && year < PIT_UPPERS[venue.key].from) ? { maxDepth: PIT_UPPERS[venue.key].maxDepth } : {}),
       // the pit wall at the track's edge with the catch fence over it, a narrow step behind for the teams' stands
-      // (a lane surveyed from the doors to the wall – pitroads.js lane.wallAt: this app's wall's lane face that far out, the
-      // plain wall with its walkway behind it; a wall the map draws further out stays as mapped – Monza's outer wall)
-      pitWall: lay?.pitWall || (venue && PIT_ROADS[venue.key]?.lane.wallAt ? { ...PLAIN_PIT_WALL, at: PIT_ROADS[venue.key].lane.wallAt } : PLAIN_PIT_WALL),
-      ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : venue && PIT_ROADS[venue.key]?.lane.wallAt ? { pitWallFrom: `surveyed: ${PIT_ROADS[venue.key].lane.wallAt} m from the garage doors (pitroads.js)` } : {}),
+      pitWall: lay?.pitWall || PLAIN_PIT_WALL, ...(lay ? { pitWallFrom: "estimate (Monaco: a wall along the fast lane, no pit wall at the track)" } : {}),
       ...(venue && PIT_LOOKS[venue.key] ? { ...PIT_LOOKS[venue.key], lookFrom: PIT_LOOKS[venue.key].src } : {}),
     },
     ...(lay ? { layout: lay.src, toTrack } : {}),

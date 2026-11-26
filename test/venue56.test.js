@@ -689,12 +689,16 @@ test("v0.70: Spa-Francorchamps – the pit building's storeys, the start gantry,
   // over the track's middle where that is known – kept 3.6 m inside the beam's ends
   assert.ok(Math.abs(F.lampsOnModel(mk, [80, 44]).pos[2][2] - 44) < 1e-9);
   assert.ok(Math.abs(F.lampsOnModel(mk, [80, 70]).pos[2][2] - (50 + 0.4 - 3.6)) < 1e-9 && Math.abs(F.lampsOnModel(mk, [80, 20]).pos[2][2] - (50 - 20.4 + 3.6)) < 1e-9);
-  mk.userData.face = -1; assert.ok(Math.abs(Math.sin(F.lampsOnModel(mk).yaw) + 1) < 1e-9, "face −1: looking the other way");
+  // the reds come on from the grid's left: on the +Z face the first lamp is at the smaller x (scene z 42.8 here, the beam's
+  // +X running to −z), on the −Z face at the larger
+  assert.ok(Math.abs(onMid.pos[0][2] - 42.8) < 1e-9 && Math.abs(onMid.pos[4][2] - 37.2) < 1e-9);
+  mk.userData.face = -1; const back = F.lampsOnModel(mk); assert.ok(Math.abs(Math.sin(back.yaw) + 1) < 1e-9, "face −1: looking the other way");
+  assert.ok(Math.abs(back.pos[0][2] - 37.2) < 1e-9 && Math.abs(back.pos[4][2] - 42.8) < 1e-9, "…and lit from the other end of the beam: the viewers' left");
 });
 
 // v0.70: Monza – the Palazzina Box's storeys and the terrace canopy over the builder's garages, the Hospitality
 // Building, the Centro Medico, the gantry before the control line, the two towers (the landmarks built in code give way to
-// the models), 38 stand files; the pit wall at its surveyed distance from the doors (pitroads.js lane.wallAt).
+// the models), 38 stand files; the cars in the surveyed fast lane (pitroads.js lane.fast).
 test("v0.70: Monza – the pit building's storeys with the canopy, five more models, 38 stand files; landmarks built in code give way to a facility's model", async () => {
   const THREE = await import("../src/renderer/vendor/three.module.js");
   const F = await import("../src/renderer/facilities.js");
@@ -722,8 +726,9 @@ test("v0.70: Monza – the pit building's storeys with the canopy, five more mod
   assert.strictEqual(st.filter((s) => s.n === "GF Gradinate Interno Parabolica").length, 9); assert.ok(st.find((s) => s.n === "26A/26B/26C Laterale Destra").model.file === "mza_stand_laterale_destra.glb" && st.find((s) => s.n === "8A/8B Prima Variante Esterna").model.file === "mza_stand_prima_variante.glb");
   // the five Laterale Parabolica blocks keep this list's order (A south … E north): the files are matched by place
   assert.ok(st.find((s) => s.n === "21A Laterale Parabolica").model.file === "mza_stand_lat_parabolica_e.glb" && st.find((s) => s.n === "21E Laterale Parabolica").model.file === "mza_stand_lat_parabolica_a.glb");
-  // the pit wall's lane face at the surveyed 11.5 m from the doors: the generic pit building's wall params carry it
-  assert.strictEqual(PIT_ROADS[39].lane.wallAt, 11.5); assert.ok(!PIT_ROADS[7].lane.wallAt, "Spa's garage fronts do not stand on one line: its wall stays the map's");
+  // the cars in the surveyed fast lane (7.5 … 11.5 m from the doors); the wall stays the map's – this app's lane ends at the
+  // walkway before it, 11.4 … 12.1 m out, where the surveyed wall stands
+  assert.deepStrictEqual(PIT_ROADS[39].lane.fast, [7.5, 11.5]); assert.ok(!("wallAt" in PIT_ROADS[39].lane) && !PIT_ROADS[7].lane.fast);
   // a landmark built in code gives way to the facility's model (landmarks.js givesWayTo → combine)
   const gf = { xz: (p) => p, fromLL: (la, lo) => [lo, la] }, scene = { buildings: [{ name: "Podio", pts: [[0, 0], [10, 0], [10, 10], [0, 10]] }] };
   const mk = () => L.buildLandmarks({ scene, gf, groundAt: () => 0, location: "Monza", venue: { key: 39 }, toTrack: () => [1, 0] });
@@ -739,7 +744,7 @@ test("v0.70: Monza – the pit building's storeys with the canopy, five more mod
 // v0.70: Zandvoort – the pit building's storeys (the old block, the round tower, the 2024 block) over the builder's garages,
 // the start gantry carrying the start lamps, 16 stand files on their front lines; the pit-lane roads from surveyed lines
 // (the exit road round the inside of the Tarzanbocht). No surveyed wall place: this app's track lies over it.
-test("v0.70: Zandvoort – the pit building's storeys, the start gantry with the lamps, 16 stand files; the surveyed fast lane, no wall place", async () => {
+test("v0.70: Zandvoort – the pit building's storeys, the start gantry with the lamps, 16 stand files; the lane's paint, no wall or fast-lane place", async () => {
   const F = await import("../src/renderer/facilities.js");
   const { PIT_ROADS } = await import("../src/renderer/pitroads.js");
   const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));
@@ -756,6 +761,6 @@ test("v0.70: Zandvoort – the pit building's storeys, the start gantry with the
   assert.strictEqual(st.length, 16); assert.ok(st.every((s) => s.model && files.includes(s.model.file) && s.model.heading === 180 && Array.isArray(s.model.at) && Array.isArray(s.model.drape.along) && s.model.drape.along.length >= 2));
   assert.strictEqual(new Set(st.map((s) => s.model.file)).size, 16);
   // the lane: the surveyed fast lane for the cars; no wall place (this app's track lies over the surveyed wall)
-  const P = PIT_ROADS[55]; assert.deepStrictEqual(P.lane.fast, [9.4, 12.7]); assert.ok(!P.lane.wallAt); assert.deepStrictEqual(P.lane.u, [-36, 223]); assert.strictEqual(P.exit.edgeLine, 0.15); assert.strictEqual(P.edgeLine, 0);
+  const P = PIT_ROADS[55]; assert.ok(!P.lane.fast && !P.lane.wallAt, "this app's lane is nowhere wide enough for the surveyed fast lane"); assert.deepStrictEqual(P.lane.u, [-36, 223]); assert.strictEqual(P.exit.edgeLine, 0.15); assert.strictEqual(P.edgeLine, 0);
 });
 

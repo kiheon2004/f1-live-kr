@@ -11,8 +11,8 @@ import { blendHeight } from "./auxroads.js";
 // lane: doors – the garage door line's two ends; width – from the doors to the wall;
 //       span – the door line's length as surveyed (lengths along it below are in those metres; default: as measured here);
 //       u – [from, to] along the door line, the lane's own ends (default: the door line's: [0, span]);
-//       fast – [from, to] from the doors: the fast lane, where the cars drive (default: the 3.5 m against the wall);
-//       wallAt – the pit wall's lane face that far from the doors (facilities.js builds this app's wall there);
+//       fast – [from, to] from the doors: the fast lane, where the cars drive – as far as this app's lane reaches, and
+//       where that leaves 3 m of it (default: the 3.5 m against the lane's far side);
 //       bands – paint along the lane: [metres from the door line, to, colour, from u, to u] (the last two optional);
 //       cross – lines across it: [u, from v, to v, width, colour].
 // entry / exit: the road's two edges, section by section (left[i] and right[i] face each other), in the cars' direction;
@@ -52,11 +52,11 @@ export const PIT_ROADS = {
   // edge 96 m past the wall's end and runs on inside the track (`onTrack`). Between the pit wall and the track's edge
   // line lies the tarmac of the old straight's second lane (`tarmac`). (The survey ends 183 m past the wall's end: the exit
   // apron's last 18 m run in to a point on the track's edge line.)
-  // `wallAt`: the pit wall's lane face that far from the doors – facilities.js builds this app's wall there (the map's
-  // wall line, 13.1 … 13.8 m out, is the outer wall with the debris fence).
+  // This app's lane ends at the walkway before the map's wall line (13.1 … 13.8 m out: the outer wall with the debris
+  // fence) – 11.4 … 12.1 m from the doors, the surveyed wall's place; `fast`: the cars in the surveyed fast lane.
   39: {
     src: "the chat-side session's survey of Esri World Imagery (looked at only), the FIA 2025 pit lane drawing's widths: carpilot venue/stands/monza_pitlane.json, 2026-11-26",
-    lane: { doors: [[45.6162526, 9.2811215], [45.6183105, 9.2814375]], span: 230.4, u: [-11.2, 320], width: 11.5, wallAt: 11.5, fast: [7.5, 11.5],
+    lane: { doors: [[45.6162526, 9.2811215], [45.6183105, 9.2814375]], span: 230.4, u: [-11.2, 320], width: 11.5, fast: [7.5, 11.5],
       bands: [[0, 5.5, "concrete", -10.8, 238], [5.5, 5.8, "white"], [7.2, 7.5, "white"], [10.0, 10.2, "white"]],
       cross: [[-11.2, 0, 11.5, 0.45, "white"]] },
     edgeLine: 0,
@@ -88,12 +88,13 @@ export const PIT_ROADS = {
   // lane opens behind the fence on the track's right after the banked last corner and swings right round the wall's nose
   // (a red crash cushion, 113 m before the building); the exit road turns right round the INSIDE of the Tarzanbocht –
   // a half circle of 32 m – and joins the track behind the corner.
-  // No `wallAt`: this app's track, 14 m wide round the line the cars drove, reaches 2.4 … 5.3 m nearer the garages than
-  // the real track's edge, over the surveyed wall's place; the app's wall stays at its own track's edge and nothing is
-  // painted past it. `fast`: where the lane is wide enough the cars drive in the surveyed fast lane.
+  // This app's track, 14 m wide round the line the cars drove, reaches 2.4 … 5.3 m nearer the garages than the real
+  // track's edge, over the surveyed wall's place: the app's wall stands at its own track's edge, its lane ends at the
+  // walkway 2 m before that – 11.5 m from the doors at the south end, 8.2 m at the north – and nothing is painted past
+  // it. No `fast`: the lane is nowhere wide enough for the surveyed fast lane; the cars drive 1.75 m from the lane's end.
   55: {
     src: "the chat-side session's survey of the PDOK aerial picture through Esri World Imagery (looked at only): carpilot venue/stands/zandvoort_pitlane.json, 2026-11-26",
-    lane: { doors: [[52.3890479, 4.5412606], [52.3903427, 4.5421234]], span: 155.6, u: [-36, 223], width: 14.7, fast: [9.4, 12.7],
+    lane: { doors: [[52.3890479, 4.5412606], [52.3903427, 4.5421234]], span: 155.6, u: [-36, 223], width: 14.7,
       bands: [[9.4, 12.7, "concrete", -27.5, 223], [0.1, 8.4, "concrete", 196.6, 221.2], [8.9, 9.4, "red", 8, 223], [12.7, 12.85, "white", -36, 223]] },
     edgeLine: 0,
     entry: {
@@ -139,6 +140,8 @@ export function pitRoads(plan, toXZ, roadY, slots, trackY = null) {
   const floorAt = (u) => { if (u <= S[0].u) return S[0].floor; for (let i = 1; i < S.length; i++) if (u <= S[i].u) { const f = (u - S[i - 1].u) / (S[i].u - S[i - 1].u || 1); return S[i - 1].floor + (S[i].floor - S[i - 1].floor) * f; } return S[S.length - 1].floor; };
   // (how far out the garage front stands at u – the map's outline can stand further out than the door line in places)
   const frontV = (u) => { if (u < S[0].u0 || u > S[S.length - 1].u1) return -Infinity; let b = S[0]; for (const s of S) if (Math.abs(s.u - u) < Math.abs(b.u - u)) b = s; return b.v; };
+  // (where this app's own lane ends at u – 0.1 m before the walkway's edge: nothing is painted past it)
+  const wallV = (u) => { let b = S[0]; for (const s of S) if (Math.abs(s.u - u) < Math.abs(b.u - u)) b = s; return b.v + b.w - 0.1; };
   // the lane's surface height at (u, v): the garages' floor within the run; beyond it, eased to the road's height at the lane's end
   const laneY = (u, v) => {
     const [x, z] = at(u, v);
@@ -159,7 +162,8 @@ export function pitRoads(plan, toXZ, roadY, slots, trackY = null) {
       const v0 = T.pos.length / 3; r.forEach((p, k) => { T.pos.push(...p); T.uv.push(k * 0.75, dist / 6); });
       if (i) for (let k = 0; k < 2; k++) { const p = v0 - 3 + k, q = v0 + k; T.idx.push(p, q, p + 1, p + 1, q, q + 1); }
       // (its two sides)
-      for (const k of [0, 2]) { const s0 = skirt.pos.length / 3, [x, y, z] = r[k]; skirt.pos.push(x, y, z, x, y - 0.5, z); if (i) skirt.idx.push(s0 - 4 + (k ? 2 : 0), s0 - 3 + (k ? 2 : 0), s0, s0 - 3 + (k ? 2 : 0), s0 + 1, s0); }
+      // (four points a row: this edge's pair of the row before lies four before this one's, whichever edge)
+      for (const k of [0, 2]) { const s0 = skirt.pos.length / 3, [x, y, z] = r[k]; skirt.pos.push(x, y, z, x, y - 0.5, z); if (i) skirt.idx.push(s0 - 4, s0 - 3, s0, s0 - 3, s0 + 1, s0); }
     });
   };
   const quadRun = (out, pts) => { for (let i = 0; i < pts.length; i++) { const v0 = out.pos.length / 3; out.pos.push(...pts[i][0], ...pts[i][1]); if (i && !pts[i].gap) out.idx.push(v0 - 2, v0 - 1, v0, v0 - 1, v0 + 1, v0); } };
@@ -194,8 +198,7 @@ export function pitRoads(plan, toXZ, roadY, slots, trackY = null) {
   // ---- the lane's paint: along the door line, at its surveyed distance from the doors – not where a garage's front stands in it
   // (a line is left out where a front stands within 0.4 m of it; a band a metre wide or more begins at the front. Nothing
   // is painted past this app's own wall: where the track – drawn round the cars' line – lies nearer the garages than the
-  // surveyed lane is wide, the wall stands at the track's edge, inside the surveyed lane: Zandvoort)
-  const wallV = (u) => { let b = S[0]; for (const s of S) if (Math.abs(s.u - u) < Math.abs(b.u - u)) b = s; return b.v + b.w - 0.1; };
+  // surveyed lane is wide, the wall stands at the track's edge, inside the surveyed lane: Zandvoort – wallV)
   for (const [v0, v1, colour, ua = null, ub = null] of plan.lane.bands || []) {
     const A0 = ua == null ? U0 : ua * k, B0 = ub == null ? U1 : ub * k, K = Math.max(1, Math.round((B0 - A0) / 5)), wide = v1 - v0 >= 1, lift = colour === "concrete" ? 0.005 : 0.008, pts = []; let gap = true;
     for (let i = 0; i <= K; i++) {
@@ -206,15 +209,32 @@ export function pitRoads(plan, toXZ, roadY, slots, trackY = null) {
     quadRun(coat(colour), pts);
   }
   for (const [uc, v0, v1, w, colour] of plan.lane.cross || []) {
-    const pts = []; for (let i = 0; i <= 4; i++) { const v = v0 + ((v1 - v0) * i) / 4; pts.push([uc * k - w / 2, uc * k + w / 2].map((u) => { const [x, z] = at(u, v); return [x, laneY(u, v) + 0.009, z]; })); }
+    const vb = Math.min(v1, wallV(uc * k)), pts = []; if (!(vb > v0 + 0.3)) continue;
+    for (let i = 0; i <= 4; i++) { const v = v0 + ((vb - v0) * i) / 4; pts.push([uc * k - w / 2, uc * k + w / 2].map((u) => { const [x, z] = at(u, v); return [x, laneY(u, v) + 0.009, z]; })); }
     pts[0].gap = true; quadRun(coat(colour || "white"), pts);
   }
-  // ---- painted lines: along their points, a point every 3 m or less; broken ones in pieces
+  // ---- painted lines: along their points, a point every 3 m or less (every metre for a line on the track's surface, every
+  // half metre in the lane); broken ones in pieces. A cross-section lies on ONE surface – the lane's, the track's (`onTrack`)
+  // or the road's, as its middle does – and a line is cut where that changes and where it leaves this app's lane (past its
+  // end: Zandvoort's lines across the fast lane ran on through the wall)
   for (const ln of plan.lines || []) {
     const P = ln.pts.map(toXZ), cum = [0]; for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
     const total = cum[cum.length - 1], hw = (ln.width || 0.15) / 2; if (!(total > 0)) continue;
-    const pointAt = (s) => { let i = 1; while (i < P.length - 1 && cum[i] < s) i++; const f = (s - cum[i - 1]) / (cum[i] - cum[i - 1] || 1), l = cum[i] - cum[i - 1] || 1, d = [(P[i][0] - P[i - 1][0]) / l, (P[i][1] - P[i - 1][1]) / l], c = [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * f, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * f]; return [-1, 1].map((q) => { const x = c[0] - d[1] * hw * q, z = c[1] + d[0] * hw * q; return [x, paintAt(x, z, 0.008, !!ln.onTrack), z]; }); };
-    const piece = (s0, s1, out) => { const stops = [s0, ...cum.filter((c) => c > s0 + 0.01 && c < s1 - 0.01), s1], pts = []; for (let i = 0; i < stops.length; i++) { if (i) { const m = Math.ceil((stops[i] - stops[i - 1]) / 3); for (let j = 1; j < m; j++) pts.push(pointAt(stops[i - 1] + ((stops[i] - stops[i - 1]) * j) / m)); } pts.push(pointAt(stops[i])); } pts[0].gap = true; quadRun(out, pts); };
+    const inLane = P.every((q) => onLane(uOf(q), vOf(q))), stepMax = inLane ? 0.5 : ln.onTrack ? 1 : 3;
+    // → [the two edge points, the surface: "lane" | "track" | "road"] – null past the lane's end
+    const pointAt = (s) => {
+      let i = 1; while (i < P.length - 1 && cum[i] < s) i++;
+      const f = (s - cum[i - 1]) / (cum[i] - cum[i - 1] || 1), l = cum[i] - cum[i - 1] || 1, d = [(P[i][0] - P[i - 1][0]) / l, (P[i][1] - P[i - 1][1]) / l], c = [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * f, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * f];
+      const u = uOf(c), v = vOf(c), lane = onLane(u, v); if (lane && v > wallV(u)) return null;
+      const ty = !lane && ln.onTrack && trackY ? trackY(c[0], c[1]) : null, y = lane ? laneY(u, v) + 0.008 : ty != null ? ty + 0.006 : roadY(c[0], c[1]) + 0.008;
+      const e = [-1, 1].map((q) => [c[0] - d[1] * hw * q, y, c[1] + d[0] * hw * q]); e.on = lane ? "lane" : ty != null ? "track" : "road"; return e;
+    };
+    const piece = (s0, s1, out) => {
+      const stops = [s0, ...cum.filter((c) => c > s0 + 0.01 && c < s1 - 0.01), s1], pts = []; let last = null;
+      const add = (s) => { const e = pointAt(s); if (!e) { last = null; return; } if (last !== e.on) e.gap = true; last = e.on; pts.push(e); };
+      for (let i = 0; i < stops.length; i++) { if (i) { const m = Math.ceil((stops[i] - stops[i - 1]) / stepMax); for (let j = 1; j < m; j++) add(stops[i - 1] + ((stops[i] - stops[i - 1]) * j) / m); } add(stops[i]); }
+      quadRun(out, pts);
+    };
     const out = coat(ln.colour || "white");
     if (ln.dash) { const per = ln.dash[0] + ln.dash[1]; for (let s = 0; s < total - 0.05; s += per) piece(s, Math.min(total, s + ln.dash[0]), out); } else piece(0, total, out);
   }
@@ -231,7 +251,9 @@ export function pitRoads(plan, toXZ, roadY, slots, trackY = null) {
       for (let i = 1; i < pg.length - 1; i++) out.idx.push(v0, v0 + i, v0 + i + 1);
     }
   }
-  return { tarmac: T, skirt, paint, white, red: paint.red, info: { lane: +L.toFixed(1), ends: [+U0.toFixed(1), +U1.toFixed(1)], run: [+runA.toFixed(1), +runB.toFixed(1)], entry: nIn, exit: nOut, more: nMore, fronts: [+Math.min(...S.map((s) => s.v)).toFixed(2), +Math.max(...S.map((s) => s.v)).toFixed(2)] } };
+  return { tarmac: T, skirt, paint, white, red: paint.red, info: { lane: +L.toFixed(1), ends: [+U0.toFixed(1), +U1.toFixed(1)], run: [+runA.toFixed(1), +runB.toFixed(1)], entry: nIn, exit: nOut, more: nMore, fronts: [+Math.min(...S.map((s) => s.v)).toFixed(2), +Math.max(...S.map((s) => s.v)).toFixed(2)],
+    // (where this app's lane ends – the walkway's edge before its wall –, from the door line: first garage, middle, last)
+    face: [S[0], S[S.length >> 1], S[S.length - 1]].map((s) => +(s.v + s.w).toFixed(2)) } };
 }
 
 // Is (x, z) on a surveyed entry or exit road, `inset` metres or more inside its edges? A mapped barrier standing there is

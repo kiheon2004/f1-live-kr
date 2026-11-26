@@ -19,18 +19,23 @@ const verts = (m) => { const o = []; for (let i = 0; i < m.pos.length; i += 3) o
 test("pitRoads: the lane beyond the garages, the entry and the exit road, the paint", async () => {
   const { pitRoads } = await import("../src/renderer/pitroads.js");
   const r = pitRoads(plan(), toXZ, () => 2, slots());
-  assert.deepStrictEqual(r.info, { lane: 100, ends: [0, 100], run: [15, 85], entry: 13, exit: 13, more: 0, fronts: [0, 3] });
+  assert.deepStrictEqual(r.info, { lane: 100, ends: [0, 100], run: [15, 85], entry: 13, exit: 13, more: 0, fronts: [0, 3], face: [11, 14, 11] });
   for (const m of [r.tarmac, r.white, r.red]) { assert.ok(m.pos.every(Number.isFinite) && m.pos.length % 3 === 0); assert.ok(m.idx.length % 3 === 0 && m.idx.every((i) => i >= 0 && i < m.pos.length / 3)); }
   assert.strictEqual(r.tarmac.uv.length / 2, r.tarmac.pos.length / 3);
   // the strips' sides: under every edge point a point 0.5 m lower
   assert.ok(r.skirt.pos.length % 6 === 0 && r.skirt.idx.length % 3 === 0 && r.skirt.idx.every((i) => i < r.skirt.pos.length / 3));
   for (let i = 0; i < r.skirt.pos.length; i += 6) assert.ok(r.skirt.pos[i] === r.skirt.pos[i + 3] && r.skirt.pos[i + 2] === r.skirt.pos[i + 5] && Math.abs(r.skirt.pos[i + 1] - r.skirt.pos[i + 4] - 0.5) < 1e-9);
+  // …and every triangle of a side lies along ONE edge of its strip, never across the road (the entry road's edges: z 2 and 8)
+  { const K = verts(r.skirt); let n = 0; for (let i = 0; i < r.skirt.idx.length; i += 3) { const tr = [0, 1, 2].map((k) => K[r.skirt.idx[i + k]]); if (!tr.every(([x]) => x < -4.99)) continue; n++; assert.ok(tr.every(([, , z]) => z === 2) || tr.every(([, , z]) => z === 8), JSON.stringify(tr)); } assert.strictEqual(n, 11 * 2 * 2, "both edges of the entry road's eleven outer steps have a side"); }
   const T = verts(r.tarmac);
   // the entry road: 13 sections up to the lane's start – none inside it –, each at the ground's height
   const inEntry = T.filter(([x]) => x < -0.01), inExit = T.filter(([x]) => x > 100.01);
   assert.strictEqual(inEntry.length, 12 * 3); assert.strictEqual(inExit.length, 12 * 3);
   // …and each joined to the lane's own first / last row, the lane's whole width (−0.3 … 11 m from the doors), no gap between
   for (const u of [0, 100]) { const row = T.filter(([x]) => Math.abs(x - u) < 1e-9).map(([, , z]) => z); assert.ok(row.includes(-0.3) && row.includes(11), `the lane's row at ${u}: ${row}`); }
+  // (a triangle of the tarmac has a corner on the road's own edge – z 8, its last section at the lane's start – and one on
+  // the lane's row there, z 11: the road widens into the lane's whole width)
+  { let joined = false; for (let i = 0; i < r.tarmac.idx.length; i += 3) { const tr = [0, 1, 2].map((k) => T[r.tarmac.idx[i + k]]); if (tr.some(([x, , z]) => x === 0 && z === 8) && tr.some(([x, , z]) => x === 0 && z === 11)) joined = true; } assert.ok(joined, "the entry road's last section is joined to the lane's row"); }
   assert.ok([...inEntry, ...inExit].every(([, y]) => y === 2));
   // the lane from its start to the first garage's middle: from the road's height to the garages' floor, never stepping down
   const fill = T.filter(([x, , z]) => x >= 0 && x <= 15 && z < 0).sort((a, b) => a[0] - b[0]);
@@ -99,19 +104,25 @@ test("pitRoads: a lane longer than its door line, bands over part of it, a line 
   assert.deepStrictEqual(r.info.ends, [-10, 130]); assert.strictEqual(r.info.more, 21); assert.strictEqual(r.info.entry, 10); assert.strictEqual(r.info.exit, 7);
   const T = verts(r.tarmac);
   assert.ok(T.some(([x, , z]) => Math.abs(x + 10) < 1e-9 && z === 11) && T.some(([x, , z]) => Math.abs(x - 130) < 1e-9 && z === -0.3), "the lane's rows at its own ends, not the door line's");
-  assert.ok(T.filter(([, , z]) => z >= 13 && z <= 20 && true).length >= 21 * 3, "the further strip, beside the lane, is laid whole");
+  // the roads are joined to those rows: the entry's last section (at −15, edge z 8) to the lane's row at −10 (z 11) – 5 m the
+  // lane's own surface does not cover –, the exit's first (at 130, edge z 9) to the lane's row there
+  const tri = (p, q) => { for (let i = 0; i < r.tarmac.idx.length; i += 3) { const tr = [0, 1, 2].map((k) => T[r.tarmac.idx[i + k]]); if (tr.some(([x, , z]) => Math.abs(x - p[0]) < 1e-9 && z === p[1]) && tr.some(([x, , z]) => Math.abs(x - q[0]) < 1e-9 && z === q[1])) return true; } return false; };
+  assert.ok(tri([-15, 8], [-10, 11]) && tri([-15, 2], [-10, -0.3]), "the entry road reaches the lane's start");
+  assert.ok(tri([130, 9], [130, 11]) && tri([130, 4], [130, -0.3]), "the exit road begins at the lane's end");
+  assert.ok(T.filter(([, , z]) => z >= 13 && z <= 20).length >= 21 * 3, "the further strip, beside the lane, is laid whole");
   // the concrete band: from the doors (not from a garage front that stands 3 m out), over the first half only (0 … 100 survey metres = 0 … 50)
   const C = verts(r.paint.concrete); assert.ok(C.length && C.every(([x]) => x >= -1e-9 && x <= 50 + 1e-9));
   assert.ok(C.some(([x, , z]) => x < 40 && Math.abs(z - 0.05) < 1e-9) && C.some(([x, , z]) => x > 41 && Math.abs(z - 3.05) < 1e-9), "it begins at each garage's front");
   assert.ok(C.every(([, y]) => y < 5.011), "under the white lines' height");
   // the line across the lane's start; the broken line in pieces of 3 m; a line on the track's surface where the track is
-  const Wt = verts(r.white); assert.ok(Wt.some(([x, , z]) => Math.abs(x + 10.25) < 1e-9 && z === 0) && Wt.some(([x, , z]) => Math.abs(x + 9.75) < 1e-9 && z === 11));
+  const Wt = verts(r.white); assert.ok(Wt.some(([x, , z]) => Math.abs(x + 10.25) < 1e-9 && z === 0) && Wt.some(([x, , z]) => Math.abs(x + 9.75) < 1e-9 && Math.abs(z - 10.9) < 1e-9), "across the lane, to its end (0.1 m before the walkway)");
   const dashX = [...new Set(Wt.filter(([, , z]) => Math.abs(z - 8.9) < 1e-9).map(([x]) => +x.toFixed(2)))].sort((a, b) => a - b);
   assert.deepStrictEqual(dashX.filter((x) => x <= 143.01), [130, 133, 135, 138, 140, 143]);
-  assert.ok(Wt.filter(([x, , z]) => z > 29 && x >= 40 && x <= 80).every(([, y]) => Math.abs(y - 7.006) < 1e-9), "on the track's own surface");
+  { const on = Wt.filter(([x, , z]) => z > 29 && x >= 40 && x <= 80); assert.ok(on.length >= 80 && on.every(([, y]) => Math.abs(y - 7.006) < 1e-9), "on the track's own surface, a point every metre"); }
   // the striped field: red, green and white pieces inside the triangle
-  const inTri = ([x, , z]) => x >= -50 - 1e-6 && x <= -20 + 1e-6 && z >= -1e-6 && z <= 6 + 1e-6;
-  assert.ok(verts(r.paint.red).filter(inTri).length >= 3 && verts(r.paint.green).length >= 3 && verts(r.paint.green).every(inTri));
+  // (the field: (−50, 3), (−20, 6), (−20, 0) – every painted point within its three sides)
+  const inTri = ([x, , z]) => x <= -20 + 1e-6 && z - 3 <= (x + 50) / 10 + 1e-6 && 3 - z <= (x + 50) / 10 + 1e-6;
+  assert.ok(verts(r.paint.red).length >= 3 && verts(r.paint.red).every(inTri) && verts(r.paint.green).length >= 3 && verts(r.paint.green).every(inTri));
   for (const m of Object.values(r.paint)) assert.ok(m.pos.every(Number.isFinite) && m.idx.every((i) => i < m.pos.length / 3));
 });
 
@@ -140,11 +151,16 @@ test("pitRoads: nothing is painted past this app's own wall; a road's own edge l
   const { pitRoads } = await import("../src/renderer/pitroads.js");
   // the wall 9 m from the fronts (the track lies nearer than the surveyed lane is wide): a band 6 … 12 m ends at the wall,
   // a line at 10 m is left out along the garages, a line at 5 m stays
-  const pl = { ...plan(), edgeLine: 0, lane: { doors: [[0, 0], [0, 100]], width: 14, bands: [[6, 12, "concrete"], [10, 10.2, "white"], [5, 5.2, "white"]] }, exit: { edgeLine: 0.15, left: edge(9, us(95, 160)), right: edge(4, us(95, 160)) } };
+  const pl = { ...plan(), edgeLine: 0, lane: { doors: [[0, 0], [0, 100]], width: 14, bands: [[6, 12, "concrete"], [10, 10.2, "white"], [5, 5.2, "white"]], cross: [[30, 0, 13, 0.5, "white"]] }, exit: { edgeLine: 0.15, left: edge(9, us(95, 160)), right: edge(4, us(95, 160)) },
+    lines: [{ pts: [[7, 50], [13.5, 50]], width: 0.4 }] };
   const sl = slots().map((s) => ({ ...s, front: [s.front[0], 0], w: 9 }));
   const r = pitRoads(pl, toXZ, () => 2, sl), C = verts(r.paint.concrete), Wt = verts(r.white);
   assert.ok(C.length && Math.abs(Math.max(...C.map(([, , z]) => z)) - 8.9) < 1e-9, "the band ends 0.1 m before the wall's face");
   assert.ok(!Wt.some(([, , z]) => Math.abs(z - 10) < 1e-9) && Wt.some(([, , z]) => Math.abs(z - 5) < 1e-9));
+  // a line across the lane (painted, or `cross`) ends at the lane's end too: at 50 from z 7 to 8.9, at 30 from 0 to 8.9
+  const at50 = Wt.filter(([x]) => Math.abs(Math.abs(x - 50) - 0.2) < 1e-9), at30 = Wt.filter(([x]) => Math.abs(Math.abs(x - 30) - 0.25) < 1e-9);
+  assert.ok(at50.length && Math.abs(Math.min(...at50.map(([, , z]) => z)) - 7) < 1e-9 && Math.max(...at50.map(([, , z]) => z)) <= 8.9 + 1e-9 && Math.max(...at50.map(([, , z]) => z)) > 8.3);
+  assert.ok(at30.some(([, , z]) => z === 0) && Math.abs(Math.max(...at30.map(([, , z]) => z)) - 8.9) < 1e-9);
   // the exit road carries edge lines (its own `edgeLine`), the entry road none
   assert.ok(Wt.some(([x, , z]) => x > 100 && Math.abs(z - 4.05) < 1e-9) && !Wt.some(([x]) => x < 0));
 });

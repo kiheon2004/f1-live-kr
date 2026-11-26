@@ -211,9 +211,11 @@ export function crossSection(st, R = CREW_ROOM) {
   const wall = st.wall != null ? st.wall : st.edge != null ? st.edge - R.wallThick : null;
   const wallFrom = st.wall != null ? "facility wall" : st.edge != null ? "track edge (wall assumed there)" : null;
   if (wall == null || !(wall > 0)) return { ok: false, wall: null, wallFrom, why: "no wall or track edge" };
-  // (st.fast: [a, b] – a surveyed fast lane, metres out from the garages' fronts (pitroads.js lane.fast): the cars drive in
-  // it where it does not lie against the wall – Zandvoort: 9.4 … 12.7 m, a 2 m strip between it and the wall at 14.7 m)
-  const sf = Array.isArray(st.fast) && st.fast[0] > 0 && st.fast[1] > st.fast[0] && st.fast[1] <= wall + 0.01 ? st.fast : null;
+  // (st.fast: [a, b] – a surveyed fast lane, metres out from the garages' fronts (pitroads.js lane.fast): the cars drive
+  // in it – as far as this lane reaches (its far side wobbles a few decimetres about the surveyed one: Monza 11.4 … 12.1 m
+  // for 11.5), and only where that leaves 3 m of it: a lane much narrower than the surveyed one keeps the rule's 3.5 m
+  // against its far side)
+  const fb = Array.isArray(st.fast) ? Math.min(st.fast[1], wall) : 0, sf = fb && st.fast[0] > 0 && fb - st.fast[0] >= 3 ? [st.fast[0], fb] : null;
   const fastW = sf ? sf[1] - sf[0] : Math.min(FIA.fastMax, wall / 2), inner = sf ? sf[0] : wall - fastW;
   const lo = R.carHalf + R.garageSide, hi = inner - R.carHalf - R.laneSide;
   const narrow = hi < lo;
