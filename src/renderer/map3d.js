@@ -379,14 +379,22 @@ function pitLaneMeshes(m) {
     if (v0) for (let k = 0; k < 2; k++) { const a = v0 - 3 + k, b = v0 + k; idx.push(a, b, a + 1, a + 1, b, b + 1); }
     if (!r.end && !plan) { const l0 = line.length / 3; line.push(...P(inner - 0.06, r.x.floor + 0.012), ...P(inner + 0.06, r.x.floor + 0.012)); if (l0) lidx.push(l0 - 2, l0 - 1, l0, l0 - 1, l0 + 1, l0); }
   }
-  let coats = null;
+  let coats = null, sides = null;
   if (plan) {
     const roadY = R.roadAt ? (x, z) => R.roadAt(x, z) + PIT_ROAD_LIFT : (x, z) => { const [s, d] = world.grid.nearest(x, z, 3); return roadHeight(s ? s.p.y : null, R.terrainAt(x, z), d); };
     // (a line that runs on inside the track's edge – a pit exit line – lies on the track's own surface there)
-    const onTrackY = (x, z) => { const [s] = world.grid.nearest(x, z, 3); if (!s) return null; const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; return l <= edgeOf(s, 1) && l >= edgeOf(s, -1) ? s.p.y + ROAD_LIFT : null; };
+    // (…at the road's own height there: the tarmac runs straight from one sample to the next, 2 m on – the nearest sample's
+    // height alone lay up to a centimetre under it on a gradient)
+    const onTrackY = (x, z) => {
+      const [s] = world.grid.nearest(x, z, 3); if (!s) return null;
+      const l = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z; if (l > edgeOf(s, 1) || l < edgeOf(s, -1)) return null;
+      const S = world.samples, a = (x - s.p.x) * s.tan.x + (z - s.p.z) * s.tan.z, q = S[(s.i + (a >= 0 ? 1 : S.length - 1)) % S.length];
+      const f = q ? Math.min(1, Math.abs(a) / (Math.hypot(q.p.x - s.p.x, q.p.z - s.p.z) || 1)) : 0;
+      return s.p.y + (q ? (q.p.y - s.p.y) * f : 0) + ROAD_LIFT;
+    };
     const pr = pitRoads(plan, ([la, lo]) => R.geo.fromLL(la, lo), roadY, sl.map((x) => ({ front: x.s.front, inward: x.s.inward, width: x.s.width, floor: x.floor, w: x.cs.wall ?? x.edge ?? 12 })), onTrackY);
     const o = pos.length / 3; pos.push(...pr.tarmac.pos); for (let k = 0; k < pr.tarmac.pos.length / 3; k++) col.push(0.4, 0.404, 0.412); uv.push(...pr.tarmac.uv); for (const i of pr.tarmac.idx) idx.push(o + i);
-    const k0 = pos.length / 3; pos.push(...pr.skirt.pos); for (let k = 0; k < pr.skirt.pos.length / 3; k++) { col.push(0.26, 0.262, 0.268); uv.push(0, (k % 2) * 0.08); } for (const i of pr.skirt.idx) idx.push(k0 + i);   // (the strips' sides)
+    sides = pr.skirt;   // (the strips' sides: a mesh of their own – the cars' ray onto the tarmac need not test them)
     const lo = line.length / 3; line.push(...pr.white.pos); for (const i of pr.white.idx) lidx.push(lo + i);
     coats = pr.paint; g.userData.pitRoads = pr.info;
   }
@@ -398,6 +406,7 @@ function pitLaneMeshes(m) {
   };
   mk(pos, idx, new THREE.MeshStandardMaterial({ vertexColors: true, map: asphaltTexture(), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, side: THREE.DoubleSide }), "pitLaneTarmac", col, uv);
   mk(line, lidx, new THREE.MeshStandardMaterial({ color: 0xeeeeea, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }), "laneLine");
+  if (sides?.idx.length) mk(sides.pos, sides.idx, new THREE.MeshStandardMaterial({ color: 0x45474b, roughness: 0.92, side: THREE.DoubleSide }), "pitRoadSides");
   // (the surveyed lane's other paint – pitroads.js: a red band, a green stripe, a pale concrete working lane under the lines)
   const COAT = { red: 0xb3261e, green: 0x2f8f4e, concrete: 0xb4b1a8 };
   for (const [c, m] of Object.entries(coats || {})) if (c !== "white" && m.idx.length) mk(m.pos, m.idx, new THREE.MeshStandardMaterial({ color: COAT[c] ?? 0xeeeeea, roughness: c === "concrete" ? 0.85 : 0.6, polygonOffset: true, polygonOffsetFactor: c === "concrete" ? -3 : -4, polygonOffsetUnits: c === "concrete" ? -3 : -4, side: THREE.DoubleSide }), "lanePaint:" + c);
@@ -549,13 +558,15 @@ function pitDraw(c, r, v) {
 }
 // The height a pit car is drawn at: in front of the garages the lane's floor (the drawn tarmac: pitLaneMeshes, at the
 // garages' floor); over the run's ends what is drawn under it – the tarmac's ends, falling to the ground over 20 m, then
-// the ground (a ray straight down onto the tarmac mesh only – a few dozen triangles –, else the terrain's own height),
+// the ground (a ray straight down onto the tarmac mesh only – a few dozen triangles, some hundreds with surveyed pit roads in
+// it, their sides kept in a mesh of their own –, else the terrain's own height),
 // eased to the height the car had from its track (y) over the last quarter of the way to the feed's line. v0.52 eased the
 // floor to that height over the 40 m: past the tarmac the cars hung up to 0.63 m over the ground (Hungary 2025, the exit
 // road; a ray down, Map3D.pitPathScan).
 const surfRay = new THREE.Raycaster(), surfDown = new THREE.Vector3(0, -1, 0), surfFrom = new THREE.Vector3();
 function pitSurfaceY(x, z, y, floor, inRun) {
   if (inRun >= 1) return floor + 0.004;
+  if (inRun <= 0) return y;   // (40 m and more from the garages: the car's own height – nothing below is used)
   const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"), R = world?.real;
   let s = null;
   // (with surveyed roads in the tarmac – pitroads.js – the surface can lie well over or under the garages' floor: a longer ray)
@@ -3879,7 +3890,7 @@ function paintGrid(m) {
     for (let i = -2; i <= 2; i++) {
       const lamp = new THREE.MeshStandardMaterial({ color: 0x180505, emissive: 0xff2a1a, emissiveIntensity: 0.04 }); lamps.push(lamp);
       const pod = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.35), lamp);
-      pod.position.set(sx + nx * (mid + i * 1.4) - fx * 0.45, y + H - 0.9, sz + nz * (mid + i * 1.4) - fz * 0.45); pod.rotation.y = yaw; g.add(pod);
+      pod.position.set(sx + nx * (mid + i * 1.4) - fx * 0.45, y + H - 0.9, sz + nz * (mid + i * 1.4) - fzz * 0.45); pod.rotation.y = yaw; g.add(pod);
     }
     g.userData.lamps = lamps; g.userData.gantry = "own";
   }

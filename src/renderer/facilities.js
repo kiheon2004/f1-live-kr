@@ -420,8 +420,10 @@ export const FACILITIES = [
     id: "monza-hospitality", name: "Monza – the Hospitality Building at the pit exit", kind: "tower",
     venue: [39], loc: ["Monza"], years: [2018, null],
     status: "trial",
-    // On the map's outline (90.5 × 28.4 m) north of the garages; its track face stands 4.2 m behind the door line – the pit
-    // lane runs on past it. The map's block, drawn with ribbon glazing (landmarks.js), makes way.
+    // On the map's outline (90.5 × 28.4 m) north of the garages; its track face stands 4.2 m OUT from the door line, towards
+    // the track (pit frame v +4.2 over u 244 … 334, its roof edge 5.55 m): the lane's working strip ends at the building
+    // (the concrete band stops at u 238), the fast lane (7.5 … 11.5 m) runs on past it. The map's block, drawn with ribbon
+    // glazing (landmarks.js), makes way.
     replaces: { names: /^hospitality building$/i },
     model: { file: "mza_hospitality.glb", anchor: [45.618827, 9.281646], heading: 276.13 },
     sources: [
@@ -2965,10 +2967,11 @@ export const PIT_UPPERS = {
   // pergola), a tiled annexe at the south end – one file, made with its +Z to the pit lane (`turned`), its door line
   // (z +12.0) on the built garage fronts (`alongFronts`). The file of 2026-11-26 16:23 (the second issue: after Commons
   // photographs of 2018 and the circuit's two renders of 2024-01; the first had no photograph). A winners' podium frame
-  // stands on the terrace south of the tower – its place after the 2020 extension is not confirmed. `along`: the garages
-  // this app builds follow the session's pit boxes (34 bays of 5.48 m, 186 m); the model stands at the map's place, its
-  // middle 10.2 m before theirs. ZAN_UPPER_PLACE
-  55: { file: "zan_pit_upper.glb", garageTop: 4.8, front: 12.0, length: 230.8, depth: 24.0, maxDepth: 24.05, span: [-107.25, 123.55], along: 10.2, fill: false, turned: true, alongFronts: true,
+  // stands on the terrace south of the tower – its place after the 2020 extension is not confirmed. `span`: the turned
+  // model's ends in this frame – the annexe at −X (the pit-entry end), the 2024 block at +X. `along`: the garages this app
+  // builds follow the session's pit boxes (34 bays of 5.48 m, 186 m); the model stands at the map's place, its origin
+  // 10.2 m along this frame's +X from the built garage level's middle. ZAN_UPPER_PLACE
+  55: { file: "zan_pit_upper.glb", garageTop: 4.8, front: 12.0, length: 230.8, depth: 24.0, maxDepth: 24.05, span: [-123.55, 107.25], along: 10.2, fill: false, turned: true, alongFronts: true,
     src: "src/data/models/zan_pit_upper.glb – Zandvoort's pit building over the garages: the old block (a roof terrace over the one-storey front, two storeys behind with a long band of dark glass under a white roof edge, a railing, twelve bare flagpoles and two cabins on the roof, 8.8 m), a podium frame on the terrace, the control tower (a blue-green glazed drum in white fins, a wood-clad top storey 12.45 m, a penthouse, a mast), the 2024 block (six wide glazed bays, a parapet, a roof terrace under a timber pergola, a two-storey glazed part with a wood-clad cube), a tiled annexe – made for this app (2026-11-26, second issue) after OpenStreetMap's outline, the PDOK aerial picture, Commons photographs of 2018-11-03 (before the 2020 extension) and the circuit's two renders of 2024-01, all compared by eye, nothing copied; the present colour and doors of the 2020 front, the tower's top-storey cladding, the podium's place and the terrace's depth are estimates; no outside asset, no logo or lettering" },
   14: { file: "spo_pit_upper.glb", garageTop: 5.0, front: 9.0, length: 291, depth: 18, backTo: 43.3, along: -6.35, span: [-140, 184.5], fill: false, platform: 36, turned: true,
     src: "src/data/models/spo_pit_upper.glb – Interlagos pit building over the garages with the Operations Centre at its pit-entry end: a terrace with a glass rail and a glass awning, one cream membrane cone over each of the 23 garages, a white mast leaning out over the pit lane at every bay line, a flatter membrane over the paddock street, the support strip behind; the Operations Centre in pale concrete and grey-blue glass (its mural is not shown) – made for this app (2026-11-22) from this app's research notes, OpenStreetMap's outlines (279 × 52 m), aerial imagery (one cone every 12.1 m) and Wikimedia Commons photos compared by eye, nothing copied; published: 23 boxes of 216 m², a six-storey operations centre; every height estimated; no outside asset, no logo or lettering" },

@@ -675,10 +675,10 @@ test("v0.70: Spa-Francorchamps – the pit building's storeys, the start gantry,
   assert.ok(Math.abs(ua.inward[0] + ua.inward[1] * kf) < 1e-9, "square to the fifteen garages' line");
   const off = ua.info.upperFronts.map(([, e]) => e); assert.ok(off.every((e) => Math.abs(e) < 0.02), "the end garages on the model's front line: " + JSON.stringify(off));
   // a start-lights gantry model carries a mark where this app's five lamps hang (model.lights): with it in the scene
-  // map3d.js builds no gantry of its own. The four gantries name the face: the grid's side (Red Bull Ring's panel hangs on
+  // map3d.js builds no gantry of its own. The five gantries name the face: the grid's side (Red Bull Ring's panel hangs on
   // the far side: its lamps under the beam, looking back)
-  const ids = ["spa-start-gantry", "silverstone-start-gantry", "interlagos-start-gantry", "red-bull-ring-start-gantry"].map((id) => F.FACILITIES.find((f) => f.id === id).model.lights);
-  assert.ok(ids.every((L) => L && L.y[1] > L.y[0] && L.y[0] > 5 && Math.abs(L.face) === 1)); assert.deepStrictEqual(ids.map((L) => L.face), [1, 1, 1, -1]);
+  const ids = ["spa-start-gantry", "silverstone-start-gantry", "interlagos-start-gantry", "red-bull-ring-start-gantry", "zandvoort-start-gantry"].map((id) => F.FACILITIES.find((f) => f.id === id).model.lights);
+  assert.ok(ids.every((L) => L && L.y[1] > L.y[0] && L.y[0] > 5 && Math.abs(L.face) === 1)); assert.deepStrictEqual(ids.map((L) => L.face), [1, 1, 1, -1, 1]);
   // a beam from x 0 to 20, turned a quarter (its +Z to scene +x), at (100, 3, 50); the mark on its +Z face 0.9 m out
   const holder = new THREE.Group(); holder.position.set(100, 3, 50); holder.rotation.y = Math.PI / 2;
   const mk = new THREE.Object3D(); mk.position.set(0, 6.5, 0.9 + 0.19); mk.userData = { h: 1.3, face: 1, x0: -0.4, x1: 20.4 }; holder.add(mk); holder.updateMatrixWorld(true);
@@ -754,13 +754,14 @@ test("v0.70: Zandvoort – the pit building's storeys, the start gantry with the
   const readme = fs.readFileSync(path.join(__dirname, "..", "src", "data", "models", "README.md"), "utf8"); for (const f of zan) assert.ok(readme.includes("`" + f + "`"), f);
   const U = F.PIT_UPPERS[55];
   assert.ok(U.file === "zan_pit_upper.glb" && U.turned === true && U.alongFronts === true && U.fill === false && U.front === 12.0 && U.garageTop === 4.8 && U.maxDepth >= U.depth && !U.also);
-  assert.ok(Math.abs(U.span[1] - U.span[0] - U.length) < 0.05 && U.span[1] > -U.span[0], "the model reaches further at its south end: the annexe");
+  assert.ok(Math.abs(U.span[1] - U.span[0] - U.length) < 0.05 && -U.span[0] > U.span[1], "the turned model reaches further at this frame's −X end – the south, pit-entry end: the annexe");
   const g = F.FACILITIES.find((f) => f.id === "zandvoort-start-gantry");
   assert.ok(g.model.file === "zan_gantry.glb" && g.venue[0] === 55 && !g.replaces.names.test("") && g.model.footprint.length === 4 && g.model.lights.face === 1 && g.model.lights.y[0] > 5, "the start lamps hang on the model's panel");
   const st = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Zandvoort.stands;
   assert.strictEqual(st.length, 16); assert.ok(st.every((s) => s.model && files.includes(s.model.file) && s.model.heading === 180 && Array.isArray(s.model.at) && Array.isArray(s.model.drape.along) && s.model.drape.along.length >= 2));
   assert.strictEqual(new Set(st.map((s) => s.model.file)).size, 16);
-  // the lane: the surveyed fast lane for the cars; no wall place (this app's track lies over the surveyed wall)
+  // the lane: no surveyed fast lane for the cars (this app's lane is nowhere wide enough), no wall place (this app's track
+  // lies over the surveyed wall)
   const P = PIT_ROADS[55]; assert.ok(!P.lane.fast && !P.lane.wallAt, "this app's lane is nowhere wide enough for the surveyed fast lane"); assert.deepStrictEqual(P.lane.u, [-36, 223]); assert.strictEqual(P.exit.edgeLine, 0.15); assert.strictEqual(P.edgeLine, 0);
 });
 
