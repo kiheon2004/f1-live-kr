@@ -103,9 +103,10 @@ function drawMini() {
   // v0.71 – the same look as the timing screen's 2D view: a blue board with a grid, the road as a filled light band with
   // a dark edge, the cars as square blocks in their team's colour (mine larger with a light edge; the camera's car with
   // a yellow frame). Not a dark map with an outlined track and coloured dots.
-  const INK = "#0d0d0f", LIGHT = "#f2efe6";
+  const tok = (name, fallback) => globalThis.Fmt?.token?.(name, fallback) || fallback;   // (the design tokens: css/tokens.css)
+  const INK = tok("--text-inv", "#0d0d0f"), LIGHT = tok("--text-1", "#f2efe6");
   const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-  g.fillStyle = "#3d4dff"; g.fillRect(0, 0, w, h);
+  g.fillStyle = tok("--c-blue", "#3d4dff"); g.fillRect(0, 0, w, h);
   g.beginPath(); for (let x = 20.5; x < w; x += 20) { g.moveTo(x, 0); g.lineTo(x, h); } for (let y = 20.5; y < h; y += 20) { g.moveTo(0, y); g.lineTo(w, y); }
   g.strokeStyle = "rgba(255,255,255,0.22)"; g.lineWidth = 1; g.stroke();
   const path = (pts, closed) => { g.beginPath(); pts.forEach(([x, y], i) => { const [a, b] = M.T.map(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); }); if (closed) g.closePath(); };
@@ -125,7 +126,7 @@ function drawMini() {
     g.globalAlpha = c.status === "dnf" ? 0.4 : 1;
     g.fillStyle = mine ? LIGHT : INK; g.fillRect(x - r - 1.5, y - r - 1.5, 2 * r + 3, 2 * r + 3);
     g.fillStyle = e?.colour || "#888"; g.fillRect(x - r, y - r, 2 * r, 2 * r); g.globalAlpha = 1;
-    if (String(c.num) === onCam) { g.lineWidth = 2; g.strokeStyle = "#ffe500"; g.strokeRect(x - r - 3.5, y - r - 3.5, 2 * r + 7, 2 * r + 7); }
+    if (String(c.num) === onCam) { g.lineWidth = 2; g.strokeStyle = tok("--c-yellow", "#ffe500"); g.strokeRect(x - r - 3.5, y - r - 3.5, 2 * r + 7, 2 * r + 7); }
     if (mine) labels.push({ x, y, r: r + 2, t: e?.tla || String(c.num) });
   }
   // my two cars' names: inside the box, flipped left at its right edge, the second moved off the first when they'd overlap

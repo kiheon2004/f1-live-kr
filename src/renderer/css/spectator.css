@@ -22,14 +22,14 @@
 #map3d .hud3d-wrap > button { background: var(--hud-bg); color: var(--text-1); }
 #map3d[data-cam="heli"] .hud3d-wrap > button { display: none; }
 #map3d .hud3d { display: flex; align-items: center; gap: 10px; padding: 7px 14px 7px 8px; border-radius: var(--r-2); background: var(--hud-bg); border: var(--bw) solid var(--line); white-space: nowrap; overflow: hidden; font-size: var(--fs-md); }
-#map3d .hud3d .bar { width: 4px; height: 22px; border-radius: 2px; }
+#map3d .hud3d .bar { width: 4px; height: 22px; border-radius: 0; }
 #map3d .hud3d .p { font-size: var(--fs-lg); } #map3d .hud3d b { font-size: 14.5px; }
 #map3d .hud3d .t { color: var(--text-2); font-size: var(--fs-sm); } #map3d .hud3d .g { color: var(--text-1); font-size: var(--fs-sm); font-weight: var(--fw-med); font-variant-numeric: tabular-nums; }
 #map3d .hud3d .tel { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding-left: 10px; border-left: var(--bw) solid var(--line); font-variant-numeric: tabular-nums; }
 #map3d .hud3d .tel b { font-weight: var(--fw-bold); font-size: var(--fs-lg); min-width: 2.2em; text-align: right; }
 #map3d .hud3d .tel b.gear { color: var(--warn); min-width: 1em; margin-left: 4px; }
 #map3d .hud3d .tel small { font-size: var(--fs-2xs); color: var(--text-2); }
-#map3d .hud3d .tel i { display: inline-block; width: 6px; height: 18px; border-radius: 2px; background: linear-gradient(to top, var(--c) var(--v), var(--bg-3) var(--v)); margin-left: 2px; }
+#map3d .hud3d .tel i { display: inline-block; width: 6px; height: 18px; border-radius: 0; background: linear-gradient(to top, var(--c) var(--v), var(--bg-3) var(--v)); margin-left: 2px; }
 #map3d .hud3d .tel i.thr { --c: var(--ok); } #map3d .hud3d .tel i.brk { --c: var(--bad); }
 .map-card:not(.expanded) #map3d .hud3d .t { display: none; }
 .map-card:not(.expanded) #map3d .hud3d { gap: 8px; padding: 6px 10px 6px 7px; font-size: var(--fs-sm); }
@@ -82,7 +82,7 @@
 /* position tower */
 #map3d .spec-tower .spec-in { padding: 0 0 var(--s-2); width: 200px; }
 #map3d .spec-tower.full .spec-in { width: 316px; }
-#map3d .spec-tower .tw-h { display: flex; justify-content: space-between; align-items: center; padding: var(--s-1) var(--s-2) var(--s-1) var(--s-4); color: var(--text-3); font-size: var(--fs-xs); border-bottom: var(--bw) solid var(--line-soft); }
+#map3d .spec-tower .tw-h { display: flex; justify-content: space-between; align-items: center; padding: var(--s-1) var(--s-2) var(--s-1) var(--s-4); color: var(--text-3); font-size: var(--fs-xs); border-bottom: 1px solid var(--line-soft); }
 #map3d .spec-tower .tw-hcol { min-height: 24px; padding: 0 var(--s-3); border: 0; border-radius: var(--r-1); background: none; color: var(--text-2); font-size: var(--fs-xs); cursor: pointer; }
 #map3d .spec-tower .tw-hcol:hover:not(:disabled) { color: var(--text-1); background: var(--bg-3); }
 #map3d .spec-tower .tw-hcol:disabled { cursor: default; }
@@ -97,7 +97,7 @@
 #map3d .spec-tower .tw-row.cmp { background: var(--cmp-bg); box-shadow: inset 2px 0 0 var(--info); }
 #map3d .spec-tower .tw-row.out { color: var(--text-3); }
 #map3d .spec-tower .tw-pos { text-align: right; font-weight: var(--fw-bold); }
-#map3d .spec-tower .tw-bar { width: 3px; height: 13px; border-radius: 1px; }
+#map3d .spec-tower .tw-bar { width: 3px; height: 13px; border-radius: 0; }
 #map3d .spec-tower .tw-tla { font-weight: var(--fw-bold); letter-spacing: 0.02em; }
 #map3d .spec-tower .tw-mk { display: inline-flex; align-items: center; gap: 2px; color: var(--text-1); overflow: hidden; }
 #map3d .spec-tower .tw-mk .ui-badge { height: 14px; padding: 0 2px; font-size: 8.5px; letter-spacing: -0.02em; }
@@ -108,7 +108,7 @@
 /* selected driver card */
 #map3d .spec-driver .spec-in { white-space: nowrap; }
 #map3d .spec-driver .dc-main { display: flex; align-items: center; gap: var(--s-5); padding: var(--s-3) var(--s-5) var(--s-3) var(--s-4); }
-#map3d .spec-driver .dc-bar { width: 4px; height: 28px; border-radius: 2px; flex: none; }
+#map3d .spec-driver .dc-bar { width: 4px; height: 28px; border-radius: 0; flex: none; }
 #map3d .spec-driver .dc-pos { font-size: var(--fs-lg); font-weight: var(--fw-bold); }
 #map3d .spec-driver .dc-name { display: flex; flex-direction: column; line-height: 1.2; }
 #map3d .spec-driver .dc-name b { font-size: var(--fs-lg); font-weight: var(--fw-bold); }
@@ -121,12 +121,12 @@
 #map3d .spec-driver .dc-tel b { font-weight: var(--fw-bold); font-size: var(--fs-lg); min-width: 2.2em; text-align: right; }
 #map3d .spec-driver .dc-tel b.gear { color: var(--warn); min-width: 1em; margin-left: var(--s-2); }
 #map3d .spec-driver .dc-tel small { color: var(--text-2); font-size: var(--fs-xs); }
-#map3d .spec-driver .dc-tel i { display: inline-block; width: 6px; height: 18px; border-radius: 2px; background: linear-gradient(to top, var(--c) var(--v, 0%), var(--bg-3) var(--v, 0%)); }
+#map3d .spec-driver .dc-tel i { display: inline-block; width: 6px; height: 18px; border-radius: 0; background: linear-gradient(to top, var(--c) var(--v, 0%), var(--bg-3) var(--v, 0%)); }
 #map3d .spec-driver .dc-tel i.thr { --c: var(--ok); } #map3d .spec-driver .dc-tel i.brk { --c: var(--bad); }
-#map3d .spec-driver .dc-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-5); border-top: var(--bw) solid var(--line-soft); font-size: var(--fs-xs); color: var(--text-2); }
+#map3d .spec-driver .dc-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-5); border-top: 1px solid var(--line-soft); font-size: var(--fs-xs); color: var(--text-2); }
 #map3d .spec-driver .dc-cam { color: var(--text-1); }   /* (another car filmed is a state, not a warning: no yellow – v0.53 §12-3) */
 #map3d .spec-driver .dc-cam .ui-btn { margin-left: auto; }
-#map3d .spec-driver .dc-cmpdot { width: 8px; height: 8px; border-radius: 2px; box-shadow: 0 0 0 1px var(--info); }
+#map3d .spec-driver .dc-cmpdot { width: 8px; height: 8px; border-radius: 0; box-shadow: 0 0 0 1px var(--info); }
 #map3d .spec-driver .dc-empty { margin: 0; padding: var(--s-4) var(--s-5); font-size: var(--fs-xs); }
 
 /* camera tools */
@@ -141,11 +141,11 @@
 #map3d .spec-pit[data-tone="warn"] .spec-in { border-left-color: var(--warn); }
 #map3d .spec-pit[data-tone="ok"] .spec-in { border-left-color: var(--ok); }
 #map3d .spec-pit[data-tone="bad"] .spec-in { border-left-color: var(--bad); }
-#map3d .spec-pit .pt-h { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); padding: var(--s-2) var(--s-4); border-bottom: var(--bw) solid var(--line-soft); font-size: var(--fs-md); }
+#map3d .spec-pit .pt-h { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); padding: var(--s-2) var(--s-4); border-bottom: 1px solid var(--line-soft); font-size: var(--fs-md); }
 #map3d .spec-pit .pt-h:has(+ .pt-rows[hidden]) { border-bottom: 0; }
 #map3d .spec-pit .pt-rows { display: grid; grid-template-columns: auto 1fr; gap: 1px var(--s-4); margin: 0; padding: var(--s-2) var(--s-4) var(--s-3); font-size: var(--fs-sm); }
 #map3d .spec-pit dt { color: var(--text-3); } #map3d .spec-pit dd { margin: 0; }
-#map3d .spec-pit dd.warn { color: var(--warn); } #map3d .spec-pit dd.bad { color: #ff7a71; } #map3d .spec-pit dd.num { font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+#map3d .spec-pit dd.warn { color: var(--warn); } #map3d .spec-pit dd.bad { color: var(--bad-ink); } #map3d .spec-pit dd.num { font-weight: var(--fw-bold); font-size: var(--fs-sm); }
 
 /* ready / loading */
 #map3d .spec-ready { position: absolute; inset: 0; display: grid; place-items: center; background: var(--scrim); pointer-events: none; }
@@ -166,7 +166,7 @@
 #map3d .spec-editor .ed-list { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3) var(--s-5); }
 #map3d .spec-editor .ed-hint { margin: 0; font-size: var(--fs-2xs); }
 #map3d .spec-editor > footer .grow { flex: 1; }
-#map3d .spec-editor > footer { display: flex; justify-content: flex-end; gap: var(--s-4); padding: var(--s-3) var(--s-5) var(--s-4); border-top: var(--bw) solid var(--line-soft); }
+#map3d .spec-editor > footer { display: flex; justify-content: flex-end; gap: var(--s-4); padding: var(--s-3) var(--s-5) var(--s-4); border-top: 1px solid var(--line-soft); }
 
 /* cockpit cameras: narrow widgets that fit beside the wheel and under the mirrors (the layout moves them off the wheel,
  * the mirrors and the view's centre – spectator/layout.js avoidZones); the tower is a relative box of five there */

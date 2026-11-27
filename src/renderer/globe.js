@@ -13,8 +13,7 @@ import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 import { LAND } from "./globeland.js";
 
-const BLUE = "#3d4dff", EDGE = "#f2efe6";   // (css/tokens.css --c-blue, --line)
-const LAND_FILL = "#f2efe6";                 // the continents: one flat light shape on the blue (no outline, no shading)
+// (colours: the design tokens – the ball --c-blue, its edge, grid and the land --line; css/tokens.css)
 const RIM = 1.03;                            // a point on the far side is drawn just outside the ball's edge (and cut off)
 const R = 166;                               // the ball's radius in the picture's own units (as in the design)
 const H = () => window.HomeData;
@@ -44,14 +43,14 @@ export class Globe {
       const keep = { "vector-effect": "non-scaling-stroke" };   // (the edge stays 3 px and the grid 1.5 px at any zoom)
       const clip = el("clipPath", { id: "globeClip" }, el("defs", {}, this.svg));
       el("circle", { r: R }, clip);
-      el("circle", { r: R, fill: BLUE }, this.ball);
+      el("circle", { r: R, style: "fill:var(--c-blue)" }, this.ball);
       // the land turns with the globe: its outline is written again whenever the view moves (draw → landPath)
-      this.landEl = el("path", { fill: LAND_FILL, "clip-path": "url(#globeClip)", "fill-rule": "evenodd" }, this.ball);
-      const grid = el("g", { fill: "none", stroke: EDGE, "stroke-opacity": 0.4, "stroke-width": 1.5 }, this.ball);
+      this.landEl = el("path", { style: "fill:var(--line)", "clip-path": "url(#globeClip)", "fill-rule": "evenodd" }, this.ball);
+      const grid = el("g", { fill: "none", style: "stroke:var(--line)", "stroke-opacity": 0.4, "stroke-width": 1.5 }, this.ball);
       for (const [rx, ry] of [[R, 60], [R, 120], [60, R], [120, R]]) el("ellipse", { rx, ry, ...keep }, grid);
       el("line", { x1: -R, y1: 0, x2: R, y2: 0, ...keep }, grid);
       el("line", { x1: 0, y1: -R, x2: 0, y2: R, ...keep }, grid);
-      el("circle", { r: R, fill: "none", stroke: EDGE, "stroke-width": 3, ...keep }, this.ball);   // the edge, over the land
+      el("circle", { r: R, fill: "none", style: "stroke:var(--line)", "stroke-width": 3, ...keep }, this.ball);   // the edge, over the land
       this.host.prepend(this.svg);
       // the land's outlines as points on the unit sphere, with long edges split (≤ 4°) so an outline crossing the
       // ball's edge is cut close to where it really crosses

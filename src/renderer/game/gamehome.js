@@ -1,8 +1,9 @@
 // The strategy game's flow and state (request §10, §12, §13, §16): globe home → 전략 게임 → season & team → main menu
-// (over the 3D garage) → pre-race strategy → race → results → menu; 라이브 타이밍으로 leaves cleanly (the 3D view detached,
+// (tabs over tiles; its 차고 tile opens the 3D garage) → pre-race strategy → race → results → menu; the app bar's logo –
+// and, on the steps that show the game bar, 라이브 타이밍으로 – leaves cleanly (the 3D view detached,
 // the live / replay app as it was). This file keeps the state and moves between the screens; each screen is its own
 // module:
-//   menu.js     season & team, the main menu over the 3D menu garage, the driver cards, driver/car info, settings
+//   menu.js     season & team, the main menu (tab row, tiles, sheets), the 3D menu garage with its driver cards, settings
 //   saveui.js   prepared races (refresh, import, prepare from the cache), save slots, continue, the leave prompt
 //   prerace.js  the pre-race strategy editor (plans, timeline, checks, the estimator's numbers)
 //   racehud.js  the race HUD (top bar, standings tower, the two driver cards, the pit-work slot, events)
@@ -303,8 +304,8 @@ $("homeGameBtn")?.addEventListener("click", open);
 // (v0.71: while the game is up the app bar's logo is the way out too – the same as the game bar's 라이브 타이밍으로; taken
 // before the app's own handler, which would switch between the home and the timing screen under the game)
 $("homeBtn")?.addEventListener("click", (e) => { if (!G.on) return; e.stopImmediatePropagation(); close(); }, true);
-// (the game bar's 라이브 타이밍으로 is the one way out on every step – data-act="game:exit", handled below; v0.53 removed the
-// garage's second copy of it)
+// (the way out: the game bar's 라이브 타이밍으로 – data-act="game:exit", handled below – on the steps that show the bar, and
+// the app bar's logo on every step)
 const MODS = { menu: Menu, save: SaveUI, pre: Pre, hud: Hud, res: Res, alerts: AlertsUI };
 $("game").addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;

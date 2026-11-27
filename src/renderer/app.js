@@ -2,21 +2,23 @@
   const $ = (id) => document.getElementById(id);
   // a team colour as F1 sends it ("3671C6"), else the fallback – never anything that could end a style attribute
   const hexColour = (c, fallback) => (/^[0-9a-f]{6}$/i.test(c || "") ? c : fallback);
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const KST = (opts) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", ...opts });
+  // (escaping, clock and Korean-time formatting, the settings store and the design tokens' colours: src/shared/fmt.js)
+  const { esc, hms, KST, toOffset, store, token } = window.Fmt;
   const kstFull = KST({ month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
   const kstTime = KST({ hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-  const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return [s / 3600, (s % 3600) / 60, s % 60].map((v) => String(Math.floor(v)).padStart(2, "0")).join(":"); };
   const at = (arrOrObj, i) => (Array.isArray(arrOrObj) ? arrOrObj[i] : arrOrObj?.[i]);
   // (an element's HTML replaced only when it's different: writing the same again still makes the page lay out again)
   const setHTML = (el, html) => { if (el.__html !== html) { el.innerHTML = html; el.__html = html; } };
   const ico = (name, opts) => window.UIIcons?.svg(name, opts) || "";
+  // Colours written into chart markup (SVG attributes) and drawn on the 2D map's canvas: the design tokens, read once –
+  // no palette of its own here (css/tokens.css).
+  const PAL = { grid: token("--line-soft", "#2a2a30"), ink: token("--text-1", "#f2efe6"), inv: token("--text-inv", "#0d0d0f"), faint: token("--text-3", "#8a8880"),
+    ok: token("--ok", "#3ddc84"), info: token("--info", "#8fb4ff"), warn: token("--warn", "#ffd60a"), sc: token("--sc", "#ff9f1c"), bad: token("--bad", "#ff5a4d"), badInk: token("--bad-ink", "#ff7a6e"),
+    blue: token("--c-blue", "#3d4dff"), yellow: token("--c-yellow", "#ffe500"), blueInk: token("--c-blue-ink", "#ffffff") };
+  // (laps under a safety car, a virtual safety car or a red flag, shaded in the lap charts: colour, opacity, word)
+  const SHADE = { SC: [PAL.sc, 0.13, "SC"], VSC: [PAL.warn, 0.09, "VSC"], RED: [PAL.bad, 0.14, "적색기"] };
   const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.reduceMotion === "1";
   const lastOf = (arrOrObj) => { const a = Array.isArray(arrOrObj) ? arrOrObj : Object.values(arrOrObj || {}); return a[a.length - 1]; };
-  const store = {
-    get(k, d) { try { const v = localStorage.getItem("f1kr:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem("f1kr:" + k, JSON.stringify(v)); } catch {} },
-  };
 
   // (versions before 0.23 kept the last standing grid seen at each circuit under "f1kr:grid:<location>" and showed it at
   // the next session there – another race's grid: no longer used, cleared)
@@ -81,8 +83,7 @@
   const thisYear = new Date().getFullYear();
   for (let y = thisYear; y >= 2023; y--) $("year").add(new Option(String(y), y));
   $("year").value = store.get("year", thisYear);
-  // StartDate is local track time; GmtOffset turns it into UTC.
-  const toOffset = (off) => { const m = /^(-?)(\d\d):(\d\d)/.exec(off || "00:00"); return `${m[1] ? "-" : "+"}${m[2]}:${m[3]}`; };
+  // (StartDate is local track time; GmtOffset turns it into UTC – Fmt.toOffset)
 
   // (each request numbered: a slow answer for a year since changed doesn't replace the newer list)
   let listReq = 0, loadJob = 0;
@@ -103,8 +104,8 @@
     } catch (e) { if (req === listReq && !quiet) $("progress").textContent = `목록을 불러오지 못했어요 (${e.message})`; if (req === listReq) paintSessList(`목록을 불러오지 못했어요 (${e.message})`); return false; }
   }
   // The session button's list (v0.71): the season's Grands Prix, latest first, each with its sessions as small buttons –
-  // a press loads that session at once (the same path as the hidden picker and its 불러오기: #session + #load). The one on
-  // screen is marked.
+  // a press loads that session at once through loadReplay. The one on screen is marked. (#session and #load are still in
+  // the page, hidden: the development screenshot helper picks and loads through them.)
   function paintSessList(note = "") {
     const groups = [];
     for (const s of sessions) { const g = groups[groups.length - 1]; if (g && g.meeting === s.meeting) g.list.push(s); else groups.push({ meeting: s.meeting, list: [s] }); }
@@ -114,8 +115,8 @@
   }
   $("sessList").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-path]"); if (!b) return;
-    if (![...$("session").options].some((o) => o.value === b.dataset.path)) return;
-    $("session").value = b.dataset.path; $("load").click();
+    const info = sessions.find((x) => x.path === b.dataset.path); if (!info) return;
+    $("session").value = info.path; loadReplay(info.path, info);
   });
   const sessMenu = UIKit.menu($("sessBtn"), $("sessPop"), { onOpen: () => requestAnimationFrame(() => $("sessList").querySelector('[aria-current="true"]')?.scrollIntoView({ block: "center" })) });
   $("sessBtn").addEventListener("click", () => { if (mode === "live") sessMenu.close(); });   // (live: the session is the one F1 sends – nothing to pick)
@@ -566,7 +567,7 @@
     const segs = Array.isArray(sec?.Segments) ? sec.Segments : Object.values(sec?.Segments || {});
     return segs.length ? `<div class="segs">${segs.map((g) => `<i class="${SEG[g?.Status] || ""}"></i>`).join("")}</div>` : "";
   };
-  const sectorCls = (s) => (s?.OverallFastest ? "s-purple" : s?.PersonalFastest ? "s-green" : s?.Value ? "s-yellow" : "");
+  const sectorCls = (s) => (s?.OverallFastest ? "s-purple" : s?.PersonalFastest ? "s-green" : "");
   const HEADERS = {
     Race: ["차이", "선두와의 시간 차이(초). '+1랩'은 선두에게 한 바퀴 뒤처졌다는 뜻이에요 · 빈칸: 아직 받지 않은 값", "간격", "바로 앞 차와의 시간 차이(초). 1초 이내는 추월 사정권이라 초록으로 표시해요 · 작은 ▼/▲: 최근 3랩 동안 줄어든/늘어난 간격"],
     Qualifying: ["차이", "이번 단계(Q1·Q2·Q3)에서 가장 빠른 기록(1위)과의 차이 · 빈칸: 아직 기록 없음", "간격", "바로 앞 순위 드라이버 기록과의 차이"],
@@ -586,7 +587,6 @@
   }
   $("lapToggle").addEventListener("click", () => { lapMode = lapMode === "best" ? "last" : "best"; store.set("lapMode", lapMode); paintLapToggle(); renderAll(true); });
   paintLapToggle();
-  const pill = (v, cls) => (v ? `<span class="lap ${cls}">${esc(v)}</span>` : "");
   // Out-laps, in-laps and laps that include time in the pits read like "6:15.879": shown dimmed.
   const slowLap = (v, fastest) => { const x = ReplayKit.toSec(v); return x && Number.isFinite(fastest) && x > fastest * 1.3; };
 
@@ -644,8 +644,6 @@
   // overall best = purple fill, personal best = green text (fill vs none: not colour alone); the tyre as its lettered
   // ring (dashed: a used set); state as badges. A row whose position changed slides from where it was (300 ms; off under
   // reduced motion and after a jump) and its position number is tinted for a few seconds (gain / loss).
-  const NONE = "";
-  const cell = (v) => (v == null || v === "" ? NONE : esc(v));
   const TYRE_LETTER = { SOFT: "S", MEDIUM: "M", HARD: "H", INTERMEDIATE: "I", WET: "W" };
   let boardOrder = "", moved = {};
   function renderBoard() {
@@ -718,12 +716,12 @@
         <td class="chg">${chg > 0 ? `<span class="up" title="출발 그리드보다 ${chg}계단 올라감">▲${chg}</span>` : chg < 0 ? `<span class="down" title="출발 그리드보다 ${-chg}계단 내려감">▼${-chg}</span>` : ""}</td>
         <td class="drv" title="${esc(`${KO.DRIVERS[d.Tla] || d.FullName} (${d.Tla}) · ${num}번 · ${KO.TEAMS[d.TeamName] || d.TeamName}`)}"><div class="drv-in"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
           <span class="name">${esc(KO.surname(d.Tla, d.LastName))}</span>${num === compare && num !== focus ? `<span class="mark" title="Shift+클릭으로 고른 비교 드라이버">비교</span>` : ""}</div></td>
-        <td class="time r${type === "Race" && !rel ? " gapc" : ""}">${leader && type === "Race" && !rel ? "" : cell(gap)}</td>
-        <td class="time r ${close ? "close" : ""}"${close ? ` title="앞 차와 1초 이내"` : ""}>${leader ? "" : interval ? esc(interval) + trendTag(trend[num]) : NONE}</td>
-        <td class="time r">${lapV ? `<span class="lap ${lapCls}"${lapTitle ? ` title="${lapTitle}"` : ""}>${esc(lapV)}</span>` : NONE}</td>
+        <td class="time r">${leader && type === "Race" && !rel ? "" : esc(gap ?? "")}</td>
+        <td class="time r ${close ? "close" : ""}"${close ? ` title="앞 차와 1초 이내"` : ""}>${leader ? "" : interval ? esc(interval) + trendTag(trend[num]) : ""}</td>
+        <td class="time r">${lapV ? `<span class="lap ${lapCls}"${lapTitle ? ` title="${lapTitle}"` : ""}>${esc(lapV)}</span>` : ""}</td>
         ${[0, 1, 2].map((i) => `<td class="time r sec ${sectorCls(sectors[i])}"${sectors[i]?.OverallFastest ? ` title="전체 최고"` : sectors[i]?.PersonalFastest ? ` title="개인 최고"` : ""}><span>${esc(sectors[i]?.Value || "")}</span>${miniSectors(sectors[i])}</td>`).join("")}
         <td class="time r sec ${sectorCls(l.Speeds?.ST)}"><span>${esc(l.Speeds?.ST?.Value || "")}</span></td>
-        <td class="c">${ty ? `<span class="tyre" title="${esc(ty.ko)}${stint.New === "true" ? " (새 타이어)" : " (중고 타이어로 시작)"} · 이 타이어로 ${esc(stint.TotalLaps ?? 0)}랩"><i class="ui-tyre ${TYRE_LETTER[stint.Compound] || ""}${stint.New === "false" ? " used" : ""}">${ty.short}</i><span class="n">${esc(stint.TotalLaps ?? "")}</span></span>` : NONE}</td>
+        <td class="c">${ty ? `<span class="tyre" title="${esc(ty.ko)}${stint.New === "true" ? " (새 타이어)" : " (중고 타이어로 시작)"} · 이 타이어로 ${esc(stint.TotalLaps ?? 0)}랩"><i class="ui-tyre ${TYRE_LETTER[stint.Compound] || ""}${stint.New === "false" ? " used" : ""}">${ty.short}</i><span class="n">${esc(stint.TotalLaps ?? "")}</span></span>` : ""}</td>
         <td class="r pits">${+pits > 0 ? esc(pits) : ""}</td>
         <td class="state">${state ? `<span class="ui-badge ${state[1]}">${state[0]}</span>` : ""}${delTag}</td></tr>`;
     }).join(""));
@@ -760,10 +758,7 @@
   // A red flag: the flag itself (Flag "RED", or a message that starts with it) – not "CHEQUERED FLAG" (whose letters
   // contain "RED FLAG": v0.49 coloured and alerted the chequered flag as a red flag) nor "RED FLAG INFRINGEMENT".
   const isRedFlag = (m) => m?.Flag === "RED" || /^RED FLAG\b(?! INFRINGEMENT)/.test(m?.Message || "");
-  function rcClass(m) {
-    return isRedFlag(m) ? "flag-red" : m.Category === "SafetyCar" ? "sc" : /YELLOW/.test(m.Flag || "") ? "flag-yellow" : /PENALTY/.test(m.Message) ? "penalty" : "";
-  }
-  // Message kinds for the filter chips above the list.
+  // Message kinds for the filter's list (the filter button at the end of the tab row).
   const RC_KINDS = [
     ["all", "전체", () => true],
     ["flag", "깃발", (m) => m.Category === "Flag" && !/TRACK LIMITS/.test(m.Message)],
@@ -773,7 +768,7 @@
   ];
   let rcKind = store.get("rcKind", "all");
   // v0.50: blue flags (lapped cars told to let the leaders by – dozens a race) are left out of the list unless asked
-  // for: a toggle at the end of the chips, with their count
+  // for: a toggle at the end of the filter's list, with their count
   let rcBlue = store.get("rcBlue", false);
   const isBlue = (m) => /BLUE FLAG/.test(m.Message || "") || m.Flag === "BLUE";
   $("rcFilter").addEventListener("click", (e) => {
@@ -811,7 +806,7 @@
       const time = m.Utc ? kstTime.format(new Date(m.Utc + (/Z$/.test(m.Utc) ? "" : "Z"))) : "";
       // (a row: the lap, a square in the message's colour – red flag, SC, penalty, yellow, green; none: an empty square –
       // and the words in Korean; the time and F1's own English text are the row's tooltip)
-      return `<li class="${rcClass(m)}" title="${esc(`${time} KST${m.Lap ? ` · ${m.Lap}랩` : ""}\n${m.Message}`)}"><span class="lapn">${m.Lap ? `L${esc(m.Lap)}` : ""}</span><i class="sq ${rcKindOf(m)}" aria-hidden="true"></i><span class="ko">${esc(ko || m.Message)}</span></li>`;
+      return `<li title="${esc(`${time} KST${m.Lap ? ` · ${m.Lap}랩` : ""}\n${m.Message}`)}"><span class="lapn">${m.Lap ? `L${esc(m.Lap)}` : ""}</span><i class="sq ${rcKindOf(m)}" aria-hidden="true"></i><span class="ko">${esc(ko || m.Message)}</span></li>`;
     }).join("");
   }
 
@@ -910,7 +905,7 @@
         return `<li class="${n === focus ? "focus" : ""}${l.Retired || l.Stopped ? " out" : ""}" data-num="${esc(n)}">
           <span class="p">${esc(l.Position || "")}</span><span class="b" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span><b>${esc(d.Tla || n)}</b>
           <div class="lane">${ticks.join("")}${race && now ? `<em class="now" style="left:${pct(Math.min(total, now))}"></em>` : ""}${parts.map(({ x, from, laps }) => {
-            const ty = KO.TYRES[x.Compound] || { short: "?", color: "#666", ko: x.Compound || "알 수 없음" };
+            const ty = KO.TYRES[x.Compound] || { short: "?", color: PAL.faint, ko: x.Compound || "알 수 없음" };
             return `<div class="st${x.New === "false" ? " used" : ""}" style="left:${pct(from)};width:${pct(Math.max(laps, 0.6))};--c:var(--tyre-${(TYRE_LETTER[x.Compound] || "x").toLowerCase()}, ${ty.color})" title="${esc(`${ty.ko} · ${from + 1}~${from + laps}랩 (${laps}랩)${x.New === "false" ? ` · 중고 타이어 (${x.StartLaps}랩 사용)` : " · 새 타이어"}`)}">${laps >= 3 ? `${ty.short}${laps}` : ""}</div>`;
           }).join("")}</div></li>`;
       }).join("")}</ol>`;
@@ -1010,14 +1005,13 @@
     let out = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="갭 차트">
       <defs><clipPath id="traceClip"><rect x="${L}" y="${T - 4}" width="${W - L - R + 2}" height="${H - T - B + 4}"/></clipPath></defs>`;
     // Shade safety car / VSC / red flag laps: the field bunches up there, so gaps shrink for a reason.
-    const SHADE = { SC: ["#f29a30", 0.13, "SC"], VSC: ["#f2c230", 0.09, "VSC"], RED: ["#e8392f", 0.14, "적색기"] };
     for (const p of src.neutralPeriods()) {
       const [c, op, label] = SHADE[p.kind], x1 = X(Math.max(minLap, p.from)), x2 = X(Math.min(maxLap, Math.max(p.to, p.from + 1)));
       if (x2 <= x1) continue;
       out += `<rect x="${x1}" y="${T}" width="${x2 - x1}" height="${H - T - B}" fill="${c}" fill-opacity="${op}"/><text x="${x1 + 3}" y="${H - B - 4}" style="fill:${c}">${label}</text>`;
     }
     const step = top <= 15 ? 5 : top <= 45 ? 15 : Math.ceil(top / 4 / 10) * 10;
-    for (let g = 0; g <= top; g += step) out += `<line x1="${L}" x2="${W - R}" y1="${Y(g)}" y2="${Y(g)}" stroke="#2a3038"/><text x="4" y="${Y(g) + 3}">${g ? "+" + g : "선두"}</text>`;
+    for (let g = 0; g <= top; g += step) out += `<line x1="${L}" x2="${W - R}" y1="${Y(g)}" y2="${Y(g)}" stroke="${PAL.grid}"/><text x="4" y="${Y(g) + 3}">${g ? "+" + g : "선두"}</text>`;
     out += `<text x="${L}" y="${H - 5}">${minLap}랩</text><text x="${W - R}" y="${H - 5}" text-anchor="end">${maxLap}랩</text>`;
     // Others first, then the compared and focused drivers on top.
     const rank = (s) => (s.n === focus ? 2 : s.n === compare ? 1 : 0);
@@ -1048,12 +1042,11 @@
     const minLap = Math.min(...all.map((x) => x.lap)), maxLap = Math.max(...all.map((x) => x.lap));
     const X = (lap) => L + ((lap - minLap) / Math.max(1, maxLap - minLap)) * (W - L - R), Y = (p) => T + ((p - 1) / Math.max(1, N - 1)) * (H - T - B);
     let out = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="랩별 순위 차트">`;
-    const SHADE = { SC: ["#f29a30", 0.13, "SC"], VSC: ["#f2c230", 0.09, "VSC"], RED: ["#e8392f", 0.14, "적색기"] };
     for (const p of src.neutralPeriods()) {
       const [c, op, label] = SHADE[p.kind], x1 = X(Math.max(minLap, p.from)), x2 = X(Math.min(maxLap, Math.max(p.to, p.from + 1)));
       if (x2 > x1) out += `<rect x="${x1}" y="${T}" width="${x2 - x1}" height="${H - T - B}" fill="${c}" fill-opacity="${op}"/><text x="${x1 + 3}" y="${H - B - 4}" style="fill:${c}">${label}</text>`;
     }
-    for (let p = 1; p <= N; p++) if (p === 1 || p % 5 === 0) out += `<line x1="${L}" x2="${W - R}" y1="${Y(p)}" y2="${Y(p)}" stroke="#2a3038"/><text x="4" y="${Y(p) + 3}">${p}</text>`;
+    for (let p = 1; p <= N; p++) if (p === 1 || p % 5 === 0) out += `<line x1="${L}" x2="${W - R}" y1="${Y(p)}" y2="${Y(p)}" stroke="${PAL.grid}"/><text x="4" y="${Y(p) + 3}">${p}</text>`;
     out += `<text x="${L}" y="${H - 5}">${minLap}랩</text><text x="${W - R}" y="${H - 5}" text-anchor="end">${maxLap}랩</text>`;
     const rank = (s) => (s.n === focus ? 2 : s.n === compare ? 1 : 0);
     const mates = {}; for (const s of series) (mates[s.d.TeamName] || (mates[s.d.TeamName] = [])).push(+s.n);
@@ -1153,14 +1146,14 @@
     const X = (lap) => L + ((lap - minLap) / Math.max(1, maxLap - minLap)) * (W - L - R);
     const Y = (sec) => T + ((Math.min(sec, hi) - lo) / Math.max(0.1, hi - lo)) * (H - T - B);
     let out = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="랩타임 그래프"${H !== 150 ? ` style="height:${H}px"` : ""}>`;
-    for (let k = 0; k <= 3; k++) { const v = lo + ((hi - lo) * k) / 3, y = Y(v); out += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#2a3038"/><text x="4" y="${y + 3}">${fmtLap(v)}</text>`; }
-    for (const p of pits) out += `<line x1="${X(p.lap)}" x2="${X(p.lap)}" y1="${T}" y2="${H - B}" stroke="#7aa7d8" stroke-dasharray="3 3"/>`;
+    for (let k = 0; k <= 3; k++) { const v = lo + ((hi - lo) * k) / 3, y = Y(v); out += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="${PAL.grid}"/><text x="4" y="${y + 3}">${fmtLap(v)}</text>`; }
+    for (const p of pits) out += `<line x1="${X(p.lap)}" x2="${X(p.lap)}" y1="${T}" y2="${H - B}" stroke="${PAL.info}" stroke-dasharray="3 3"/>`;
     out += `<text x="${L}" y="${H - 5}">${minLap}랩</text><text x="${W - R - 30}" y="${H - 5}">${maxLap}랩</text>`;
     for (const s of series) {
       const pts = s.laps.filter((x) => x.sec);
       out += `<polyline fill="none" stroke="${s.color}" stroke-width="1.8" points="${pts.map((x) => `${X(x.lap).toFixed(1)},${Y(x.sec).toFixed(1)}`).join(" ")}"/>`;
       const fastest = pts.reduce((a, b) => (b.sec < a.sec ? b : a), pts[0]);
-      if (fastest) out += `<circle cx="${X(fastest.lap)}" cy="${Y(fastest.sec)}" r="3.5" fill="#38c96a" stroke="#0f1114"/>`;
+      if (fastest) out += `<circle cx="${X(fastest.lap)}" cy="${Y(fastest.sec)}" r="3.5" fill="${PAL.ok}" stroke="${PAL.inv}"/>`;
     }
     return out + "</svg>";
   }
@@ -1172,7 +1165,7 @@
     const maxPos = Math.max(10, ...all.map((x) => x.pos));
     const X = (lap) => L + ((lap - minLap) / Math.max(1, maxLap - minLap)) * (W - L - R), Y = (p) => T + ((p - 1) / (maxPos - 1)) * (H - T - B);
     let out = `<svg class="chart" style="height:110px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="순위 변화">`;
-    for (const p of [1, Math.round(maxPos / 2), maxPos]) out += `<line x1="${L}" x2="${W - R}" y1="${Y(p)}" y2="${Y(p)}" stroke="#2a3038"/><text x="2" y="${Y(p) + 3}">${p}</text>`;
+    for (const p of [1, Math.round(maxPos / 2), maxPos]) out += `<line x1="${L}" x2="${W - R}" y1="${Y(p)}" y2="${Y(p)}" stroke="${PAL.grid}"/><text x="2" y="${Y(p) + 3}">${p}</text>`;
     for (const s of series) out += `<polyline fill="none" stroke="${s.color}" stroke-width="1.8" points="${s.laps.filter((x) => x.pos).map((x) => `${X(x.lap).toFixed(1)},${Y(x.pos).toFixed(1)}`).join(" ")}"/>`;
     return out + "</svg>";
   }
@@ -1235,7 +1228,7 @@
     const rows = stintPace(num).filter((r) => r.n > 0);
     if (!rows.length) return "";
     return `<table class="stint-pace"><tbody>${rows.map((r) => {
-      const ty = KO.TYRES[r.x.Compound] || { short: "?", color: "#666" };
+      const ty = KO.TYRES[r.x.Compound] || { short: "?", color: PAL.faint };
       const trend = r.slope == null || r.used < 4 ? "–" : `${r.slope >= 0 ? "+" : "−"}${Math.abs(r.slope).toFixed(3)}초/랩`;
       return `<tr><td><i class="ui-tyre sm ${TYRE_LETTER[r.x.Compound] || ""}">${ty.short}</i></td><td class="muted">${r.lo}–${r.hi}랩</td>
         <td>${r.avg ? `평균 <b>${lapStr(r.avg)}</b>` : ""}</td>
@@ -1274,10 +1267,11 @@
     if (telemRef === "compare" && cmpOn) { const cl = src.laps(compare, src.now()); refNum = compare; refLap = cl[cl.length - 1]?.lap; refLabel = `${src.state.DriverList[compare].Tla} 최근 랩`; }
     const a = last ? src.lapTrace(num, last.lap) : null;
     const b = refLap && !(refNum === num && refLap === last?.lap) ? src.lapTrace(refNum, refLap) : null;
-    const focusColor = "#ffffff", cmpColor = cmpOn ? "#" + (hexColour(src.state.DriverList[compare]?.TeamColour, "7aa7d8")) : "#7aa7d8";
+    const cmpHex = cmpOn ? hexColour(src.state.DriverList[compare]?.TeamColour, "") : "";
+    const focusColor = PAL.ink, cmpColor = cmpHex ? "#" + cmpHex : PAL.info;
     return `<div class="d-section"><h4>텔레메트리 <span class="seg mini" role="group" aria-label="비교 기준"><button data-tref="best" aria-pressed="${telemRef === "best"}">개인 최고 랩과</button><button data-tref="compare" aria-pressed="${telemRef === "compare"}"${cmpOn ? "" : " disabled title=\"Shift+클릭으로 비교할 드라이버를 고르세요\""}>비교 드라이버와</button></span></h4>
       <div class="gauges">${gauge(num, focusColor)}${cmpOn ? gauge(compare, cmpColor) : ""}</div>
-      ${a ? traceChart(a, b, focusColor, b ? (refNum === num ? "#38c96a" : cmpColor) : null, `${last.lap}랩 ${last.time || ""}`, b ? `${refLabel} ${b.lap}랩 ${b.time || ""}` : "", size) : `<p class="muted note">한 랩을 마치면 속도 그래프를 그려요.</p>`}</div>`;
+      ${a ? traceChart(a, b, focusColor, b ? (refNum === num ? PAL.ok : cmpColor) : null, `${last.lap}랩 ${last.time || ""}`, b ? `${refLabel} ${b.lap}랩 ${b.time || ""}` : "", size) : `<p class="muted note">한 랩을 마치면 속도 그래프를 그려요.</p>`}</div>`;
   }
   function traceChart(a, b, ca, cb, la, lb, { W = 420, H = 230 } = {}) {
     const L = 34, R = 8, T = 16, dt = 50, pd = 22, sp = Math.max(80, H - 110);   // speed / delta / pedals bands
@@ -1291,13 +1285,13 @@
       return `<polyline fill="none" stroke="${color}" stroke-width="${w}" stroke-linejoin="round" points="${pts.join(" ")}"/>`;
     };
     let out = `<svg class="chart trace-tel" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="속도 그래프"${H !== 230 ? ` style="height:${H}px"` : ""}>`;
-    for (const v of [100, 200, 300]) if (v < vmax) out += `<line x1="${L}" x2="${W - R}" y1="${Ys(v)}" y2="${Ys(v)}" stroke="#2a3038"/><text x="2" y="${Ys(v) + 3}">${v}</text>`;
+    for (const v of [100, 200, 300]) if (v < vmax) out += `<line x1="${L}" x2="${W - R}" y1="${Ys(v)}" y2="${Ys(v)}" stroke="${PAL.grid}"/><text x="2" y="${Ys(v) + 3}">${v}</text>`;
     out += `<text x="${L}" y="11" fill="${ca}">${esc(la)}</text>${b ? `<text x="${W - R}" y="11" text-anchor="end" fill="${cb}">${esc(lb)}</text>` : ""}`;
     if (b) out += line(b, cb, 1.4);
     out += line(a, ca, 1.8);
     // running time difference (positive: slower than the reference)
     const y0 = T + sp + 8 + dt / 2;
-    out += `<line x1="${L}" x2="${W - R}" y1="${y0}" y2="${y0}" stroke="#39414b"/><text x="2" y="${y0 + 3}">Δ</text><text x="${L + 2}" y="${y0 + dt / 2 - 1}" style="fill:#6b7682">아래: 기준보다 느림</text>`;
+    out += `<line x1="${L}" x2="${W - R}" y1="${y0}" y2="${y0}" stroke="${PAL.grid}"/><text x="2" y="${y0 + 3}">Δ</text><text x="${L + 2}" y="${y0 + dt / 2 - 1}" style="fill:${PAL.faint}">아래: 기준보다 느림</text>`;
     if (b) {
       const nb = b.d[b.d.length - 1] || 1, steps = 120, ds = [];
       for (let k = 0; k <= steps; k++) { const f = k / steps; ds.push((ReplayKit.timeAtDistance(a, f * len) - ReplayKit.timeAtDistance(b, f * nb)) / 1000); }
@@ -1305,17 +1299,17 @@
       // the line finishes at the official lap time difference.
       if (a.sec && b.sec) { const err = a.sec - b.sec - ds[steps]; for (let k = 0; k <= steps; k++) ds[k] += (err * k) / steps; }
       const m = Math.max(0.3, ...ds.map(Math.abs)), Yd = (v) => y0 + (v / m) * (dt / 2);
-      out += `<polyline fill="none" stroke="#f2c230" stroke-width="1.6" points="${ds.map((v, k) => `${X(k / steps).toFixed(1)},${Yd(v).toFixed(1)}`).join(" ")}"/>`;
+      out += `<polyline fill="none" stroke="${PAL.warn}" stroke-width="1.6" points="${ds.map((v, k) => `${X(k / steps).toFixed(1)},${Yd(v).toFixed(1)}`).join(" ")}"/>`;
       const end = ds[ds.length - 1];
-      out += `<text x="${W - R}" y="${y0 - dt / 2 + 8}" text-anchor="end" fill="${end > 0 ? "#e87b72" : "#3ccf6e"}">${end > 0 ? "+" : "−"}${Math.abs(end).toFixed(3)}초</text><text x="2" y="${y0 - dt / 2 + 8}">±${m.toFixed(1)}</text>`;
+      out += `<text x="${W - R}" y="${y0 - dt / 2 + 8}" text-anchor="end" fill="${end > 0 ? PAL.badInk : PAL.ok}">${end > 0 ? "+" : "−"}${Math.abs(end).toFixed(3)}초</text><text x="2" y="${y0 - dt / 2 + 8}">±${m.toFixed(1)}</text>`;
     }
     // pedals: throttle (green) and brake (red) of the driver's lap
     const yp = T + sp + 8 + dt + 6;
     out += `<text x="2" y="${yp + 8}">페달</text>`;
     for (let i = 1; i < a.d.length; i++) {
       const x1 = X(a.d[i - 1] / len), x2 = X(a.d[i] / len), w = Math.max(0.6, x2 - x1);
-      out += `<rect x="${x1.toFixed(1)}" y="${yp}" width="${w.toFixed(1)}" height="${(pd / 2 - 1).toFixed(1)}" fill="#3ccf6e" fill-opacity="${(a.thr[i] / 100).toFixed(2)}"/>`;
-      if (a.brk[i]) out += `<rect x="${x1.toFixed(1)}" y="${yp + pd / 2}" width="${w.toFixed(1)}" height="${(pd / 2 - 1).toFixed(1)}" fill="#e8392f"/>`;
+      out += `<rect x="${x1.toFixed(1)}" y="${yp}" width="${w.toFixed(1)}" height="${(pd / 2 - 1).toFixed(1)}" fill="${PAL.ok}" fill-opacity="${(a.thr[i] / 100).toFixed(2)}"/>`;
+      if (a.brk[i]) out += `<rect x="${x1.toFixed(1)}" y="${yp + pd / 2}" width="${w.toFixed(1)}" height="${(pd / 2 - 1).toFixed(1)}" fill="${PAL.bad}"/>`;
     }
     out += `<text x="${L}" y="${H - 2}">0m</text><text x="${W - R}" y="${H - 2}" text-anchor="end">${Math.round(len)}m</text>`;
     return out + "</svg>";
@@ -1354,7 +1348,7 @@
     const name = KO.DRIVERS[d.Tla] || d.FullName, color = "#" + (hexColour(d?.TeamColour, "888"));
     const stints = src.stints(focus);
     const tNow = src.now();
-    const series = [{ laps: src.laps(focus, tNow), color: "#ffffff", label: name }];
+    const series = [{ laps: src.laps(focus, tNow), color: PAL.ink, label: name }];
     let cmpName = "";
     if (compare && drivers[compare]) {
       const cd = drivers[compare]; cmpName = KO.DRIVERS[cd.Tla] || cd.Tla;
@@ -1375,11 +1369,11 @@
       ${pitWindow(focus)}
       ${pitStopList(focus)}
       <div class="d-section"><h4>타이어 스틴트</h4><div class="stints">${stints.map((x) => {
-        const ty = KO.TYRES[x.Compound] || { short: "?", color: "#666", ko: x.Compound };
+        const ty = KO.TYRES[x.Compound] || { short: "?", color: PAL.faint, ko: x.Compound };
         const laps = Math.max(1, (x.TotalLaps || 0) - (x.StartLaps || 0));
         return `<div class="${x.New === "false" ? "used" : ""}" style="flex:${laps};--tc:var(--tyre-${(TYRE_LETTER[x.Compound] || "x").toLowerCase()}, ${ty.color})" title="${esc(ty.ko)} ${laps}랩${x.New === "true" ? " (새 타이어)" : " (중고 타이어로 시작)"}">${ty.short}${laps}</div>`;
       }).join("") || `<div style="flex:1;color:var(--text-3)">기록 없음</div>`}</div>${stintTable(focus)}</div>
-      <div class="d-section"><h4>랩타임 ${cmpName ? `<span class="legend"><span><i style="background:#fff"></i>${esc(name)}</span><span><i style="background:${series[1].color}"></i>${esc(cmpName)}</span></span>` : ""}</h4>
+      <div class="d-section"><h4>랩타임 ${cmpName ? `<span class="legend"><span><i style="background:${PAL.ink}"></i>${esc(name)}</span><span><i style="background:${series[1].color}"></i>${esc(cmpName)}</span></span>` : ""}</h4>
         ${lapChart(series, src.pits(focus, tNow))}
         <p class="muted" style="margin:4px 0 0;font-size:11px">초록 점: 개인 최고 랩 · 파란 점선: 피트 진입 · 세이프티카·피트 랩은 위쪽에서 잘려요</p></div>
       ${sessionType() === "Race" ? `<div class="d-section"><h4>순위 변화</h4>${posChart(series)}</div>` : ""}`;
@@ -1412,7 +1406,7 @@
       const { W, H } = paneSize(laps);
       const key = [sessionTag, focus, compare, src.laps(focus, tNow).length, cd ? src.laps(compare, tNow).length : 0, W, H].join("|");
       if (laps.__key === key) return; laps.__key = key;
-      const series = [{ laps: src.laps(focus, tNow), color: "#ffffff" }];
+      const series = [{ laps: src.laps(focus, tNow), color: PAL.ink }];
       if (cd) series.push({ laps: src.laps(compare, tNow), color: "#" + hexColour(cd.TeamColour, "7aa7d8") });
       const L = src.state.TimingData?.Lines || {}, S = src.state.TimingStats?.Lines || {};
       const secOf = (n, i) => ReplayKit.toSec(at(S[n]?.BestSectors, i)?.Value);
@@ -1424,14 +1418,14 @@
         if (/^s\d$/.test(k)) return secOf(n, +k[1] - 1);
         return null;
       };
-      const fmt = (v, k) => (v == null ? NONE : /^s\d$/.test(k) ? v.toFixed(3) : lapStr(v));
+      const fmt = (v, k) => (v == null ? "" : /^s\d$/.test(k) ? v.toFixed(3) : lapStr(v));
       const rowsDef = [["last", "최근 랩"], ["best", "개인 최고 랩"], ["s1", "최고 S1"], ["s2", "최고 S2"], ["s3", "최고 S3"], ["ideal", "이론상 최고 (최고 섹터 합)"]];
       const table = `<table class="cmp-table"><thead><tr><th></th><th>${esc(d.Tla)}</th>${cd ? `<th>${esc(cd.Tla)}</th><th title="${esc(d.Tla)} − ${esc(cd.Tla)} · −: ${esc(d.Tla)}가 빠름">차이</th>` : ""}</tr></thead><tbody>${rowsDef.map(([k, label]) => {
         const a = val(focus, k), b = cd ? val(compare, k) : null, diff = a != null && b != null ? a - b : null;
-        return `<tr><td>${label}</td><td>${fmt(a, k)}</td>${cd ? `<td>${fmt(b, k)}</td><td class="d ${diff == null ? "" : diff < 0 ? "t-gain" : diff > 0 ? "t-lose" : ""}">${diff == null ? NONE : fmtRel(diff)}</td>` : ""}</tr>`;
+        return `<tr><td>${label}</td><td>${fmt(a, k)}</td>${cd ? `<td>${fmt(b, k)}</td><td class="d ${diff == null ? "" : diff < 0 ? "t-gain" : diff > 0 ? "t-lose" : ""}">${diff == null ? "" : fmtRel(diff)}</td>` : ""}</tr>`;
       }).join("")}</tbody></table>`;
       const chartH = Math.min(Math.max(150, H - 60), 380);
-      setHTML(laps, `<div class="wp-head"><h3>랩 비교</h3><span class="legend"><span><i style="background:#fff"></i>${esc(KO.DRIVERS[d.Tla] || d.Tla)}</span>${cd ? `<span><i style="background:${series[1].color}"></i>${esc(KO.DRIVERS[cd.Tla] || cd.Tla)}</span>` : `<span class="faint">Shift+클릭으로 비교할 드라이버를 더하세요</span>`}</span><span class="grow"></span><span class="faint">초록 점: 개인 최고 랩 · 파란 점선: 피트 진입</span></div>
+      setHTML(laps, `<div class="wp-head"><h3>랩 비교</h3><span class="legend"><span><i style="background:${PAL.ink}"></i>${esc(KO.DRIVERS[d.Tla] || d.Tla)}</span>${cd ? `<span><i style="background:${series[1].color}"></i>${esc(KO.DRIVERS[cd.Tla] || cd.Tla)}</span>` : `<span class="faint">Shift+클릭으로 비교할 드라이버를 더하세요</span>`}</span><span class="grow"></span><span class="faint">초록 점: 개인 최고 랩 · 파란 점선: 피트 진입</span></div>
         ${lapChart(series, src.pits(focus, tNow), { W, H: chartH })}${table}${stintTable(focus) ? `<h4 class="wp-sub">${esc(d.Tla)} 스틴트 페이스</h4>${stintTable(focus)}` : ""}${cd && stintTable(compare) ? `<h4 class="wp-sub">${esc(cd.Tla)} 스틴트 페이스</h4>${stintTable(compare)}` : ""}`);
     }
   }
@@ -1501,7 +1495,7 @@
     // v0.71 – the 2D view's look: a blue board with a light edge and a grid, the road on it as a filled light band with a
     // dark edge and a flat shadow, each car a square block in its team's colour carrying its position; the selected
     // car's block is larger and yellow. (Not a dark map with an outlined track and coloured dots.)
-    const INK = "#0d0d0f", LIGHT = "#f2efe6", BLUE = "#3d4dff", YELLOW = "#ffe500";
+    const INK = PAL.inv, LIGHT = PAL.ink, BLUE = PAL.blue, YELLOW = PAL.yellow;
     // Margins keep the track clear of the board's edge and of the map tools on the left.
     // (in the full window the standings list stands over the board's right side: the track keeps clear of it)
     // A small map (the side column or the map's height dragged small): the tools lie in a row along the top instead of a
@@ -1600,7 +1594,7 @@
       // (a block too small for digits is the team's colour alone; the selected car always carries its number)
       if (p && !gone(num) && sz >= 12) {
         ctx.font = `400 ${Math.round(sz * 0.7)}px Anton, "IBM Plex Sans KR", sans-serif`;
-        ctx.fillStyle = isF || lightBlock(hex.length === 6 ? hex : "888888") ? INK : "#ffffff";
+        ctx.fillStyle = isF || lightBlock(hex.length === 6 ? hex : "888888") ? INK : PAL.blueInk;
         ctx.fillText(String(p), x0 + sz / 2, y0 + sz / 2 + sz * 0.05);
       }
     }

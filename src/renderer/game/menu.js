@@ -16,7 +16,6 @@
 import { G, go, paint, seasons, teamsOf, racesOf, menuRace, toPrerace, saveSettings, autoSlowRule, applyRacePrefs } from "./gamehome.js";
 import { $, esc, teamKo, raceKo, fmtT } from "./ui.js";
 import { safeFrac } from "./hudmodel.js";
-import * as API from "./gameapi.js";
 import * as SaveUI from "./saveui.js";
 
 // ---------- the 3D garage hook ----------
@@ -59,11 +58,11 @@ async function showGarage(host) {
   paintLoading();
   reframe();
 }
-// The car's safe area: the share of the scene's width the menu column (left) and the driver cards / sheet (right) cover,
+// The car's safe area: the share of the scene's width the way-back button (left) and the driver cards (right) cover,
 // measured from the DOM as laid out now (they change with the window and when a sheet opens) plus a margin, so the car is
 // framed in the free middle and never under text.
 function safeArea(host) {
-  const H = host.getBoundingClientRect(), W = H.width || innerWidth, L = $("gmLeft")?.getBoundingClientRect(), R = $("gmRight")?.getBoundingClientRect();
+  const H = host.getBoundingClientRect(), W = H.width || innerWidth, L = document.querySelector(".gm-back")?.getBoundingClientRect(), R = $("gmRight")?.getBoundingClientRect();
   return safeFrac(W, L ? L.right - H.left : 0, R && R.width ? H.right - R.left : 0);
 }
 function reframe() {
@@ -112,7 +111,6 @@ export function mount(body, html) {
   }
   const t = teamsOf(G.season).find((x) => x.key === G.teamKey);
   body.style.setProperty("--tc", t?.colour || "#888");
-  body.dataset.view = want ? "garage" : "tiles";
   $("gmOver").innerHTML = html;
   if (!want) return;
   paintLoading();
@@ -140,11 +138,11 @@ export function paintTeam() {
 // The tiles' shapes: plain blocks and lines (no photographs) – a track with a marker, two lines crossing, the number of
 // prepared races, a chequer, three tyre rings, four squares with the team's colour.
 const ART = {
-  start: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 320 230" style="--ah:230px;right:-40px;bottom:-30px"><path d="M40 170 L34 90 Q32 40 80 36 L180 24 Q214 20 226 50 L238 84 Q246 104 274 100 L300 96 L300 190 L80 196 Q44 198 40 170 Z" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linejoin="round"/><circle cx="130" cy="30" r="12" fill="#FFE500" stroke="#0D0D0F" stroke-width="3"/></svg>`,
-  cont: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 420 200" style="--ah:200px;right:-20px;bottom:10px" fill="none" stroke-width="14"><path d="M0 60 L170 60 Q210 60 240 100 Q270 140 310 140 L420 140" stroke="#F2EFE6"/><path d="M0 140 L170 140 Q210 140 240 100 Q270 60 310 60 L420 60" stroke="#FFE500"/></svg>`,
-  saves: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 200 150" style="--ah:150px;right:0;bottom:0" fill="#0D0D0F"><rect x="0" y="0" width="50" height="50"/><rect x="100" y="0" width="50" height="50"/><rect x="50" y="50" width="50" height="50"/><rect x="150" y="50" width="50" height="50"/><rect x="0" y="100" width="50" height="50"/><rect x="100" y="100" width="50" height="50"/></svg>`,
-  garage: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 230 120" style="--ah:120px;right:-30px;bottom:-30px" fill="#131316" stroke-width="14"><circle cx="60" cy="60" r="48" stroke="#FF5A4D"/><circle cx="115" cy="60" r="48" stroke="#FFD60A"/><circle cx="170" cy="60" r="48" stroke="#F2EFE6"/></svg>`,
-  team: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 150 150" style="--ah:150px;right:-16px;bottom:-16px" fill="none" stroke="#0D0D0F" stroke-width="8"><rect x="8" y="8" width="58" height="58"/><rect x="84" y="8" width="58" height="58" fill="var(--tc)"/><rect x="8" y="84" width="58" height="58" fill="#3D4DFF"/><rect x="84" y="84" width="58" height="58"/></svg>`,
+  start: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 320 230" style="--ah:230px;right:-40px;bottom:-30px"><path d="M40 170 L34 90 Q32 40 80 36 L180 24 Q214 20 226 50 L238 84 Q246 104 274 100 L300 96 L300 190 L80 196 Q44 198 40 170 Z" fill="none" stroke-width="12" stroke-linejoin="round" style="stroke:var(--c-blue-ink)"/><circle cx="130" cy="30" r="12" stroke-width="3" style="fill:var(--c-yellow);stroke:var(--text-inv)"/></svg>`,
+  cont: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 420 200" style="--ah:200px;right:-20px;bottom:10px" fill="none" stroke-width="14"><path d="M0 60 L170 60 Q210 60 240 100 Q270 140 310 140 L420 140" style="stroke:var(--ink)"/><path d="M0 140 L170 140 Q210 140 240 100 Q270 60 310 60 L420 60" style="stroke:var(--c-yellow)"/></svg>`,
+  saves: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 200 150" style="--ah:150px;right:0;bottom:0;fill:var(--text-inv)"><rect x="0" y="0" width="50" height="50"/><rect x="100" y="0" width="50" height="50"/><rect x="50" y="50" width="50" height="50"/><rect x="150" y="50" width="50" height="50"/><rect x="0" y="100" width="50" height="50"/><rect x="100" y="100" width="50" height="50"/></svg>`,
+  garage: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 230 120" style="--ah:120px;right:-30px;bottom:-30px;fill:var(--bg-1)" stroke-width="14"><circle cx="60" cy="60" r="48" style="stroke:var(--tyre-s)"/><circle cx="115" cy="60" r="48" style="stroke:var(--tyre-m)"/><circle cx="170" cy="60" r="48" style="stroke:var(--tyre-h)"/></svg>`,
+  team: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 150 150" style="--ah:150px;right:-16px;bottom:-16px;stroke:var(--text-inv)" fill="none" stroke-width="8"><rect x="8" y="8" width="58" height="58"/><rect x="84" y="8" width="58" height="58" style="fill:var(--tc)"/><rect x="8" y="84" width="58" height="58" style="fill:var(--c-blue)"/><rect x="84" y="84" width="58" height="58"/></svg>`,
 };
 const GEAR = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></svg>`;
 const raceShort = (ev) => window.KO?.gpShort?.(ev) || raceKo(ev);

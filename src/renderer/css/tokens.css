@@ -40,8 +40,8 @@
   /* text */
   --text-1: #f2efe6; --text-2: #a3a199; --text-3: #8a8880; --text-inv: #0d0d0f;
   /* point colours */
-  --c-blue: #3d4dff; --c-blue-ink: #ffffff;
-  --c-yellow: #ffe500; --c-yellow-ink: #0d0d0f;
+  --c-blue: #3d4dff; --c-blue-ink: #ffffff; --bar-hover: rgb(13 13 15 / 0.22);   /* (a control on the blue bar under the pointer) */
+  --c-yellow: #ffe500; --c-yellow-ink: #0d0d0f; --c-yellow-hover: #fff06a;
   --c-red: #ff4b33; --c-red-ink: #0d0d0f;
   /* the main action (red) and the focus ring (yellow) */
   --accent: var(--c-red); --accent-ink: var(--c-red-ink); --accent-soft: rgb(255 75 51 / 0.16); --accent-hover: #ff6a55;
@@ -96,5 +96,3 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .muted { color: var(--text-2); }
 .faint { color: var(--text-3); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-/* a yellow sticker label (R21 라스베이거스, 스프린트, KR): dark text on yellow, a dark edge, a flat dark shadow */
-.sticker { display: inline-flex; align-items: center; background: var(--c-yellow); color: var(--c-yellow-ink); border: 2px solid var(--text-inv); font-weight: var(--fw-bold); white-space: nowrap; }

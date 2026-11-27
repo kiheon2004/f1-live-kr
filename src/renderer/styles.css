@@ -1,15 +1,10 @@
-/* Layout: header + status strip, then leaderboard (left) beside map and tabbed panel (right), player bar at the bottom.
-   v0.50: the live area's rules (bar, session bar, table, panels, player, drawers, home) are in css/live.css; what is
-   left here is the legacy base, the 3D map block and the game block (moving to css/spectator.css / css/game.css). */
-:root {
-  /* legacy names → the v0.50 tokens (css/tokens.css); area files use the tokens directly */
-  --bg: var(--bg-0); --panel: var(--bg-1); --panel-2: var(--bg-2); --line-2: var(--line-soft); --muted: var(--text-2);
-  --green: var(--ok); --purple: var(--best); --yellow: var(--warn); --red: var(--bad);
-}
+/* The page's frame and the legacy base rules for bare elements (button, select): the app bar, then the table (left)
+   beside the map card and its tab panel (right), the player at the bottom. Everything else lives in the area files
+   (css/live.css, css/spectator.css, css/game.css); what is left below is the full-window map's small block. */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--text-1); font: 13px/1.4 var(--font); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
+body { background: var(--bg-0); color: var(--text-1); font: 13px/1.4 var(--font); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
 button, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; border-radius: 0; border: var(--bw) solid var(--line); background: transparent; padding: 5px 12px; font-weight: var(--fw-bold); }
 button:disabled { opacity: 0.4; cursor: default; }
@@ -18,7 +13,7 @@ button.primary { background: var(--accent); border-color: var(--line); color: va
 button.ghost { background: none; }
 button.small { padding: 4px 8px; font-size: 12px; }
 select { background: var(--bg-0); border: var(--bw) solid var(--line); border-radius: 0; padding: 4px 8px; font-weight: var(--fw-bold); }
-.muted { color: var(--muted); }
+.muted { color: var(--text-2); }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 
@@ -29,7 +24,7 @@ select { background: var(--bg-0); border: var(--bw) solid var(--line); border-ra
 .toasts { z-index: 7; }
 
 /* full-window map */
-.map-card.expanded { position: fixed; inset: 0; z-index: 60; background: var(--bg); border: 0; }
+.map-card.expanded { position: fixed; inset: 0; z-index: 60; background: var(--bg-0); border: 0; }
 .mini-board { position: absolute; top: 22px; right: 22px; z-index: 6; list-style: none; margin: 0; padding: 4px 0; width: 230px; max-height: calc(100% - 60px); overflow: auto; background: var(--bg-0); border: var(--bw) solid var(--line); font-size: 13px; }
 .mini-board li { display: grid; grid-template-columns: 24px 5px 1fr auto; gap: 7px; align-items: center; padding: 3px 10px; cursor: pointer; }
 .mini-board li:hover { background: var(--bg-3); }

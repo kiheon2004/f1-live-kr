@@ -12,23 +12,16 @@ import { Globe } from "./globe.js";
 
 const $ = (id) => document.getElementById(id);
 const D = window.HomeData, KO = window.KO, A = () => window.F1KRApp;
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const KST = (o) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", ...o });
+// (escaping, clock and Korean-time formatting, the settings store: src/shared/fmt.js)
+const { esc, hms, KST, toOffset, store } = window.Fmt;
 const kstFull = KST({ month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 const kstDay = KST({ month: "long", day: "numeric", weekday: "short" });
 // "11.22" (a list row's date) · "금 09:30" (a session block) · "11.20–22" (a weekend), all in Korean time
 const kstParts = (o, ms) => Object.fromEntries(KST(o).formatToParts(ms).map((p) => [p.type, p.value]));
 const kstMD = (ms) => { const p = kstParts({ month: "numeric", day: "numeric" }, ms); return `${p.month}.${p.day}`; };
-const kstShort = { format: kstMD };
 const kstDowTime = (ms) => { const p = kstParts({ weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }, ms); return `${p.weekday} ${p.hour === "24" ? "00" : p.hour}:${p.minute}`; };
 const kstRange = (a, b) => { const p = kstParts({ month: "numeric", day: "numeric" }, a), q = kstParts({ month: "numeric", day: "numeric" }, b); return p.month === q.month ? (p.day === q.day ? `${p.month}.${p.day}` : `${p.month}.${p.day}–${q.day}`) : `${p.month}.${p.day}–${q.month}.${q.day}`; };
-const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return [s / 3600, (s % 3600) / 60, s % 60].map((v) => String(Math.floor(v)).padStart(2, "0")).join(":"); };
-const store = {
-  get(k, d) { try { const v = localStorage.getItem("f1kr:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("f1kr:" + k, JSON.stringify(v)); } catch {} },
-};
-// archive StartDate is the track's local time; GmtOffset makes it UTC
-const toOffset = (off) => { const m = /^(-?)(\d\d):(\d\d)/.exec(off || "00:00"); return m ? `${m[1] ? "-" : "+"}${m[2]}:${m[3]}` : "+00:00"; };
+// (archive StartDate is the track's local time; GmtOffset makes it UTC – Fmt.toOffset)
 const archiveAt = (s) => Date.parse(s.start + toOffset(s.gmtOffset));
 const ago = (ms) => { const m = Math.round((Date.now() - ms) / 6e4); return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
 const cleanErr = (e) => String(e?.message || e || "").replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
@@ -45,7 +38,7 @@ const hasSprint = (sessions) => !!sessions?.some((s) => /^Sprint$/.test(s?.name 
 const metrics = { tScript: Math.round(performance.now()), tListReady: null, tScheduleReady: null, tGlobeFirstFrame: null, ignored: { season: 0, cached: 0, probe: 0, all: 0, load: 0 }, seasonLoads: 0 };
 const S = {
   year: store.get("homeYear", thisYear), races: [], sched: { state: "loading" }, listing: { state: "loading" }, sessions: [], match: null,
-  cached: {}, probes: {}, items: [], sel: store.get("homeSel", null), query: "", kbd: -1, all: false, allItems: [], allNote: "", load: null,
+  cached: {}, probes: {}, items: [], sel: store.get("homeSel", null), query: "", all: false, allItems: [], allNote: "", load: null,
   seasonData: new Map(),
 };
 const seasonG = D.guard(), probeG = D.guard(), allG = D.guard();
@@ -99,7 +92,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePick(
 async function loadSeason(year) {
   const tok = seasonG.next();
   metrics.seasonLoads++;
-  S.year = year; S.races = []; S.sessions = []; S.match = null; S.cached = {}; S.items = []; S.kbd = -1;
+  S.year = year; S.races = []; S.sessions = []; S.match = null; S.cached = {}; S.items = [];
   S.sched = { state: "loading" }; S.listing = year < D.ARCHIVE_FROM ? { state: "skip" } : { state: "loading" };
   $("homeSeason").value = String(year);
   render();
@@ -142,7 +135,7 @@ function rebuild() {
       id: `r${r.round}`, kind: "race", round: r.round, race: r, meeting, match,
       name: r.name, koName: KO.gpName(r.name), shortName: KO.gpShort(r.name), circuitName: r.circuitName, circuitId: r.circuitId, locality: r.locality, country: r.country,
       sprint: hasSprint(r.sessions) || hasSprint(meeting?.sessions),
-      lat: r.lat, lon: r.lon, dateText: r.date ? (r.precision === "time" ? kstShort.format(Date.parse(r.utc)) : kstShort.format(Date.parse(r.date + "T12:00:00Z"))) : "",
+      lat: r.lat, lon: r.lon, dateText: r.date ? (r.precision === "time" ? kstMD(Date.parse(r.utc)) : kstMD(Date.parse(r.date + "T12:00:00Z"))) : "",
       sched: D.scheduleStatus(r, { now, raceListed: !!raceS, raceStart: raceS ? archiveAt(raceS) : null }),
       data: D.dataStatus({ year: S.year, listing, match, cached: S.cached, probes: S.probes, now, race: r }),
     });
@@ -154,7 +147,7 @@ function rebuild() {
     items.push({
       id: `m${g.key}`, kind: "meeting", round: null, race: null, meeting: g, match: { state: "matched", meeting: g },
       name: g.name, koName: KO.gpName(g.name), shortName: KO.gpShort(g.name), circuitName: g.circuit, locality: g.location, country: g.country, lat: null, lon: null,
-      dateText: first ? kstShort.format(archiveAt(first)) : "", extra: true, sprint: hasSprint(g.sessions),
+      dateText: first ? kstMD(archiveAt(first)) : "", extra: true, sprint: hasSprint(g.sessions),
       sched: { key: "unknown", ...D.SCHEDULE.unknown, why: S.races.length ? "일정(Jolpica)에 없는 F1 기록" : "일정을 받지 못함" },
       data: D.dataStatus({ year: S.year, listing, match: { state: "matched", meeting: g }, cached: S.cached, probes: S.probes, now }),
     });
@@ -283,7 +276,7 @@ function renderList(scroll) {
   const list = visibleItems(), sel = S.sel;
   const ol = $("homeList");
   let html = "", group = null;
-  for (const [i, it] of list.entries()) {
+  for (const it of list) {
     const g = it.extra ? "일정에 없는 F1 기록" : null;
     if (g && g !== group) { html += `<li class="group" role="presentation">${esc(g)}</li>`; group = g; }
     const id = S.all ? it.id : fullId(it);
@@ -297,7 +290,7 @@ function renderList(scroll) {
       rd = it.round ? String(it.round) : "·"; date = it.dateText;
       tip = `${it.koName}\n${place}\n개최: ${it.sched.ko} – ${it.sched.why}\n데이터: ${it.data.ko} – ${it.data.why}${it.lat == null && !it.extra ? "\n좌표 없음" : ""}`;
     }
-    html += `<li role="option" id="hl-${esc(id.replace(/[^A-Za-z0-9_-]/g, "_"))}" data-id="${esc(id)}" aria-selected="${id === sel}" class="${state}${i === S.kbd ? " kbd" : ""}" title="${esc(tip)}"><span class="rd">${esc(rd)}</span><span class="nm">${esc(S.all ? it.koName : it.shortName || it.koName)}</span>${!S.all && it.sprint ? `<span class="sprint">스프린트</span>` : ""}<span class="dt">${esc(date)}</span></li>`;
+    html += `<li role="option" id="hl-${esc(id.replace(/[^A-Za-z0-9_-]/g, "_"))}" data-id="${esc(id)}" aria-selected="${id === sel}" class="${state}" title="${esc(tip)}"><span class="rd">${esc(rd)}</span><span class="nm">${esc(S.all ? it.koName : it.shortName || it.koName)}</span>${!S.all && it.sprint ? `<span class="sprint">스프린트</span>` : ""}<span class="dt">${esc(date)}</span></li>`;
   }
   if (ol.__html !== html) { ol.innerHTML = html; ol.__html = html; }
   const loading = !S.all && (S.sched.state === "loading" || S.listing.state === "loading") && !S.items.length;
@@ -437,7 +430,7 @@ function setAll(on) {
 // ---------- events ----------
 $("homeSeason").addEventListener("change", () => { const y = +$("homeSeason").value; store.set("homeYear", y); if (S.all) setAll(false); loadSeason(y); });
 $("homeAll").addEventListener("click", () => setAll(!S.all));
-$("homeSearch").addEventListener("input", () => { S.query = $("homeSearch").value; S.kbd = -1; renderList(false); });
+$("homeSearch").addEventListener("input", () => { S.query = $("homeSearch").value; renderList(false); });
 $("homeSearch").addEventListener("keydown", (e) => { if (e.key === "ArrowDown") { e.preventDefault(); $("homeList").focus(); moveKbd(1); } else if (e.key === "Enter") { const first = visibleItems()[0]; if (first) select(S.all ? first.id : fullId(first)); } });
 $("homeList").addEventListener("click", (e) => { const id = e.target.closest("[data-id]")?.dataset.id; if (id) select(id); });
 function moveKbd(d) {

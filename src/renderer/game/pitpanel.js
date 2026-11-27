@@ -14,6 +14,7 @@
 //     [{ key, label, done }], wheels: [bool × 4] (nut done) | null, issue: { kind, wheel, text } | null, release: text | null }
 import { stopChoreo } from "../crew.js";
 import { stopPlan } from "./pitcrew.js";
+import { esc } from "./ui.js";
 
 const D0 = { FZ: 1.7, RZ: -1.7, FR: 0.353, RR: 0.355, FW: 0.28, RW: 0.375, FX: 0.81, RX: 0.7625, W: 1.9 };   // (timings don't depend on the car's size)
 const PHASE_KO = { called: "박스 요청됨", committed: "피트 진입 확정", entry: "피트 진입", lane: "피트레인 주행", approach: "박스 접근", queue: "앞차 정비 대기", penalty: "페널티 정지",
@@ -21,7 +22,6 @@ const PHASE_KO = { called: "박스 요청됨", committed: "피트 진입 확정"
 const WHEEL_KO = ["왼쪽 앞", "오른쪽 앞", "왼쪽 뒤", "오른쪽 뒤"];
 const CAUSE_KO = { "double stack": "더블 스택", rain: "비" };
 const IN = new Set(["called", "committed", "entry", "lane", "approach", "queue", "penalty", "work", "release", "laneOut", "exit"]);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export function pitPanelModel(car, T) {
   const p = car?.pit; if (!p || !IN.has(p.phase)) return null;

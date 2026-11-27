@@ -16,13 +16,14 @@ Files:
 | `src/renderer/css/spectator.css` | 3D view HUD (`#map3d …`) – spectator area |
 | `src/renderer/css/game.css` | strategy game (`#game …`) – game area |
 | `src/renderer/styles.css` | legacy base + blocks not yet moved (shrinking; no new rules) |
+| `src/shared/fmt.js` | `window.Fmt` – the one copy of `esc`, `hms`, the Korean-time formatters, the settings `store`, and `token()` (a design token's value for canvas drawing and chart markup) |
 | `src/renderer/icons.js` | `window.UIIcons` – inline Lucide subset |
 | `src/renderer/ui/kit.js` | `window.UIKit` – dialog, focus trap, menu, toast, tooltip behaviour |
 | `src/renderer/ui/keys.js` | `window.UIKeys` – global keyboard shortcut policy |
 | `src/renderer/ui/livestatus.js` | `window.LiveStatus` – stale data, race-control kinds/unread, late-answer guard |
 
 Load order in `index.html`: `tokens.css → components.css → styles.css → live.css (→ spectator.css, game.css)`, then
-`icons.js, ui/kit.js, ui/keys.js, ui/livestatus.js` before `app.js`. All are classic scripts (no modules, no framework).
+`shared/fmt.js, shared/ko.js, icons.js, ui/kit.js, ui/keys.js, ui/livestatus.js` before `app.js`. All are classic scripts (no modules, no framework).
 
 ---
 
@@ -49,6 +50,12 @@ The structure (tokens → shared components → one stylesheet per area) is v0.5
   the position – not a dark map with an outlined track and coloured dots (timing screen `app.js drawMap`, game
   `racehud.js drawMini`).
 * **Avoid:** rounded corners, blurred shadows, gradients, glass, long explanations always on screen.
+* **No palette in scripts.** What a script draws (the 2D board, the minimap, chart markup, the globe, the tiles' shapes)
+  takes its colours from the tokens – `Fmt.token("--ok")` for canvas and SVG attributes, `style="fill:var(--c-blue)"`
+  for page SVG. Only data colours that come from the feed (a team's colour) are written as they arrive, after
+  `hexColour()` / the game store's check.
+* **A chosen control stays readable under the pointer:** hover rules exclude `[aria-pressed="true"]`,
+  `[aria-selected="true"]` and `[aria-current="true"]` (a pressed control is a light block with dark text).
 
 ## 2. Tokens (`css/tokens.css`)
 
