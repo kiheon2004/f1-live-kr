@@ -65,17 +65,20 @@ export function validateScenario(sc) {
   for (const p of forbiddenPaths(sc)) err.push(`${p}: a race outcome must not be in a scenario (it belongs in the calibration extract)`);
   const m = sc.meta || {};
   for (const k of ["id", "season", "event", "sessionPath", "builtAt"]) if (m[k] == null || m[k] === "") err.push(`meta.${k}: missing`);
+  // (the season is shown in menus and compared as a number: a year, never a text)
+  if (m.season != null && m.season !== "" && !(Number.isInteger(m.season) && m.season >= 1950 && m.season <= 2100)) err.push(`meta.season: ${JSON.stringify(m.season)} (a year)`);
   if (!Array.isArray(m.sources) || !m.sources.length) err.push("meta.sources: missing");
   if (!Array.isArray(m.estimates)) err.push("meta.estimates: missing");
   // track
   const t = sc.track || {};
   const n = t.n, L = t.L;
-  if (!Number.isInteger(n) || n < 100) err.push(`track.n: ${n}`);
+  // (L ≤ 9 km and ds ≥ 1 m: never more than 9,000 samples – a file's own n is not trusted for a loop)
+  if (!Number.isInteger(n) || n < 100 || n > 10000) err.push(`track.n: ${n}`);
   if (!isNum(L) || L < 1000 || L > 9000) err.push(`track.L: ${L} (a Grand Prix lap is 3–7.1 km)`);
   if (!isNum(t.ds) || t.ds < 1 || t.ds > 4) err.push(`track.ds: ${t.ds}`);
   if (Number.isInteger(n) && isNum(L) && isNum(t.ds) && Math.abs(n * t.ds - L) > 1e-3 * L) err.push(`track: n·ds = ${n * t.ds} ≠ L = ${L}`);
   if (Number.isInteger(n)) checkColumns(t.columns, TRACK_COLUMNS, n, "track.columns", err);
-  if (t.columns?.x && t.columns?.y && Number.isInteger(n) && n > 2) {
+  if (Array.isArray(t.columns?.x) && Array.isArray(t.columns?.y) && Number.isInteger(n) && n > 2 && n <= 10000 && t.columns.x.length === n && t.columns.y.length === n) {
     let worst = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n, d = Math.hypot(t.columns.x[j] - t.columns.x[i], t.columns.y[j] - t.columns.y[i]); worst = Math.max(worst, Math.abs(d - t.ds)); }
     if (worst > t.ds * 0.5) err.push(`track: sample spacing off by ${worst.toFixed(2)} m somewhere (not a closed even lap)`);
   }

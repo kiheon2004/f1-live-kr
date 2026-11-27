@@ -948,11 +948,11 @@
         ? `<span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span><b>${esc(d ? KO.surname(d.Tla, d.LastName) : k + "번")}</b>${d ? `<span class="tla">${esc(d.Tla)}</span>` : ""}`
         : `<b>${esc(teamKo(k))}</b>`;
       return `<tr class="${champKind === "drivers" && k === focus ? "focus" : ""}" ${champKind === "drivers" ? `data-num="${esc(k)}"` : ""}>
-        <td class="c pos">${r.PredictedPosition}</td>
+        <td class="c pos">${esc(r.PredictedPosition)}</td>
         <td class="c chg">${move > 0 ? `<span class="up"><b>↑</b>${move}</span>` : move < 0 ? `<span class="down"><b>↓</b>${-move}</span>` : `<span class="same">–</span>`}</td>
         <td><div class="drv-in">${who}</div></td>
-        <td class="c muted">${r.CurrentPosition ?? "–"}위 · ${r.CurrentPoints ?? 0}</td>
-        <td class="c"><b>${r.PredictedPoints ?? 0}</b>${gain > 0 ? ` <span class="up">+${gain}</span>` : ""}</td></tr>`;
+        <td class="c muted">${esc(r.CurrentPosition ?? "–")}위 · ${esc(r.CurrentPoints ?? 0)}</td>
+        <td class="c"><b>${esc(r.PredictedPoints ?? 0)}</b>${gain > 0 ? ` <span class="up">+${esc(gain)}</span>` : ""}</td></tr>`;
     }).join("")}</tbody></table>`;
   }
   $("champTable").addEventListener("click", (e) => {
@@ -1101,7 +1101,7 @@
     const caps = src.state.TeamRadio?.Captures;
     const list = (Array.isArray(caps) ? caps : Object.values(caps || {})).filter(Boolean);
     const raceLap = isRaceLike() ? src.state.LapCount?.CurrentLap : null;
-    $("radioLap").innerHTML = raceLap ? `지금 <b>${raceLap}랩</b>` : isRaceLike() ? "" : "드라이버마다 자기 랩 기준";
+    $("radioLap").innerHTML = raceLap ? `지금 <b>${esc(raceLap)}랩</b>` : isRaceLike() ? "" : "드라이버마다 자기 랩 기준";
     const key = [list.length, raceLap, radioView, focus, isRaceLike() ? "" : Math.floor(src.now() / 5000)].join("|");
     // (v0.50: another session on screen – the old session's list goes even under a playing clip, which stops with it)
     if (radioFor !== sessionTag) { force = true; radioFor = sessionTag; }
@@ -1116,7 +1116,7 @@
     const item = (x) => {
       const d = drivers[x.c.RacingNumber] || {};
       return `<li class="${x.c.RacingNumber === focus ? "mine" : ""}"><span class="team-bar" style="background:#${esc(hexColour(d?.TeamColour, "888"))}"></span>
-        <div class="who">${esc(KO.DRIVERS[d.Tla] || d.Tla || x.c.RacingNumber)}${x.lap ? `<span class="lap-tag">${x.lap}랩</span>` : ""}<small>${x.utc ? kstTime.format(x.utc) + " KST" : ""}</small>
+        <div class="who">${esc(KO.DRIVERS[d.Tla] || d.Tla || x.c.RacingNumber)}${x.lap ? `<span class="lap-tag">${esc(x.lap)}랩</span>` : ""}<small>${x.utc ? kstTime.format(x.utc) + " KST" : ""}</small>
           ${!src.isLive && x.ms != null ? `<button class="jump" data-ms="${Math.round(x.ms)}" title="이 무전이 나온 순간으로 재생 위치를 옮겨요">이 장면으로</button>` : ""}</div>
         <audio controls preload="none" src="https://livetiming.formula1.com/static/${esc(base)}${esc(x.c.Path)}"></audio></li>`;
     };
@@ -1125,14 +1125,14 @@
       const now = clips.filter((x) => x.lap != null && (x.lap === currentLapFor(x.c.RacingNumber) || (x.ms != null && src.now() - x.ms < 15000)));
       if (now.length) { $("radio").innerHTML = now.map(item).join(""); return; }
       const last = clips[0], d = drivers[last.c.RacingNumber] || {};
-      $("radio").innerHTML = `<li class="empty-li">이번 랩에는 아직 공개된 팀 라디오가 없어요.<br>가장 최근 무전: <b>${last.lap ? last.lap + "랩" : ""} ${esc(KO.surname(d.Tla, d.LastName))}</b>
+      $("radio").innerHTML = `<li class="empty-li">이번 랩에는 아직 공개된 팀 라디오가 없어요.<br>가장 최근 무전: <b>${last.lap ? esc(last.lap) + "랩" : ""} ${esc(KO.surname(d.Tla, d.LastName))}</b>
         <button class="link" data-rv-go="all">랩별 전체 보기</button></li>`;
       return;
     }
     // Grouped by lap, newest lap first; the current race lap is marked.
     const groups = new Map();
     for (const x of clips) { const k = x.lap ?? "?"; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(x); }
-    $("radio").innerHTML = [...groups].map(([lap, xs]) => `<li class="lap-head${lap === raceLap ? " now" : ""}">${lap === "?" ? "랩 정보 없음" : `${lap}랩`}${lap === raceLap ? " · 지금" : ""}<span>${xs.length}개</span></li>${xs.map(item).join("")}`).join("");
+    $("radio").innerHTML = [...groups].map(([lap, xs]) => `<li class="lap-head${lap === raceLap ? " now" : ""}">${lap === "?" ? "랩 정보 없음" : `${esc(lap)}랩`}${lap === raceLap ? " · 지금" : ""}<span>${xs.length}개</span></li>${xs.map(item).join("")}`).join("");
   }
   $("radio").addEventListener("click", (e) => {
     const jump = e.target.closest("button.jump");

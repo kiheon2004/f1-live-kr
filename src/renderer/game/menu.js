@@ -129,7 +129,7 @@ export function paintTeam() {
   const teams = teamsOf(G.season), cont = SaveUI.continueInfo();
   // (after a restart the game opens here: the latest save is one click away – its own team and race come with it)
   const contBar = cont.ok ? `<div class="g-cont"><button class="ui-btn primary" data-act="menu:continue">이어하기</button><span>${esc(cont.text)}</span></div>` : "";
-  return `<div class="g-team-pick">${contBar}<div class="g-team-h"><h2>팀 선택</h2><label class="g-field">시즌 <select class="ui-select" data-chg="menu:season">${ss.map((y) => `<option ${y === G.season ? "selected" : ""}>${y}</option>`).join("")}</select></label>
+  return `<div class="g-team-pick">${contBar}<div class="g-team-h"><h2>팀 선택</h2><label class="g-field">시즌 <select class="ui-select" data-chg="menu:season">${ss.map((y) => `<option ${y === G.season ? "selected" : ""}>${esc(y)}</option>`).join("")}</select></label>
     <span class="muted">팀과 드라이버는 그 시즌 준비된 경기의 참가 명단에서 읽어요.</span></div>
     <div class="g-grid">${teams.map((t) => `<button class="g-team ${t.key === G.teamKey ? "on" : ""}" data-act="menu:team" data-team="${esc(t.key)}" style="--tc:${esc(t.colour || "#888")}"><b>${esc(teamKo(t.name))}</b>
       <small>준비된 경기 ${t.races}개</small></button>`).join("")}</div></div>`;
@@ -177,7 +177,7 @@ export function paintMenu() {
     ${tile("yellow", 6, "sheet:races", "경기 선택", `${nRaces}개 준비됨`, "열기", `<span class="gt-art gt-big" aria-hidden="true">${nRaces}</span>`)}
     ${tile("red", 8, "sheet:saves", "저장 슬롯", "저장 · 불러오기", "열기", ART.saves)}
     ${tile("", 10, "sheet:garage", "차고", `${esc(teamKo(t.name))} 차량 보기`, "열기", ART.garage)}
-    ${tile("light", 6, "menu:changeTeam", "팀 바꾸기", `${G.season} · ${esc(teamKo(t.name))}`, "열기", ART.team)}
+    ${tile("light", 6, "menu:changeTeam", "팀 바꾸기", `${esc(G.season)} · ${esc(teamKo(t.name))}`, "열기", ART.team)}
   </div>`;
 }
 function driverCard(e, on, t) {
