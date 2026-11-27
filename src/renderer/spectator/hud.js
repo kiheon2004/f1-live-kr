@@ -23,7 +23,7 @@ const RATE = { tower: 500, strip: 500, driver: 500, tel: 100, pit: 200, ready: 2
 const ORDER = ["cam", "strip", "driver", "tower", "pit", "notes"];   // layout priority (who keeps its place)
 const ROW_H = 22;
 const CAM_SVG = '<svg class="cam-ico" viewBox="0 0 16 12" aria-hidden="true"><rect x="1" y="2.5" width="10" height="8" rx="1.5"/><path d="M11 5.5l4-2.5v7l-4-2.5z"/></svg>';
-const esc = (x) => String(x ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+const esc = window.Fmt.esc;   // (src/shared/fmt.js)
 const hex = (c) => (/^[0-9a-f]{6}$/i.test(c || "") ? "#" + c : "#888888");
 function setText(el, v) {
   v = v == null ? "" : String(v); if (el.__t === v) return; el.__t = v;

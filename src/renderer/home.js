@@ -12,17 +12,16 @@ import { Globe } from "./globe.js";
 
 const $ = (id) => document.getElementById(id);
 const D = window.HomeData, KO = window.KO, A = () => window.F1KRApp;
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const KST = (o) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", ...o });
+// (escaping, clock and Korean-time formatting, the settings store: src/shared/fmt.js)
+const { esc, hms, KST, toOffset, store } = window.Fmt;
 const kstFull = KST({ month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
-const kstDay = KST({ month: "long", day: "numeric", weekday: "short" }), kstShort = KST({ month: "numeric", day: "numeric" });
-const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return [s / 3600, (s % 3600) / 60, s % 60].map((v) => String(Math.floor(v)).padStart(2, "0")).join(":"); };
-const store = {
-  get(k, d) { try { const v = localStorage.getItem("f1kr:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("f1kr:" + k, JSON.stringify(v)); } catch {} },
-};
-// archive StartDate is the track's local time; GmtOffset makes it UTC
-const toOffset = (off) => { const m = /^(-?)(\d\d):(\d\d)/.exec(off || "00:00"); return m ? `${m[1] ? "-" : "+"}${m[2]}:${m[3]}` : "+00:00"; };
+const kstDay = KST({ month: "long", day: "numeric", weekday: "short" });
+// "11.22" (a list row's date) · "금 09:30" (a session block) · "11.20–22" (a weekend), all in Korean time
+const kstParts = (o, ms) => Object.fromEntries(KST(o).formatToParts(ms).map((p) => [p.type, p.value]));
+const kstMD = (ms) => { const p = kstParts({ month: "numeric", day: "numeric" }, ms); return `${p.month}.${p.day}`; };
+const kstDowTime = (ms) => { const p = kstParts({ weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }, ms); return `${p.weekday} ${p.hour === "24" ? "00" : p.hour}:${p.minute}`; };
+const kstRange = (a, b) => { const p = kstParts({ month: "numeric", day: "numeric" }, a), q = kstParts({ month: "numeric", day: "numeric" }, b); return p.month === q.month ? (p.day === q.day ? `${p.month}.${p.day}` : `${p.month}.${p.day}–${q.day}`) : `${p.month}.${p.day}–${q.month}.${q.day}`; };
+// (archive StartDate is the track's local time; GmtOffset makes it UTC – Fmt.toOffset)
 const archiveAt = (s) => Date.parse(s.start + toOffset(s.gmtOffset));
 const ago = (ms) => { const m = Math.round((Date.now() - ms) / 6e4); return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
 const cleanErr = (e) => String(e?.message || e || "").replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
@@ -39,7 +38,7 @@ const hasSprint = (sessions) => !!sessions?.some((s) => /^Sprint$/.test(s?.name 
 const metrics = { tScript: Math.round(performance.now()), tListReady: null, tScheduleReady: null, tGlobeFirstFrame: null, ignored: { season: 0, cached: 0, probe: 0, all: 0, load: 0 }, seasonLoads: 0 };
 const S = {
   year: store.get("homeYear", thisYear), races: [], sched: { state: "loading" }, listing: { state: "loading" }, sessions: [], match: null,
-  cached: {}, probes: {}, items: [], sel: store.get("homeSel", null), query: "", kbd: -1, all: false, allItems: [], allNote: "", load: null,
+  cached: {}, probes: {}, items: [], sel: store.get("homeSel", null), query: "", all: false, allItems: [], allNote: "", load: null,
   seasonData: new Map(),
 };
 const seasonG = D.guard(), probeG = D.guard(), allG = D.guard();
@@ -52,7 +51,7 @@ function makeGlobe(forceFail = false) {
     onPick: (ids, x, y) => (ids.length === 1 ? select(ids[0], { fly: false }) : pickMenu(ids, x, y)),
     onError: (msg) => { globeFailed = msg; $("homeGlobeNote").textContent = msg; $("homeGlobeNote").hidden = false; },
     onFirstFrame: () => { if (metrics.tGlobeFirstFrame == null) metrics.tGlobeFirstFrame = Math.round(performance.now()); },
-    labelOf: (id) => { const it = itemById(id); return it ? `${it.round ? `R${it.round} ` : ""}${it.koName}` : ""; },
+    labelOf: (id) => { const it = itemById(id); return it ? `${it.round ? `R${it.round} ` : ""}${it.shortName || it.koName}` : ""; },
   });
   if (!g.init()) return g;
   $("homeGlobeNote").hidden = true; globeFailed = null;
@@ -63,8 +62,8 @@ function globeShow() {
   if (!globe) { globe = makeGlobe(); placeMarkers(); const it = itemById(S.sel); if (it?.lat != null) globe.flyTo(it.lat, it.lon); }
   globe.start();
 }
-// Hidden: the loop stops at once; the GPU side (renderer, ~85 MB of texture with its mipmaps) is let go after a minute
-// in the timing screen – coming back within that is instant, later it's rebuilt (the texture is a local file).
+// Hidden: the loop stops at once; the globe itself (its picture, camera and markers – small since v0.71, no GPU side) is
+// let go after a minute in the timing screen and rebuilt when the home screen comes back.
 function globeHide() {
   globe?.stop();
   clearTimeout(globeDisposeTimer);
@@ -93,7 +92,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePick(
 async function loadSeason(year) {
   const tok = seasonG.next();
   metrics.seasonLoads++;
-  S.year = year; S.races = []; S.sessions = []; S.match = null; S.cached = {}; S.items = []; S.kbd = -1;
+  S.year = year; S.races = []; S.sessions = []; S.match = null; S.cached = {}; S.items = [];
   S.sched = { state: "loading" }; S.listing = year < D.ARCHIVE_FROM ? { state: "skip" } : { state: "loading" };
   $("homeSeason").value = String(year);
   render();
@@ -134,9 +133,9 @@ function rebuild() {
     const raceS = meeting?.sessions.find((s) => s.name === "Race");
     items.push({
       id: `r${r.round}`, kind: "race", round: r.round, race: r, meeting, match,
-      name: r.name, koName: KO.gpName(r.name), circuitName: r.circuitName, circuitId: r.circuitId, locality: r.locality, country: r.country,
+      name: r.name, koName: KO.gpName(r.name), shortName: KO.gpShort(r.name), circuitName: r.circuitName, circuitId: r.circuitId, locality: r.locality, country: r.country,
       sprint: hasSprint(r.sessions) || hasSprint(meeting?.sessions),
-      lat: r.lat, lon: r.lon, dateText: r.date ? (r.precision === "time" ? kstShort.format(Date.parse(r.utc)) : kstShort.format(Date.parse(r.date + "T12:00:00Z"))) : "",
+      lat: r.lat, lon: r.lon, dateText: r.date ? (r.precision === "time" ? kstMD(Date.parse(r.utc)) : kstMD(Date.parse(r.date + "T12:00:00Z"))) : "",
       sched: D.scheduleStatus(r, { now, raceListed: !!raceS, raceStart: raceS ? archiveAt(raceS) : null }),
       data: D.dataStatus({ year: S.year, listing, match, cached: S.cached, probes: S.probes, now, race: r }),
     });
@@ -147,8 +146,8 @@ function rebuild() {
     const first = g.sessions[0];
     items.push({
       id: `m${g.key}`, kind: "meeting", round: null, race: null, meeting: g, match: { state: "matched", meeting: g },
-      name: g.name, koName: KO.gpName(g.name), circuitName: g.circuit, locality: g.location, country: g.country, lat: null, lon: null,
-      dateText: first ? kstShort.format(archiveAt(first)) : "", extra: true, sprint: hasSprint(g.sessions),
+      name: g.name, koName: KO.gpName(g.name), shortName: KO.gpShort(g.name), circuitName: g.circuit, locality: g.location, country: g.country, lat: null, lon: null,
+      dateText: first ? kstMD(archiveAt(first)) : "", extra: true, sprint: hasSprint(g.sessions),
       sched: { key: "unknown", ...D.SCHEDULE.unknown, why: S.races.length ? "일정(Jolpica)에 없는 F1 기록" : "일정을 받지 못함" },
       data: D.dataStatus({ year: S.year, listing, match: { state: "matched", meeting: g }, cached: S.cached, probes: S.probes, now }),
     });
@@ -242,22 +241,27 @@ function progressHtml(origin) {
 // ---------- rendering ----------
 function render() { renderMeta(); renderList(false); renderEvent(); renderRecent(); renderLive(); placeMarkers(); }
 
+// Where the calendar and F1's record list come from and how fresh they are: in the ⋯ menu (index.html .menu-status), not on
+// the screen. The menu's button carries the yellow mark only while a refresh has failed (a request failed, or a stored
+// copy stands in for one that could not be refreshed).
 function renderMeta() {
   const parts = [];
   const sc = S.sched;
+  let failed = false;
   if (S.all) parts.push(esc(S.allNote));
   else {
     if (sc.state === "loading") parts.push("일정 확인 중…");
-    else if (sc.state === "error") parts.push(`<span class="bad">일정 요청 실패${sc.offline ? " (오프라인)" : ""}</span>`);
-    else parts.push(`일정: Jolpica · ${esc(ago(Date.parse(sc.fetchedAt)))} 확인${sc.stale ? ` · <span class="warn">${sc.offline ? "오프라인 – 저장된 일정" : "갱신 실패 – 저장된 일정"}</span>` : ""}`);
+    else if (sc.state === "error") { failed = true; parts.push(`<span class="bad">일정 요청 실패${sc.offline ? " (오프라인)" : ""}</span>`); }
+    else { failed ||= !!sc.stale; parts.push(`일정: Jolpica · ${esc(ago(Date.parse(sc.fetchedAt)))} 확인${sc.stale ? ` · <span class="warn">${sc.offline ? "오프라인 – 저장된 일정" : "갱신 실패 – 저장된 일정"}</span>` : ""}`); }
     const L = S.listing;
     if (L.state === "skip") parts.push(`F1 기록: ${D.ARCHIVE_FROM}년부터 (이 시즌은 지원 범위 밖)`);
     else if (L.state === "loading") parts.push("F1 기록 목록 확인 중…");
-    else if (L.state === "error") parts.push(`<span class="${L.status === 401 || L.status === 403 ? "warn" : "bad"}">F1 기록 목록: ${L.status === 401 || L.status === 403 ? `인증 필요 (HTTP ${L.status})` : L.offline ? "요청 실패 (오프라인)" : "요청 실패"}</span>`);
-    else parts.push(`F1 기록 목록: ${L.stale ? `<span class="warn">${L.offline ? "오프라인" : `HTTP ${L.status}`} – 저장된 목록 (${esc(ago(L.fetchedAt))})</span>` : `${esc(ago(L.fetchedAt))} 확인`}`);
+    else if (L.state === "error") { failed = true; parts.push(`<span class="${L.status === 401 || L.status === 403 ? "warn" : "bad"}">F1 기록 목록: ${L.status === 401 || L.status === 403 ? `인증 필요 (HTTP ${L.status})` : L.offline ? "요청 실패 (오프라인)" : "요청 실패"}</span>`); }
+    else { failed ||= !!L.stale; parts.push(`F1 기록 목록: ${L.stale ? `<span class="warn">${L.offline ? "오프라인" : `HTTP ${L.status}`} – 저장된 목록 (${esc(ago(L.fetchedAt))})</span>` : `${esc(ago(L.fetchedAt))} 확인`}`); }
   }
-  if (S.load?.state === "loading" && !itemHasPath(itemById(S.sel), S.load.path) && S.load.origin === "event") parts.push(`다른 세션 불러오는 중 ${S.load.pct}%`);
-  $("homeMeta").innerHTML = parts.join(" · ");
+  $("homeMeta").innerHTML = parts.map((x) => `<span>${x}</span>`).join("");
+  $("menuWarnDot").hidden = !failed;
+  $("menuBtn").setAttribute("aria-label", failed ? "설정 · 일정 갱신 실패" : "설정");
 }
 const itemHasPath = (it, path) => !!it?.meeting?.sessions.some((s) => s.path === path);
 
@@ -265,18 +269,28 @@ function visibleItems() {
   const list = S.all ? S.allItems : S.items;
   return D.filterRaces(list, S.query, KO.gpName);
 }
+// A row: the round's number block, the name, the sprint label, the date – nothing else. The block tells the race's
+// state: filled = finished, the yellow one = the selected race, an outline only = still to come. What the schedule and
+// the data are in stays in the row's tooltip.
 function renderList(scroll) {
   const list = visibleItems(), sel = S.sel;
   const ol = $("homeList");
   let html = "", group = null;
-  for (const [i, it] of list.entries()) {
+  for (const it of list) {
     const g = it.extra ? "일정에 없는 F1 기록" : null;
     if (g && g !== group) { html += `<li class="group" role="presentation">${esc(g)}</li>`; group = g; }
     const id = S.all ? it.id : fullId(it);
-    const badges = S.all ? `<span class="badge">개최 ${it.hosted.length}</span>${it.replay.length ? `<span class="badge ok">다시보기 목록 ${it.replay.length}</span>` : ""}`
-      : `<span class="badge ${it.sched.cls}" title="개최 일정: ${esc(it.sched.why)}">${esc(it.sched.ko)}</span><span class="badge ${it.data.cls}" title="데이터: ${esc(it.data.why)}">${esc(it.data.ko)}</span>${it.sprint ? `<span class="badge sprint" title="스프린트가 있는 주말">스프린트</span>` : ""}`;
-    const sub = S.all ? `${esc([it.locality, it.country].filter(Boolean).join(", "))} · ${esc(seasonsText(it.hosted.map((h) => h.season)))}` : `${esc(it.dateText)} · ${esc([it.locality, it.country].filter(Boolean).join(", "))}${it.lat == null && !it.extra ? " · 좌표 없음" : ""}`;
-    html += `<li role="option" id="hl-${esc(id.replace(/[^A-Za-z0-9_-]/g, "_"))}" data-id="${esc(id)}" aria-selected="${id === sel}" class="${i === S.kbd ? "kbd" : ""}"><span class="rd">${it.round ? `R${it.round}` : S.all ? "" : "·"}</span><span class="nm"><em>${esc(it.koName)}</em>${!S.all && it.circuitName ? `<small>${esc(it.circuitName)}</small>` : ""}</span><span class="sub">${sub} ${badges}</span></li>`;
+    const place = [it.circuitName, it.locality, it.country].filter(Boolean).join(" · ");
+    let state, rd, date, tip;
+    if (S.all) {
+      state = "done"; rd = String(it.hosted.length); date = seasonsText(it.hosted.map((h) => h.season));
+      tip = `${it.koName}\n${place}\n개최 ${it.hosted.length}회${it.replay.length ? ` · 다시보기 목록 ${it.replay.length}개 시즌` : ""}`;
+    } else {
+      state = it.sched.key === "finished" || (it.extra && it.meeting) ? "done" : it.sched.key === "ongoing" ? "live" : "soon";
+      rd = it.round ? String(it.round) : "·"; date = it.dateText;
+      tip = `${it.koName}\n${place}\n개최: ${it.sched.ko} – ${it.sched.why}\n데이터: ${it.data.ko} – ${it.data.why}${it.lat == null && !it.extra ? "\n좌표 없음" : ""}`;
+    }
+    html += `<li role="option" id="hl-${esc(id.replace(/[^A-Za-z0-9_-]/g, "_"))}" data-id="${esc(id)}" aria-selected="${id === sel}" class="${state}" title="${esc(tip)}"><span class="rd">${esc(rd)}</span><span class="nm">${esc(S.all ? it.koName : it.shortName || it.koName)}</span>${!S.all && it.sprint ? `<span class="sprint">스프린트</span>` : ""}<span class="dt">${esc(date)}</span></li>`;
   }
   if (ol.__html !== html) { ol.innerHTML = html; ol.__html = html; }
   const loading = !S.all && (S.sched.state === "loading" || S.listing.state === "loading") && !S.items.length;
@@ -289,52 +303,61 @@ function renderList(scroll) {
   $("homeAllNote").hidden = !S.all; $("homeAllNote").textContent = S.allNote;
 }
 
+// The selected race: its round, name and dates over one block per session (the name, the day and time in Korea). A
+// block is the button: pressing it loads that session (or goes back to it when it is the one loaded). A session F1's
+// list does not have yet is an outline that cannot be pressed – why is in its tooltip.
 function renderEvent() {
   const box = $("homeEvent");
   const it = itemById(S.sel);
   if (S.all && it?.kind === "venue") return renderVenue(box, it);
-  if (!it) { box.innerHTML = `<h3>경기를 고르세요</h3>${progressHtml("event")}<p class="muted">오른쪽 목록이나 지구본의 빨간 표시를 누르세요. 화살표 키로도 고를 수 있어요.</p>`; return; }
+  if (!it) { box.innerHTML = `<div class="ev-head"><h1>경기를 고르세요</h1></div>${progressHtml("event")}`; return; }
   const r = it.race;
-  const head = `<h3>${it.round ? `R${it.round} · ` : ""}${esc(it.koName)} <small>${esc([it.circuitName, it.locality, it.country].filter(Boolean).join(" · "))}</small></h3>`;
-  const badges = `<p><span class="badge ${it.sched.cls}">${esc(it.sched.ko)}</span> <span class="muted">개최 · ${esc(it.sched.why)}</span><br><span class="badge ${it.data.cls}">${esc(it.data.ko)}</span> <span class="muted">데이터 · ${esc(it.data.why)}</span>${it.sprint ? `<br><span class="badge sprint">스프린트</span> <span class="muted">스프린트가 있는 주말이에요</span>` : ""}</p>`;
-  // other seasons at this circuit: only from what the app has checked (전체 개최지) – asked for, not fetched here
-  const history = it.circuitId || it.lat != null ? `<p class="home-history"><button class="ghost small" data-history="${esc(it.circuitId || "")}">이 서킷의 다른 시즌 개최 이력</button> <span class="muted">앱이 확인한 시즌 기준</span></p>` : "";
-  const coord = r ? (r.lat == null ? `<p class="muted">좌표 정보가 없어 지구본에 표시하지 않았어요 (목록에서는 고를 수 있어요).</p>` : "") : "";
-  let body = "";
+  const place = [it.circuitName, it.locality, it.country].filter(Boolean).join(" · ");
+  const tip = `${it.koName}\n${place}\n개최: ${it.sched.ko} – ${it.sched.why}\n데이터: ${it.data.ko} – ${it.data.why}`;
+  let blocks = "", range = "";
   if (it.meeting) {
     const loaded = A().loaded()?.info?.path;
-    const rows = [...it.meeting.sessions].sort((a, b) => archiveAt(a) - archiveAt(b)).map((s) => {
+    const list = [...it.meeting.sessions].sort((a, b) => archiveAt(a) - archiveAt(b));
+    if (list.length) range = kstRange(archiveAt(list[0]), archiveAt(list[list.length - 1]));
+    blocks = list.map((s) => {
       const st = D.sessionStatus({ cached: S.cached[s.path], probe: S.probes[s.path] });
       const busy = S.load?.state === "loading" && S.load.path === s.path;
-      const btn = loaded === s.path ? `<button class="primary small" data-resume>이어보기</button>` : `<button class="small${s.name === "Race" ? " primary" : ""}" data-load="${esc(s.path)}" ${busy ? "disabled" : ""}>${busy ? "불러오는 중" : "불러오기"}</button>`;
-      return `<li class="${s.name === "Race" ? "main" : s.name === "Sprint" ? "sprint" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span class="when">${esc(kstFull.format(archiveAt(s)))}</span><span class="act"><span class="badge ${st.cls}" title="${esc(st.why)}">${esc(st.ko)}</span>${btn}</span></li>`;
+      const act = loaded === s.path ? "data-resume" : `data-load="${esc(s.path)}"`;
+      return `<button class="ev-s${s.name === "Race" ? " main" : ""}${busy ? " busy" : ""}" ${act} ${busy ? "disabled" : ""} title="${esc(`${KO.sessionName(s.name)} · ${kstFull.format(archiveAt(s))}\n${loaded === s.path ? "지금 불러온 세션 – 누르면 이어서 봐요" : `${st.ko} – ${st.why}`}`)}"><b>${esc(KO.sessionShort(s.name))}</b><span>${esc(kstDowTime(archiveAt(s)))}</span></button>`;
     }).join("");
-    body = `<h4>세션 (F1 기록 목록 · 한국 시간)</h4><ul class="home-sessions">${rows}</ul>`;
   } else if (r) {
-    const rows = r.sessions.map((s) => `<li class="${s.name === "Race" ? "main" : s.name === "Sprint" ? "sprint" : ""}"><span>${esc(KO.sessionName(s.name))}</span><span class="when">${esc(calWhen(s))}</span><span class="act"></span></li>`).join("");
-    body = `<h4>일정 (Jolpica · 한국 시간)</h4><ul class="home-sessions">${rows}</ul><p class="muted">${S.listing.state === "error" ? `F1 기록 목록을 받지 못해 (${esc(it.data.ko)}) 이 경기의 세션을 확인할 수 없어요. 기록이 없다는 뜻은 아니에요.` : S.listing.state === "skip" ? `F1 기록 보관소는 ${D.ARCHIVE_FROM}년부터라 이 시즌은 다시볼 수 없어요.` : S.listing.state === "loading" ? "F1 기록 목록을 확인하는 중이에요…" : it.match?.state === "ambiguous" ? "F1 기록에서 이 경기로 보이는 후보가 여러 개라 자동으로 고르지 않았어요." : "F1 기록 목록에 이 경기의 세션이 아직 없어 불러올 수 없어요 (취소됐다는 뜻은 아니에요)."}</p>`;
+    const why = S.listing.state === "error" ? `F1 기록 목록을 받지 못해 (${it.data.ko}) 이 경기의 세션을 확인할 수 없어요. 기록이 없다는 뜻은 아니에요.` : S.listing.state === "skip" ? `F1 기록 보관소는 ${D.ARCHIVE_FROM}년부터라 이 시즌은 다시볼 수 없어요.` : S.listing.state === "loading" ? "F1 기록 목록을 확인하는 중이에요…" : it.match?.state === "ambiguous" ? "F1 기록에서 이 경기로 보이는 후보가 여러 개라 자동으로 고르지 않았어요." : "F1 기록 목록에 이 경기의 세션이 아직 없어 불러올 수 없어요 (취소됐다는 뜻은 아니에요).";
+    const timed = r.sessions.filter((s) => s.utc).map((s) => Date.parse(s.utc));
+    if (timed.length) range = kstRange(Math.min(...timed), Math.max(...timed)); else if (r.date) range = kstMD(Date.parse(r.date + "T12:00:00Z"));
+    blocks = r.sessions.map((s) => `<button class="ev-s soon" disabled title="${esc(`${KO.sessionName(s.name)} · ${calWhen(s)}\n${why}`)}"><b>${esc(KO.sessionShort(s.name))}</b><span>${esc(s.utc ? kstDowTime(Date.parse(s.utc)) : "미정")}</span></button>`).join("");
   }
-  // (the load's progress or error right under the title, where it's seen without scrolling)
-  box.innerHTML = head + progressHtml("event") + badges + coord + body + history;
+  const head = `<div class="ev-head" title="${esc(tip)}">${it.round ? `<span class="ev-rd">R${it.round}</span>` : ""}<h1>${esc(it.shortName || it.koName)}</h1>${range ? `<span class="ev-date">${esc(range)}</span>` : ""}</div>`;
+  // other seasons at this circuit: only from what the app has checked (전체 개최지) – asked for, not fetched here
+  const history = it.circuitId || it.lat != null ? `<button class="ev-more" data-history="${esc(it.circuitId || "")}" title="이 서킷의 다른 시즌 개최 이력 (앱이 확인한 시즌 기준)">지난 시즌</button>` : "";
+  box.innerHTML = `${head}<div class="ev-sessions">${blocks}</div>${progressHtml("event")}${history}`;
 }
 function renderVenue(box, v) {
-  box.innerHTML = `<h3>${esc(v.koName)} <small>${esc([v.locality, v.country].filter(Boolean).join(" · "))}</small></h3>
+  box.innerHTML = `<div class="ev-head"><h1>${esc(v.koName)}</h1><span class="ev-date">${esc([v.locality, v.country].filter(Boolean).join(" · "))}</span></div>
     <p class="muted">앱이 확인한 시즌만 셌어요. 개최 이력은 받은 일정(Jolpica) 기준, 다시보기는 그 시즌의 F1 기록 목록 기준이에요.</p>
     <h4>개최 (확인한 시즌)</h4><p>${v.hosted.map((h) => `<button class="small" data-goto="${h.season}:r${h.round}">${h.season} R${h.round}</button>`).join(" ")}</p>
     <h4>다시보기 기록 목록이 있는 시즌</h4><p>${v.replay.length ? v.replay.map((y) => `<span class="badge ok">${y}</span>`).join(" ") : `<span class="muted">확인한 시즌 중엔 없거나 목록을 확인하지 못했어요.</span>`}</p>`;
 }
 
+// 이어보기: a row per session watched lately – its name and how far it was watched (a bar). The row is the button: it
+// opens the session where it was left. (✕ – taking a row off the list – shows when the row is pointed at.)
 function renderRecent() {
   const box = $("homeRecent");
   const cur = A().loaded(), rec = A().recent().filter((x) => x.path !== cur?.info?.path).slice(0, 5);
-  const line = (x) => `${esc(KO.gpName(x.meeting))} · ${esc(KO.sessionName(x.name))}`;
+  const line = (x) => `${esc(KO.gpShort(x.meeting))} · ${esc(KO.sessionName(x.name))}`;
   const pos = (p, s, e) => (Number.isFinite(p) && Number.isFinite(s) ? `${p < s ? "출발 전" : hms(p - s)}${Number.isFinite(e) ? ` / ${hms(e - s)}` : ""}` : "");
-  let html = `<h3>최근 본 세션</h3><ul>`;
-  if (cur) html += `<li><span class="t"><b>지금 불러온 세션</b> ${line(cur.info)}<small>${esc(pos(cur.t, cur.tStart, cur.t1))}</small></span><button class="primary small" data-resume>이어보기</button></li>`;
-  for (const x of rec) html += `<li><span class="t">${line(x)}<small>${x.year} · ${esc(pos(x.pos, x.tStart, x.t1))}</small></span><button class="small" data-recent="${esc(x.path)}">이어보기</button><button class="ghost small" data-forget="${esc(x.path)}" title="목록에서 지우기" aria-label="목록에서 지우기">✕</button></li>`;
+  const pct = (p, s, e) => (Number.isFinite(p) && Number.isFinite(s) && Number.isFinite(e) && e > s ? Math.max(0, Math.min(100, Math.round(((p - s) / (e - s)) * 100))) : 0);
+  const bar = (p, s, e) => `<span class="bar" aria-hidden="true"><i style="width:${pct(p, s, e)}%"></i></span>`;
+  let html = `<h2>이어보기</h2>${progressHtml("recent")}<ul>`;
+  if (cur) html += `<li><button class="rc-row" data-resume title="${esc(`지금 불러온 세션 · ${pos(cur.t, cur.tStart, cur.t1)}`)}"><span class="t">${line(cur.info)}</span>${bar(cur.t, cur.tStart, cur.t1)}</button></li>`;
+  for (const x of rec) html += `<li><button class="rc-row" data-recent="${esc(x.path)}" title="${esc(`${x.year} · ${pos(x.pos, x.tStart, x.t1)}`)}"><span class="t">${line(x)}</span>${bar(x.pos, x.tStart, x.t1)}</button><button class="rc-x" data-forget="${esc(x.path)}" title="목록에서 지우기" aria-label="목록에서 지우기">✕</button></li>`;
   html += `</ul>`;
-  if (!cur && !rec.length) html += `<p class="muted">아직 본 세션이 없어요. 경기를 고르고 세션을 불러오면 여기에 남아요.</p>`;
-  box.innerHTML = html.replace("</h3>", "</h3>" + progressHtml("recent"));
+  if (!cur && !rec.length) html += `<p class="muted">아직 본 세션이 없어요.</p>`;
+  box.innerHTML = html;
 }
 
 // Live: from the live connection's real state only (the one LiveClient the timing screen uses) – the calendar says
@@ -342,7 +365,7 @@ function renderRecent() {
 function renderLive() {
   const live = A().mode === "live";
   $("homeLive").hidden = !live; $("homeEvent").hidden = live;
-  $("homeSeasonWrap").hidden = live; $("homeAll").hidden = live;
+  $("homeSeason").hidden = live; $("homeAll").hidden = live;
   clearInterval(liveTimer); liveTimer = null;
   if (!live) return;
   if (A().homeOn) liveTimer = setInterval(renderLive, 30e3);
@@ -407,7 +430,7 @@ function setAll(on) {
 // ---------- events ----------
 $("homeSeason").addEventListener("change", () => { const y = +$("homeSeason").value; store.set("homeYear", y); if (S.all) setAll(false); loadSeason(y); });
 $("homeAll").addEventListener("click", () => setAll(!S.all));
-$("homeSearch").addEventListener("input", () => { S.query = $("homeSearch").value; S.kbd = -1; renderList(false); });
+$("homeSearch").addEventListener("input", () => { S.query = $("homeSearch").value; renderList(false); });
 $("homeSearch").addEventListener("keydown", (e) => { if (e.key === "ArrowDown") { e.preventDefault(); $("homeList").focus(); moveKbd(1); } else if (e.key === "Enter") { const first = visibleItems()[0]; if (first) select(S.all ? first.id : fullId(first)); } });
 $("homeList").addEventListener("click", (e) => { const id = e.target.closest("[data-id]")?.dataset.id; if (id) select(id); });
 function moveKbd(d) {
@@ -472,7 +495,7 @@ window.HomeDev = {
 };
 
 // ---------- start ----------
-for (let y = thisYear; y >= FIRST_SEASON; y--) $("homeSeason").add(new Option(`${y}년`, y));
+for (let y = thisYear; y >= FIRST_SEASON; y--) $("homeSeason").add(new Option(String(y), y));
 if (!(S.year >= FIRST_SEASON && S.year <= thisYear)) S.year = thisYear;
 if (A().homeOn) globeShow();
 loadSeason(A().mode === "live" ? thisYear : S.year);

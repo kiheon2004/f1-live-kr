@@ -41,6 +41,18 @@ function writeJson(file, obj) {
   return job;
 }
 
+// A scenario is a file – prepared by the app, or imported by the user. Two of its fields are written into the page's
+// markup and style attributes: the season (a year, else none) and each entry's team colour (#rrggbb, else none).
+const HEX = /^#?[0-9a-f]{6}$/i;
+const cleanColour = (c) => (typeof c === "string" && HEX.test(c) ? c : null);
+const cleanSeason = (y) => (Number.isInteger(y) && y >= 1950 && y <= 2100 ? y : null);
+function cleanScenario(s) {
+  if (!s || typeof s !== "object") return s;
+  if (s.meta && typeof s.meta === "object" && s.meta.season != null) s.meta.season = cleanSeason(s.meta.season);
+  if (Array.isArray(s.entries)) for (const e of s.entries) if (e && typeof e === "object" && e.colour != null) e.colour = cleanColour(e.colour);
+  return s;
+}
+
 class GameStore {
   constructor(dir) { this.dir = dir; this.sc = path.join(dir, "scenarios"); this.res = path.join(dir, "results"); this.sav = path.join(dir, "saves"); }
   // what the menus need from each prepared race – its identity, its laps and its entry list (the teams and drivers of
@@ -51,22 +63,23 @@ class GameStore {
       try {
         const s = await readJson(inside(this.sc, f)); if (!s || s.format !== "f1kr-game-scenario") continue;
         const m = s.meta || {};
-        out.push({ id: f.replace(/\.scenario\.json$/, ""), metaId: m.id || null, season: m.season ?? null, round: m.round ?? null, event: m.event || null, date: m.date || null, location: m.location || null, circuitKey: m.circuitKey ?? null,
+        out.push({ id: f.replace(/\.scenario\.json$/, ""), metaId: m.id || null, season: cleanSeason(m.season), round: m.round ?? null, event: m.event || null, date: m.date || null, location: m.location || null, circuitKey: m.circuitKey ?? null,
           laps: s.race?.laps ?? null, lapLength: s.track?.L ?? null, version: s.version ?? null,
-          entries: (s.entries || []).map((e) => ({ num: e.num, tla: e.tla, name: e.name, last: e.last, team: e.team, teamKey: e.teamKey, colour: e.colour })) });
+          entries: (s.entries || []).map((e) => ({ num: e.num, tla: e.tla, name: e.name, last: e.last, team: e.team, teamKey: e.teamKey, colour: cleanColour(e.colour) })) });
         // (no "it rained" flag: the scenario's weather record is what WILL happen – the engine's truth; before the race
         // the player gets only the engine's forecast – v0.49 §5)
       } catch (e) { out.push({ id: f.replace(/\.scenario\.json$/, ""), error: String(e.message || e) }); }
     }
     return out;
   }
-  async loadScenario(sid) { return readJson(inside(this.sc, id(sid) + ".scenario.json")); }
+  async loadScenario(sid) { return cleanScenario(await readJson(inside(this.sc, id(sid) + ".scenario.json"))); }
   // a finished game: kept under its scenario with the moment it was saved (several games of one race side by side)
   async saveResult(sid, result) {
     if (!result || typeof result !== "object") throw new Error("bad result");
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const file = inside(this.res, path.join(id(sid), stamp + ".json"));
-    await writeJson(file, { kind: "f1kr-game-result", savedAt: new Date().toISOString(), scenarioId: sid, ...result });
+    // (the store's own fields last: the page's object cannot replace them)
+    await writeJson(file, { ...result, kind: "f1kr-game-result", savedAt: new Date().toISOString(), scenarioId: sid });
     return { ok: true, file: path.relative(this.dir, file) };
   }
   async listResults(sid) {
@@ -95,7 +108,7 @@ class GameStore {
   // the slot list (scenario, sim time, lap, engine version, saved at) – the list never parses the saves themselves
   async saveGame(slot, data) {
     if (!data || typeof data !== "object") throw new Error("bad save");
-    const sl = id(slot, "slot"), meta = { slot: sl, savedAt: new Date().toISOString(), ...(data.meta && typeof data.meta === "object" ? data.meta : {}) };
+    const sl = id(slot, "slot"), meta = { ...(data.meta && typeof data.meta === "object" ? data.meta : {}), slot: sl, savedAt: new Date().toISOString() };
     await writeJson(inside(this.sav, sl + ".json"), data);
     await writeJson(inside(this.sav, sl + ".meta.json"), meta);
     return { ok: true, meta };
@@ -113,4 +126,4 @@ class GameStore {
   }
 }
 
-module.exports = { GameStore, gameId: id };
+module.exports = { GameStore, gameId: id, cleanScenario };

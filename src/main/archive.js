@@ -6,6 +6,7 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 
 const BASE = "https://livetiming.formula1.com/static/";
+const MAX_DOWNLOAD = 512 * 1024 * 1024;   // one file of a session is tens of MB: a body past this is refused, not kept in memory
 
 // Topics the app replays. Position.z is compressed (raw deflate + base64).
 const TOPICS = [
@@ -63,7 +64,7 @@ function flattenPositions(lines) {
 // – what the replay's CarTracks keeps. (The sample list above is ~90 MB of objects for a race; this is ~13 MB, and
 // passes to the page without copying every little array.)
 function flattenTracks(lines) {
-  const per = {};
+  const per = Object.create(null);   // (keyed by car numbers from the file: no prototype to reach)
   for (const [ms, body] of lines) {
     const list = body.Position || [];
     if (!list.length) continue;
@@ -96,7 +97,7 @@ function flattenTracks(lines) {
 // F1 channels: 0 RPM, 2 speed, 3 gear, 4 throttle, 5 brake, 45 DRS (10+ = open). 2026 cars send no channel 45 at all (no
 // DRS; nothing about active aero, overtake or energy either): kept as 255 = not sent, never as a "closed" 0.
 function flattenCarData(lines) {
-  const per = {};
+  const per = Object.create(null);   // (keyed by car numbers from the file: no prototype to reach)
   for (const [ms, body] of lines) {
     const list = body.Entries || [];
     if (!list.length) continue;
@@ -174,7 +175,8 @@ class Archive {
   // next requests. Whether the archive takes any of them isn't published: this.authTried says what happened ("none":
   // no token, "refused": every form refused, else the form that worked). The token goes to F1's archive only.
   async fetchAuthed(rel) {
-    const url = BASE + rel, opt = (headers) => ({ headers, signal: AbortSignal.timeout(60000) });
+    // (redirect "manual": a redirect is answered as it is – never followed with the token's headers to another address)
+    const url = BASE + rel, opt = (headers) => ({ headers, redirect: "manual", signal: AbortSignal.timeout(60000) });
     const forms = (tok) => ({
       bearer: { Authorization: `Bearer ${tok}` },
       ascendontoken: { ascendontoken: tok },
@@ -248,9 +250,12 @@ class Archive {
       const total = +res.headers.get("content-length") || 0, chunks = [];
       let got = 0;
       onBytes(0, total);
-      for await (const c of res.body) { chunks.push(c); got += c.length; onBytes(got, Math.max(total, got)); }
+      for await (const c of res.body) { chunks.push(c); got += c.length; if (got > MAX_DOWNLOAD) throw new Error(`응답이 너무 커요 (${rel})`); onBytes(got, Math.max(total, got)); }
       text = stripBom(Buffer.concat(chunks).toString("utf8"));
-    } else text = stripBom(await res.text());
+    } else {
+      if (+res.headers.get("content-length") > MAX_DOWNLOAD) throw new Error(`응답이 너무 커요 (${rel})`);
+      text = stripBom(await res.text());
+    }
     fs.writeFileSync(file, text);
     return { text, source: "network", fetchedAt: Date.now(), offline: false, status: null };
   }
