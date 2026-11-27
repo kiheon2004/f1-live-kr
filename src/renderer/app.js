@@ -1443,7 +1443,7 @@
 
   // ---------- track map ----------
   const canvas = $("map"), ctx = canvas.getContext("2d");
-  let lastMapPts = {};
+  let lastMapPts = {}, mapSmall = false;
   // (the canvas's size, from the resize observer: read every frame after the board's HTML changed it forced a layout)
   let mapW = canvas.clientWidth, mapH = canvas.clientHeight;
   // (the track line and the fit of the shape, made again only when the shape, the canvas or the view changes)
@@ -1486,7 +1486,7 @@
     // Rotate (clockwise on screen), fit to the canvas, then apply zoom around the centre plus pan.
     const th = view.rot * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
     const R = ([x, y]) => [x * cs + y * sn, -x * sn + y * cs];
-    const ckey = `${w}|${h}|${view.rot}|${view.zoom}|${view.panX}|${view.panY}|${k}|${$("mapCard").classList.contains("expanded")}`;
+    const ckey = `${w}|${h}|${view.rot}|${view.zoom}|${view.panX}|${view.panY}|${k}|${$("mapCard").classList.contains("expanded")}|${mapSmall}`;
     const fresh = !trackCache || trackCache.shape !== shape || trackCache.n !== shape.length;
     if (fresh) {
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1504,9 +1504,17 @@
     const INK = "#0d0d0f", LIGHT = "#f2efe6", BLUE = "#3d4dff", YELLOW = "#ffe500";
     // Margins keep the track clear of the board's edge and of the map tools on the left.
     // (in the full window the standings list stands over the board's right side: the track keeps clear of it)
-    const edge = 10, padT = 30 * k, padL = 64, pad = 30 * k, padR = $("mapCard").classList.contains("expanded") ? 270 : pad;
+    // A small map (the side column or the map's height dragged small): the tools lie in a row along the top instead of a
+    // column down the left (CSS .map-small), and everything drawn on the board is smaller – see `u` below.
+    const small = w < 400 || h < 250;
+    if (small !== mapSmall) { mapSmall = small; $("mapCard").classList.toggle("map-small", small); }
+    const edge = small ? 6 : 10, pad = (small ? 16 : 30) * k, padT = small ? 44 : pad, padL = small ? pad : 64, padR = $("mapCard").classList.contains("expanded") ? 270 : pad;
     const sc = Math.min((w - padL - padR) / (maxX - minX || 1), (h - padT - pad) / (maxY - minY || 1));
     const ox = padL + (w - padL - padR - (maxX - minX) * sc) / 2, oy = pad + (h - padT - pad - (maxY - minY) * sc) / 2, z = view.zoom;
+    // u: the size of a car's block in px – 18 where the track is drawn at its usual size (about 360 px across or more),
+    // smaller as the track gets smaller (a twentieth of its longer side), never under 8: the cars must not cover the road
+    // they are on (22 blocks of a fixed 18 px hid a small map)
+    const u = Math.max(8, Math.min(18, (Math.max(maxX - minX, maxY - minY) * sc) / 20)), us = u / 18;
     const P = (pt) => {
       const [rx, ry] = R(pt), bx = ox + (rx - minX) * sc, by = h - (oy + (ry - minY) * sc);
       return [w / 2 + (bx - w / 2) * z + view.panX, h / 2 + (by - h / 2) * z + view.panY];
@@ -1545,14 +1553,15 @@
       trackCache.path = path; trackCache.key = ckey;
     }
     // the road: a flat shadow, the dark edge, the light fill
-    const sk = Math.sqrt(k), zk = Math.min(2, Math.sqrt(z)), rw = 10 * sk * zk, ow = rw + 6 * sk;
+    const sk = Math.sqrt(k), zk = Math.min(2, Math.sqrt(z)), rw = Math.max(4, 10 * sk * zk * us), ow = rw + Math.max(3, 6 * sk * us);
     ctx.lineJoin = ctx.lineCap = "round";
-    ctx.save(); ctx.translate(4 * sk, 5 * sk); ctx.strokeStyle = INK; ctx.lineWidth = ow; ctx.stroke(trackCache.path); ctx.restore();
+    ctx.save(); ctx.translate(4 * sk * us, 5 * sk * us); ctx.strokeStyle = INK; ctx.lineWidth = ow; ctx.stroke(trackCache.path); ctx.restore();
     ctx.strokeStyle = INK; ctx.lineWidth = ow; ctx.stroke(trackCache.path);
     ctx.strokeStyle = LIGHT; ctx.lineWidth = rw; ctx.stroke(trackCache.path);
 
     // Corner numbers sit just off the road, on the outside of the bend: a small dark square with the number.
-    if (circuit?.corners.length) {
+    // (not on a small map: the numbers would crowd it)
+    if (circuit?.corners.length && u >= 13) {
       const off = (ow / 2 + 12 * k) / (sc * z);   // label distance stays the same on screen at any zoom
       const cs2 = 14 * sk;
       ctx.font = `500 ${Math.round(9.5 * sk)}px "IBM Plex Mono", monospace`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -1575,19 +1584,21 @@
     const order = Object.keys(pos).filter((n) => drivers[n]).sort((a, b) => rank(a) - rank(b));
     // (dark digits on a light block, light ones on a dark block)
     const lightBlock = (hex) => { const v = parseInt(hex, 16); return 0.299 * (v >> 16 & 255) + 0.587 * (v >> 8 & 255) + 0.114 * (v & 255) > 150; };
-    const ck = Math.min(1.5, sk);
+    // (zoomed in, the blocks grow back towards their usual size – there is room between the cars then)
+    const ck = Math.min(1.5, sk) * Math.min(1, us * Math.sqrt(z));
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (const num of order) {
       const d = drivers[num];
       const [x, y] = P(pos[num]); lastMapPts[num] = [x, y];
       const isF = num === focus, isC = num === compare;
       const hex = hexColour(d?.TeamColour, "888888"), col = isF ? YELLOW : "#" + hex;
-      const sz = Math.round((isF ? 26 : isC ? 22 : 18) * ck), e = 2.5 * ck, x0 = Math.round(x - sz / 2), y0 = Math.round(y - sz / 2);
+      const sz = Math.max(isF ? 14 : 7, Math.round((isF ? 26 : isC ? 22 : 18) * ck)), e = Math.max(1.5, 2.5 * ck), x0 = Math.round(x - sz / 2), y0 = Math.round(y - sz / 2);
       ctx.globalAlpha = gone(num) ? 0.3 : 1;
       ctx.fillStyle = isC ? LIGHT : INK; ctx.fillRect(x0 - e, y0 - e, sz + 2 * e, sz + 2 * e);   // (the edge; the compared car's is light)
       ctx.fillStyle = col; ctx.fillRect(x0, y0, sz, sz);
       const p = +lines[num]?.Position;
-      if (p && !gone(num)) {
+      // (a block too small for digits is the team's colour alone; the selected car always carries its number)
+      if (p && !gone(num) && sz >= 12) {
         ctx.font = `400 ${Math.round(sz * 0.7)}px Anton, "IBM Plex Sans KR", sans-serif`;
         ctx.fillStyle = isF || lightBlock(hex.length === 6 ? hex : "888888") ? INK : "#ffffff";
         ctx.fillText(String(p), x0 + sz / 2, y0 + sz / 2 + sz * 0.05);
@@ -1649,7 +1660,7 @@
     const sw = store.get("sideW", null), mh = store.get("mapH", null);
     const maxW = Math.max(320, innerWidth - 480);
     if (sw) root.style.setProperty("--side-w", Math.min(maxW, Math.max(320, sw)) + "px"); else root.style.removeProperty("--side-w");
-    if (mh) root.style.setProperty("--map-h", Math.min(sideEl.clientHeight - 140, Math.max(160, mh)) + "px"); else root.style.removeProperty("--map-h");
+    if (mh) root.style.setProperty("--map-h", Math.min(sideEl.clientHeight - 140, Math.max(190, mh)) + "px"); else root.style.removeProperty("--map-h");
   }
   function splitter(el, axis, keyName, measure) {
     el.addEventListener("pointerdown", (e) => {
@@ -1675,7 +1686,7 @@
     });
   }
   splitter($("splitV"), "v", "sideW", () => sideEl.clientWidth);
-  splitter($("splitH"), "h", "mapH", () => canvas.parentElement.clientHeight);
+  splitter($("splitH"), "h", "mapH", () => $("mapCard").clientHeight);   // (the whole card – its bar and the view under it)
   addEventListener("resize", applySizes);
   applySizes();
   new ResizeObserver((es) => { const r = es[es.length - 1]?.contentRect; if (r) { mapW = r.width; mapH = r.height; } drawMap(); }).observe(canvas);

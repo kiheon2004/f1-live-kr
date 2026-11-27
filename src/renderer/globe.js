@@ -1,6 +1,8 @@
 // The home screen's globe, drawn like the design's picture: an upright flat blue ball with a light 3 px edge and a
-// fixed grid – two wide and two tall ellipses and the two centre lines – and the season's circuits as markers on it.
-// The ball and its grid are one SVG picture that does not turn; what turns is the globe underneath it – a camera
+// fixed grid – two wide and two tall ellipses and the two centre lines – with the continents on it as rough flat shapes
+// (globeland.js) and the season's circuits as markers.
+// The ball and its grid are one SVG picture that does not turn; what turns is the globe underneath it – the land and
+// the markers move over the ball – a camera
 // around a unit sphere (three.js maths only: no WebGL context, nothing rendered): dragging, zooming, the slow turn and
 // flying to a race move the markers over the ball, and a marker on the far side is hidden.
 // Ownership: a Globe owns its SVG element, the camera and its controls, a ResizeObserver, its listeners and its marker
@@ -9,8 +11,11 @@
 // Longitude 180°W is at the equirectangular left edge in HomeData.latLonToVec3.
 import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
+import { LAND } from "./globeland.js";
 
 const BLUE = "#3d4dff", EDGE = "#f2efe6";   // (css/tokens.css --c-blue, --line)
+const LAND_FILL = "#f2efe6";                 // the continents: one flat light shape on the blue (no outline, no shading)
+const RIM = 1.03;                            // a point on the far side is drawn just outside the ball's edge (and cut off)
 const R = 166;                               // the ball's radius in the picture's own units (as in the design)
 const H = () => window.HomeData;
 const SVG = "http://www.w3.org/2000/svg";
@@ -37,12 +42,29 @@ export class Globe {
       this.svg = el("svg", { class: "globe-ball", role: "img", "aria-label": "개최지 지구본" });
       this.ball = el("g", {}, this.svg);
       const keep = { "vector-effect": "non-scaling-stroke" };   // (the edge stays 3 px and the grid 1.5 px at any zoom)
-      el("circle", { r: R, fill: BLUE, stroke: EDGE, "stroke-width": 3, ...keep }, this.ball);
+      const clip = el("clipPath", { id: "globeClip" }, el("defs", {}, this.svg));
+      el("circle", { r: R }, clip);
+      el("circle", { r: R, fill: BLUE }, this.ball);
+      // the land turns with the globe: its outline is written again whenever the view moves (draw → landPath)
+      this.landEl = el("path", { fill: LAND_FILL, "clip-path": "url(#globeClip)", "fill-rule": "evenodd" }, this.ball);
       const grid = el("g", { fill: "none", stroke: EDGE, "stroke-opacity": 0.4, "stroke-width": 1.5 }, this.ball);
       for (const [rx, ry] of [[R, 60], [R, 120], [60, R], [120, R]]) el("ellipse", { rx, ry, ...keep }, grid);
       el("line", { x1: -R, y1: 0, x2: R, y2: 0, ...keep }, grid);
       el("line", { x1: 0, y1: -R, x2: 0, y2: R, ...keep }, grid);
+      el("circle", { r: R, fill: "none", stroke: EDGE, "stroke-width": 3, ...keep }, this.ball);   // the edge, over the land
       this.host.prepend(this.svg);
+      // the land's outlines as points on the unit sphere, with long edges split (≤ 4°) so an outline crossing the
+      // ball's edge is cut close to where it really crosses
+      this.land = LAND.map((ring) => {
+        const out = [];
+        for (let i = 0; i < ring.length; i++) {
+          const a = ring[i], b = ring[(i + 1) % ring.length];
+          let dLon = b[0] - a[0]; if (dLon > 180) dLon -= 360; else if (dLon < -180) dLon += 360;
+          const n = Math.max(1, Math.ceil(Math.max(Math.abs(dLon), Math.abs(b[1] - a[1])) / 4));
+          for (let k = 0; k < n; k++) out.push(H().latLonToVec3(a[1] + ((b[1] - a[1]) * k) / n, a[0] + (dLon * k) / n, 1));
+        }
+        return out;
+      });
     } catch (e) {
       this.svg?.remove(); this.svg = null;
       this.opts.onError?.(`지구본을 그릴 수 없어요 (${e.message || "오류"}). 오른쪽 목록으로 고를 수 있어요.`);
@@ -122,6 +144,34 @@ export class Globe {
     const w = this.host.clientWidth, h = this.host.clientHeight;
     const tr = `translate(${(w / 2).toFixed(1)} ${(h / 2).toFixed(1)}) scale(${(this.radiusPx() / R).toFixed(4)})`;
     if (this._tr !== tr) { this.ball.setAttribute("transform", tr); this._tr = tr; }
+    const d = this.landPath(w, h);
+    if (this._land !== d) { this.landEl.setAttribute("d", d); this._land = d; }
+  }
+  // The land as it is seen now, in the picture's own units: every outline projected with the camera; a point on the far
+  // side goes to the ball's rim in its own direction (just outside the edge, where the clip cuts it), so an outline that
+  // runs over the horizon is closed along the rim. An outline wholly on the far side is left out.
+  landPath(w, h) {
+    const cam = this.camera, c = cam.position, k = R / this.radiusPx(), v = (this._v ||= new THREE.Vector3());
+    let d = "";
+    for (const ring of this.land) {
+      let any = false, prev = null; const pts = [];
+      for (const p of ring) {
+        v.set(p.x, p.y, p.z).project(cam);
+        let x = v.x * 0.5 * w * k, y = -v.y * 0.5 * h * k, ang = null;
+        if (p.x * c.x + p.y * c.y + p.z * c.z > 1) any = true;
+        else {
+          ang = Math.atan2(y, x);
+          // (two far-side points far apart along the rim: the straight line between them would cut across the ball –
+          // rim points are put between them, the short way round)
+          if (prev != null) { let da = ang - prev; if (da > Math.PI) da -= 2 * Math.PI; else if (da < -Math.PI) da += 2 * Math.PI; const n = Math.floor(Math.abs(da) / 0.2); for (let i = 1; i <= n; i++) { const t = prev + (da * i) / (n + 1); pts.push(`${(Math.cos(t) * R * RIM).toFixed(1)} ${(Math.sin(t) * R * RIM).toFixed(1)}`); } }
+          x = Math.cos(ang) * R * RIM; y = Math.sin(ang) * R * RIM;
+        }
+        prev = ang;
+        pts.push(`${x.toFixed(1)} ${y.toFixed(1)}`);
+      }
+      if (any) d += `M${pts.join("L")}Z`;
+    }
+    return d;
   }
 
   // places: [{ key, lat, lon, ids, label }] – one per spot (HomeData.placeGroups); selected: the selected race's id
@@ -198,6 +248,6 @@ export class Globe {
     for (const el of this.markerEls.values()) el.remove();
     this.markerEls.clear();
     this.svg?.remove();
-    this.svg = this.ball = this.camera = null; this._tr = null;
+    this.svg = this.ball = this.landEl = this.camera = null; this._tr = this._land = null;
   }
 }

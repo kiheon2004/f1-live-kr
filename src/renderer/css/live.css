@@ -285,6 +285,13 @@ td.pits { color: var(--text-2); width: 34px; }
 .map-bar .expand-btn { position: static; width: var(--ctl-h-lg); padding: 0; display: grid; place-items: center; background: transparent; color: var(--text-1); }
 .map-card.expanded .map-bar .expand-btn { background: var(--ink); color: var(--text-inv); border-color: var(--line); }
 .map-card[data-view="tel"] .expand-btn, .map-card[data-view="laps"] .expand-btn { display: none; }
+/* (a narrow side column – by the window or by the divider: the bar's controls get smaller before the bar wraps) */
+.map-bar { container-type: inline-size; }
+@container (max-width: 440px) {
+  .map-bar button, .map-bar select, .map-card .map-bar .view-switch button { min-height: 36px; padding: 0 8px; font-size: 13px; }
+  .map-bar select.cam-sel { padding: 0 26px 0 8px; background-position: right 8px center; }
+  .map-bar .expand-btn { width: 36px; }
+}
 .map-stage { position: relative; min-height: 0; min-width: 0; overflow: hidden; background: var(--bg-1); }
 #map { width: 100%; height: 100%; display: block; touch-action: none; }
 #map.pannable { cursor: grab; } #map.panning { cursor: grabbing; }
@@ -294,6 +301,10 @@ td.pits { color: var(--text-2); width: 34px; }
 .map-tools button[aria-pressed="true"] { background: var(--ink); color: var(--text-inv); }
 .map-tools button:disabled { opacity: 0.4; cursor: default; }
 .map-tools svg { width: 18px; height: 18px; }
+/* a small map (app.js drawMap sets .map-small): the tools in a row along the top, smaller */
+.map-card.map-small .map-tools { top: 10px; left: 10px; grid-auto-flow: column; gap: var(--s-2); }
+.map-card.map-small .map-tools button { width: 28px; height: 28px; }
+.map-card.map-small .map-tools svg { width: 15px; height: 15px; }
 .map-note { position: absolute; inset: auto var(--s-6) var(--s-6) var(--s-6); margin: 0; color: var(--text-1); font-size: var(--fs-md); font-weight: var(--fw-med); text-align: center; }
 .map-card[data-view="tel"] #map, .map-card[data-view="laps"] #map, .map-card[data-view="tel"] .map-tools, .map-card[data-view="laps"] .map-tools,
 .map-card[data-view="tel"] .map-note, .map-card[data-view="laps"] .map-note { display: none; }
@@ -330,6 +341,9 @@ td.pits { color: var(--text-2); width: 34px; }
 .rc-filter-btn { position: relative; width: var(--ctl-h-lg); min-height: var(--ctl-h-lg); padding: 0; display: grid; place-items: center; border: 0; border-left: var(--bw) solid var(--line); background: none; color: var(--text-1); }
 .rc-filter-btn:hover, .rc-filter-btn[aria-expanded="true"] { background: var(--bg-3); }
 .filter-dot { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; background: var(--text-1); }
+/* (a narrow side column: the tabs get tighter before the row has to scroll) */
+.tabs-row { container-type: inline-size; }
+@container (max-width: 440px) { .tabs button { padding: 0 8px; font-size: 13px; min-height: 40px; } .rc-filter-btn { width: 40px; min-height: 40px; } }
 /* race control: the kinds (in the filter's list), then a row per message – lap, colour square, words */
 .chips { right: 0; top: calc(100% + var(--s-3)); display: grid; gap: 2px; min-width: 200px; padding: var(--s-2); }
 .chips[hidden] { display: none; }
@@ -531,11 +545,6 @@ h2 small { color: var(--text-3); font-weight: var(--fw-reg); margin-left: var(--
   body:not(.home-on) .brand-name { display: none; }   /* (the timing screen's one row: the KR sticker alone is the way home) */
   /* (the side column is 360 px here: the map bar and the tab row stay one line each) */
   .map-bar { gap: 6px; padding: 8px; }
-  .map-bar button, .map-bar select, .map-card .map-bar .view-switch button { min-height: 36px; padding: 0 8px; font-size: 13px; }
-  .map-bar select.cam-sel { padding: 0 26px 0 8px; background-position: right 8px center; }
-  .map-bar .expand-btn { width: 36px; }
-  .tabs button { padding: 0 8px; font-size: 13px; min-height: 40px; }
-  .rc-filter-btn { width: 40px; min-height: 40px; }
   .ev-sessions { gap: 8px; } .ev-s b { font-size: 20px; }
   #driver .gauge { grid-template-columns: 40px 84px 44px 1fr auto; } #driver .gauge .mono { display: none; }
 }

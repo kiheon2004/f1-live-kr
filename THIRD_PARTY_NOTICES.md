@@ -14,6 +14,7 @@ their terms apply.
 | Anton (font; Latin subset file of `@fontsource/anton` 5.3.0) | `src/renderer/fonts/Anton-Regular.woff2` | SIL Open Font License 1.1, © The Anton Project Authors | `src/renderer/fonts/ANTON-LICENSE.txt` |
 | Lucide icons (subset, lucide-static 1.54.0) | `src/renderer/icons.js` | ISC | `src/renderer/ICONS-LICENSE.txt` |
 | bacinger/f1-circuits (circuit centre lines, lengths, opening years) | `src/data/f1-circuits.json` | MIT, © Tomislav Bacinger | `src/data/f1-circuits-LICENSE.md` |
+| Natural Earth 1:110m land (the globe's rough continents, thinned) | `src/renderer/globeland.js` (made by `tools/make-globe-land.py`) | public domain (naturalearthdata.com) | – |
 | ws (WebSocket client) | runtime dependency (`node_modules`) | MIT | in its package |
 | Electron (app runtime, in built apps) | `node_modules` / the built app | MIT (Chromium and Node.js components under their own licenses) | in the built app (`LICENSES.chromium.html`) |
 
