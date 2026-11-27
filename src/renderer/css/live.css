@@ -41,6 +41,10 @@ body.home-on .brand-name { font-size: 28px; } body.home-on .brand-kr { font-size
 .top .modes button[aria-selected="true"] { background: var(--ink); color: var(--text-inv); }
 .dot { display: inline-block; width: 8px; height: 8px; background: currentColor; opacity: 0.45; margin-left: var(--s-3); vertical-align: 1px; }
 .dot.on { background: var(--c-red); opacity: 1; outline: 2px solid var(--text-inv); }
+/* the strategy game is up: its name stands beside the logo (the logo closes the game) */
+.game-only { display: none !important; }
+body.game-on .game-only { display: inline-flex !important; }
+.game-title-block { align-items: center; height: var(--ctl-h-lg); padding: 0 14px; background: var(--bg-0); color: var(--text-1); border: var(--bw) solid var(--line); font-family: var(--font-title); font-size: 20px; line-height: 1; white-space: nowrap; }
 /* shown on the home screen only: the season and the strategy game */
 body:not(.home-on) .home-only, body.game-on .home-only { display: none !important; }
 .top select.top-season { appearance: none; -webkit-appearance: none; padding: 0 38px 0 14px; font-family: var(--font-num); font-size: 20px; font-weight: 400; cursor: pointer;

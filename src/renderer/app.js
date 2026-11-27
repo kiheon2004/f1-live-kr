@@ -242,8 +242,11 @@
     paintHomeBtn();
     dispatchEvent(new CustomEvent("f1kr-home", { detail: { on } }));
   }
+  let gameUp = false;   // (the strategy game covers the home screen: the logo then closes the game – game/gamehome.js)
+  addEventListener("f1kr-game", (e) => { gameUp = !!e.detail?.on; paintHomeBtn(); });
   function paintHomeBtn() {
     const b = $("homeBtn"); if (!b) return;
+    if (gameUp) { b.title = "게임을 닫고 라이브 타이밍(홈)으로 돌아가요"; b.setAttribute("aria-label", "홈"); b.classList.remove("idle"); return; }
     const canLeave = mode === "live" || !!replay;
     // (the logo: on the timing screen the way home; on the home screen the way back to what is loaded, when something is)
     b.title = homeOn ? (canLeave ? "불러온 세션의 타이밍 화면으로 돌아가요" : "") : "시즌 지구본 홈 (재생은 멈추고 위치를 기억해요)";

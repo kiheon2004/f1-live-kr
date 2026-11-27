@@ -100,12 +100,19 @@ function drawMini() {
     H.mini = { sc, w, h, ol, T: fitTransform(ol, w, h, 10), ents: new Map(sc.entries.map((e) => [String(e.num), e])) };
   }
   const M = H.mini, snap = hudSnap(R, G.adapter); if (!snap) return;
+  // v0.71 – the same look as the timing screen's 2D view: a blue board with a grid, the road as a filled light band with
+  // a dark edge, the cars as square blocks in their team's colour (mine larger with a light edge; the camera's car with
+  // a yellow frame). Not a dark map with an outlined track and coloured dots.
+  const INK = "#0d0d0f", LIGHT = "#f2efe6";
   const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  g.fillStyle = "#3d4dff"; g.fillRect(0, 0, w, h);
+  g.beginPath(); for (let x = 20.5; x < w; x += 20) { g.moveTo(x, 0); g.lineTo(x, h); } for (let y = 20.5; y < h; y += 20) { g.moveTo(0, y); g.lineTo(w, y); }
+  g.strokeStyle = "rgba(255,255,255,0.22)"; g.lineWidth = 1; g.stroke();
   const path = (pts, closed) => { g.beginPath(); pts.forEach(([x, y], i) => { const [a, b] = M.T.map(x, y); i ? g.lineTo(a, b) : g.moveTo(a, b); }); if (closed) g.closePath(); };
   g.lineJoin = "round"; g.lineCap = "round";
-  if (M.ol.pit.length) { path(M.ol.pit, false); g.strokeStyle = "rgba(255,255,255,0.18)"; g.lineWidth = 2; g.stroke(); }
-  path(M.ol.lap, true); g.strokeStyle = "rgba(255,255,255,0.32)"; g.lineWidth = 4; g.stroke();
-  { const [a, b] = M.T.map(...M.ol.lap[0]); g.fillStyle = "#fff"; g.fillRect(a - 1.5, b - 1.5, 3, 3); }   // (the line where laps are counted)
+  if (M.ol.pit.length) { path(M.ol.pit, false); g.strokeStyle = INK; g.lineWidth = 4.5; g.stroke(); g.strokeStyle = "rgba(242,239,230,0.75)"; g.lineWidth = 2; g.stroke(); }
+  path(M.ol.lap, true); g.strokeStyle = INK; g.lineWidth = 8; g.stroke(); g.strokeStyle = LIGHT; g.lineWidth = 5; g.stroke();
+  { const [a, b] = M.T.map(...M.ol.lap[0]); g.fillStyle = INK; g.fillRect(a - 2, b - 2, 4, 4); }   // (the line where laps are counted)
   const focus = G.adapter?.ctx.focus, onCam = String(G.adapter?.camAuto?.num ?? focus ?? "");
   const cars = [...snap.cars];
   const mineOf = (c) => M.ents.get(String(c.num))?.teamKey === G.teamKey;
@@ -114,14 +121,15 @@ function drawMini() {
   for (const c of cars) {
     if (c.status === "dnf" && c.where !== "lap" && c.where !== "pit") continue;
     const p = carPoint(sc.track, c); if (!p) continue;
-    const [x, y] = M.T.map(p[0], p[1]), e = M.ents.get(String(c.num)), mine = mineOf(c), r = mine ? 4.5 : 3.2;
-    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = e?.colour || "#888"; g.globalAlpha = c.status === "dnf" ? 0.4 : 1; g.fill(); g.globalAlpha = 1;
-    if (mine) { g.lineWidth = 1.5; g.strokeStyle = "#fff"; g.stroke(); }
-    if (String(c.num) === onCam) { g.beginPath(); g.arc(x, y, r + 3, 0, Math.PI * 2); g.lineWidth = 1.2; g.strokeStyle = "#ffd400"; g.stroke(); }
-    if (mine) labels.push({ x, y, r, t: e?.tla || String(c.num) });
+    const [x, y] = M.T.map(p[0], p[1]), e = M.ents.get(String(c.num)), mine = mineOf(c), r = mine ? 5 : 3.5;
+    g.globalAlpha = c.status === "dnf" ? 0.4 : 1;
+    g.fillStyle = mine ? LIGHT : INK; g.fillRect(x - r - 1.5, y - r - 1.5, 2 * r + 3, 2 * r + 3);
+    g.fillStyle = e?.colour || "#888"; g.fillRect(x - r, y - r, 2 * r, 2 * r); g.globalAlpha = 1;
+    if (String(c.num) === onCam) { g.lineWidth = 2; g.strokeStyle = "#ffe500"; g.strokeRect(x - r - 3.5, y - r - 3.5, 2 * r + 7, 2 * r + 7); }
+    if (mine) labels.push({ x, y, r: r + 2, t: e?.tla || String(c.num) });
   }
   // my two cars' names: inside the box, flipped left at its right edge, the second moved off the first when they'd overlap
-  g.font = "600 10px Pretendard, sans-serif"; g.textBaseline = "middle"; const placed = [];
+  g.font = '700 10px "IBM Plex Sans KR", sans-serif'; g.textBaseline = "middle"; const placed = [];
   for (const L of labels) {
     const tw = g.measureText(L.t).width; let lx = L.x + L.r + 3; if (lx + tw > w - 2) lx = L.x - L.r - 3 - tw;
     let ly = Math.max(7, Math.min(h - 7, L.y));

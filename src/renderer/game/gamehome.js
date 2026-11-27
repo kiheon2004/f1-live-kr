@@ -123,7 +123,7 @@ export function go(step) {
 }
 export function paint() {
   if (!G.on) return;
-  const crumbs = [["team", "시즌·팀"], ["menu", "차고"], ["prerace", "출발 전 전략"], ["race", "레이스"], ["results", "게임 결과"]];
+  const crumbs = [["team", "시즌·팀"], ["menu", "메뉴"], ["prerace", "출발 전 전략"], ["race", "레이스"], ["results", "게임 결과"]];
   $("gameCrumbs").innerHTML = crumbs.map(([k, t]) => `<span class="${k === G.step ? "on" : ""}">${t}</span>`).join("<i>›</i>");
   // (nothing to say while the engine works; only a problem is shown – no "connected" jargon)
   $("gameEngine").textContent = G.engine ? "" : G.engineErr === "checking" ? "게임 엔진 여는 중…" : "게임 엔진을 열지 못했어요";
@@ -300,6 +300,9 @@ function finishRace() {
 
 // ---------- events: each screen's module gets its own actions (data-act="<module>:<what>") ----------
 $("homeGameBtn")?.addEventListener("click", open);
+// (v0.71: while the game is up the app bar's logo is the way out too – the same as the game bar's 라이브 타이밍으로; taken
+// before the app's own handler, which would switch between the home and the timing screen under the game)
+$("homeBtn")?.addEventListener("click", (e) => { if (!G.on) return; e.stopImmediatePropagation(); close(); }, true);
 // (the game bar's 라이브 타이밍으로 is the one way out on every step – data-act="game:exit", handled below; v0.53 removed the
 // garage's second copy of it)
 const MODS = { menu: Menu, save: SaveUI, pre: Pre, hud: Hud, res: Res, alerts: AlertsUI };
@@ -307,7 +310,7 @@ $("game").addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;
   const [mod, act] = b.dataset.act.split(":");
   if (mod === "go") { if (act === "menu" && G.step === "race") leaveRace(); else go(act); return; }
-  if (mod === "sheet") { G.sheet = G.sheet === act ? null : act; if (G.sheet === "saves" || G.sheet === "races") SaveUI.onSheet(G.sheet); paint(); return; }
+  if (mod === "sheet") { G.sheet = act === "home" || G.sheet === act ? null : act; /* ("home": the tiles) */ if (G.sheet === "saves" || G.sheet === "races") SaveUI.onSheet(G.sheet); paint(); return; }
   if (mod === "game" && act === "exit") { close(); return; }
   MODS[mod]?.onClick?.(act, b, e);
 });
