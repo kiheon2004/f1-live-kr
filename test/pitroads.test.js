@@ -67,20 +67,34 @@ test("pitRoads: the lane's ends follow the ground's own height, the garages' flo
   assert.ok(roadHeight(3, 9, 5) >= 9.08, "never under the terrain");
 });
 
-test("Spa-Francorchamps' pit roads: the lane 300 m between the door line's ends, the entry road round the Bus Stop, the exit road inside La Source", async () => {
+test("Spa-Francorchamps' pit roads (the survey's second edition, on the lap survey's ground): the lane, the entry road from the track's broken edge, the exit road beside the track", async () => {
   const { PIT_ROADS } = await import("../src/renderer/pitroads.js");
-  const P = PIT_ROADS[7]; assert.ok(P && /Esri World Imagery/.test(P.src));
+  const { TRACKS } = await import("../src/renderer/trackdata.js");
+  const { llToFeed } = require("../tools/track.js");
+  const P = PIT_ROADS[7], T = TRACKS[7]; assert.ok(P && /SPW orthophotos/.test(P.src) && /second edition/.test(P.src));
   const KY = 111200, KX = 111320 * Math.cos((50.4435 * Math.PI) / 180), xz = ([la, lo]) => [(lo - 5.9665) * KX, -(la - 50.443) * KY], d = (a, b) => Math.hypot(xz(a)[0] - xz(b)[0], xz(a)[1] - xz(b)[1]);
   const L = d(P.lane.doors[0], P.lane.doors[1]); assert.ok(L > 299 && L < 301, String(L));
-  assert.strictEqual(P.lane.width, 11); assert.deepStrictEqual(P.lane.bands.map((b) => b[2]), ["white", "white", "red", "white"]);
-  assert.ok(P.lane.bands.every(([a, b]) => a < b && b <= 7.9), "the paint ends where the fast lane (7.9 … 11.0 m) begins");
-  for (const [k, n] of [["entry", 91], ["exit", 66]]) {
+  // from the doors: the box line, the band (white – red – white, 1.35 m), the fast lane to the wall at 13.2 m
+  assert.ok(Math.abs(P.lane.width - 13.17) < 0.1); assert.deepStrictEqual(P.lane.bands.map((b) => b[2]), ["white", "white", "red", "white"]);
+  const band = P.lane.bands.slice(1); assert.ok(Math.abs(band[0][0] - 8.43) < 0.1 && Math.abs(band[2][1] - 9.78) < 0.1 && band.every(([a, b]) => a < b) && band[0][1] === band[1][0] && band[1][1] === band[2][0], "the band 8.4 … 9.8 m from the doors");
+  // the cars' place: the fast lane from the line through `doors` (the door line turned with the painted lines), one value all along
+  const [f0, f1] = P.lane.fastLine; assert.ok(Math.abs(f0[0] - 9.78) < 0.1 && Math.abs(f0[1] - 13.17) < 0.1 && f0[0] === f1[0] && f0[1] === f1[1] && f0[0] === band[2][1] && f0[1] === P.lane.width && !P.lane.fast, JSON.stringify(P.lane.fastLine));
+  for (const [k, n] of [["entry", 52], ["exit", 34]]) {
     const R = P[k]; assert.strictEqual(R.left.length, n); assert.strictEqual(R.right.length, n);
-    for (let i = 0; i < n; i++) { const w = d(R.left[i], R.right[i]); assert.ok(w > 2.5 && w < 17, `${k} ${i}: ${w.toFixed(1)} m wide`); if (i) assert.ok(d(R.left[i], R.left[i - 1]) < 12 && d(R.right[i], R.right[i - 1]) < 12, `${k} ${i}`); }
+    for (let i = 1; i < n - (k === "exit" ? 1 : 0); i++) { const w = d(R.left[i], R.right[i]); assert.ok(w > 0.6 && w < 13, `${k} ${i}: ${w.toFixed(1)} m wide`); assert.ok(d(R.left[i], R.left[i - 1]) < 12 && d(R.right[i], R.right[i - 1]) < 12, `${k} ${i}`); }
   }
+  assert.ok(d(P.entry.left[0], P.entry.right[0]) < 0.01, "the entry road begins at a point on the track's edge");
   // the entry road ends, the exit road begins at the lane's ends
   const mid = (R, i) => [(R.left[i][0] + R.right[i][0]) / 2, (R.left[i][1] + R.right[i][1]) / 2];
-  assert.ok(d(mid(P.entry, 90), P.lane.doors[0]) < 16 && d(mid(P.exit, 0), P.lane.doors[1]) < 16);
+  assert.ok(d(mid(P.entry, 51), P.lane.doors[0]) < 16 && d(mid(P.exit, 0), P.lane.doors[1]) < 16);
+  // against the surveyed track: the entry's mouth and the exit lane beside the track lie 0.25 m under it
+  assert.ok(T && T.on && T.edges.left.length === 998 && T.marks.pole && T.marks.start && T.marks.control && T.low.length === 1 && T.broken.right.length === 1, "Spa's surveyed track");
+  const R = T.edges.right, Lf = T.edges.left, n = R.length, f = (ll) => llToFeed(T.fit, ll);
+  const beyond = (q) => { let best = null; for (let i = 0; i < n; i++) { const a = R[i], b = R[(i + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / (dx * dx + dy * dy || 1))), dd = Math.hypot(q[0] - a[0] - dx * t, q[1] - a[1] - dy * t); if (best === null || dd < Math.abs(best)) { const m = [(Lf[i][0] + R[i][0]) / 2, (Lf[i][1] + R[i][1]) / 2]; best = Math.hypot(q[0] - m[0], q[1] - m[1]) > Math.hypot(a[0] + dx * t - m[0], a[1] + dy * t - m[1]) ? dd : -dd; } } return best; };
+  for (const [what, pts] of [["the entry's mouth", P.entry.left.slice(0, 4)], ["the exit lane beside the track", P.exit.left.slice(20)]]) for (const [i, q] of pts.entries()) { const dd = beyond(f(q)); assert.ok(dd > -0.4 && dd < -0.1, `${what} ${i}: ${dd.toFixed(2)} m beyond the track's edge`); }
+  assert.ok(beyond(f(P.entry.left[10])) > 5 && beyond(f(P.exit.left[10])) > 5, "the roads themselves lie off the track");
+  // two lines run on the track: the thin one across the entry's mouth, the support races' pit exit line at Kemmel
+  assert.strictEqual(P.lines.filter((l) => l.onTrack).length, 2); assert.ok(P.lines.find((l) => l.onTrack && l.pts.length === 30));
 });
 
 test("onPitRoads: a point on a surveyed road, a metre inside its edges – a mapped barrier there is cut", async () => {
@@ -134,7 +148,7 @@ test("Monza's pit roads: the lane from the control line to the wall's end, the e
   // (v0.71: the lane begins on the track's surveyed control line – 2.3 m further on than the picture the lines were read on has it)
   assert.ok(Math.abs(P.lane.u[0] + 8.84) < 0.2 && Math.abs(P.lane.u[1] - 322.1) < 0.3, String(P.lane.u)); assert.strictEqual(P.lane.span, 230.4); assert.strictEqual(P.lane.width, 11.5); assert.strictEqual(P.edgeLine, 0);
   assert.deepStrictEqual(P.lane.bands.map((b) => b[2]), ["concrete", "white", "white", "white"]); assert.ok(P.lane.bands.every(([a, b]) => a < b && b <= 11.5)); assert.strictEqual(P.lane.cross[0][0], P.lane.u[0]);
-  for (const [R, n] of [[P.entry, 59], [P.exit, 34], [P.tarmac[0], 89]]) {
+  for (const [R, n] of [[P.entry, 61], [P.exit, 34], [P.tarmac[0], 89]]) {
     assert.strictEqual(R.left.length, n); assert.strictEqual(R.right.length, n);
     // (the exit apron's last four sections run in to a point on the track's edge line: the survey ends there)
     for (let i = 1; i < n; i++) { const w = d(R.left[i], R.right[i]), taper = R === P.exit && i >= n - 4; assert.ok((taper || w > 0.5) && w < 18, `${i}: ${w.toFixed(1)} m wide`); assert.ok(d(R.left[i], R.left[i - 1]) < 9 && d(R.right[i], R.right[i - 1]) < 9, String(i)); }
@@ -173,10 +187,10 @@ test("Monza's pit roads against its surveyed track: the edges that meet the trac
   };
   const under = (pts, what) => { for (const [i, q] of pts.entries()) { const d = beyond(f(q)); assert.ok(d > -0.4 && d < -0.1, `${what} ${i}: ${d.toFixed(2)} m beyond the track's edge`); } };
   under(P.exit.left, "the exit apron's left edge"); under(P.tarmac[0].left, "the old lane's tarmac"); under(P.entry.left.slice(0, 12), "the entry lane's left edge");
-  assert.ok(beyond(f(P.entry.left[58])) > 8 && beyond(f(P.entry.right[58])) > 18, "the entry lane ends well off the track, at the lane");
+  assert.ok(beyond(f(P.entry.left[60])) > 8 && beyond(f(P.entry.right[60])) > 18, "the entry lane ends well off the track, at the lane");
   // the lane's first line lies on the track's surveyed control line (within 0.3 m along)
   const c0 = T.marks.control[0], c1 = T.marks.control[1], cl = Math.hypot(c1[0] - c0[0], c1[1] - c0[1]), nx = -(c1[1] - c0[1]) / cl, ny = (c1[0] - c0[0]) / cl;
-  for (const q of [P.entry.left[58], P.entry.right[58]]) { const p = f(q), off = (p[0] - c0[0]) * nx + (p[1] - c0[1]) * ny; assert.ok(Math.abs(off) < 0.35, `the lane begins ${off.toFixed(2)} m from the control line`); }
+  for (const q of [P.entry.left[60], P.entry.right[60]]) { const p = f(q), off = (p[0] - c0[0]) * nx + (p[1] - c0[1]) * ny; assert.ok(Math.abs(off) < 0.35, `the lane begins ${off.toFixed(2)} m from the control line`); }
   // the pit exit line: on the track for its last 383 m – the survey's own points, 3 … 4.5 m inside the right edge –, to where it ends
   const A = P.lines.find((l) => l.onTrack).pts, ins = A.slice(3, -1).map((q) => -beyond(f(q)));
   assert.ok(A.length === 48 && ins.slice(14).every((d) => d > 2.8 && d < 4.6) && ins.slice(0, 14).every((d) => d > -0.1 && d < 4.6), JSON.stringify(ins.map((d) => +d.toFixed(1))));

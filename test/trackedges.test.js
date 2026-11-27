@@ -107,11 +107,15 @@ test("the shipped data: every circuit's lines pair up, lie on its own reference 
     assert.ok(T.ref.length >= 200 && Number.isFinite(T.fit.c) && Number.isFinite(T.fit.s) && Number.isFinite(T.fit.tx) && Number.isFinite(T.fit.ty) && T.fit.centre.length === 2, key + ": fit and reference line");
     const scale = Math.hypot(T.fit.c, T.fit.s); assert.ok(scale > 0.99 && scale < 1.01, key + ": the fit's scale " + scale);
     assert.ok(lapOnRef(T.ref.filter((_, i) => i % 3 === 0), T.ref).ok);
-    // the reference line as a lap, 2 m between samples
-    const pts = []; for (let i = 0; i < T.ref.length; i++) { const a = T.ref[i], b = T.ref[(i + 1) % T.ref.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]) / 10, m = Math.max(1, Math.round(l / 2)); for (let k = 0; k < m; k++) pts.push([(a[0] + ((b[0] - a[0]) * k) / m) / 10, -(a[1] + ((b[1] - a[1]) * k) / m) / 10]); }
+    // the reference line as a lap, 2 m between samples – its points joined by a smooth curve, as the app's lap line is (straight
+    // pieces turn all at once at each point: 12 m inside Spa's La Source hairpin an edge then ran back by 0.25 m – a fold of
+    // the test's own, tools/track.js tryEntry)
+    const cr = (p0, p1, p2, p3, t) => p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+    const pts = []; for (let i = 0; i < T.ref.length; i++) { const q = (k) => T.ref[(i + k + T.ref.length) % T.ref.length], a = q(0), b = q(1), l = Math.hypot(b[0] - a[0], b[1] - a[1]) / 10, m = Math.max(1, Math.round(l / 2)); for (let k = 0; k < m; k++) pts.push([cr(q(-1)[0], a[0], b[0], q(2)[0], k / m) / 10, -cr(q(-1)[1], a[1], b[1], q(2)[1], k / m) / 10]); }
     const S = samplesOf(pts, true), r = applyTrackEdges(S, T, ([X, Y]) => [X, -Y]);
-    assert.strictEqual(r.folds, 0, key + ": " + JSON.stringify(r));
-    if (!T.edges.open) assert.ok(r.changed > S.length * 0.9, key + ": " + JSON.stringify(r));
+    const facts = JSON.stringify({ ...r, broken: undefined });
+    assert.strictEqual(r.folds, 0, key + ": " + facts);
+    if (!T.edges.open) assert.ok(r.changed > S.length * 0.9, key + ": " + facts);
     assert.ok(r.width[0] >= 6 && r.width[1] <= 30, key + ": widths " + r.width);
   }
 });

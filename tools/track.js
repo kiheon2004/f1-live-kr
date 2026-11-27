@@ -188,7 +188,10 @@ function buildEntry(C, survey) {
 async function tryEntry(entry) {
   const { applyTrackEdges, lapOnRef } = await import("../src/renderer/trackedges.js");
   const R = entry.ref, pts = [];
-  for (let i = 0; i < R.length; i++) { const a = R[i], b = R[(i + 1) % R.length], l = hyp(b[0] - a[0], b[1] - a[1]) / 10, m = Math.max(1, Math.round(l / 2)); for (let k = 0; k < m; k++) pts.push([(a[0] + ((b[0] - a[0]) * k) / m) / 10, -(a[1] + ((b[1] - a[1]) * k) / m) / 10]); }
+  // (the reference line's points, 5 m apart, joined by a smooth curve as the app's lap line is – straight pieces turn all at
+  // once at each point, and 12 m inside La Source's hairpin an edge then ran backwards by 0.25 m: a fold of this test's own)
+  const cr = (p0, p1, p2, p3, t) => p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+  for (let i = 0; i < R.length; i++) { const q = (k) => R[(i + k + R.length) % R.length], a = q(0), b = q(1), l = hyp(b[0] - a[0], b[1] - a[1]) / 10, m = Math.max(1, Math.round(l / 2)); for (let k = 0; k < m; k++) pts.push([cr(q(-1)[0], a[0], b[0], q(2)[0], k / m) / 10, -cr(q(-1)[1], a[1], b[1], q(2)[1], k / m) / 10]); }
   const n = pts.length, S = pts.map((p, i) => { const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], l = hyp(b[0] - a[0], b[1] - a[1]) || 1, tx = (b[0] - a[0]) / l, tz = (b[1] - a[1]) / l; return { i, p: { x: p[0], z: p[1] }, nor: { x: -tz, z: tx }, L: 7, R: -7, M: 0 }; });
   const r = applyTrackEdges(S, entry, ([X, Y]) => [X, -Y]);
   const inside = S.filter((s) => s.sv === 1), margin = inside.map((s) => Math.min(s.L, -s.R)).sort((a, b) => a - b);

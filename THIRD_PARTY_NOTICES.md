@@ -25,7 +25,10 @@ Commons Open Database License (ODbL) 1.0 – https://www.openstreetmap.org/copyr
 The surveyed track lines (a circuit's two edges, its start and finish lines and pole's grid box) in
 `src/renderer/trackdata.js` and `tools/track/` were measured on aerial photographs. Zandvoort: PDOK Luchtfoto 2026
 Ortho HR – source: Beeldmateriaal Nederland, CC BY 4.0 (https://www.beeldmateriaal.nl, served by https://www.pdok.nl) –,
-compared with Esri World Imagery (looked at only). No photograph is in the repository: only coordinates measured on them.
+compared with Esri World Imagery (looked at only). Spa-Francorchamps (the lap and the pit lane's lines): the orthophotos of
+2024, 2025 and 2026 of the Service public de Wallonie (SPW), CC BY 4.0 (https://geoportail.wallonie.be), the building's
+place checked on its PICC map. Monza: Esri World Imagery and its earlier editions (looked at only). No photograph is in
+the repository: only coordinates measured on them.
 
 ## Fetched at run time (not in the repository)
 

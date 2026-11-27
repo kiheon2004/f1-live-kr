@@ -22,7 +22,7 @@ import { makeFlag } from "./flag3d.js";
 import { MARSHAL_DATA } from "./marshaldata.js";
 import { flagState, marshalMap, postSignal, panelSignal, vscEndOf } from "./marshals.js";
 import { harbourFor, layoutYachts, yachtMeshes, hullsOverlap } from "./harbour.js";
-import { LANES, laneCells, crossSection, laneSectionAt, laneLines } from "./pitlane.js";
+import { LANES, laneCells, crossSection, laneSectionAt, laneLines, laneStationAt } from "./pitlane.js";
 import { createPitTrace } from "./pitcheck.js";
 import { boxWays, inLenTo } from "./pitpath.js";
 import { pitState, pathW, visitStands, visitPlan, runBlend, laneOffsetOf, crewPhase, pendingPenalties, pendingTimePenalties, pitVisits, posSpeed, standingForPos, lastStandPos, standEndPos, nextStandPos, stopPlan, garagePath, PIT } from "./pitstate.js";
@@ -335,7 +335,23 @@ const pitModels = new WeakMap();
 function pitModelFor(G) {
   let m = pitModels.get(G); if (m) return m;
   // (a venue whose lane is surveyed with its fast lane's place – pitroads.js lane.fast: the cars drive there)
-  const A1 = app(), FAST = PIT_ROADS[venueOf({ circuitKey: A1.circuitKey?.(), location: A1.location?.() })?.key]?.lane.fast || null;
+  const A1 = app(), LANE = PIT_ROADS[venueOf({ circuitKey: A1.circuitKey?.(), location: A1.location?.() })?.key]?.lane || null, FAST = LANE?.fast || null;
+  // (… or with its fast lane given from the line through the lane's `doors` at that line's two ends – lane.fastLine:
+  // [[a, b] at its start, [a, b] at its end] –, where the garage fronts do not lie on that line: Spa, whose painted lines
+  // run 0.95 m nearer the doors at the north end (its `doors` is the door line turned with them) and whose middle 78 m of
+  // fronts stand 3.3 m out. At each garage, measured from that garage's own front. Needs the map's frame – without the
+  // map, the lane's own rule.)
+  let fastOf = () => FAST;
+  const RW = world.real;
+  if (LANE?.fastLine && RW?.geo?.fromLL) {
+    const D0 = RW.geo.fromLL(...LANE.doors[0]), D1 = RW.geo.fromLL(...LANE.doors[1]), dl = Math.hypot(D1[0] - D0[0], D1[1] - D0[1]) || 1, ax = (D1[0] - D0[0]) / dl, az = (D1[1] - D0[1]) / dl, [f0, f1] = LANE.fastLine;
+    fastOf = (s) => {
+      const u = ((s.front[0] - D0[0]) * ax + (s.front[1] - D0[1]) * az) / dl, t = Math.max(0, Math.min(1, u));
+      // (the front's distance out from the door line, towards the lane: against the garage's own inward direction)
+      const v = -((s.front[0] - D0[0] - ax * u * dl) * s.inward[0] + (s.front[1] - D0[1] - az * u * dl) * s.inward[1]);
+      return [f0[0] + (f1[0] - f0[0]) * t - v, f0[1] + (f1[1] - f0[1]) * t - v];
+    };
+  }
   const F = world.frame, st = G.slots.map((s) => {
     const out = [-s.inward[0], -s.inward[1]];
     let edge = null;
@@ -345,13 +361,16 @@ function pitModelFor(G) {
       if (Math.abs(pr.d) <= half) { edge = d; break; }
     }
     const wall = G.wallFace ? G.wallFace(s.uc) : null;
-    return { s, cs: crossSection({ wall, edge, fast: FAST }), edge, floor: s.floor };
+    const fast = fastOf(s);
+    return { s, cs: crossSection({ wall, edge, fast }), edge, floor: s.floor, fast };
   });
   // (between the garages either side of u by their centres – a run's garages can have a gap, Madrid 2026 –, the wall's
   // face the facility's own at u, within the run: laneSectionAt)
   const us = st.map((x) => x.s.uc), wf = G.wallFace ? (u) => G.wallFace(Math.max(G.gStart, Math.min(G.gEnd, u))) : null;
   // (v0.53: the lines driven – fast lane, boxes – without the wall's steps: pitlane.js laneLines)
-  const at = laneLines((u) => laneSectionAt(st, us, u, wf, FAST), G.gStart - PIT.ends - 5, G.gEnd + PIT.ends + 5);
+  // (the fast lane at u: between the two garages' own, where they differ – lane.fastLine)
+  const fastAt = LANE?.fastLine ? (u) => { const { i, t } = laneStationAt(us, u), a = st[Math.max(0, i)].fast, b = st[Math.min(st.length - 1, Math.max(0, i) + 1)].fast; return a && b ? [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] : a || b || null; } : () => FAST;
+  const at = laneLines((u) => laneSectionAt(st, us, u, wf, fastAt(u)), G.gStart - PIT.ends - 5, G.gEnd + PIT.ends + 5);
   m = { G, st, at, ok: st.filter((x) => x.cs.ok).length, wallFrom: [...new Set(st.map((x) => x.cs.wallFrom))] };
   pitModels.set(G, m);
   return m;
@@ -565,14 +584,25 @@ function pitDraw(c, r, v) {
 // floor to that height over the 40 m: past the tarmac the cars hung up to 0.63 m over the ground (Hungary 2025, the exit
 // road; a ray down, Map3D.pitPathScan).
 const surfRay = new THREE.Raycaster(), surfDown = new THREE.Vector3(0, -1, 0), surfFrom = new THREE.Vector3();
+// The surface of a surveyed pit road under (x, z) – the pit lane's tarmac where the venue's roads are laid from surveyed
+// lines –, looked for 20 m either side of `near`; null where there is none (no such roads here, or not on them).
+function pitRoadY(x, z, near) {
+  const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"); if (!tm?.parent?.userData.pitRoads || !Number.isFinite(near)) return null;
+  surfFrom.set(x, near + 20, z); surfRay.set(surfFrom, surfDown); surfRay.far = 42;
+  const h = surfRay.intersectObject(tm, false)[0]; return h ? h.point.y + 0.004 : null;
+}
 function pitSurfaceY(x, z, y, floor, inRun) {
   if (inRun >= 1) return floor + 0.004;
-  if (inRun <= 0) return y;   // (40 m and more from the garages: the car's own height – nothing below is used)
-  const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"), R = world?.real;
+  const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"), R = world?.real, roads = !!tm?.parent?.userData.pitRoads;
+  // (40 m and more from the garages: the car's own height – nothing below is used. v0.71: but on a surveyed pit road –
+  // pitroads.js – that road's surface all along it, as groundFor has it for a car drawn from its raw position: one height
+  // whichever way the car is posed)
+  if (inRun <= 0) return (roads ? pitRoadY(x, z, y) : null) ?? y;
   let s = null;
   // (with surveyed roads in the tarmac – pitroads.js – the surface can lie well over or under the garages' floor: a longer ray)
-  const far = tm?.parent?.userData.pitRoads ? 20 : 3;
+  const far = roads ? 20 : 3;
   if (tm) { surfFrom.set(x, floor + far, z); surfRay.set(surfFrom, surfDown); surfRay.far = far * 2 + 2; const h = surfRay.intersectObject(tm, false)[0]; if (h) s = h.point.y + 0.004; }
+  if (roads && s != null) return s;
   if (s == null && R?.groundAt) { const g = R.groundAt(x, z); if (Number.isFinite(g)) s = g + 0.02; }
   if (s == null) return y + (floor + 0.004 - y) * inRun;
   return y + (s - y) * Math.min(1, inRun * 4);
@@ -1587,8 +1617,14 @@ function groundFor(c, x, z, feedY) {
     // (off the lap line's tarmac – a pit entry or exit road, a run-off – the ground under the car, not the lap line's height
     // beside it: 0.3–0.9 m over the drawn road at Hungary's exit and Monaco's entry, the pit helper's measurement)
     const s = c.sample, lat = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z, off = lat > (s.L ?? 7) + 2 || lat < (s.R ?? -7) - 2;
+    // (v0.71: …and where a surveyed pit road lies there – pitroads.js –, that road's own surface: down from Spa's La Source
+    // the ground beside the track lies 0.3 … 0.9 m under the exit lane, which the surveyed track has outside its edge – the
+    // cars sank into the lane, came up at the lap line's height and went down again, 0.4 … 0.5 m from frame to frame)
+    // (from the track's own edge on – the road's surface comes away from the lap line's height within those first 2 m)
+    if (off || lat > (s.L ?? 7) || lat < (s.R ?? -7)) { const r = pitRoadY(x, z, g); if (r != null) return r; }
     return off && Number.isFinite(t) && Math.abs(t - g) < 6 ? t + 0.02 : g + ROAD_LIFT - 0.02;
   }
+  { const r = pitRoadY(x, z, Number.isFinite(t) ? t : feedY); if (r != null) return r; }
   return Number.isFinite(t) && Math.abs(feedY - t) > GROUND_TOL ? t + 0.02 : feedY;
 }
 
@@ -4795,7 +4831,7 @@ window.Map3D = {
     const prev = new Map(), out = [], byKind = {}, cnt = {}, tags = {}, worst = {}, R = world.real, add = (kind, num, mag, extra) => { cnt[kind] = (cnt[kind] || 0) + 1; if (!worst[kind] || mag > worst[kind]) worst[kind] = mag; const per = o.perKind ?? 300; byKind[kind] = (byKind[kind] || 0) + 1; if (byKind[kind] <= per) out.push({ t: +((fakeT - st0) / 1000).toFixed(2), num, kind, mag: +mag.toFixed(2), ...extra }); };
     const tagOf = (c) => c.est ? "est" : c.pit ? "pit:" + (c.pit.state?.state || "") : c.grid && c.grid.state !== "free" ? "grid" : c.onTrack ? "trk" : "raw";
     const groundY = (x, z) => { const [s, d] = world.grid.nearest(x, z, 2); const g = R?.groundAt ? R.groundAt(x, z) : null; return s && d < Math.max(s.L ?? 7, -(s.R ?? -7)) + 1.5 ? s.p.y : g; };
-    let frames = 0; const tA = performance.now(), ft = [];
+    let frames = 0; const tA = performance.now(), ft = [], trace = [];
     try {
       for (fakeT = t0; fakeT <= t1; fakeT += dt * 1000) {
         const f0 = performance.now(); updateCars(dt); ft.push(performance.now() - f0); frames++;
@@ -4804,6 +4840,8 @@ window.Map3D = {
           if (!c.has || !c.obj.visible) { prev.delete(num); continue; }
           const P = c.obj.position, tg = tagOf(c), q = prev.get(num), tel = src.carAt?.(num, fakeT), vt = tel ? tel.speed / 3.6 : null, sNow = c.st && c.onTrack ? Math.round(((c.st.s % world.frame.L) + world.frame.L) % world.frame.L) : null;
           tags[tg.split(":")[0]] = (tags[tg.split(":")[0]] || 0) + 1;
+          // (o.trace: one car's every frame – t, how it is posed, x, y, z, how far it is taken to be into the garages' run)
+          if (o.trace && String(o.trace) === num) trace.push([+((fakeT - st0) / 1000).toFixed(2), tg, +P.x.toFixed(2), +P.y.toFixed(2), +P.z.toFixed(2), c.pit && Number.isFinite(c.pit.inRun) ? +c.pit.inRun.toFixed(2) : null]);
           if (q) {
             const step = Math.hypot(P.x - q.x, P.z - q.z), allow = (Math.max(vt ?? 0, q.v ?? 0, c.speed || 0) * 1.25 + 8) * dt + 0.15;
             const base = { tag: q.tag === tg ? tg : q.tag + ">" + tg, s: sNow, v: Math.round((vt ?? c.speed ?? 0) * 3.6), x: +P.x.toFixed(1), y: +P.y.toFixed(2), z: +P.z.toFixed(1) };
@@ -4823,7 +4861,7 @@ window.Map3D = {
       }
     } finally { window.F1KR = real; }
     ft.sort((a, b) => a - b);
-    return JSON.stringify({ frames, ms: Math.round(performance.now() - tA), updateMs: [ft[ft.length >> 1], ft[Math.floor(ft.length * 0.99)]].map((v) => +v.toFixed(2)), tags, counts: cnt, worst: Object.fromEntries(Object.entries(worst).map(([k, v]) => [k, +v.toFixed(2)])), list: out });
+    return JSON.stringify({ frames, ms: Math.round(performance.now() - tA), updateMs: [ft[ft.length >> 1], ft[Math.floor(ft.length * 0.99)]].map((v) => +v.toFixed(2)), tags, counts: cnt, worst: Object.fromEntries(Object.entries(worst).map(([k, v]) => [k, +v.toFixed(2)])), list: out, ...(o.trace ? { trace } : {}) });
   },
   // development: across-track spread of all cars at the sharpest corners (d: + left of the lap line, metres)
   spreadAt(k = 6) {
@@ -5069,6 +5107,17 @@ window.Map3D = {
   },
   // development: the pit lane across – every 20 m between the limiter lines: the track's side and how far its edge is
   // from the measured pit path (the feed's line, the fast lane), and (with a pit building) how far its garage fronts are
+  // development: the lane model's stations (one a garage: where along, ok, the wall, the surveyed fast lane taken there, the
+  // fast lane used, the cars' line, the track's edge, the floor) and the lines driven every 5 m to 40 m past either end
+  laneStations() {
+    const G = pitTeams.G; if (!G) return "no facility"; const m = pitModelFor(G), r2 = (v) => (v == null || !Number.isFinite(v) ? null : +v.toFixed(2));
+    const st = m.st.map((x) => [r2(x.s.uc), x.cs.ok ? 1 : 0, r2(x.cs.wall), x.fast ? x.fast.map(r2) : null, x.cs.fast ? x.cs.fast.map(r2) : null, r2(x.cs.fastC), r2(x.edge), r2(x.floor)]);
+    const at = []; for (let u = G.gStart - 40; u <= G.gEnd + 40; u += 5) { const a = m.at(u); at.push([r2(u), r2(a.fastC), r2(a.inner), r2(a.wall), r2(a.floor), a.ok ? 1 : 0]); }
+    // (the building's front as the facility reads it past the last garage: a point carried on along the run from the last
+    // garage's front, how far out from the front the facility has it – 0 while the front runs on straight)
+    const L = G.slots[G.slots.length - 1], ends = []; for (let du = -8; du <= 8; du += 0.5) { const pr = G.project(L.front[0] + L.along[0] * du, L.front[1] + L.along[1] * du); ends.push([du, r2(pr.u), r2(pr.off)]); }
+    return JSON.stringify({ gStart: r2(G.gStart), gEnd: r2(G.gEnd), st, at, ends });
+  },
   pitAcross(whole = false) {   // (whole: the lane from end to end, each row with its path point's lat / lon)
     const P = world?.pitLane, F = world?.frame; if (!P) return JSON.stringify({ ok: false, info: world?.pitInfo });
     let G = null; world?.real?.group.getObjectByName("facilities")?.traverse((o) => { if (!G && o.userData?.garages) G = o.userData.garages; });
@@ -6312,6 +6361,15 @@ window.Map3D = {
   // development: (lat, lon) → scene [x, ground y, z] (to aim another build's look() at the same place)
   // development: (lat, lon) → the feed's own metres [X, Y] (the frame of START_DATA's pit paths × 0.1 and of localwidth.js)
   llToFeed(lat, lon) { const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon), o = R.geo.xz([0, 0]); return JSON.stringify([+(x - o[0]).toFixed(2), +(o[1] - z).toFixed(2)]); },
+  // development: the heights at a place – the drawn ground, the height a side road has there (the surveyed pit roads'), the
+  // pit lane's tarmac under it (a ray down), the nearest lap sample's height with how far across it the place lies
+  heightsAt(lat, lon) {
+    const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon), r2 = (v) => (v == null || !Number.isFinite(v) ? null : +v.toFixed(2));
+    const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"); let tar = null;
+    if (tm) { const g = R.groundAt?.(x, z) ?? 0; surfFrom.set(x, g + 30, z); surfRay.set(surfFrom, surfDown); surfRay.far = 60; const h = surfRay.intersectObject(tm, false)[0]; if (h) tar = h.point.y; }
+    const [sm, d] = world.grid.nearest(x, z, 2), lat2 = sm ? (x - sm.p.x) * sm.nor.x + (z - sm.p.z) * sm.nor.z : null;
+    return JSON.stringify({ ground: r2(R.groundAt?.(x, z)), road: r2(R.roadAt?.(x, z)), tarmac: r2(tar), track: sm ? r2(sm.p.y) : null, across: r2(lat2), edges: sm ? [r2(sm.R ?? -7), r2(sm.L ?? 7)] : null, d: r2(d) });
+  },
   llToScene(lat, lon) { const R = world?.real; if (!R) return "no real"; const [x, z] = R.geo.fromLL(lat, lon); return JSON.stringify([+x.toFixed(2), +(R.groundAt?.(x, z) ?? 0).toFixed(2), +z.toFixed(2)]); },
   // development: the measured pit path (startdata.js) every `every` m – lat/lon, and how far the track's tarmac is from it on
   // each side (left / right of the path's direction, m; null beyond 60 m) and which lap sample that is

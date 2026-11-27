@@ -1065,8 +1065,14 @@ async function buildReal(api, scene, world, opts, onStep, own) {
   const aux = auxRuns(scene.lines.map((l) => ({ ...l, pts: l.pts.map(gf.xz) })), T, { street: !!opts.street, skip: world.laneZone || null });
   // (the track's height only right by it, the terrain's from 10–25 m out: held at the track's height to 60 m, strips
   // floated up to 2.3 m over lower ground beside it – Spa, audit)
+  // (a venue whose surveyed pit roads say `noAux` – pitroads.js: the map's own way for such a road is not laid on it, nor
+  // within 3.5 m of it – it lies sunk under the ground there. Spa: the surveyed exit lane lies beside the track down from
+  // La Source; the map's way for it, at the track's centre height, stood over the lane and over the track's edge.)
+  const auxPlan = opts.venue?.key != null ? PIT_ROADS[opts.venue.key] : null, auxOn = auxPlan?.noAux ? onPitRoads(auxPlan, ([la, lo]) => gf.fromLL(la, lo)) : null;
+  const nearPitRoad = auxOn ? (x, z) => { if (auxOn(x, z)) return true; for (let k = 0; k < 8; k++) if (auxOn(x + 3.5 * Math.cos((k * Math.PI) / 4), z + 3.5 * Math.sin((k * Math.PI) / 4))) return true; return false; } : null;
   const auxY = (x, z) => { const [s, d] = nearTrack(x, z); const ty = terrainAt(x, z); return s && !between(x, z, s, d) ? blendHeight(s.p.y, ty, d, 10, 25) : ty + 0.05; };
-  const tm = auxMesh(aux, T, auxY);
+  // (the strips' own height: the surveyed pit roads lie at auxY – roadAt below – and are not sunk with them)
+  const tm = auxMesh(aux, T, nearPitRoad ? (x, z) => (nearPitRoad(x, z) ? terrainAt(x, z) - 0.8 : auxY(x, z)) : auxY);
   if (tm) group.add(tm);
   // Real barriers within 45 m of the track.
   // Mapped barriers within 45 m of the track, cut where a mapping error puts them on the tarmac – or across the pit lane
