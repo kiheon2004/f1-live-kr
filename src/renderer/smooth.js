@@ -76,6 +76,10 @@ export function trackFrame(world) {
     },
     // the sample at or just before s
     sampleAt(s) { return S[locate(s)[0]]; },
+    // the track's edges at s (m from the lap line: o.L, o.R), straight between the sample at or just before s and the next;
+    // o.sv: both are surveyed edges (trackedges.js)
+    // (tL, tR: the room for traffic at a surveyed sample – trackedges.js trafficRoom –, the edges themselves without it)
+    edgesAt(s, o) { const [i, t] = locate(s), a = S[i], b = S[(i + 1) % n], aL = a.tL ?? a.L ?? 7, aR = a.tR ?? a.R ?? -7; o.L = aL + ((b.tL ?? b.L ?? 7) - aL) * t; o.R = aR + ((b.tR ?? b.R ?? -7) - aR) * t; o.sv = a.sv && b.sv ? 1 : 0; return o; },
     // the racing line's offset at s (samples' .line, metres left of the lap line; 0 without one), cubic
     lineAt(s) {
       const [i, t] = locate(s), v = (k) => S[(i + k + n) % n].line || 0;
@@ -110,13 +114,19 @@ const cr = (p0, p1, p2, p3, t) => p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1
 // to the edges. Coarse spacings first (the overall shape over 100+ m), then finer ones.
 // (F1's position feed is now matched to one reference line – every car is on it – so the line can't be read from
 // the data; this is the line a driver takes on a clear lap.)
+const OVER = 1;   // m the cars' line may lie beyond a surveyed edge line (on the kerb) where the feed's own line does
 export function racingLine(samples, margin = 0.75) {
   const n = samples.length;
   const px = new Float64Array(n), pz = new Float64Array(n), nx = new Float64Array(n), nz = new Float64Array(n);
   const lo = new Float64Array(n), hi = new Float64Array(n), a = new Float64Array(n);
   samples.forEach((s, i) => {
     px[i] = s.p.x; pz[i] = s.p.z; nx[i] = s.nor.x; nz[i] = s.nor.z;
-    const L = (s.L ?? 7) - margin, R = (s.R ?? -7) + margin;
+    let L = (s.L ?? 7) - margin, R = (s.R ?? -7) + margin;
+    // (a surveyed edge – trackedges.js, s.sv – is the white line itself, and at an apex the feed's own line may run nearer it
+    // than the margin or over it, on the kerb – Monza's first chicane: 1 m beyond the line. Held `margin` inside there, the
+    // line was bent in and out again within 4 m – more than a car can turn, every car, every lap. Where the feed's line
+    // lies beyond the edge, this line may go as far as the feed's does, at most OVER beyond the edge.)
+    if (s.sv) { if (s.L < 0) L = Math.max(L, Math.min(0, s.L + OVER)); if (s.R > 0) R = Math.min(R, Math.max(0, s.R - OVER)); }
     if (L > R) { lo[i] = R; hi[i] = L; } else lo[i] = hi[i] = ((s.L ?? 7) + (s.R ?? -7)) / 2;
   });
   const X = (i, k) => { const j = (((i + k) % n) + n) % n; return [px[j] + nx[j] * a[j], pz[j] + nz[j] * a[j]]; };

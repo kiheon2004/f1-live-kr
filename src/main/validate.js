@@ -52,4 +52,16 @@ function trustedSender(frame, win, pageUrl) {
 // a facility model file name (src/data/models): "silverstone-wing.glb"
 const modelFile = (v) => { if (typeof v !== "string" || !/^[a-z0-9][a-z0-9_-]{0,80}\.glb$/.test(v)) throw new Error("bad model file"); return v; };
 
-module.exports = { modelFile, tileArgs, inside, year, season, circuitKey, text, sessionPath, jobId, sessionPaths, externalUrl, trustedSender };
+// A circuit's stored fit (feed metres → metres east and north of the circuit's centre: a rotation with a scale within a
+// hundredth of 1, and a shift) or null: { centre: [lat, lon], c, s, tx, ty } – only those numbers are passed on.
+function fixedFit(v) {
+  if (v === undefined || v === null) return null;
+  const num = (x, lim) => typeof x === "number" && Number.isFinite(x) && Math.abs(x) <= lim;
+  if (typeof v !== "object" || !Array.isArray(v.centre) || v.centre.length !== 2 || !num(v.centre[0], 90) || !num(v.centre[1], 180) ||
+    !num(v.c, 2) || !num(v.s, 2) || !num(v.tx, 20000) || !num(v.ty, 20000)) throw new Error("bad fit");
+  const scale = Math.hypot(v.c, v.s);
+  if (!(scale > 0.99 && scale < 1.01)) throw new Error("bad fit");
+  return { centre: [v.centre[0], v.centre[1]], c: v.c, s: v.s, tx: v.tx, ty: v.ty };
+}
+
+module.exports = { modelFile, tileArgs, inside, year, season, circuitKey, text, sessionPath, jobId, sessionPaths, externalUrl, trustedSender, fixedFit };

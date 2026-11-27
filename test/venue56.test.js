@@ -743,8 +743,9 @@ test("v0.70: Monza – the pit building's storeys with the canopy, five more mod
 
 // v0.70: Zandvoort – the pit building's storeys (the old block, the round tower, the 2024 block) over the builder's garages,
 // the start gantry carrying the start lamps, 16 stand files on their front lines; the pit-lane roads from surveyed lines
-// (the exit road round the inside of the Tarzanbocht). No surveyed wall place: this app's track lies over it.
-test("v0.70: Zandvoort – the pit building's storeys, the start gantry with the lamps, 16 stand files; the lane's paint, no wall or fast-lane place", async () => {
+// (the exit road round the inside of the Tarzanbocht). v0.72: the track's edges are surveyed (trackdata.js) – the lane
+// reaches the surveyed fast lane, the gantry stands at its surveyed place again.
+test("v0.70 / v0.72: Zandvoort – the pit building's storeys, the start gantry with the lamps at its surveyed place, 16 stand files; the lane's paint and fast lane", async () => {
   const F = await import("../src/renderer/facilities.js");
   const { PIT_ROADS } = await import("../src/renderer/pitroads.js");
   const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));
@@ -760,8 +761,11 @@ test("v0.70: Zandvoort – the pit building's storeys, the start gantry with the
   const st = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "data", "grandstands.json"), "utf8")).circuits.Zandvoort.stands;
   assert.strictEqual(st.length, 16); assert.ok(st.every((s) => s.model && files.includes(s.model.file) && s.model.heading === 180 && Array.isArray(s.model.at) && Array.isArray(s.model.drape.along) && s.model.drape.along.length >= 2));
   assert.strictEqual(new Set(st.map((s) => s.model.file)).size, 16);
-  // the lane: no surveyed fast lane for the cars (this app's lane is nowhere wide enough), no wall place (this app's track
-  // lies over the surveyed wall)
-  const P = PIT_ROADS[55]; assert.ok(!P.lane.fast && !P.lane.wallAt, "this app's lane is nowhere wide enough for the surveyed fast lane"); assert.deepStrictEqual(P.lane.u, [-36, 223]); assert.strictEqual(P.exit.edgeLine, 0.15); assert.strictEqual(P.edgeLine, 0);
+  assert.deepStrictEqual(g.model.anchor, [52.389763, 4.541171], "the gantry at the place it was surveyed at (v0.70 had it 2.5 m nearer the pits, off this app's then track)");
+  // the lane: the surveyed fast lane for the cars (with the track's real edge the lane is wide enough); no wall place of its
+  // own – the app's wall stands at the track's surveyed edge, where the real one does
+  const P = PIT_ROADS[55]; assert.deepStrictEqual(P.lane.fast, [9.59, 12.76]); assert.ok(/version 2\.1/.test(P.src) && P.exit.left.length === 49 && P.exit.left.length === P.exit.right.length && P.entry.left.length === P.entry.right.length); assert.ok(!P.lane.wallAt); assert.deepStrictEqual(P.lane.u, [-36, 223]); assert.strictEqual(P.exit.edgeLine, 0.15); assert.strictEqual(P.edgeLine, 0);
+  const { TRACKS } = await import("../src/renderer/trackdata.js");
+  assert.ok(TRACKS[55] && TRACKS[55].on && TRACKS[55].edges.left.length === 851 && TRACKS[55].marks.pole && TRACKS[55].marks.start && TRACKS[55].marks.control, "Zandvoort's surveyed track, with the start line, the control line and pole's box");
 });
 

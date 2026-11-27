@@ -133,3 +133,20 @@ test("grid slots after the clock started: the published grid when it fits best (
   assert.strictEqual(a.size, 16);
   assert.ok([...a].every(([n, x]) => x.by === "gridPos" && "n" + x.g === n));
 });
+
+test("v0.72: the boxes drawn at the surveyed pole box – only the drawing moves, and only within a slot and a half", async () => {
+  const G = await import("../src/renderer/grid.js");
+  const L = 4215, fz = 1.7;
+  // Zandvoort 2026: the surveyed front line of pole's box lies 2.5 m behind where the feed has pole's car standing;
+  // pole's box is on the − side of the track's middle (the lap line's own across axis)
+  const z = G.surveyedBoxes({ s: 410.0, d: -3.1 }, 412.5 - fz - G.GRID_RULES.frontGap + 2.2, fz, L, 0.2);
+  assert.ok(z.ok && Math.abs(z.off + 4.7) < 1e-9 && z.drawOff === z.off && z.side === -1, JSON.stringify(z));
+  // Monza: 8.4 m – still drawn at the surveyed box; 15 m: not (something else is wrong), nothing moves
+  assert.ok(G.surveyedBoxes({ s: 100, d: 2 }, 106.2, fz, L).ok && G.surveyedBoxes({ s: 100, d: 2 }, 106.2, fz, L).side === 1);
+  const far = G.surveyedBoxes({ s: 100, d: 2 }, 113, fz, L); assert.ok(!far.ok && far.drawOff === 0 && far.side === 0 && Math.abs(far.off + 15.2) < 1e-9);
+  // across the lap line's seam
+  const w = G.surveyedBoxes({ s: 3, d: 1 }, L - 2, fz, L); assert.ok(w.ok && Math.abs(w.off - (5 - fz - 0.5)) < 1e-9, JSON.stringify(w));
+  assert.deepStrictEqual(G.surveyedBoxes(null, 10, fz, L), { off: null, ok: false, drawOff: 0, side: 0 });
+  // the car in such a slot is let go like any other: 8.4 m over 40 m, never backwards
+  let prev = -Infinity; for (let driven = 0; driven <= 45; driven += 0.5) { const b = G.leaveBase({ da: -8.4, dc: 0, driven }); const drawn = driven + (b ? b.ds : 0); assert.ok(drawn > prev - 1e-9); prev = drawn; }
+});

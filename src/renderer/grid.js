@@ -127,6 +127,22 @@ export function leaveBase({ da, dc, driven, d = 0, lo = -Infinity, hi = Infinity
   return { state: w.state, along: w.along, across: w.across, dAcross: w.dAcross, ds: da * w.along, dd: lat - d };
 }
 
+// Where the boxes are DRAWN at a circuit whose surveyed track carries pole's box (trackdata.js marks.pole – its front
+// line's place on the lap line: s along it, d across it): where the real ones are painted. The feed has the field
+// standing a little off them (Zandvoort 4.7 m, Monza 8.4 m), so only the drawing moves by `drawOff` (m along the lap):
+// which car is in which slot is still matched against where the feed has the field standing (s1 – assignSlots), and a
+// car's offset to its drawn slot is let go as it drives off like any other (leaveBase: 8 m over 40 m – the drawn car at
+// up to 131 % of its speed for 2.7 s, never backwards). Not when the feed's grid stands more than a slot and a half from
+// the surveyed box (ASSIGN_TOL.gridPos): something else is wrong then, and nothing moves.
+// fz: the car's front axle ahead of its reference point (m); mid: the track's middle across the lap line at the mark.
+// → { off (the surveyed slot − the feed's, m), ok, drawOff, side (±1: which side of the middle pole's box is on, on the
+// lap line's own across axis; 0 when not ok) }
+export function surveyedBoxes(mark, s1, fz, L, mid = 0) {
+  if (!mark || !Number.isFinite(mark.s) || !Number.isFinite(s1) || !(L > 0)) return { off: null, ok: false, drawOff: 0, side: 0 };
+  const off = (((mark.s - fz - GRID_RULES.frontGap - s1) % L) + L * 1.5) % L - L / 2, ok = Math.abs(off) <= ASSIGN_TOL.gridPos;
+  return { off, ok, drawOff: ok ? off : 0, side: ok ? Math.sign((mark.d || 0) - mid) || 0 : 0 };
+}
+
 // Which slot each standing car is in. Before the start: the published grid position (TimingAppData GridPos) – the
 // car is known to be in that slot, so it is taken up to 1.5 slots off (the feed's misfits reach 8 m). After the clock
 // has started, when 6+ cars stand still within the grid's length (a standing start after laps behind the safety car, or

@@ -393,16 +393,28 @@ function wallsUnder(a, parts) {
   return b && { ...b, name: null };
 }
 
+// A stored fit as geo.fitTrack's answer (geo.toLocal / toF1 take it as it is), or null: none, or made about another
+// centre than this circuit's here (the map's features are kept in metres about that centre).
+function fixedFit(fixed, center) {
+  if (!fixed || !Array.isArray(fixed.centre) || Math.abs(fixed.centre[0] - center[0]) > 1e-7 || Math.abs(fixed.centre[1] - center[1]) > 1e-7) return null;
+  const scale = Math.hypot(fixed.c, fixed.s);
+  if (![fixed.c, fixed.s, fixed.tx, fixed.ty].every(Number.isFinite) || !(scale > 0.99 && scale < 1.01)) return null;
+  return { mirror: 1, T: { c: fixed.c, s: fixed.s, tx: fixed.tx, ty: fixed.ty }, cs: [0, 0], rms: 0, inliers: 1, scale, ok: true, against: "surveyed" };
+}
+
 const MEM_SCENES = 4;
 class Scenes {
   constructor(cacheDir) { this.cacheDir = cacheDir; this.mem = new Map(); }
 
   // lap: one clean F1 lap ([x, y, z] decimetres). Returns the scene or { ok: false, reason }.
-  async build(location, lap, onStep = () => {}) {
+  // fixed: the circuit's stored fit ({ centre, c, s, tx, ty } – a track surveyed in latitude and longitude was turned into
+  // the feed's metres with it: renderer/trackedges.js) – used instead of fitting this lap, so the map stands where that
+  // track's lines do, the same in every session.
+  async build(location, lap, onStep = () => {}, fixed = null) {
     const sig = crypto.createHash("md5").update(JSON.stringify(lap.filter((_, i) => i % 10 === 0).map((p) => [Math.round(p[0] / 50), Math.round(p[1] / 50)]))).digest("hex").slice(0, 10);
-    const key = `${location}|${sig}`;
+    const key = `${location}|${sig}${fixed ? "|" + crypto.createHash("md5").update(JSON.stringify(fixed)).digest("hex").slice(0, 10) : ""}`;
     if (this.mem.has(key)) { const j = this.mem.get(key); this.mem.delete(key); this.mem.set(key, j); return j; }
-    const job = this.make(location, lap, sig, onStep).catch((e) => ({ ok: false, reason: e.message }));
+    const job = this.make(location, lap, sig, onStep, fixed).catch((e) => ({ ok: false, reason: e.message }));
     this.mem.set(key, job);
     // (a scene is tens of MB: only the last few circuits stay in memory; older ones rebuild from the disk cache)
     while (this.mem.size > MEM_SCENES) this.mem.delete(this.mem.keys().next().value);
@@ -413,7 +425,7 @@ class Scenes {
     return out;
   }
 
-  async make(location, lap, sig, onStep) {
+  async make(location, lap, sig, onStep, fixed = null) {
     onStep("위치 찾는 중");
     const info = geo.circuitInfo(location);
     const center = await geo.locate(this.cacheDir, location) || info?.center;
@@ -422,8 +434,8 @@ class Scenes {
 
     // Fit (cached per circuit and lap shape).
     const fitFile = path.join(this.cacheDir, `fit2_${location.replace(/[^A-Za-z0-9]+/g, "_")}_${sig}.json`);
-    let fit = null;
-    try { fit = JSON.parse(fs.readFileSync(fitFile, "utf8")); } catch {}
+    let fit = fixedFit(fixed, center);
+    if (!fit) try { fit = JSON.parse(fs.readFileSync(fitFile, "utf8")); } catch {}
     // 1) the circuit's own centreline (bundled), 2) OpenStreetMap raceways and roads.
     if (!fit && info?.line?.length) {
       onStep("트랙 위치 맞추는 중");
@@ -540,4 +552,4 @@ class Scenes {
   }
 }
 
-module.exports = { Scenes, standBuildings, buildingHeight, buildingOf, wallsUnder, areaKind, mergeBuildings, resolveParts };
+module.exports = { Scenes, fixedFit, standBuildings, buildingHeight, buildingOf, wallsUnder, areaKind, mergeBuildings, resolveParts };
