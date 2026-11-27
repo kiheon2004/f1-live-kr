@@ -14,7 +14,7 @@ import { gridMemo } from "./armswap.js";
 import { GRID_RULES, ASSIGN_TOL, BLEND, fitGrid, slotS, slotLat, gridWeight, leaveBase, assignSlots, poleSideFor, surveyedGrid, slotCount, surveyedBoxes } from "./grid.js";
 import { START_DATA } from "./startdata.js";
 import { LOCAL_WIDTHS, applyLocalWidths } from "./localwidth.js";
-import { trackFor, lapOnRef, applyTrackEdges, edgeSteps, dashPieces } from "./trackedges.js";
+import { trackFor, lapOnRef, applyTrackEdges, edgeSteps, dashPieces, trafficRoom } from "./trackedges.js";
 import { StartHistory, startContext, carKind, placeWithout, arrivalBy, onPitPath, PLAN, startLights, fieldLaunch, departsFromFeed } from "./startplan.js";
 import { supportPlan, supportModels, followTarget, medicalLap1, gridRearSlot, flagSpot, flagAt, FLAG, SUPPORT } from "./support.js";
 import { makeSupportCar, SUPPORT_CARS } from "./support3d.js";
@@ -991,6 +991,12 @@ function buildWorld(points) {
   // the racing line (smooth.js) – where the cars are drawn, and where the tarmac is rubbered in
   const line = racingLine(samples);
   samples.forEach((s, i) => { s.line = line[i]; s.M = line[i]; });
+  // (a surveyed track: the room the traffic code may use, eased from the edges – trackedges.js trafficRoom)
+  if (track && samples.some((s) => s.sv)) {
+    const m = samples.length, ds = samples.reduce((a, s, i) => a + Math.hypot(samples[(i + 1) % m].p.x - s.p.x, samples[(i + 1) % m].p.z - s.p.z), 0) / m;
+    const room = trafficRoom(samples.map((s) => s.L ?? 7), samples.map((s) => s.R ?? -7), line, samples.map((s) => s.sv || 0), ds);
+    samples.forEach((s, i) => { if (Number.isFinite(room.L[i])) { s.tL = room.L[i]; s.tR = room.R[i]; } });
+  }
 
   const box = new THREE.Box3().setFromPoints(pts);
   const size = box.getSize(new THREE.Vector3());
@@ -1636,6 +1642,7 @@ function traffic(sm, F, t, dt, pos, grid = null) {
     // sample, 2 m apart, the room traffic.js works with moved in steps of 0.1 … 0.4 m, and a car held at its limit was moved
     // with them frame by frame – its heading swinging 15 … 20° in the first-corner pack. Between two surveyed samples the
     // edges are taken straight from one to the next. Every other circuit: the sample's own, as before.)
+    // (… and the room itself is the surveyed edges eased – trackedges.js trafficRoom, the samples' tL / tR.)
     edges(s) { const q = traf.F.sampleAt(s); if (q.sv && traf.F.edgesAt(s, trafEdge).sv) return trafEdge; trafEdge.L = q.L ?? 7; trafEdge.R = q.R ?? -7; return trafEdge; },
     // (the next 200 m's turning: > 0 the next corner goes left)
     turnAhead(s) { const i = traf.F.sampleAt(s).i; let x = 0; for (let k = 0; k < 100; k++) x += world.samples[(i + k) % world.n].turn; return x; },

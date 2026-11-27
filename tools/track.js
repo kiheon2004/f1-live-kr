@@ -192,6 +192,8 @@ async function tryEntry(entry) {
   const n = pts.length, S = pts.map((p, i) => { const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], l = hyp(b[0] - a[0], b[1] - a[1]) || 1, tx = (b[0] - a[0]) / l, tz = (b[1] - a[1]) / l; return { i, p: { x: p[0], z: p[1] }, nor: { x: -tz, z: tx }, L: 7, R: -7, M: 0 }; });
   const r = applyTrackEdges(S, entry, ([X, Y]) => [X, -Y]);
   const inside = S.filter((s) => s.sv === 1), margin = inside.map((s) => Math.min(s.L, -s.R)).sort((a, b) => a - b);
+  // (the report keeps only how many samples lie in a broken stretch, not the masks)
+  if (r?.broken) r.broken = Object.fromEntries(Object.entries(r.broken).map(([k, v]) => [k, v.mask ? Array.from(v.mask).filter(Boolean).length : v]));
   return { samples: n, ...r, onRef: lapOnRef(R.filter((_, i) => i % 3 === 0), R), margin: margin.length ? { min: +margin[0].toFixed(2), p02: +margin[Math.floor(margin.length * 0.02)].toFixed(2), median: +margin[margin.length >> 1].toFixed(2) } : null,
     insideShare: inside.length ? +(inside.filter((s) => s.L >= 0 && s.R <= 0).length / inside.length).toFixed(4) : null };
 }

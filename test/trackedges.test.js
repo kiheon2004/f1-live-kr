@@ -154,3 +154,32 @@ test("v0.71: a broken edge line – the painted pieces along a path, and which s
   // no `broken` in the data: nothing in the result
   assert.ok(!("broken" in applyTrackEdges(S.map((s) => ({ ...s, L: 7, R: -7, sv: 0 })), { ...T, broken: undefined }, ([X, Y]) => [X, -Y], { ease: 0 })));
 });
+
+test("v0.71: where the feed's own line lies beyond a surveyed edge (a kerb at an apex), the cars' line is not bent back inside it", async () => {
+  const { racingLine } = await import("../src/renderer/smooth.js");
+  // a straight lap line, 2 m a sample, the edges 6 m either side – and over five samples the edge on the +nor side comes
+  // across the lap line by up to 1.04 m (Monza's first apex as surveyed)
+  const dip = [-0.06, -0.81, -1.04, -0.73, -0.05], mk = (sv) => Array.from({ length: 400 }, (_, i) => ({ p: { x: 0, z: i * 2 }, nor: { x: 1, z: 0 }, L: i >= 200 && i < 205 ? dip[i - 200] : 6, R: -6, sv }));
+  const a = racingLine(mk(1)), b = racingLine(mk(0));
+  const step = (v) => Math.max(...Array.from(v).slice(1).map((x, i) => Math.abs(x - v[i])));
+  assert.ok(Math.min(...a) > -0.15 && step(a) < 0.05, `surveyed: the line stays on the feed's (${Math.min(...a).toFixed(2)} m, step ${step(a).toFixed(2)})`);
+  assert.ok(Math.min(...b) < -1.5, "an edge that is not surveyed: the margin holds, as before (" + Math.min(...b).toFixed(2) + " m)");
+  // at most 1 m beyond the edge: a feed line 2.5 m outside is followed to 1 m outside only
+  const far = Array.from({ length: 400 }, (_, i) => ({ p: { x: 0, z: i * 2 }, nor: { x: 1, z: 0 }, L: i >= 190 && i < 215 ? -2.5 : 6, R: -6, sv: 1 })), c = racingLine(far);
+  assert.ok(Math.abs(c[202] + 1.5) < 0.05, String(c[202]));
+});
+
+test("v0.71: the room for traffic at a surveyed track comes in no faster than 0.2 m a metre, and reaches the cars' own line where that lies over an edge", async () => {
+  const { trafficRoom } = await import("../src/renderer/trackedges.js");
+  const n = 300, L = new Array(n).fill(7), R = new Array(n).fill(-7), line = new Array(n).fill(0), sv = new Array(n).fill(1);
+  for (let i = 150; i < 170; i++) R[i] = -1.5;          // the far edge steps in by 5.5 m at one sample, and out again
+  for (let i = 60; i < 65; i++) { L[i] = -1; line[i] = -0.2; }   // the near edge 1 m across the lap line, the cars' line 0.8 m over it
+  const T = trafficRoom(L, R, line, sv, 2);
+  const steps = (v) => Math.max(...Array.from(v).map((x, i) => Math.abs(v[(i + 1) % n] - x)));
+  assert.ok(steps(T.L) <= 0.4 + 1e-9 && steps(T.R) <= 0.4 + 1e-9, `no more than 0.4 m from one sample to the next (${steps(T.L).toFixed(2)}, ${steps(T.R).toFixed(2)})`);
+  assert.ok(Math.abs(T.R[150] + 1.5) < 1e-9 && Math.abs(T.R[160] + 1.5) < 1e-9 && Math.abs(T.R[145] + 3.5) < 1e-9 && Math.abs(T.R[120] + 7) < 1e-9, "the room narrows before the edge does, and is the edge where the edge is nearest");
+  assert.ok(Math.abs(T.L[62] - 0.7) < 1e-9, "the cars' own line plus a car's half width less the allowance: " + T.L[62]);
+  assert.ok(T.L.every((v, i) => v <= Math.max(L[i], line[i] + 0.9) + 1e-9) && T.R.every((v, i) => v >= Math.min(R[i], line[i] - 0.9) - 1e-9), "never more room than the edges give (but for the cars' own line)");
+  // not surveyed: no room of its own
+  const U = trafficRoom(L, R, line, new Array(n).fill(0), 2); assert.ok(U.L.every(Number.isNaN) && U.R.every(Number.isNaN));
+});

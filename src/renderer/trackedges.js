@@ -175,3 +175,26 @@ export function dashPieces(lengths, on, off) {
   }
   return out;
 }
+
+// The room the traffic code may use beside the lap line at each sample of a surveyed track (traffic.js parts cars that
+// overlap within it): the surveyed edges, eased.
+//   · A surveyed edge is the white line itself – it turns as sharply as the paint does (the corner of a kerb: 20° at a
+//     point; the outside of a chicane comes across by 0.4 m a metre). A car held at that limit was moved across with it,
+//     its heading swinging more than a car can turn – Monza's two chicanes in the first-lap pack. The room never comes in
+//     faster than `k` metres a metre: it starts to narrow before the edge does.
+//   · Where the cars' own line lies nearer an edge than 0.6 m (it only does where the feed's line runs over the edge, on
+//     a kerb – smooth.js racingLine), a car on that line is at the limit, not past it.
+// L, R: the edges (m from the lap line: L on the +nor side, R on the other), line: the cars' line, sv: the surveyed share
+// (the room is made where it is 1), ds: metres between samples, the lap closed. → { L, R } (NaN where not surveyed)
+export function trafficRoom(L, R, line, sv, ds = 2, k = 0.2, own = 0.9) {
+  const n = L.length, a = new Float64Array(n), b = new Float64Array(n), oL = new Float64Array(n).fill(NaN), oR = new Float64Array(n).fill(NaN);
+  for (let i = 0; i < n; i++) { const ln = line[i] || 0; a[i] = L[i] - ln < 0.6 ? ln + own : L[i]; b[i] = ln - R[i] < 0.6 ? ln - own : R[i]; }
+  const W = Math.ceil(16 / (k * ds));   // (further off than this an edge 16 m away cannot matter)
+  for (let i = 0; i < n; i++) {
+    if (!(sv[i] >= 0.999)) continue;
+    let lo = a[i], hi = b[i];
+    for (let j = 1; j <= W; j++) for (const q of [(i + j) % n, (i - j + n) % n]) { if (!(sv[q] >= 0.999)) continue; const e = k * ds * j; if (a[q] + e < lo) lo = a[q] + e; if (b[q] - e > hi) hi = b[q] - e; }
+    oL[i] = lo; oR[i] = hi;
+  }
+  return { L: oL, R: oR };
+}
