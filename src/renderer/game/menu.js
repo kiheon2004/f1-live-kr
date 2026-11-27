@@ -1,11 +1,11 @@
-// The game's main menu (v0.50 request §9-1): the player's team in its garage – the 3D menu garage (menugarage.js) fills
-// the screen and the car is the hero; the menu is a narrow column on the left, the race's two drivers on the right, and
-// the car is framed in the free middle (the safe area is MEASURED from the laid-out DOM – it changes with the window and
-// when a side sheet opens – and handed to the scene's setSafe()).
-//
-// The main actions first: 이어하기 (the latest save) and 레이스 준비 (the chosen race's strategy screen); the one that fits
-// is the primary action – a save exists → 이어하기, none → 레이스 준비. The rest (race choice, saves, driver info,
-// records, settings) is a quiet secondary list; the exit is last.
+// The game's main menu (v0.71): a row of tabs over a mosaic of tiles – no picture behind it. A tile is a title, one line
+// and its button; the shapes on the tiles are plain blocks and lines.
+//   tabs    홈 (the tiles) · 경기 기록 · 드라이버·차량, and the gear at the row's end = 설정
+//   tiles   레이스 준비 (the chosen race's strategy screen – the large blue tile) · 이어하기 (the latest save) · 경기 선택 ·
+//           저장 슬롯 · 차고 · 팀 바꾸기
+// 차고 opens the 3D menu garage (menugarage.js) – the player's team in its garage, the car as the hero, the race's two
+// drivers beside it: the garage is built only when that tile is opened (v0.50–0.70 drew it behind the whole menu), and
+// its safe area is MEASURED from the laid-out DOM and handed to the scene's setSafe().
 //
 // Which drivers: the entry list of ONE prepared race (the chosen one, else the team's latest prepared race of the
 // season) – said on screen ("이 경기 기준"); never the season's other drivers (a team's line-up changes during a season).
@@ -16,7 +16,6 @@
 import { G, go, paint, seasons, teamsOf, racesOf, menuRace, toPrerace, saveSettings, autoSlowRule, applyRacePrefs } from "./gamehome.js";
 import { $, esc, teamKo, raceKo, fmtT } from "./ui.js";
 import { safeFrac } from "./hudmodel.js";
-import * as API from "./gameapi.js";
 import * as SaveUI from "./saveui.js";
 
 // ---------- the 3D garage hook ----------
@@ -59,11 +58,11 @@ async function showGarage(host) {
   paintLoading();
   reframe();
 }
-// The car's safe area: the share of the scene's width the menu column (left) and the driver cards / sheet (right) cover,
+// The car's safe area: the share of the scene's width the way-back button (left) and the driver cards (right) cover,
 // measured from the DOM as laid out now (they change with the window and when a sheet opens) plus a margin, so the car is
 // framed in the free middle and never under text.
 function safeArea(host) {
-  const H = host.getBoundingClientRect(), W = H.width || innerWidth, L = $("gmLeft")?.getBoundingClientRect(), R = $("gmRight")?.getBoundingClientRect();
+  const H = host.getBoundingClientRect(), W = H.width || innerWidth, L = document.querySelector(".gm-back")?.getBoundingClientRect(), R = $("gmRight")?.getBoundingClientRect();
   return safeFrac(W, L ? L.right - H.left : 0, R && R.width ? H.right - R.left : 0);
 }
 function reframe() {
@@ -100,13 +99,20 @@ export function hideGarage(dispose = false) {
   MG.shown = null; MG.drawn = null; MG.safe = null;
 }
 
-// the menu's DOM: the 3D host stays (it carries the scene's canvas); the overlay is rewritten
+// the menu's DOM: the overlay (tab row + tiles / a sheet) is rewritten on every paint; the 3D host – it carries the scene's
+// canvas – is there only while the garage is open (G.sheet === "garage") and stays across repaints of that view
 export function mount(body, html) {
+  const want = G.sheet === "garage";
   let host = $("gGarage3d");
-  if (!host || host.parentNode !== body) { body.innerHTML = `<div class="gm-3d" id="gGarage3d" data-fallback="1"></div><div class="gm-load ui-state" id="gmLoad" role="status" aria-live="polite"></div><div class="gm-over" id="gmOver"></div>`; host = $("gGarage3d"); }
+  if (!$("gmOver") || $("gmOver").parentNode !== body || !!host !== want) {
+    if (host && !want) hideGarage();
+    body.innerHTML = `${want ? `<div class="gm-3d" id="gGarage3d" data-fallback="1"></div><div class="gm-load ui-state" id="gmLoad" role="status" aria-live="polite"></div>` : ""}<div class="gm-over" id="gmOver"></div>`;
+    host = $("gGarage3d");
+  }
   const t = teamsOf(G.season).find((x) => x.key === G.teamKey);
   body.style.setProperty("--tc", t?.colour || "#888");
   $("gmOver").innerHTML = html;
+  if (!want) return;
   paintLoading();
   showGarage(host);
   requestAnimationFrame(reframe);
@@ -121,41 +127,55 @@ export function paintTeam() {
   const teams = teamsOf(G.season), cont = SaveUI.continueInfo();
   // (after a restart the game opens here: the latest save is one click away – its own team and race come with it)
   const contBar = cont.ok ? `<div class="g-cont"><button class="ui-btn primary" data-act="menu:continue">이어하기</button><span>${esc(cont.text)}</span></div>` : "";
-  return `<div class="g-team-pick">${contBar}<div class="g-team-h"><h2>팀 선택</h2><label class="g-field">시즌 <select class="ui-select" data-chg="menu:season">${ss.map((y) => `<option ${y === G.season ? "selected" : ""}>${y}</option>`).join("")}</select></label>
+  return `<div class="g-team-pick">${contBar}<div class="g-team-h"><h2>팀 선택</h2><label class="g-field">시즌 <select class="ui-select" data-chg="menu:season">${ss.map((y) => `<option ${y === G.season ? "selected" : ""}>${esc(y)}</option>`).join("")}</select></label>
     <span class="muted">팀과 드라이버는 그 시즌 준비된 경기의 참가 명단에서 읽어요.</span></div>
     <div class="g-grid">${teams.map((t) => `<button class="g-team ${t.key === G.teamKey ? "on" : ""}" data-act="menu:team" data-team="${esc(t.key)}" style="--tc:${esc(t.colour || "#888")}"><b>${esc(teamKo(t.name))}</b>
       <small>준비된 경기 ${t.races}개</small></button>`).join("")}</div></div>`;
 }
 
 // ---------- the main menu ----------
-// The two main actions first – 이어하기 (continue the latest save) and 레이스 준비 (the chosen race's strategy screen) –
-// the one that fits the situation emphasised: a save exists → 이어하기 is the primary action; none → 레이스 준비. The rest
-// (race choice, saves, driver info, records, settings) is a quiet list under them; the exit is last.
+// (a shape is as tall as --ah, and never more than 60 % of its tile – a short window keeps the title and the line clear)
+// The tiles' shapes: plain blocks and lines (no photographs) – a track with a marker, two lines crossing, the number of
+// prepared races, a chequer, three tyre rings, four squares with the team's colour.
+const ART = {
+  start: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 320 230" style="--ah:230px;right:-40px;bottom:-30px"><path d="M40 170 L34 90 Q32 40 80 36 L180 24 Q214 20 226 50 L238 84 Q246 104 274 100 L300 96 L300 190 L80 196 Q44 198 40 170 Z" fill="none" stroke-width="12" stroke-linejoin="round" style="stroke:var(--c-blue-ink)"/><circle cx="130" cy="30" r="12" stroke-width="3" style="fill:var(--c-yellow);stroke:var(--text-inv)"/></svg>`,
+  cont: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 420 200" style="--ah:200px;right:-20px;bottom:10px" fill="none" stroke-width="14"><path d="M0 60 L170 60 Q210 60 240 100 Q270 140 310 140 L420 140" style="stroke:var(--ink)"/><path d="M0 140 L170 140 Q210 140 240 100 Q270 60 310 60 L420 60" style="stroke:var(--c-yellow)"/></svg>`,
+  saves: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 200 150" style="--ah:150px;right:0;bottom:0;fill:var(--text-inv)"><rect x="0" y="0" width="50" height="50"/><rect x="100" y="0" width="50" height="50"/><rect x="50" y="50" width="50" height="50"/><rect x="150" y="50" width="50" height="50"/><rect x="0" y="100" width="50" height="50"/><rect x="100" y="100" width="50" height="50"/></svg>`,
+  garage: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 230 120" style="--ah:120px;right:-30px;bottom:-30px;fill:var(--bg-1)" stroke-width="14"><circle cx="60" cy="60" r="48" style="stroke:var(--tyre-s)"/><circle cx="115" cy="60" r="48" style="stroke:var(--tyre-m)"/><circle cx="170" cy="60" r="48" style="stroke:var(--tyre-h)"/></svg>`,
+  team: `<svg class="gt-art" aria-hidden="true" viewBox="0 0 150 150" style="--ah:150px;right:-16px;bottom:-16px;stroke:var(--text-inv)" fill="none" stroke-width="8"><rect x="8" y="8" width="58" height="58"/><rect x="84" y="8" width="58" height="58" style="fill:var(--tc)"/><rect x="8" y="84" width="58" height="58" style="fill:var(--c-blue)"/><rect x="84" y="84" width="58" height="58"/></svg>`,
+};
+const GEAR = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></svg>`;
+const raceShort = (ev) => window.KO?.gpShort?.(ev) || raceKo(ev);
 export function paintMenu() {
   const t = teamsOf(G.season).find((x) => x.key === G.teamKey); if (!t) { G.step = "team"; return paintTeam(); }
   const r = menuRace(), ents = menuEntries(r);
   const focus = MG.focus && ents.some((e) => String(e.num) === MG.focus) ? MG.focus : String(ents[0]?.num ?? "");
-  const cont = SaveUI.continueInfo(), nRaces = racesOf(G.season, G.teamKey).length;
-  const prep = `<button class="gm-act ${cont.ok ? "" : "primary"}" data-act="menu:start" ${G.engine && r ? "" : "disabled"}><span>레이스 준비</span><small>${r ? `${esc(raceKo(r.event))} · ${r.laps ?? "?"}랩 · 출발 전 전략` : "준비된 경기가 없어요"}</small></button>`;
-  const contB = `<button class="gm-act ${cont.ok ? "primary" : ""}" data-act="menu:continue" ${cont.ok && G.engine ? "" : "disabled"}><span>이어하기</span><small>${esc(cont.text)}</small></button>`;
-  const item = (k, label, val) => `<button data-act="sheet:${k}" aria-pressed="${G.sheet === k}"><span>${label}</span>${val ? `<small>${val}</small>` : ""}</button>`;
-  return `
-  <div class="gm-left" id="gmLeft">
-    <div class="gm-team"><small>${G.season} 시즌 · 내 팀</small><h2>${esc(teamKo(t.name))}</h2><button class="ui-btn ghost sm" data-act="menu:changeTeam">팀 바꾸기</button></div>
-    <div class="gm-main">${cont.ok ? contB + prep : prep + contB}</div>
-    <nav class="gm-more" aria-label="게임 메뉴">
-      ${item("races", "경기 선택", `${r ? esc(raceKo(r.event)) : "없음"} · ${nRaces}개`)}
-      ${item("saves", "저장 슬롯", "")}
-      ${item("info", "드라이버·차량", "")}
-      ${item("history", "경기 기록", "")}
-      ${item("settings", "설정", "")}
-    </nav>
+  const cont = SaveUI.continueInfo(), nRaces = racesOf(G.season, G.teamKey).length, sheet = G.sheet;
+  const tab = (k, label) => `<button role="tab" data-act="sheet:${k}" aria-selected="${k === "home" ? !sheet : sheet === k}">${label}</button>`;
+  const tabs = `<div class="gm-tabs-row">
+    <div class="gm-tabs" role="tablist" aria-label="게임 메뉴">${tab("home", "홈")}${tab("history", "경기 기록")}${tab("info", "드라이버·차량")}</div>
+    <span class="grow"></span>
     ${G.engine ? "" : `<p class="gm-note">${esc(G.engineErr === "checking" ? "게임 엔진을 여는 중…" : "게임 엔진을 열지 못했어요")}</p>`}
-  </div>
-  <div class="gm-right" id="gmRight">
-    ${G.sheet ? paintSheet(G.sheet, t, r, ents) : `
-    <div class="gm-src"><small>참가 명단 · 이 경기 기준</small><b>${r ? esc(raceKo(r.event)) : "준비된 경기 없음"}</b><span>${r ? `${esc(r.date || "")} · ${esc(r.location || "")} · ${r.laps ?? "?"}랩` : "경기를 준비하면 그 경기의 두 드라이버가 보여요"}</span></div>
-    ${ents.length ? `<div class="gm-drivers" role="group" aria-label="차고 앞 차량">${ents.map((e) => driverCard(e, String(e.num) === focus, t)).join("")}</div>` : ""}`}
+    <button class="gm-gear" data-act="sheet:settings" aria-pressed="${sheet === "settings"}" aria-label="설정" title="설정">${GEAR}</button>
+  </div>`;
+  // the garage: the 3D scene fills the screen under the tab row; beside the car, the race's two drivers
+  if (sheet === "garage") return `${tabs}<div class="gm-garage">
+    <button class="gm-back" data-act="sheet:home" title="메뉴로 돌아가요">← 메뉴</button>
+    <div class="gm-right" id="gmRight">
+      <div class="gm-src"><small>참가 명단 · 이 경기 기준</small><b>${r ? esc(raceKo(r.event)) : "준비된 경기 없음"}</b><span>${r ? `${esc(r.date || "")} · ${esc(r.location || "")} · ${r.laps ?? "?"}랩` : "경기를 준비하면 그 경기의 두 드라이버가 보여요"}</span></div>
+      ${ents.length ? `<div class="gm-drivers" role="group" aria-label="차고 앞 차량">${ents.map((e) => driverCard(e, String(e.num) === focus, t)).join("")}</div>` : ""}
+    </div></div>`;
+  if (sheet) return `${tabs}<div class="gm-panel">${paintSheet(sheet, t, r, ents)}</div>`;
+  // a tile: its title, one line, the shape, and its button's word (no word on a tile that cannot be pressed now)
+  const tile = (cls, span, act, title, desc, go, art, off = false) => `<button class="gm-tile ${cls}" style="grid-column: span ${span}" data-act="${act}" ${off ? "disabled" : ""}>
+    <span class="gt-title">${title}</span><span class="gt-desc">${desc}</span>${art}<span class="gt-go">${go}</span></button>`;
+  return `${tabs}<div class="gm-mosaic">
+    ${tile("blue big", 8, "menu:start", "레이스 준비", r ? `${esc(raceShort(r.event))} · ${r.laps ?? "?"}랩` : "준비된 경기가 없어요", "시작", ART.start, !(G.engine && r))}
+    ${tile("big", 10, "menu:continue", "이어하기", esc(cont.text), "시작", ART.cont, !(cont.ok && G.engine))}
+    ${tile("yellow", 6, "sheet:races", "경기 선택", `${nRaces}개 준비됨`, "열기", `<span class="gt-art gt-big" aria-hidden="true">${nRaces}</span>`)}
+    ${tile("red", 8, "sheet:saves", "저장 슬롯", "저장 · 불러오기", "열기", ART.saves)}
+    ${tile("", 10, "sheet:garage", "차고", `${esc(teamKo(t.name))} 차량 보기`, "열기", ART.garage)}
+    ${tile("light", 6, "menu:changeTeam", "팀 바꾸기", `${esc(G.season)} · ${esc(teamKo(t.name))}`, "열기", ART.team)}
   </div>`;
 }
 function driverCard(e, on, t) {

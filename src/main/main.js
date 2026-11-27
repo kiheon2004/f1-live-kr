@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification, powerMonitor, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, Notification, powerMonitor, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { Archive } = require("./archive");
@@ -30,21 +30,32 @@ const DEMO = process.argv.includes("--demo");
 let archive, auth, live, mainWin, scenes, google, schedules;
 const PAGE = path.join(__dirname, "..", "renderer", "index.html"), PAGE_URL = pathToFileURL(PAGE).href;
 
+// (camera, microphone, location, notifications, MIDI … – asked by a page or a frame in it: refused, and reported as not granted)
+function denyPermissions(ses) {
+  ses.setPermissionRequestHandler((_wc, _permission, done) => done(false));
+  ses.setPermissionCheckHandler(() => false);
+}
+
 function createWindow() {
   mainWin = new BrowserWindow({
     width: 1520, height: 940, minWidth: 1180, minHeight: 720,
     title: "라이브 타이밍 KR",
     backgroundColor: "#0e1013",
+    // (development only: a screenshot run's window comes up without taking the keyboard – dev-snapshot shows it inactive)
+    show: !(process.env.F1KR_SNAPSHOT && !app.isPackaged),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
     },
   });
   mainWin.loadFile(PAGE);
-  // External links open in the browser, never inside the app – and only web pages (http/https). The window itself
-  // never navigates away from the app's page.
-  mainWin.webContents.setWindowOpenHandler(({ url }) => { if (V.externalUrl(url)) shell.openExternal(url); return { action: "deny" }; });
-  mainWin.webContents.on("will-navigate", (e, url) => { if (url !== PAGE_URL) { e.preventDefault(); if (V.externalUrl(url)) shell.openExternal(url); } });
+  // The window never opens another window and never navigates away from the app's page. (v0.71: nothing is handed to
+  // the system browser either – the page has no outside links, so a request to open one could only come from markup
+  // that should not be there. A link added on purpose later gets its host allowed here.)
+  mainWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWin.webContents.on("will-navigate", (e, url) => { if (url !== PAGE_URL) e.preventDefault(); });
+  // No web permission is ever needed by the page (notifications go through the main process): every request is refused.
+  denyPermissions(mainWin.webContents.session);
   // (development only: the packaged app doesn't ship dev-snapshot.js – package.json build.files – so it's never asked for there)
   if (process.env.F1KR_SNAPSHOT && !app.isPackaged) require("./dev-snapshot")(mainWin, process.env.F1KR_SNAPSHOT);
 }

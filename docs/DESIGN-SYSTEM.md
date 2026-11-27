@@ -1,4 +1,4 @@
-# LiveTimingKR design system (v0.50)
+# LiveTimingKR design system (v0.50 structure · v0.71 look)
 
 One look for the three areas of the app – **live timing** (timing screen + season globe home), the **3D spectator
 view** (HUD over the circuit) and the **strategy game** – with the same font, icons, colour meanings, units, buttons and
@@ -16,71 +16,89 @@ Files:
 | `src/renderer/css/spectator.css` | 3D view HUD (`#map3d …`) – spectator area |
 | `src/renderer/css/game.css` | strategy game (`#game …`) – game area |
 | `src/renderer/styles.css` | legacy base + blocks not yet moved (shrinking; no new rules) |
+| `src/shared/fmt.js` | `window.Fmt` – the one copy of `esc`, `hms`, the Korean-time formatters, the settings `store`, and `token()` (a design token's value for canvas drawing and chart markup) |
 | `src/renderer/icons.js` | `window.UIIcons` – inline Lucide subset |
 | `src/renderer/ui/kit.js` | `window.UIKit` – dialog, focus trap, menu, toast, tooltip behaviour |
 | `src/renderer/ui/keys.js` | `window.UIKeys` – global keyboard shortcut policy |
 | `src/renderer/ui/livestatus.js` | `window.LiveStatus` – stale data, race-control kinds/unread, late-answer guard |
 
 Load order in `index.html`: `tokens.css → components.css → styles.css → live.css (→ spectator.css, game.css)`, then
-`icons.js, ui/kit.js, ui/keys.js, ui/livestatus.js` before `app.js`. All are classic scripts (no modules, no framework).
+`shared/fmt.js, shared/ko.js, icons.js, ui/kit.js, ui/keys.js, ui/livestatus.js` before `app.js`. All are classic scripts (no modules, no framework).
 
 ---
 
 ## 1. Principles
 
-* **Data first.** Neutral dark charcoal surfaces in three steps; numbers are the brightest thing on screen.
-* **One accent.** `--accent` (red-orange) marks the single primary action of a view (불러오기, 연결, 재생 in the game's
-  start screen …) and the live dot – never every button. Selected states are light (`--text-1` underline / bar), not
-  accent-coloured.
+The structure (tokens → shared components → one stylesheet per area) is v0.50's; the look is v0.71's redesign
+(mock-ups: a Claude design canvas, three screens – home, timing, game menu):
+
+* **Fewer words.** A state the viewer does not need to watch the session (cached, listed, refreshed, paused, humidity …)
+  is not on screen: it moves to the ⋯ menu or to a tooltip (`title`) – never deleted.
+* **Square, heavy, flat.** Every box and control has a 2 px solid light edge (`--line`) and square corners; inside a
+  panel, separators are 1 px (`--line-soft`). A shadow is a flat block offset by 3–6 px (`--shadow-*`), never blurred.
+  Numbers are heavy (Anton); a chosen item is a filled light block with dark text.
+* **Three point colours, outside the data.** Blue (`--c-blue`) = the app bar, a selected list row, the globe, the 2D
+  track board. Yellow (`--c-yellow`) = sticker labels (KR, 스프린트, a tile's button), the selected position block, the
+  focus ring. Red (`--c-red`, = `--accent`) = the ONE main action of a view (결승, 재생, 연결, 레이스 시작).
+* **In the timing table colour is data only**: purple block = overall best, green text = personal best (and a car
+  within a second), the tyre compound, the team's bar. No point colour there except the selected row's yellow position.
 * **Meanings are fixed** across live, spectator and game (table below). A colour never means two things.
-* **Colour is never the only signal.** Tyres carry their letter, flags their word, overall best is a *filled* chip while
+* **Colour is never the only signal.** Tyres carry their letter, flags their word, overall best is a *filled* block while
   personal best is coloured *text*, the compared driver row says "비교".
-* **Team colours identify a team only** – a 3–4 px bar or a dot beside the name, never a state, never a background.
-* **Avoid:** blue neon, repeated purple gradients, glass cards everywhere, big radii, decorative shadows (only floating
-  layers – menus, dialogs, toasts – get `--shadow-float`), full-screen backdrop blur, red buttons everywhere, grids of
-  same-size cards, long explanations always on screen (put them in `title` / `data-tip`).
+* **Team colours identify a team only** – a bar beside the name or a block carrying the car's position on the 2D map.
+* **The 2D track is a blue board** with a grid, a filled light road with a dark edge, and square team-colour blocks with
+  the position – not a dark map with an outlined track and coloured dots (timing screen `app.js drawMap`, game
+  `racehud.js drawMini`).
+* **Avoid:** rounded corners, blurred shadows, gradients, glass, long explanations always on screen.
+* **No palette in scripts.** What a script draws (the 2D board, the minimap, chart markup, the globe, the tiles' shapes)
+  takes its colours from the tokens – `Fmt.token("--ok")` for canvas and SVG attributes, `style="fill:var(--c-blue)"`
+  for page SVG. Only data colours that come from the feed (a team's colour) are written as they arrive, after
+  `hexColour()` / the game store's check.
+* **A chosen control stays readable under the pointer:** hover rules exclude `[aria-pressed="true"]`,
+  `[aria-selected="true"]` and `[aria-current="true"]` (a pressed control is a light block with dark text).
 
 ## 2. Tokens (`css/tokens.css`)
 
-**Never redefine a token in an area file.** Add a token in `tokens.css` (owner: live/design helper) when a new meaning
-or size is needed.
+**Never redefine a token in an area file.** Add a token in `tokens.css` when a new meaning or size is needed.
 
-### Surfaces and text
+### Surfaces, text, edges
 | Token | Use |
 |---|---|
-| `--bg-0` | page, timing table rows, the map |
-| `--bg-1` | panels, app bar, alternate table rows |
-| `--bg-2` | raised: inputs, table head, menus, hover |
-| `--bg-3` | pressed / selected (segmented control, selected row) |
-| `--line`, `--line-soft` | borders; separators inside a panel |
-| `--scrim`, `--hud-bg` | behind a dialog; a HUD panel over 3D (opaque enough, no blur) |
-| `--text-1`, `--text-2`, `--text-3` | primary, secondary, tertiary (labels, units, "–") |
+| `--bg-0` `#0d0d0f` | page, timing table |
+| `--bg-1` `#131316` | panels, the player, the globe's board |
+| `--bg-2`, `--bg-3` | raised / hover, the selected row |
+| `--line` `#f2efe6` (2 px = `--bw`) | the edge of a box, a control, a bar |
+| `--line-soft` | 1 px separators inside a panel |
+| `--text-1` `#f2efe6`, `--text-2` `#a3a199`, `--text-3`, `--text-inv` | text; dark text on a light or coloured block |
+| `--c-blue` `#3d4dff`, `--c-yellow` `#ffe500`, `--c-red` `#ff4b33` | the point colours (see above) |
+| `--scrim`, `--hud-bg` | behind a dialog; a HUD panel over 3D (no blur) |
 
-### State meanings
+### State meanings (data colours)
 | Token | Meaning | Examples |
 |---|---|---|
-| `--best` (purple) | overall best | fastest lap / sector of everyone (filled chip) |
-| `--ok` (green) | personal best · OK · gaining | PB lap/sector (text), connected, places gained, interval < 1 s |
-| `--warn` (yellow) | caution · pending | yellow flag, an order sent but not in force, stale data notice |
-| `--sc` (orange) | safety car / VSC | SC/VSC flag, SC shading in charts |
-| `--bad` (red) | danger · red flag · refused · losing | red flag, retired, connection error, places lost |
-| `--info` (blue) | neutral information | estimates, pit lane, "자료 없음" notes, the **compared** driver, sprint weekends |
-| `--sel` / `--sel-bg` | the selected driver | light bar + raised row |
-| `--cmp-bg` | the compared driver | blue-tinted row |
+| `--best` `#c77dff` | overall best | fastest lap / sector of everyone (filled block, dark digits) |
+| `--ok` `#3ddc84` | personal best · OK · gaining | PB lap/sector (text), green flag, places gained, interval < 1 s |
+| `--warn` `#ffd60a` | caution · pending | yellow flag, an order sent but not in force, the stale-data line |
+| `--sc` | safety car / VSC | SC/VSC flag block, SC shading in charts |
+| `--bad` | danger · red flag · refused · losing | red flag, retired, connection error, places lost |
+| `--info` | neutral information | estimates, pit lane, the **compared** driver |
+| `--sel-bg` | the selected driver's row | (its position is the yellow block) |
 
-Purple is reserved for "overall best": the compared driver is **blue**, never purple (v0.49 used purple for it).
+Purple is reserved for "overall best": the compared driver is **blue-grey** (`--info`), never purple.
 
 ### Tyres
-`--tyre-s` red · `--tyre-m` yellow · `--tyre-h` white · `--tyre-i` green · `--tyre-w` blue – always with the letter
-(`.ui-tyre.S` …). A set that started used has a **dashed** ring / hatched stint.
+`--tyre-s` red · `--tyre-m` yellow · `--tyre-h` light · `--tyre-i` green · `--tyre-w` blue – always with the letter
+(`.ui-tyre.S` …) in a round ring. A set that started used has a **dashed** ring / hatched stint.
 
 ### Type, space, shape, layers, motion
-* Font `--font` = Pretendard Variable (bundled), fallbacks Apple SD Gothic Neo / Malgun Gothic. `--mono` only for ids
-  and code, **not** for times.
-* Sizes `--fs-2xs 10.5 · xs 11 · sm 12 · md 13 · lg 15 · xl 18 · 2xl 24 px`; weights `--fw-reg 450 · med 560 · bold 680`.
-  Nothing smaller than 10.5 px; body text 13 px.
-* Space `--s-1..8` = 2 4 6 8 12 16 24 32 px. Radius `--r-1..3` = 3 5 8 px (small: this is a data UI).
-* Controls `--ctl-h 28`, `--ctl-h-sm 24`, minimum target `--hit 24` px.
+* Four bundled families (SIL OFL 1.1, `src/renderer/fonts/`): `--font-title` Black Han Sans (Korean titles),
+  `--font-num` Anton (numbers, Latin titles), `--font` IBM Plex Sans KR 400 / 500 / 700 (text),
+  `--mono` IBM Plex Mono 500 / 600 (times and values – the timing table's figures).
+* Sizes `--fs-2xs 10.5 · xs 11 · sm 12 · md 13 · lg 15 · xl 18 · 2xl 24 px`; weights `--fw-reg 400 · med 500 · bold 700`.
+* Space `--s-1..8` = 2 4 6 8 12 16 24 32 px. Radius `--r-1..3` = 0 (square). Edge `--bw` = 2 px.
+* Controls `--ctl-h 30`, `--ctl-h-sm 26`, `--ctl-h-lg 44` (the app bar, the map bar, the player, tabs), min target `--hit 24`.
+* Shadows `--shadow-float` 4 px blue (menus, toasts), `--shadow-panel` 6 px blue (the chosen panel), `--shadow-sticker`
+  3 px dark (a yellow sticker).
 * Layers `--z-hud 10 · panel 20 · menu 40 · toast 60 · modal 80 · tip 90`.
 * Motion `--t-fast 120 ms`, `--t-med 200 ms`, `--ease`; both become 0 under `prefers-reduced-motion` (and
   `html[data-reduce-motion="1"]`).
@@ -127,27 +145,30 @@ the same lucide-static version and appending the inner shapes (tests check every
 | What | Rule | Example |
 |---|---|---|
 | Lap / sector times | as F1 sends them, tabular, right-aligned | `1:22.533`, `29.866` |
-| Gaps / intervals | sign + 3 decimals as sent; lapped = `+1랩`; leader = `선두` | `+4.608`, `+1랩` |
+| Gaps / intervals | sign + 3 decimals as sent; lapped = `+1랩`; the leader's cell is blank | `+4.608`, `+1랩` |
 | Relative to a driver | `+` behind, `−` ahead, 3 decimals | `−0.412` |
 | Estimates | words "약" / "예상", whole seconds or a range – never more precision than the model has | `약 22초`, `약 8위` |
 | Speed | km/h | `303km/h` |
-| Temperatures | ° with one decimal as sent | `기온 22.1°`, `노면 31.8°` |
+| Temperatures | whole degrees in the bar, air then track (as sent, with humidity and wind, in the tooltip) | `30° · 노면 44°` |
 | Delay | seconds, minutes above 60 s | `30초`, `1분 5초` |
-| Laps | `랩 n / N`, stint `M28` (letter + laps) | `랩 30 / 70` |
-| Session clock | `HH:MM:SS` "남은 시간"; "(멈춤)" when the clock is stopped | `남은 시간 01:19:56` |
-| **No data** | `–` in `--text-3` (`.t-none`) – never `0` | gap before the first timing line |
-| **Real zero** | `0` (a race car with no pit stop reported yet shows a faint `0`, the protocol's zero) | pits `0` |
+| Laps | `LAP n /N`, stint `M28` (letter + laps) | `LAP 30 /62` |
+| Session clock | only where there is no lap count (practice, qualifying), in the lap's place; dimmed when stopped | `남은 시간 12:56` |
+| **No data** | a blank cell – never `0`, no `–` | gap before the first timing line |
+| **Pit stops** | the count once there is one; blank before (no `0`) | pits `1` |
+| Places gained / lost | `▲n` / `▼n` only when the place changed | `▲3` |
 | **Stale (live)** | values greyed and italic (`.board.stale`) + one line saying since when and why | "45초째 새 데이터가 오지 않아요" |
 | DNF / DSQ / stopped / knocked out | row dimmed in place + state badge (`리타이어`, `정지`, `탈락`) | |
-| PIT | `피트` / `피트 아웃` badge (`--info`) | |
+| PIT | `피트` / `피트 아웃` badge (a light block) | |
 | Session end | chequered flag word + pattern; session status chip | `체커기 · 종료` |
 
-Korean UI text: short and plain; English feed text only as secondary (race control shows Korean, then the original).
+Korean UI text: short and plain; a race control row is the lap, a colour square and the Korean words – the time and the
+original English are its tooltip.
 
 ## 5. Selection rules (live timing)
 
-* Click a row = **selected driver** (light bar, raised row; the 2D map rings it white). Click again = clear.
-* Shift+click another = **compared driver** (blue bar, tint, the word "비교"; the 2D map rings it blue).
+* Click a row = **selected driver** (raised row, its position a yellow block; on the 2D map a larger yellow block). Click
+  again = clear.
+* Shift+click another = **compared driver** (tinted row, the word "비교"; on the 2D map its block has a light edge).
 * Selection is kept across the work-area views (2D · 3D · 텔레메트리 · 랩 비교) and the side tabs. Opening an analysis view
   never moves the 3D camera (the 3D view is only hidden, its camera state untouched).
 * The selected and the compared driver are the inputs of the telemetry and lap comparison views; with none selected
@@ -179,6 +200,6 @@ Escape closes, in order: the open popover/menu, a dialog, a drawer, the full-win
 
 | Asset | Source | Licence | Offline |
 |---|---|---|---|
-| Pretendard Variable font | github.com/orioncactus/pretendard | SIL Open Font License 1.1 (`src/renderer/fonts/PRETENDARD-LICENSE.txt`) | bundled woff2 |
+| IBM Plex Sans KR, IBM Plex Mono, Black Han Sans, Anton (fonts) | npm packages `@fontsource/*` 5.3.0 (Google Fonts builds) via cdn.jsdelivr.net (fetched once, 2026-11-27) | SIL Open Font License 1.1 (`src/renderer/fonts/*-LICENSE.txt`) | bundled woff2 |
 | Icons (63) | Lucide, package `lucide-static` 1.54.0 via cdn.jsdelivr.net (fetched once, 2026-10-30) | ISC; a few icons derive from Feather (MIT) – both in `src/renderer/ICONS-LICENSE.txt` | inlined in `icons.js` |
 | Colours, components, layout | own work | – | – |

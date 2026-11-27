@@ -1,51 +1,37 @@
-/* Layout: header + status strip, then leaderboard (left) beside map and tabbed panel (right), player bar at the bottom.
-   v0.50: the live area's rules (bar, session bar, table, panels, player, drawers, home) are in css/live.css; what is
-   left here is the legacy base, the 3D map block and the game block (moving to css/spectator.css / css/game.css). */
-:root {
-  /* legacy names → the v0.50 tokens (css/tokens.css); area files use the tokens directly */
-  --bg: var(--bg-0); --panel: var(--bg-1); --panel-2: var(--bg-2); --line-2: var(--line-soft); --ink: var(--text-1); --muted: var(--text-2);
-  --green: var(--ok); --purple: var(--best); --yellow: var(--warn); --red: var(--bad);
-}
+/* The page's frame and the legacy base rules for bare elements (button, select): the app bar, then the table (left)
+   beside the map card and its tab panel (right), the player at the bottom. Everything else lives in the area files
+   (css/live.css, css/spectator.css, css/game.css); what is left below is the full-window map's small block. */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--ink); font: 13px/1.4 var(--font); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
+body { background: var(--bg-0); color: var(--text-1); font: 13px/1.4 var(--font); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
 button, select, input { font: inherit; color: inherit; }
-button { cursor: pointer; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); padding: 6px 12px; }
+button { cursor: pointer; border-radius: 0; border: var(--bw) solid var(--line); background: transparent; padding: 5px 12px; font-weight: var(--fw-bold); }
 button:disabled { opacity: 0.4; cursor: default; }
-button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--line); color: var(--accent-ink); font-weight: var(--fw-bold); }
 button.ghost { background: none; }
 button.small { padding: 4px 8px; font-size: 12px; }
-select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
-.muted { color: var(--muted); }
+select { background: var(--bg-0); border: var(--bw) solid var(--line); border-radius: 0; padding: 4px 8px; font-weight: var(--fw-bold); }
+.muted { color: var(--text-2); }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 
 /* ---------- 2D / 3D map ---------- */
-.view-switch { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; background: rgb(28 33 40 / 0.92); }
-.view-switch button { padding: 4px 14px; font-weight: 700; }
-.expand-btn { position: absolute; top: 10px; right: 10px; z-index: 6; width: 34px; height: 34px; padding: 0; display: grid; place-items: center; border-radius: 8px; background: rgb(28 33 40 / 0.92); color: #c9d1da; }
-.expand-btn:hover { color: #fff; background: #2a313a; }
+/* (the map card's bar, stage and buttons: css/live.css; the 3D view: css/spectator.css) */
 .map-card[data-view="3d"] #map, .map-card[data-view="3d"] .map-tools { display: none; }
-/* the 3D view (#map3d: camera tools, HUD, notes, real-map settings) – css/spectator.css (v0.50) */
-.map-card[data-view="3d"] .map-note { z-index: 5; color: #fff; text-shadow: 0 1px 3px #000; bottom: 56px; }
+.map-card[data-view="3d"] .map-note { z-index: 5; color: #fff; bottom: 56px; }
 .toasts { z-index: 7; }
 
 /* full-window map */
-.map-card.expanded { position: fixed; inset: 0; z-index: 60; background: var(--bg); border: 0; }
-.map-card.expanded .expand-btn { color: #fff; background: var(--accent); border-color: var(--accent); }
-.mini-board { position: absolute; top: 56px; right: 10px; z-index: 6; list-style: none; margin: 0; padding: 4px 0; width: 230px; max-height: calc(100% - 120px); overflow: auto; background: rgb(14 16 19 / 0.84); border-radius: 10px; font-size: 12.5px; }
-.mini-board li { display: grid; grid-template-columns: 22px 4px 1fr auto; gap: 7px; align-items: center; padding: 3px 10px; cursor: pointer; }
-.mini-board li:hover { background: rgb(255 255 255 / 0.06); }
-.mini-board li.focus { background: rgb(255 255 255 / 0.14); }
-.mini-board .n { font-weight: 800; text-align: right; } .mini-board .b { height: 14px; border-radius: 2px; }
-.mini-board .g { color: #cfd6de; font: 11.5px var(--mono); }
-.map-card.expanded .toasts { top: 56px; right: 250px; }
-.expand-hint { position: absolute; bottom: 14px; left: 14px; margin: 0; z-index: 6; color: #dfe5ea; font-size: 12px; text-shadow: 0 1px 3px #000; }
+.map-card.expanded { position: fixed; inset: 0; z-index: 60; background: var(--bg-0); border: 0; }
+.mini-board { position: absolute; top: 22px; right: 22px; z-index: 6; list-style: none; margin: 0; padding: 4px 0; width: 230px; max-height: calc(100% - 60px); overflow: auto; background: var(--bg-0); border: var(--bw) solid var(--line); font-size: 13px; }
+.mini-board li { display: grid; grid-template-columns: 24px 5px 1fr auto; gap: 7px; align-items: center; padding: 3px 10px; cursor: pointer; }
+.mini-board li:hover { background: var(--bg-3); }
+.mini-board li.focus { background: var(--bg-3); }
+.mini-board li.focus .n { background: var(--c-yellow); color: var(--c-yellow-ink); }
+.mini-board .n { font-family: var(--font-num); font-size: 15px; text-align: center; } .mini-board .b { height: 16px; }
+.mini-board .g { color: var(--text-2); font: 500 12px var(--mono); }
+.map-card.expanded .toasts { top: 22px; right: 270px; }
+.expand-hint { position: absolute; bottom: 22px; left: 22px; margin: 0; z-index: 6; padding: 4px 10px; background: var(--bg-0); border: var(--bw) solid var(--line); color: var(--text-1); font-size: 12px; font-weight: var(--fw-med); }
 .map-card:not(.expanded) .mini-board, .map-card:not(.expanded) .expand-hint { display: none; }
-.lap.slow { background: none; color: #6c7682; font-weight: 500; }
-/* make the 2D / 3D switch easy to spot */
-.view-switch { border-color: #4a5462; box-shadow: 0 4px 14px rgb(0 0 0 / 0.35); }
-.view-switch button { padding: 5px 16px; font-size: 13px; color: #c9d1da; }
-.view-switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }

@@ -59,11 +59,16 @@ class Auth {
       const win = new BrowserWindow({ width: 520, height: 760, parent, modal: false, title: "F1 계정 로그인",
         webPreferences: { partition: PARTITION, contextIsolation: true, sandbox: true } });
       const ses = session.fromPartition(PARTITION);
+      // (the sign-in pages need no web permission – camera, location, notifications …: every request is refused)
+      ses.setPermissionRequestHandler((_wc, _permission, done) => done(false));
+      ses.setPermissionCheckHandler(() => false);
       // A record of the window's pages and F1's sign-in requests, for finding where a sign-in fails (signin-log.txt in the
       // app's data folder, the last attempt only): addresses with every value that could carry a code, a token or an
       // address blanked, the response codes, the error page's text – never what is typed, never a cookie or a header
       const logFile = path.join(path.dirname(this.file), "signin-log.txt"), lines = [], t0 = Date.now();
-      const clean = (u) => String(u || "").replace(/([?&#](code|state|nonce|code_challenge|id_token|access_token|token|session|email|username|login_hint|sid|flowId|interactionId)=)[^&#]*/gi, "$1…").slice(0, 300);
+      // (an address in the log: where it points and the NAMES of its parameters – no parameter's value is written, whatever
+      // its name; before v0.71 only a list of known names was blanked)
+      const clean = (u) => String(u || "").replace(/([?&#;][^=&#;]{1,40}=)[^&#;]*/g, "$1…").slice(0, 300);
       const log = (...a) => { lines.push(`${((Date.now() - t0) / 1000).toFixed(1)}s ${a.join(" ")}`); try { require("node:fs").writeFileSync(logFile, lines.join("\n") + "\n"); } catch {} };
       log("open", app.getVersion(), "locale", app.getLocale(), "ua", PLAIN_UA);
       const onDone = (d) => { if (d.resourceType === "mainFrame" || /formula1\.com\/(as|davinci)\/|pingone|authorize|subscriber|authenticate|\/v\d\/account/i.test(d.url)) log("req", d.statusCode ?? d.error, d.method, d.resourceType, clean(d.url)); };

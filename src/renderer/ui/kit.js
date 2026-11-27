@@ -20,7 +20,7 @@
   const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), audio[controls]';
   const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length) && getComputedStyle(el).visibility !== "hidden";
   const focusables = (el) => [...el.querySelectorAll(FOCUSABLE)].filter(visible);
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const esc = window.Fmt.esc;   // (src/shared/fmt.js)
 
   // ---------- focus trap ----------
   const traps = [];   // (stacked: the newest one owns Tab and Escape)

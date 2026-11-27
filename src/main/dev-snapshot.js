@@ -32,6 +32,7 @@ const { app } = require("electron");
 module.exports = function snapshot(win, outFile) {
   // (a snapshot window behind other windows would get no animation frames: loading waits for one)
   win.webContents.setBackgroundThrottling(false);
+  win.showInactive();   // (never in front of what the person is typing into – main.js makes the window hidden for these runs)
   const run = (js) => win.webContents.executeJavaScript(js);
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   win.webContents.on("console-message", (...a) => { const e = a[0]?.message !== undefined ? a[0] : { level: a[1], message: a[2] }; if (e.level === "error" || e.level >= 2) console.log("RENDERER", e.message); });

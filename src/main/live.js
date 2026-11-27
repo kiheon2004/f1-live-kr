@@ -15,8 +15,10 @@ const TOPICS = [
 ];
 
 // "Position.z" arrives compressed; the app uses the plain name.
+// (only the topics asked for are passed on: a topic's name becomes a key of the page's state – "__proto__" must never)
+const KNOWN = new Set(TOPICS.flatMap((t) => [t, t.replace(/\.z$/, "")]));
 function decode(topic, data) {
-  if (typeof topic !== "string" || !topic) return [null, null];
+  if (typeof topic !== "string" || !topic || !KNOWN.has(topic)) return [null, null];
   if (topic.endsWith(".z")) {
     try { return [topic.slice(0, -2), typeof data === "string" ? inflateZ(data) : data]; }
     catch { return [topic.slice(0, -2), null]; }

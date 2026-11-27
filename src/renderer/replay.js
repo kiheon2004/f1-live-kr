@@ -453,6 +453,7 @@
   }
 
   function applyTo(src, topic, data) {
+    if (typeof topic !== "string" || UNSAFE.has(topic)) return;   // (a topic is a key of the state: never the prototype's)
     if (topic === "TimingAppData") noteStints(src, data);
     if (topic === "RaceControlMessages") { applyMessages(src, data?.Messages); return; }
     src.state[topic] = merge(src.state[topic], data);

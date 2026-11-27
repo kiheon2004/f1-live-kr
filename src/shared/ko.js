@@ -53,6 +53,10 @@
     return `${GP[m[1]]} 그랑프리${m[2] ? ` (${HOSTS[m[2]] || m[2]} 개최)` : ""}`;
   };
   const sessionName = (name) => SESSIONS[name] || name;
+  // the short form on a session block (FP1 … 결승); "라스베이거스 그랑프리" → "라스베이거스" where the list says only the place
+  const SESSIONS_SHORT = { "Practice 1": "FP1", "Practice 2": "FP2", "Practice 3": "FP3" };
+  const sessionShort = (name) => SESSIONS_SHORT[name] || sessionName(name);
+  const gpShort = (name) => String(gpName(name) ?? "").replace(" 그랑프리", "");
 
   // ---------- race control ----------
   const REASONS = [
@@ -258,6 +262,6 @@
     ["중계 지연 · 멈춤", "TV 중계는 실제보다 수십 초 늦게 나와요. 그만큼 화면을 늦추면 순위가 TV보다 먼저 바뀌지 않아요. TV를 멈추면 멈춤을 누르고, 다시 재생할 때 이어서를 누르면 멈춘 시간만큼 지연이 자동으로 늘어나요."],
   ];
 
-  const KO = { DRIVERS, TEAMS, TYRES, TRACK_STATUS, GLOSSARY, gpName, sessionName, surname, translate };
+  const KO = { DRIVERS, TEAMS, TYRES, TRACK_STATUS, GLOSSARY, gpName, gpShort, sessionName, sessionShort, surname, translate };
   if (typeof module !== "undefined" && module.exports) module.exports = KO; else root.KO = KO;
 })(typeof window !== "undefined" ? window : globalThis);
