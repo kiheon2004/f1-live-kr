@@ -145,7 +145,7 @@ test("Monza's pit roads: the lane from the control line to the wall's end, the e
   const P = PIT_ROADS[39]; assert.ok(P && /Esri World Imagery/.test(P.src));
   const KY = 111200, KX = 111320 * Math.cos((45.6175 * Math.PI) / 180), xz = ([la, lo]) => [(lo - 9.2811) * KX, -(la - 45.6163) * KY], d = (a, b) => Math.hypot(xz(a)[0] - xz(b)[0], xz(a)[1] - xz(b)[1]);
   const Ld = d(P.lane.doors[0], P.lane.doors[1]); assert.ok(Math.abs(Ld - 230.4) < 1.5, String(Ld));
-  // (v0.71: the lane begins on the track's surveyed control line – 2.3 m further on than the picture the lines were read on has it)
+  // (v0.72: the lane begins on the track's surveyed control line – 2.3 m further on than the picture the lines were read on has it)
   assert.ok(Math.abs(P.lane.u[0] + 8.84) < 0.2 && Math.abs(P.lane.u[1] - 322.1) < 0.3, String(P.lane.u)); assert.strictEqual(P.lane.span, 230.4); assert.strictEqual(P.lane.width, 11.5); assert.strictEqual(P.edgeLine, 0);
   assert.deepStrictEqual(P.lane.bands.map((b) => b[2]), ["concrete", "white", "white", "white"]); assert.ok(P.lane.bands.every(([a, b]) => a < b && b <= 11.5)); assert.strictEqual(P.lane.cross[0][0], P.lane.u[0]);
   for (const [R, n] of [[P.entry, 61], [P.exit, 34], [P.tarmac[0], 89]]) {
@@ -155,7 +155,7 @@ test("Monza's pit roads: the lane from the control line to the wall's end, the e
   }
   assert.ok(d(P.exit.left[33], P.exit.right[33]) < 0.01 && d(P.exit.left[29], P.exit.right[29]) > 3, "the exit apron ends in a point");
   assert.ok(d(P.entry.left[0], P.entry.right[0]) < 0.01, "the entry lane begins at a point on the track's edge");
-  // (v0.71: the track's broken edge line at the entry is the track's own – trackdata.js `broken` –, no line of these; the pit exit
+  // (v0.72: the track's broken edge line at the entry is the track's own – trackdata.js `broken` –, no line of these; the pit exit
   // line on the track is the lap survey's, 383 m to where it ends)
   assert.strictEqual(P.lines.length, 7); assert.ok(P.lines.every((l) => !l.dash) && P.lines.filter((l) => l.onTrack).length === 1 && P.lines.every((l) => l.pts.length >= 2 && l.width > 0.1 && l.width < 0.3));
   const A = P.lines.find((l) => l.onTrack); let lenA = 0; for (let i = 1; i < A.pts.length; i++) lenA += d(A.pts[i], A.pts[i - 1]); assert.ok(lenA > 440 && lenA < 520, String(lenA));
@@ -165,7 +165,7 @@ test("Monza's pit roads: the lane from the control line to the wall's end, the e
   assert.ok(on(...xz(mid(P.entry, 30)), 1) && on(...xz(mid(P.tarmac[0], 60)), 1) && on(...xz(mid(P.exit, 15)), 1));
 });
 
-// v0.71: Monza's track is surveyed (trackdata.js) – in the map's frame, where the picture the pit lane's lines were read on
+// v0.72: Monza's track is surveyed (trackdata.js) – in the map's frame, where the picture the pit lane's lines were read on
 // lies 2 m along the straight and up to 1 m across. The roads that meet the track go by the track's own edge.
 test("Monza's pit roads against its surveyed track: the edges that meet the track lie 0.25 m under it, the lane begins on the track's control line, the pit exit line is the survey's", async () => {
   const { PIT_ROADS } = await import("../src/renderer/pitroads.js");

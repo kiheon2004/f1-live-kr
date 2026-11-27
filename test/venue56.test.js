@@ -743,9 +743,9 @@ test("v0.70: Monza – the pit building's storeys with the canopy, five more mod
 
 // v0.70: Zandvoort – the pit building's storeys (the old block, the round tower, the 2024 block) over the builder's garages,
 // the start gantry carrying the start lamps, 16 stand files on their front lines; the pit-lane roads from surveyed lines
-// (the exit road round the inside of the Tarzanbocht). v0.71: the track's edges are surveyed (trackdata.js) – the lane
+// (the exit road round the inside of the Tarzanbocht). v0.72: the track's edges are surveyed (trackdata.js) – the lane
 // reaches the surveyed fast lane, the gantry stands at its surveyed place again.
-test("v0.70 / v0.71: Zandvoort – the pit building's storeys, the start gantry with the lamps at its surveyed place, 16 stand files; the lane's paint and fast lane", async () => {
+test("v0.70 / v0.72: Zandvoort – the pit building's storeys, the start gantry with the lamps at its surveyed place, 16 stand files; the lane's paint and fast lane", async () => {
   const F = await import("../src/renderer/facilities.js");
   const { PIT_ROADS } = await import("../src/renderer/pitroads.js");
   const files = fs.readdirSync(path.join(__dirname, "..", "src", "data", "models"));

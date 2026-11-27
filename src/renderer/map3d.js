@@ -594,7 +594,7 @@ function pitRoadY(x, z, near) {
 function pitSurfaceY(x, z, y, floor, inRun) {
   if (inRun >= 1) return floor + 0.004;
   const tm = pitTeams.facility?.getObjectByName("pitLaneTarmac"), R = world?.real, roads = !!tm?.parent?.userData.pitRoads;
-  // (40 m and more from the garages: the car's own height – nothing below is used. v0.71: but on a surveyed pit road –
+  // (40 m and more from the garages: the car's own height – nothing below is used. v0.72: but on a surveyed pit road –
   // pitroads.js – that road's surface all along it, as groundFor has it for a car drawn from its raw position: one height
   // whichever way the car is posed)
   if (inRun <= 0) return (roads ? pitRoadY(x, z, y) : null) ?? y;
@@ -1617,7 +1617,7 @@ function groundFor(c, x, z, feedY) {
     // (off the lap line's tarmac – a pit entry or exit road, a run-off – the ground under the car, not the lap line's height
     // beside it: 0.3–0.9 m over the drawn road at Hungary's exit and Monaco's entry, the pit helper's measurement)
     const s = c.sample, lat = (x - s.p.x) * s.nor.x + (z - s.p.z) * s.nor.z, off = lat > (s.L ?? 7) + 2 || lat < (s.R ?? -7) - 2;
-    // (v0.71: …and where a surveyed pit road lies there – pitroads.js –, that road's own surface: down from Spa's La Source
+    // (v0.72: …and where a surveyed pit road lies there – pitroads.js –, that road's own surface: down from Spa's La Source
     // the ground beside the track lies 0.3 … 0.9 m under the exit lane, which the surveyed track has outside its edge – the
     // cars sank into the lane, came up at the lap line's height and went down again, 0.4 … 0.5 m from frame to frame)
     // (from the track's own edge on – the road's surface comes away from the lap line's height within those first 2 m)

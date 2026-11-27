@@ -31,7 +31,7 @@ import { blendHeight } from "./auxroads.js";
 export const PIT_ROADS = {
   // Spa-Francorchamps: the chat-side session's survey of the Walloon orthophotos (SPW, 0.25 m; 2024, 2025, 2026), its SECOND
   // edition – the first, read on a satellite picture, lay 1.2 … 2.2 m towards the building and its roads 2 … 5 m off. The
-  // same ground as the lap survey (trackdata.js, v0.71): the lane good to 0.15 m, the roads to 0.3 m. From the garage doors:
+  // same ground as the lap survey (trackdata.js, v0.72): the lane good to 0.15 m, the roads to 0.3 m. From the garage doors:
   // a line before the boxes, a working lane of 8.4 m, a white – red – white band (1.35 m), the fast lane (3.4 m), the wall –
   // then a platform of 2 m behind a second wall, 3 m of grass and the track. The entry road leaves the track through its
   // broken edge line at the Bus Stop, runs round the outside of the chicane and arrives as the fast lane; the exit road
@@ -74,7 +74,7 @@ export const PIT_ROADS = {
   // (`tarmac`).
   // This app's lane ends at the walkway before the map's wall line (13.1 … 13.8 m out: the outer wall with the debris
   // fence) – 11.4 … 12.1 m from the doors, the surveyed wall's place; `fast`: the cars in the surveyed fast lane.
-  // The track's own edges are surveyed here (trackdata.js, v0.71) – in the frame of the map, where that Esri picture lies
+  // The track's own edges are surveyed here (trackdata.js, v0.72) – in the frame of the map, where that Esri picture lies
   // about 2 m along this straight and 0.5 … 1 m across from it. ACROSS, the lane stays on the building's door line with the
   // drawing's widths; what meets the track goes by the track – the entry's left edge up to where it leaves the track's
   // edge, the exit apron's left edge and the old lane's tarmac are the surveyed edge (0.25 m under the track), the pit
@@ -122,7 +122,7 @@ export const PIT_ROADS = {
   // swings right round the wall's nose (a red crash cushion, 113 m before the building) between two walls that overlap
   // 3 m apart at 119 m; the exit road turns right round the INSIDE of the Tarzanbocht – a half circle of 32 m – and
   // joins the track behind the corner.
-  // The track's own edges are surveyed here (trackdata.js, v0.71): the app's wall stands at the real track's edge – where
+  // The track's own edges are surveyed here (trackdata.js, v0.72): the app's wall stands at the real track's edge – where
   // the real wall does – and `fast` is the surveyed fast lane (the cars drive down its middle). Up to v0.70 the track,
   // 14 m wide round the line the cars drove, reached 2.4 … 5.3 m nearer the garages and the lane ended 8.2 … 11.5 m from
   // the doors.
@@ -132,7 +132,7 @@ export const PIT_ROADS = {
   // the road is carried on straight 1.1 m past its last surveyed section, just past the line across the lane (234.9 m)
   // where the track is the whole tarmac again.
   55: {
-    src: "the chat-side session's survey of the aerial picture (looked at only): carpilot venue/stands/zandvoort_pitlane.json, version 2.1 of 2026-11-27 (md5 b1cbd529d1)",
+    src: "the chat-side session's survey of the aerial picture (looked at only): carpilot venue/stands/zandvoort_pitlane.json, version 2.1 of 2026-11-27 (md5 bac717829d)",
     lane: { doors: [[52.3890479, 4.5412606], [52.3903427, 4.5421234]], span: 155.6, u: [-36, 223], width: 15.1, fast: [9.59, 12.76],
       bands: [[9.59, 12.76, "concrete", -27.5, 223], [0.1, 8.4, "concrete", 196.6, 221.2], [9.07, 9.31, "red", 8, 223], [9.33, 9.57, "white", 8, 223], [12.76, 13.09, "white", -36, 223]] },
     edgeLine: 0,

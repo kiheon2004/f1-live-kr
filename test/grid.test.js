@@ -134,7 +134,7 @@ test("grid slots after the clock started: the published grid when it fits best (
   assert.ok([...a].every(([n, x]) => x.by === "gridPos" && "n" + x.g === n));
 });
 
-test("v0.71: the boxes drawn at the surveyed pole box – only the drawing moves, and only within a slot and a half", async () => {
+test("v0.72: the boxes drawn at the surveyed pole box – only the drawing moves, and only within a slot and a half", async () => {
   const G = await import("../src/renderer/grid.js");
   const L = 4215, fz = 1.7;
   // Zandvoort 2026: the surveyed front line of pole's box lies 2.5 m behind where the feed has pole's car standing;

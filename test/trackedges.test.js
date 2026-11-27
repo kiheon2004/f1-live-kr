@@ -120,7 +120,7 @@ test("the shipped data: every circuit's lines pair up, lie on its own reference 
   }
 });
 
-test("v0.71: no edge line along a step in a surveyed edge – only there, and never at an unsurveyed circuit", async () => {
+test("v0.72: no edge line along a step in a surveyed edge – only there, and never at an unsurveyed circuit", async () => {
   const { edgeSteps } = await import("../src/renderer/trackedges.js");
   // a pit lane's line ends: 4.6 m within 5 m, samples 2 m apart
   // (and the edge coming back in gently round the rest of the lap: no step)
@@ -138,7 +138,7 @@ test("v0.71: no edge line along a step in a surveyed edge – only there, and ne
   assert.deepStrictEqual([...edgeSteps([7, 7, 7, 12, 12, 12, 12, 7], [0, 1, 1, 1, 1, 0, 0, 0])], [0, 1, 1, 1, 1, 0, 0, 0]);
 });
 
-test("v0.71: a broken edge line – the painted pieces along a path, and which samples lie on the broken stretch", async () => {
+test("v0.72: a broken edge line – the painted pieces along a path, and which samples lie on the broken stretch", async () => {
   const { dashPieces, applyTrackEdges } = await import("../src/renderer/trackedges.js");
   // 1.1 m painted, 0.9 m bare along three pieces of 2 m: painted 0 … 1.1, 2 … 3.1, 4 … 5.1
   const r = dashPieces([2, 2, 2], 1.1, 0.9).map(([j, a, b]) => [j, +a.toFixed(3), +b.toFixed(3)]);
@@ -159,7 +159,7 @@ test("v0.71: a broken edge line – the painted pieces along a path, and which s
   assert.ok(!("broken" in applyTrackEdges(S.map((s) => ({ ...s, L: 7, R: -7, sv: 0 })), { ...T, broken: undefined }, ([X, Y]) => [X, -Y], { ease: 0 })));
 });
 
-test("v0.71: where the feed's own line lies beyond a surveyed edge (a kerb at an apex), the cars' line is not bent back inside it", async () => {
+test("v0.72: where the feed's own line lies beyond a surveyed edge (a kerb at an apex), the cars' line is not bent back inside it", async () => {
   const { racingLine } = await import("../src/renderer/smooth.js");
   // a straight lap line, 2 m a sample, the edges 6 m either side – and over five samples the edge on the +nor side comes
   // across the lap line by up to 1.04 m (Monza's first apex as surveyed)
@@ -173,7 +173,7 @@ test("v0.71: where the feed's own line lies beyond a surveyed edge (a kerb at an
   assert.ok(Math.abs(c[202] + 1.5) < 0.05, String(c[202]));
 });
 
-test("v0.71: the room for traffic at a surveyed track comes in no faster than 0.2 m a metre, and reaches the cars' own line where that lies over an edge", async () => {
+test("v0.72: the room for traffic at a surveyed track comes in no faster than 0.2 m a metre, and reaches the cars' own line where that lies over an edge", async () => {
   const { trafficRoom } = await import("../src/renderer/trackedges.js");
   const n = 300, L = new Array(n).fill(7), R = new Array(n).fill(-7), line = new Array(n).fill(0), sv = new Array(n).fill(1);
   for (let i = 150; i < 170; i++) R[i] = -1.5;          // the far edge steps in by 5.5 m at one sample, and out again
