@@ -528,7 +528,15 @@ h2 small { color: var(--text-3); font-weight: var(--fw-reg); margin-left: var(--
   .layout { grid-template-columns: minmax(0, 1fr) 6px var(--side-w, 360px); }
   #board td, #board th { padding: 0 var(--s-3); }
   #board th:nth-child(2), #board td:nth-child(2), #board .trend { display: none; }
-  .brand-name { display: none; }
+  body:not(.home-on) .brand-name { display: none; }   /* (the timing screen's one row: the KR sticker alone is the way home) */
+  /* (the side column is 360 px here: the map bar and the tab row stay one line each) */
+  .map-bar { gap: 6px; padding: 8px; }
+  .map-bar button, .map-bar select, .map-card .map-bar .view-switch button { min-height: 36px; padding: 0 8px; font-size: 13px; }
+  .map-bar select.cam-sel { padding: 0 26px 0 8px; background-position: right 8px center; }
+  .map-bar .expand-btn { width: 36px; }
+  .tabs button { padding: 0 8px; font-size: 13px; min-height: 40px; }
+  .rc-filter-btn { width: 40px; min-height: 40px; }
+  .ev-sessions { gap: 8px; } .ev-s b { font-size: 20px; }
   #driver .gauge { grid-template-columns: 40px 84px 44px 1fr auto; } #driver .gauge .mono { display: none; }
 }
 @media (max-width: 1100px) {
@@ -593,7 +601,7 @@ body.home-on .status-bar, body.home-on .layout, body.home-on .player, body.home-
 .ev-date { margin-left: auto; font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--text-2); }
 /* a session block is the button: name over day and time; the race is the red block; one not on F1's list yet is an outline */
 .ev-sessions { display: flex; flex-wrap: wrap; gap: 10px; }
-.ev-s { flex: 1 1 96px; min-height: 76px; padding: 10px 12px; border: var(--bw) solid var(--line); background: transparent; color: var(--text-1); display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 10px; text-align: left; font-weight: var(--fw-reg); }
+.ev-s { flex: 1 1 80px; min-height: 76px; padding: 10px 12px; border: var(--bw) solid var(--line); background: transparent; color: var(--text-1); display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 10px; text-align: left; font-weight: var(--fw-reg); }
 .ev-s b { font-family: var(--font-title); font-weight: 400; font-size: 22px; line-height: 1; }
 .ev-s span { font-family: var(--mono); font-size: 13px; font-weight: 500; }
 .ev-s:hover:not(:disabled) { background: var(--bg-3); }

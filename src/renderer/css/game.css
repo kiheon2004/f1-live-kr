@@ -96,7 +96,9 @@ body.game-on { grid-template-rows: auto 1fr; }
   .gm-tile.big .gt-title { font-size: 52px; }
   .gt-desc { position: relative; font-size: 17px; font-weight: var(--fw-med); color: var(--text-2); }
   .gt-art { position: absolute; pointer-events: none; }
-  .gt-big { right: -4px; bottom: -52px; font-family: var(--font-num); font-size: 230px; line-height: 1; }
+  svg.gt-art { height: min(var(--ah, 160px), 60%); width: auto; }
+  .gt-big { right: -4px; bottom: -0.23em; font-family: var(--font-num); font-size: min(230px, 28vh); line-height: 1; }
+  .gt-title, .gt-desc, .gt-go { z-index: 1; }
   .gt-go { margin-top: auto; position: relative; background: var(--c-yellow); color: var(--c-yellow-ink); border: 2px solid var(--text-inv); padding: 8px 18px; font-size: 16px; font-weight: var(--fw-bold); box-shadow: 3px 3px 0 var(--c-blue); }
   .gm-tile.blue { background: var(--c-blue); color: #fff; } .gm-tile.blue .gt-desc { color: #fff; } .gm-tile.blue .gt-go { box-shadow: 3px 3px 0 var(--text-inv); }
   .gm-tile.yellow { background: var(--c-yellow); color: var(--c-yellow-ink); } .gm-tile.yellow .gt-desc { color: inherit; } .gm-tile.yellow .gt-go { background: var(--text-inv); color: var(--c-yellow); box-shadow: 3px 3px 0 #fff; }
